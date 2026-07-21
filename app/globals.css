@@ -1,0 +1,35 @@
+/* Google Fonts — Fraunces (serif display) + Inter (body/data), exactly as
+   used in the prototype. Must come before any other rules. */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+/* ── Congressional Country Club palette (from the brief) ──────────────── */
+:root {
+  --forest: #16291F;   /* primary dark */
+  --forest-2: #1E3A29;
+  --fern: #3A6B4A;     /* mid-green accent */
+  --gold: #C9A84C;     /* highlight / call-to-action */
+  --cream: #F7F5EF;    /* page background */
+  --ink: #1A1A16;
+}
+
+/* Make the palette available as Tailwind color utilities (e.g. bg-forest). */
+@theme inline {
+  --color-forest: var(--forest);
+  --color-forest-2: var(--forest-2);
+  --color-fern: var(--fern);
+  --color-gold: var(--gold);
+  --color-cream: var(--cream);
+  --color-ink: var(--ink);
+  --font-display: 'Fraunces', serif;
+  --font-body: 'Inter', sans-serif;
+}
+
+.font-display { font-family: 'Fraunces', serif; }
+.font-body { font-family: 'Inter', sans-serif; }
+
+body {
+  background: var(--cream);
+  color: var(--ink);
+  font-family: 'Inter', sans-serif;
+}
