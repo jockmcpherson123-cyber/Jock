@@ -15,6 +15,15 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 function ymd(y, m, d) {
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 }
+
+// Shorten an area name for the tiny calendar labels: drop the equipment suffix
+// so "Blue Greens SprayBug 1.67gpm" reads as "Blue Greens".
+function shortArea(name) {
+  if (!name) return ''
+  const stripped = String(name).split(/\s+(?:HD\d|SprayBug|Spray Bug|HD)/i)[0].trim()
+  const words = stripped.split(/\s+/)
+  return words.slice(0, 2).join(' ')
+}
 function todayKey() {
   const n = new Date()
   return ymd(n.getFullYear(), n.getMonth(), n.getDate())
@@ -94,24 +103,42 @@ export default function SprayCalendar({ sheets = [], programApps = [], onOpenShe
             const isSel = c.key === selected
             const daySheets = sheetsByDate[c.key] || []
             const dayPlanned = programByDate[c.key] || []
-            const hasApproved = daySheets.some((s) => s.status === 'approved')
-            const hasPending = daySheets.some((s) => s.status === 'pending')
+
+            // Build de-duplicated area labels for the day: actual sprays first
+            // (green approved / amber pending), then planned (gold).
+            const labels = []
+            const seen = new Set()
+            daySheets.forEach((s) => {
+              const a = shortArea(s.area)
+              if (a && !seen.has(a)) { seen.add(a); labels.push({ area: a, color: s.status === 'approved' ? FERN : '#D97706' }) }
+            })
+            dayPlanned.forEach((a) => {
+              const nm = shortArea(a.area)
+              if (nm && !seen.has(nm)) { seen.add(nm); labels.push({ area: nm, color: GOLD }) }
+            })
+            const shown = labels.slice(0, 2)
+            const extra = labels.length - shown.length
+
             return (
               <button
                 key={c.key}
                 onClick={() => setSelected(c.key)}
-                className="aspect-square rounded-lg flex flex-col items-center justify-start pt-1.5 transition"
+                className="min-h-[3.25rem] sm:min-h-[4.5rem] rounded-lg flex flex-col items-stretch p-1 text-left transition overflow-hidden"
                 style={{
                   backgroundColor: isSel ? '#EAF2EC' : 'transparent',
                   border: isToday ? `1px solid ${GOLD}` : '1px solid transparent',
-                  opacity: inMonth ? 1 : 0.35,
+                  opacity: inMonth ? 1 : 0.4,
                 }}
               >
-                <span className="font-body text-xs font-semibold" style={{ color: isSel ? FOREST : '#334155' }}>{c.d}</span>
-                <div className="flex items-center gap-0.5 mt-1 h-1.5">
-                  {hasApproved && <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: FERN }} />}
-                  {hasPending && <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#D97706' }} />}
-                  {dayPlanned.length > 0 && <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: GOLD }} />}
+                <span className="font-body text-[11px] font-semibold px-0.5" style={{ color: isSel ? FOREST : '#334155' }}>{c.d}</span>
+                <div className="mt-0.5 space-y-0.5 overflow-hidden">
+                  {shown.map((it, i) => (
+                    <div key={i} className="flex items-center gap-1 rounded px-0.5" style={{ backgroundColor: `${it.color}18` }}>
+                      <span className="w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: it.color }} />
+                      <span className="font-body text-[8px] leading-tight truncate" style={{ color: '#334155' }}>{it.area}</span>
+                    </div>
+                  ))}
+                  {extra > 0 && <span className="font-body text-[8px] text-slate-400 px-0.5">+{extra} more</span>}
                 </div>
               </button>
             )
