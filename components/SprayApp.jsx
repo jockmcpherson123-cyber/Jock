@@ -127,6 +127,7 @@ function SprayOpsModule({ user }) {
   const [products, setProducts] = useState([])
   const [activeSheet, setActiveSheet] = useState(null)
   const [deliveries, setDeliveries] = useState([])
+  const [programApps, setProgramApps] = useState([]) // applications of the current program
   const [areas, setAreas] = useState({})
   const [operators, setOperators] = useState([])
   const [directors, setDirectors] = useState([])
@@ -150,11 +151,12 @@ function SprayOpsModule({ user }) {
   async function loadAll() {
     setLoading(true)
     try {
-      const [s, p, d, settings] = await Promise.all([
+      const [s, p, d, settings, progs] = await Promise.all([
         db.fetchSheets(),
         db.fetchProducts(),
         db.fetchDeliveries(),
         db.fetchSettings(),
+        db.fetchPrograms(),
       ])
       setSheets(s)
       setProducts(p)
@@ -165,6 +167,13 @@ function SprayOpsModule({ user }) {
       setTargets(settings.targets)
       setSheetTypes(settings.sheetTypes)
       setCourseInfo(settings.courseInfo)
+      // Load the newest program's applications so the dashboard can surface
+      // what's planned for the days ahead.
+      if (progs.length > 0) {
+        setProgramApps(await db.fetchApplications(progs[0].id))
+      } else {
+        setProgramApps([])
+      }
     } catch (e) {
       console.error('Failed to load data', e)
       showToast('Could not load data — check your connection')
@@ -314,6 +323,49 @@ function SprayOpsModule({ user }) {
     setRoute('edit')
   }
 
+  // Match a program area name (e.g. "Blue Greens") to the best spray area in
+  // Settings (e.g. "Blue Greens SprayBug 1.67gpm"). Falls back to the first area.
+  function matchSprayArea(programArea) {
+    const keys = Object.keys(areas)
+    if (keys.length === 0) return ''
+    const pa = String(programArea || '').toLowerCase()
+    return (
+      keys.find((k) => k.toLowerCase().startsWith(pa)) ||
+      keys.find((k) => k.toLowerCase().includes(pa)) ||
+      keys[0]
+    )
+  }
+
+  // Build a spray sheet pre-filled from one or more planned applications (a
+  // single area on a single day). The user reviews/edits it, then saves — at
+  // which point those applications are marked as executed.
+  function createSheetFromProgram(planned) {
+    const area = matchSprayArea(planned[0].area)
+    setActiveSheet({
+      id: crypto.randomUUID(),
+      sheetType: sheetTypes[0] || 'Greens Spray',
+      date: planned[0].plannedDate || new Date().toISOString().slice(0, 10),
+      operator: '',
+      area,
+      tanks: area && areas[area] ? areas[area].tanks : 1,
+      weather: { temp: '', wind: '', humidity: '', windDir: '' },
+      products: planned.map((a) => ({
+        id: uid(),
+        product: a.product,
+        rate: a.rateOzM != null ? String(a.rateOzM) : '',
+        basis: a.basis || 'oz / M',
+        forceGal: false,
+      })),
+      targets: [...new Set(planned.map((a) => a.target).filter(Boolean))],
+      status: 'pending',
+      directorSig: '',
+      directorDate: '',
+      createdAt: new Date().toISOString(),
+      _sourceAppIds: planned.map((a) => a.id),
+    })
+    setRoute('edit')
+  }
+
   const pending = sheets.filter((s) => s.status === 'pending')
   const approved = sheets.filter((s) => s.status === 'approved')
   const today = new Date().toISOString().slice(0, 10)
@@ -341,10 +393,11 @@ function SprayOpsModule({ user }) {
         {route === 'dashboard' && (
           <Dashboard
             sheets={sheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
-            manage={manage}
+            manage={manage} programApps={programApps}
             onOpen={(s) => { setActiveSheet(s); setRoute('view') }}
             onNew={newSheet}
             onSeeAll={() => setRoute('list')}
+            onCreateFromProgram={createSheetFromProgram}
           />
         )}
         {route === 'list' && (
@@ -356,7 +409,17 @@ function SprayOpsModule({ user }) {
             areas={areas} operators={operators} targets={targets} sheetTypes={sheetTypes}
             onSave={async (s) => {
               const saved = await saveSheet(s)
-              if (saved) { setActiveSheet(saved); setRoute('view'); showToast('Spray sheet saved') }
+              if (saved) {
+                // If this sheet came from the program, mark those planned
+                // applications as executed so they drop off the dashboard.
+                if (s._sourceAppIds?.length) {
+                  try {
+                    await db.markApplicationsLinked(s._sourceAppIds, saved.id)
+                    setProgramApps((prev) => prev.map((a) => (s._sourceAppIds.includes(a.id) ? { ...a, linkedSheetId: saved.id } : a)))
+                  } catch (e) { console.error(e) }
+                }
+                setActiveSheet(saved); setRoute('view'); showToast('Spray sheet saved')
+              }
             }}
             onCancel={() => setRoute('dashboard')}
           />
@@ -428,9 +491,23 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
-function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage }) {
+function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram }) {
   const lowStock = (products || []).filter((p) => p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold)
   const today = new Date().toISOString().slice(0, 10)
+
+  // Planned applications coming up in the next 7 days that haven't been turned
+  // into a spray sheet yet, grouped into one card per area + day.
+  const horizon = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
+  const upcomingGroups = (() => {
+    const due = (programApps || []).filter((a) => !a.linkedSheetId && a.plannedDate && a.plannedDate >= today && a.plannedDate <= horizon)
+    const map = {}
+    due.forEach((a) => {
+      const key = `${a.plannedDate}|${a.area}`
+      if (!map[key]) map[key] = { date: a.plannedDate, area: a.area, items: [] }
+      map[key].items.push(a)
+    })
+    return Object.values(map).sort((x, y) => x.date.localeCompare(y.date))
+  })()
 
   return (
     <div className="pt-6 space-y-6">
@@ -441,6 +518,33 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
         <StatCard icon={<Droplet size={16} />} label="Today" value={todaySheets.length} accent={GOLD} />
         <StatCard icon={<AlertTriangle size={16} />} label="Low Stock" value={lowStock.length} accent={lowStock.length > 0 ? '#DC2626' : FERN} />
       </div>
+
+      {/* From the Program — turn the plan into spray sheets */}
+      {manage && upcomingGroups.length > 0 && (
+        <section>
+          <SectionHeader title="From the Program" subtitle="Planned in the next 7 days — tap to start a spray sheet" />
+          <div className="space-y-2">
+            {upcomingGroups.map((g) => (
+              <div key={`${g.date}|${g.area}`} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between gap-3" style={{ borderColor: '#EFE6C9' }}>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-body text-[11px] font-bold flex items-center gap-1" style={{ color: '#92660D' }}>
+                      <Calendar size={11} />{new Date(g.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                    </span>
+                    <span className="font-body text-sm font-semibold text-slate-800 truncate">{g.area}</span>
+                  </div>
+                  <p className="font-body text-[11px] text-slate-400 truncate">
+                    {g.items.map((a) => a.product).join(', ')}
+                  </p>
+                </div>
+                <button onClick={() => onCreateFromProgram(g.items)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white shrink-0 flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
+                  <Plus size={13} /> Create sheet
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {manage && lowStock.length > 0 && (
         <section>
