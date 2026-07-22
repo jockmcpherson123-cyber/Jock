@@ -376,7 +376,7 @@ function SprayOpsModule({ user }) {
         {route === 'inventory' && manage && (
           <Inventory products={products} deliveries={deliveries} onAddDelivery={addDelivery} />
         )}
-        {route === 'program' && manage && <AnnualProgram areas={areas} onProductsChanged={reloadProducts} />}
+        {route === 'program' && manage && <AnnualProgram areas={areas} products={products} onProductsChanged={reloadProducts} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} />}
         {route === 'settings' && manage && (
           <SettingsPage

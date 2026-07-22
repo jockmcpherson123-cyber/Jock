@@ -5,7 +5,7 @@
 // then browse it by area. (Editing individual applications, the early-order
 // calculator and auto-populating spray sheets come in the next phase.)
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet } from 'lucide-react'
+import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
 
@@ -18,7 +18,7 @@ function fmtDate(d) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-export default function AnnualProgram({ areas, onProductsChanged }) {
+export default function AnnualProgram({ areas, products = [], onProductsChanged }) {
   const [programs, setPrograms] = useState([])
   const [activeProgram, setActiveProgram] = useState(null)
   const [apps, setApps] = useState([])
@@ -27,6 +27,8 @@ export default function AnnualProgram({ areas, onProductsChanged }) {
   const [imp, setImp] = useState(null) // import flow state
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState(null)
+  const [editApp, setEditApp] = useState(null) // application being added/edited
+  const [copyForm, setCopyForm] = useState(null) // roll-forward form state
   const fileRef = useRef(null)
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(null), 3000) }
@@ -118,6 +120,93 @@ export default function AnnualProgram({ areas, onProductsChanged }) {
     }
   }
 
+  function startAddApp() {
+    setEditApp({
+      programId: activeProgram.id,
+      area: areaFilter !== 'all' ? areaFilter : '',
+      product: '',
+      rateOzM: '',
+      rateOzA: '',
+      basis: 'oz / M',
+      type: '',
+      target: '',
+      plannedDate: new Date().toISOString().slice(0, 10),
+    })
+  }
+
+  function pickProduct(name) {
+    const prod = products.find((p) => p.name === name)
+    setEditApp((prev) => ({
+      ...prev,
+      product: name,
+      type: prod?.type || prev.type,
+      basis: prod?.basis || prev.basis,
+      rateOzM: prev.rateOzM === '' && prod?.rate != null ? prod.rate : prev.rateOzM,
+    }))
+  }
+
+  async function saveApp() {
+    if (!editApp.product || !editApp.area) {
+      showToast('Pick an area and a product first')
+      return
+    }
+    setBusy(true)
+    try {
+      const saved = await db.upsertApplication({
+        ...editApp,
+        rateOzM: editApp.rateOzM === '' ? null : Number(editApp.rateOzM),
+        rateOzA: editApp.rateOzA === '' ? null : Number(editApp.rateOzA),
+      })
+      setApps((prev) => {
+        const exists = prev.some((a) => a.id === saved.id)
+        const next = exists ? prev.map((a) => (a.id === saved.id ? saved : a)) : [...prev, saved]
+        return next.sort((a, b) => String(a.plannedDate || '').localeCompare(String(b.plannedDate || '')))
+      })
+      setEditApp(null)
+      showToast('Application saved')
+    } catch (e) {
+      console.error(e)
+      showToast('Could not save application')
+    }
+    setBusy(false)
+  }
+
+  async function removeApp(id) {
+    try {
+      await db.deleteApplication(id)
+      setApps((prev) => prev.filter((a) => a.id !== id))
+      setEditApp(null)
+      showToast('Application removed')
+    } catch (e) {
+      console.error(e)
+      showToast('Could not remove application')
+    }
+  }
+
+  function startCopy() {
+    const nextYear = (activeProgram.year || new Date().getFullYear()) + 1
+    setCopyForm({ year: nextYear, name: `${nextYear} Pesticide Plan`, shiftDays: 0 })
+  }
+
+  async function runCopy() {
+    setBusy(true)
+    try {
+      const prog = await db.copyProgram(activeProgram.id, {
+        year: Number(copyForm.year),
+        name: copyForm.name,
+        shiftDays: Number(copyForm.shiftDays) || 0,
+      })
+      setCopyForm(null)
+      await loadPrograms()
+      await selectProgram(prog)
+      showToast('New season created')
+    } catch (e) {
+      console.error(e)
+      showToast('Could not roll forward')
+    }
+    setBusy(false)
+  }
+
   if (loading) {
     return (
       <div className="pt-16 flex justify-center">
@@ -145,7 +234,12 @@ export default function AnnualProgram({ areas, onProductsChanged }) {
           <h2 className="font-display text-lg font-semibold text-slate-900">Annual Program</h2>
           <p className="font-body text-xs text-slate-400 mt-0.5">Your season-long spray plan, by area</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {activeProgram && (
+            <button onClick={startAddApp} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
+              <Plus size={14} /> Add Application
+            </button>
+          )}
           <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFileChosen} className="hidden" />
           <button onClick={() => fileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
             <Upload size={14} /> Import from Excel
@@ -217,6 +311,86 @@ export default function AnnualProgram({ areas, onProductsChanged }) {
         </div>
       )}
 
+      {/* Application editor */}
+      {editApp && (
+        <div className="bg-white rounded-2xl border-2 p-4 my-4 shadow-sm" style={{ borderColor: GOLD }}>
+          <p className="font-display text-base font-semibold text-slate-900 mb-3">
+            {editApp.id ? 'Edit application' : 'Add application'}
+          </p>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Area</label>
+                <input list="ap-areas" value={editApp.area} onChange={(e) => setEditApp({ ...editApp, area: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. Blue Greens" />
+                <datalist id="ap-areas">
+                  {[...new Set([...areaNames, ...Object.keys(areas || {})])].map((a) => <option key={a} value={a} />)}
+                </datalist>
+              </div>
+              <div>
+                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Planned date</label>
+                <input type="date" value={editApp.plannedDate || ''} onChange={(e) => setEditApp({ ...editApp, plannedDate: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+              </div>
+            </div>
+            <div>
+              <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Product</label>
+              <select value={editApp.product} onChange={(e) => pickProduct(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white">
+                <option value="">Select product…</option>
+                {products.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Rate oz/M</label>
+                <input type="number" step="any" value={editApp.rateOzM} onChange={(e) => setEditApp({ ...editApp, rateOzM: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+              </div>
+              <div>
+                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Rate oz/A</label>
+                <input type="number" step="any" value={editApp.rateOzA} onChange={(e) => setEditApp({ ...editApp, rateOzA: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+              </div>
+              <div>
+                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Target</label>
+                <input value={editApp.target} onChange={(e) => setEditApp({ ...editApp, target: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. Dollar Spot" />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              {editApp.id && (
+                <button onClick={() => removeApp(editApp.id)} className="py-2.5 px-3 rounded-xl text-red-500 border border-red-100"><Trash2 size={15} /></button>
+              )}
+              <button onClick={() => setEditApp(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+              <button onClick={saveApp} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Roll forward to a new season */}
+      {copyForm && (
+        <div className="bg-white rounded-2xl border-2 p-4 my-4 shadow-sm" style={{ borderColor: FERN }}>
+          <p className="font-display text-base font-semibold text-slate-900 mb-1">Roll forward to a new season</p>
+          <p className="font-body text-xs text-slate-400 mb-3">Copies every application into a new program, shifting each planned date so the sequence stays intact. Adjust individual applications afterward.</p>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">New year</label>
+              <input type="number" value={copyForm.year} onChange={(e) => setCopyForm({ ...copyForm, year: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+            </div>
+            <div className="col-span-2">
+              <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Name</label>
+              <input value={copyForm.name} onChange={(e) => setCopyForm({ ...copyForm, name: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Shift all dates by (days)</label>
+            <input type="number" value={copyForm.shiftDays} onChange={(e) => setCopyForm({ ...copyForm, shiftDays: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 365, or 0 to keep the same calendar dates" />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setCopyForm(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+            <button onClick={runCopy} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: FERN }}>
+              {busy ? <><Loader2 className="animate-spin" size={15} /> Creating…</> : 'Create Season'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* No program yet */}
       {programs.length === 0 && !imp && (
         <div className="bg-white rounded-2xl border border-black/5 p-10 text-center shadow-sm mt-4">
@@ -243,6 +417,11 @@ export default function AnnualProgram({ areas, onProductsChanged }) {
                 )}
               </button>
             ))}
+            {activeProgram && (
+              <button onClick={startCopy} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FERN, border: '1px solid rgba(0,0,0,0.08)' }}>
+                <CalendarPlus size={13} /> Roll forward
+              </button>
+            )}
           </div>
 
           {/* Area filter */}
@@ -263,7 +442,7 @@ export default function AnnualProgram({ areas, onProductsChanged }) {
           ) : (
             <div className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
               {visibleApps.map((a, i) => (
-                <div key={a.id} className={`flex items-center gap-3 px-4 py-3 ${i !== 0 ? 'border-t border-black/5' : ''}`}>
+                <button key={a.id} onClick={() => setEditApp({ ...a, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', target: a.target || '' })} className={`w-full text-left flex items-center gap-3 px-4 py-3 transition hover:bg-slate-50 ${i !== 0 ? 'border-t border-black/5' : ''}`}>
                   <div className="w-14 shrink-0 text-center">
                     <p className="font-body text-[11px] font-bold text-slate-500 flex items-center justify-center gap-1"><Calendar size={10} />{fmtDate(a.plannedDate)}</p>
                   </div>
@@ -276,7 +455,7 @@ export default function AnnualProgram({ areas, onProductsChanged }) {
                   {a.type && (
                     <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{a.type}</span>
                   )}
-                </div>
+                </button>
               ))}
             </div>
           )}
