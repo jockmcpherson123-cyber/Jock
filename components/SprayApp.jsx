@@ -14,7 +14,7 @@ import React, { useState, useEffect } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck,
+  Package, Truck, MapPin,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, downloadCSV,
@@ -24,6 +24,7 @@ import * as db from '@/lib/db'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import SprayCalendar from '@/components/SprayCalendar'
+import Weather from '@/components/Weather'
 
 // ── PALETTE ───────────────────────────────────────────────────────────────
 const FOREST = '#16291F'
@@ -135,6 +136,7 @@ function SprayOpsModule({ user }) {
   const [targets, setTargets] = useState([])
   const [sheetTypes, setSheetTypes] = useState([])
   const [courseInfo, setCourseInfo] = useState({ clubName: 'Congressional Country Club', deptName: 'Golf Maintenance' })
+  const [location, setLocation] = useState({ address: '', lat: null, lng: null, timezone: 'America/New_York' })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
@@ -168,6 +170,7 @@ function SprayOpsModule({ user }) {
       setTargets(settings.targets)
       setSheetTypes(settings.sheetTypes)
       setCourseInfo(settings.courseInfo)
+      setLocation(settings.location)
       // Load the newest program's applications so the dashboard can surface
       // what's planned for the days ahead.
       if (progs.length > 0) {
@@ -190,6 +193,7 @@ function SprayOpsModule({ user }) {
     if (patch.targets) setTargets(patch.targets)
     if (patch.sheetTypes) setSheetTypes(patch.sheetTypes)
     if (patch.courseInfo) setCourseInfo(patch.courseInfo)
+    if (patch.location) setLocation(patch.location)
     try {
       await db.saveSettings(patch)
     } catch (e) {
@@ -440,12 +444,13 @@ function SprayOpsModule({ user }) {
         {route === 'inventory' && manage && (
           <Inventory products={products} deliveries={deliveries} onAddDelivery={addDelivery} />
         )}
+        {route === 'weather' && <Weather location={location} onGoToSettings={() => manage && setRoute('settings')} />}
         {route === 'program' && manage && <AnnualProgram areas={areas} products={products} onProductsChanged={reloadProducts} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} />}
         {route === 'settings' && manage && (
           <SettingsPage
             areas={areas} operators={operators} directors={directors} targets={targets}
-            sheetTypes={sheetTypes} courseInfo={courseInfo}
+            sheetTypes={sheetTypes} courseInfo={courseInfo} location={location}
             onSave={async (patch) => { await saveSettings(patch); showToast('Settings updated') }}
           />
         )}
@@ -457,8 +462,8 @@ function SprayOpsModule({ user }) {
 // ── TOP NAV ───────────────────────────────────────────────────────────────
 function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
   const items = manage
-    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['inventory', 'Inventory'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
-    : [['dashboard', 'Dashboard'], ['list', 'All Sheets']]
+    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['weather', 'Weather'], ['inventory', 'Inventory'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
+    : [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['weather', 'Weather']]
 
   return (
     <div style={{ backgroundColor: FOREST }} className="text-white">
@@ -1772,7 +1777,7 @@ function NPKMini({ label, value, color }) {
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────
-function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, onSave }) {
+function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, onSave }) {
   const [section, setSection] = useState('course')
 
   return (
@@ -1780,7 +1785,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       <SectionHeader title="Settings" subtitle="Manage people, areas, and club details — changes apply everywhere instantly" />
 
       <div className="flex gap-2 mt-4 mb-5 overflow-x-auto pb-1">
-        {[['course', 'Course Info'], ['people', 'People'], ['areas', 'Sprayer Areas'], ['lists', 'Lists']].map(([k, l]) => (
+        {[['course', 'Course Info'], ['location', 'Location'], ['people', 'People'], ['areas', 'Sprayer Areas'], ['lists', 'Lists']].map(([k, l]) => (
           <button key={k} onClick={() => setSection(k)} className="font-body text-xs font-semibold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={section === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
@@ -1788,10 +1793,65 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       </div>
 
       {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} onSave={onSave} />}
+      {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
       {section === 'people' && <PeopleSettings operators={operators} directors={directors} onSave={onSave} />}
       {section === 'areas' && <AreasSettings areas={areas} onSave={onSave} />}
       {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} onSave={onSave} />}
     </div>
+  )
+}
+
+function LocationSettings({ location, onSave }) {
+  const [draft, setDraft] = useState(location || { address: '', lat: null, lng: null, timezone: 'America/New_York' })
+  const [looking, setLooking] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const dirty = JSON.stringify(draft) !== JSON.stringify(location)
+
+  async function lookup() {
+    if (!draft.address?.trim()) { setMsg('Enter an address first'); return }
+    setLooking(true); setMsg(null)
+    try {
+      const { geocodeAddress } = await import('@/lib/weather')
+      const hit = await geocodeAddress(draft.address)
+      if (hit) { setDraft({ ...draft, lat: hit.lat, lng: hit.lng }); setMsg('Coordinates found ✓') }
+      else setMsg('No match — enter latitude/longitude manually below')
+    } catch {
+      setMsg('Lookup unavailable — enter latitude/longitude manually below')
+    }
+    setLooking(false)
+  }
+
+  return (
+    <Card>
+      <p className="font-body text-xs text-slate-500 mb-3">
+        Your course's location drives the weather, Growing Degree Days and disease models. Enter your address and look up the coordinates, or type them in directly.
+      </p>
+      <FieldLabel>Address</FieldLabel>
+      <div className="flex gap-2 mb-3">
+        <input value={draft.address || ''} onChange={(e) => setDraft({ ...draft, address: e.target.value })} className="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="8500 River Road, Bethesda, MD 20817" />
+        <button onClick={lookup} disabled={looking} className="font-body text-xs font-bold px-3.5 rounded-xl text-white disabled:opacity-50 flex items-center gap-1.5" style={{ backgroundColor: FERN }}>
+          {looking ? <Loader2 className="animate-spin" size={14} /> : <MapPin size={14} />} Look up
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-3 mb-3">
+        <div>
+          <FieldLabel>Latitude</FieldLabel>
+          <input type="number" step="any" value={draft.lat ?? ''} onChange={(e) => setDraft({ ...draft, lat: e.target.value === '' ? null : Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="38.9726" />
+        </div>
+        <div>
+          <FieldLabel>Longitude</FieldLabel>
+          <input type="number" step="any" value={draft.lng ?? ''} onChange={(e) => setDraft({ ...draft, lng: e.target.value === '' ? null : Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="-77.1735" />
+        </div>
+        <div>
+          <FieldLabel>Time zone</FieldLabel>
+          <input value={draft.timezone || ''} onChange={(e) => setDraft({ ...draft, timezone: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="America/New_York" />
+        </div>
+      </div>
+      {msg && <p className="font-body text-[11px] text-slate-500 mb-3">{msg}</p>}
+      <button onClick={() => onSave({ location: draft })} disabled={!dirty} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>
+        Save Location
+      </button>
+    </Card>
   )
 }
 
