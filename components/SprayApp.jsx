@@ -22,6 +22,7 @@ import {
 import { PRODUCT_TYPES } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { logout } from '@/app/actions/auth'
+import AnnualProgram from '@/components/AnnualProgram'
 
 // ── PALETTE ───────────────────────────────────────────────────────────────
 const FOREST = '#16291F'
@@ -210,6 +211,14 @@ function SprayOpsModule({ user }) {
     }
   }
 
+  async function reloadProducts() {
+    try {
+      setProducts(await db.fetchProducts())
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
   async function addDelivery(delivery) {
     try {
       await db.addDelivery(delivery)
@@ -367,6 +376,7 @@ function SprayOpsModule({ user }) {
         {route === 'inventory' && manage && (
           <Inventory products={products} deliveries={deliveries} onAddDelivery={addDelivery} />
         )}
+        {route === 'program' && manage && <AnnualProgram areas={areas} onProductsChanged={reloadProducts} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} />}
         {route === 'settings' && manage && (
           <SettingsPage
@@ -383,7 +393,7 @@ function SprayOpsModule({ user }) {
 // ── TOP NAV ───────────────────────────────────────────────────────────────
 function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
   const items = manage
-    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['inventory', 'Inventory'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
+    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['inventory', 'Inventory'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
     : [['dashboard', 'Dashboard'], ['list', 'All Sheets']]
 
   return (
