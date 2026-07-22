@@ -18,6 +18,29 @@ function fmtDate(d) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+// A fuller date heading for the grouped view, e.g. "Mon · Mar 30, 2021".
+function fmtDateHeading(d) {
+  if (!d) return 'No date set'
+  return new Date(d + 'T00:00:00').toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+  })
+}
+
+// Group a list of applications by planned date, preserving date order.
+function groupByDate(list) {
+  const groups = []
+  const index = {}
+  list.forEach((a) => {
+    const key = a.plannedDate || 'none'
+    if (index[key] == null) {
+      index[key] = groups.length
+      groups.push({ date: a.plannedDate || null, items: [] })
+    }
+    groups[index[key]].items.push(a)
+  })
+  return groups
+}
+
 export default function AnnualProgram({ areas, products = [], onProductsChanged }) {
   const [programs, setPrograms] = useState([])
   const [activeProgram, setActiveProgram] = useState(null)
@@ -440,22 +463,32 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
           {visibleApps.length === 0 ? (
             <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No applications in this program.</div>
           ) : (
-            <div className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
-              {visibleApps.map((a, i) => (
-                <button key={a.id} onClick={() => setEditApp({ ...a, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', target: a.target || '' })} className={`w-full text-left flex items-center gap-3 px-4 py-3 transition hover:bg-slate-50 ${i !== 0 ? 'border-t border-black/5' : ''}`}>
-                  <div className="w-14 shrink-0 text-center">
-                    <p className="font-body text-[11px] font-bold text-slate-500 flex items-center justify-center gap-1"><Calendar size={10} />{fmtDate(a.plannedDate)}</p>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-body text-sm font-semibold text-slate-800 truncate">{a.product}</p>
-                    <p className="font-body text-[11px] text-slate-400 truncate">
-                      {areaFilter === 'all' ? `${a.area} · ` : ''}{a.rateOzM} oz/M{a.target ? ` · ${a.target}` : ''}
+            <div className="space-y-3">
+              {groupByDate(visibleApps).map((g) => (
+                <div key={g.date || 'none'} className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
+                  {/* Date heading — one per spray day */}
+                  <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#F0F6F2' }}>
+                    <p className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
+                      <Calendar size={12} />{fmtDateHeading(g.date)}
                     </p>
+                    <span className="font-body text-[10px] font-semibold text-slate-400">
+                      {g.items.length} application{g.items.length !== 1 ? 's' : ''}
+                    </span>
                   </div>
-                  {a.type && (
-                    <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{a.type}</span>
-                  )}
-                </button>
+                  {g.items.map((a, i) => (
+                    <button key={a.id} onClick={() => setEditApp({ ...a, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', target: a.target || '' })} className={`w-full text-left flex items-center gap-3 px-4 py-3 transition hover:bg-slate-50 ${i !== 0 ? 'border-t border-black/5' : ''}`}>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-body text-sm font-semibold text-slate-800 truncate">{a.product}</p>
+                        <p className="font-body text-[11px] text-slate-400 truncate">
+                          {areaFilter === 'all' ? `${a.area} · ` : ''}{a.rateOzM} oz/M{a.target ? ` · ${a.target}` : ''}
+                        </p>
+                      </div>
+                      {a.type && (
+                        <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{a.type}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
               ))}
             </div>
           )}
