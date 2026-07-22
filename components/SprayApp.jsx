@@ -23,6 +23,7 @@ import { PRODUCT_TYPES } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
+import SprayCalendar from '@/components/SprayCalendar'
 
 // ── PALETTE ───────────────────────────────────────────────────────────────
 const FOREST = '#16291F'
@@ -511,6 +512,14 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
   return (
     <div className="pt-6 space-y-6">
+      {/* Calendar — upcoming (planned) and past (actual) sprays at a glance */}
+      <SprayCalendar
+        sheets={sheets}
+        programApps={manage ? programApps : []}
+        onOpenSheet={onOpen}
+        onCreateFromProgram={manage ? onCreateFromProgram : undefined}
+      />
+
       {/* Stats strip */}
       <div className="grid grid-cols-4 gap-3">
         <StatCard icon={<ClipboardList size={16} />} label="Pending Approval" value={pending.length} accent={pending.length > 0 ? '#B45309' : FERN} />
