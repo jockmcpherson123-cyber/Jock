@@ -21,6 +21,7 @@ import {
 } from '@/lib/calc'
 import { PRODUCT_TYPES } from '@/lib/defaults'
 import * as db from '@/lib/db'
+import { fetchCurrent } from '@/lib/weather'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import SprayCalendar from '@/components/SprayCalendar'
@@ -410,7 +411,7 @@ function SprayOpsModule({ user }) {
         )}
         {route === 'edit' && activeSheet && manage && (
           <SheetEditor
-            sheet={activeSheet} saving={saving} products={products}
+            sheet={activeSheet} saving={saving} products={products} location={location}
             areas={areas} operators={operators} targets={targets} sheetTypes={sheetTypes}
             onSave={async (s) => {
               const saved = await saveSheet(s)
@@ -746,9 +747,25 @@ function InfoChip({ label, value }) {
 }
 
 // ── SHEET EDITOR ──────────────────────────────────────────────────────────
-function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes }) {
+function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes, location }) {
   const [s, setS] = useState({ ...sheet, targets: sheet.targets || (sheet.target ? [sheet.target] : []) })
+  const [wxLoading, setWxLoading] = useState(false)
+  const [wxError, setWxError] = useState(null)
+  const hasLocation = location && location.lat != null && location.lng != null
   const area = areas[s.area] || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
+
+  async function fillWeather() {
+    if (!hasLocation) return
+    setWxLoading(true)
+    setWxError(null)
+    try {
+      const wx = await fetchCurrent(location.lat, location.lng)
+      setS((prev) => ({ ...prev, weather: { ...prev.weather, ...wx } }))
+    } catch (e) {
+      setWxError('Could not fetch weather')
+    }
+    setWxLoading(false)
+  }
   const update = (patch) => setS((prev) => ({ ...prev, ...patch }))
   const updateProduct = (id, patch) => setS((prev) => ({ ...prev, products: prev.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))
   const addRow = () => setS((prev) => ({ ...prev, products: [...prev.products, { id: uid(), product: '', rate: '', basis: '', forceGal: false }] }))
@@ -810,12 +827,21 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
         </Card>
 
         <Card>
-          <FieldLabel>Weather</FieldLabel>
+          <div className="flex items-center justify-between mb-1">
+            <FieldLabel noMargin>Weather</FieldLabel>
+            {hasLocation && (
+              <button type="button" onClick={fillWeather} disabled={wxLoading} className="font-body text-xs font-bold flex items-center gap-1 disabled:opacity-50" style={{ color: FERN }}>
+                {wxLoading ? <Loader2 className="animate-spin" size={13} /> : <Cloud size={13} />}
+                {wxLoading ? 'Fetching…' : "Use today's weather"}
+              </button>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-2 mt-1">
             {[['temp', 'Temp °F'], ['wind', 'Wind mph'], ['humidity', 'Humidity %'], ['windDir', 'Wind dir']].map(([k, ph]) => (
               <input key={k} placeholder={ph} value={s.weather[k]} onChange={(e) => update({ weather: { ...s.weather, [k]: e.target.value } })} className="border border-slate-200 rounded-xl px-3 py-2 text-sm font-body" />
             ))}
           </div>
+          {wxError && <p className="font-body text-[11px] text-red-500 mt-1.5">{wxError}</p>}
         </Card>
 
         <Card>
