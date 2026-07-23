@@ -38,6 +38,10 @@ const INK = '#1A1A16'
 const canManage = (role) => role === 'superintendent' || role === 'director'
 const canApprove = (role) => role === 'director'
 
+// Standard PPE options and common field instructions (quick-insert on a sheet).
+const PPE_OPTIONS = ['Gloves', 'Long Sleeves', 'Eye Protection', 'Respirator', 'Coveralls', 'Chemical Boots']
+const QUICK_INSTRUCTIONS = ['Water in 0.1"', 'Do not mow for 24h', 'Avoid overlap near bunkers', 'Spray when turf is dry']
+
 // ── ERROR BOUNDARY ────────────────────────────────────────────────────────
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -321,6 +325,8 @@ function SprayOpsModule({ user }) {
       weather: { temp: '', wind: '', humidity: '', windDir: '' },
       products: [{ id: uid(), product: '', rate: '', basis: '', forceGal: false }],
       targets: [],
+      instructions: '',
+      ppe: [],
       status: 'pending',
       directorSig: '',
       directorDate: '',
@@ -363,6 +369,8 @@ function SprayOpsModule({ user }) {
         forceGal: false,
       })),
       targets: [...new Set(planned.map((a) => a.target).filter(Boolean))],
+      instructions: '',
+      ppe: [],
       status: 'pending',
       directorSig: '',
       directorDate: '',
@@ -959,6 +967,30 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             })}
           </div>
         </Card>
+
+        <Card>
+          <FieldLabel>Instructions</FieldLabel>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {QUICK_INSTRUCTIONS.map((q) => (
+              <button key={q} type="button" onClick={() => update({ instructions: (s.instructions ? s.instructions + '\n' : '') + q })} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full border" style={{ borderColor: '#E2E8F0', color: '#64748B' }}>
+                + {q}
+              </button>
+            ))}
+          </div>
+          <textarea value={s.instructions || ''} onChange={(e) => update({ instructions: e.target.value })} rows={3} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder={'e.g. Water in 0.1" after application. Avoid overlap near bunkers.'} />
+
+          <p className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide mt-4 mb-1.5">PPE Required</p>
+          <div className="flex flex-wrap gap-2">
+            {PPE_OPTIONS.map((item) => {
+              const on = (s.ppe || []).includes(item)
+              return (
+                <button key={item} type="button" onClick={() => update({ ppe: on ? (s.ppe || []).filter((x) => x !== item) : [...(s.ppe || []), item] })} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: '#92660D', color: 'white', borderColor: '#92660D' } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>
+                  {item}
+                </button>
+              )
+            })}
+          </div>
+        </Card>
       </div>
     </div>
   )
@@ -1040,6 +1072,19 @@ function PrintableSheet({ sheet, area, products, sheetTargets, courseInfo }) {
                 <td style={{ ...tdRow, fontWeight: 700 }}>{p.total ?? '—'} {p.unit}</td>
               </tr>
             ))}
+          </tbody>
+        </table>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, marginBottom: 12 }}>
+          <tbody>
+            <tr>
+              <td style={tdLabel}>PPE</td>
+              <td style={tdVal} colSpan={3}>{(sheet.ppe || []).join(', ') || '—'}</td>
+            </tr>
+            <tr>
+              <td style={tdLabel}>Instructions</td>
+              <td style={tdVal} colSpan={3}>{sheet.instructions || '—'}</td>
+            </tr>
           </tbody>
         </table>
 
@@ -1138,12 +1183,16 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, a
 
         <div className="space-y-4">
           <Card>
-            <div className="grid grid-cols-2 gap-3 font-body text-sm">
-              <Row label="Operator" value={sheet.operator || '—'} />
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-3 gap-x-4 font-body text-sm">
+              <Row label="Date" value={sheet.date || '—'} />
+              <Row label="Applicator" value={sheet.operator || '—'} />
               <Row label="Tanks" value={sheet.tanks} />
-              <Row label="Nozzle" value={area.nozzle} />
-              <Row label="PSI" value={area.psi} />
-              {sheetTargets.length > 0 && <Row label="Target" value={sheetTargets.join(', ')} />}
+              <Row label="Nozzle" value={area.nozzle || '—'} />
+              <Row label="PSI" value={area.psi || '—'} />
+              <Row label="Gal / Tank" value={area.galTank ?? '—'} />
+              <Row label="Spray Rate" value={area.sprayRate ? `${area.sprayRate} gal/ac` : '—'} />
+              <Row label="Sq Ft" value={area.sqft ? area.sqft.toLocaleString() : '—'} />
+              <Row label="Acres" value={area.sqft ? (area.sqft / 43560).toFixed(2) : '—'} />
             </div>
           </Card>
 
@@ -1159,9 +1208,16 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, a
             </Card>
           )}
 
+          {/* Products — amount per tank, with the total off to the side (your sheet's layout) */}
           <Card>
-            <FieldLabel>Products</FieldLabel>
-            <div className="mt-2 divide-y divide-slate-100">
+            <div className="flex items-center justify-between mb-1">
+              <FieldLabel noMargin>Products</FieldLabel>
+              <div className="flex gap-3 pr-1">
+                <span className="w-16 text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide">Amt/Tank</span>
+                <span className="w-16 text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide">Total</span>
+              </div>
+            </div>
+            <div className="divide-y divide-slate-100">
               {sheet.products.filter((p) => p.product).map((p) => {
                 const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
                 const total = amt !== null ? Math.round(amt * sheet.tanks * 10) / 10 : null
@@ -1172,54 +1228,73 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, a
                 const overLimit = labelMax && rateNum && rateNum > labelMax
                 const underLimit = labelMin && rateNum && rateNum < labelMin
                 const outOfRange = overLimit || underLimit
+                const stock = prodInfo?.stock ?? null
+                const insufficient = stock !== null && total !== null && stock < total
                 return (
-                  <div key={p.id} className="py-2.5 flex items-center justify-between font-body">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                  <div key={p.id} className="py-2.5 flex items-center gap-3 font-body">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-slate-800 flex items-center gap-1.5 flex-wrap">
                         {p.product}
-                        {overLimit && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">OVER LIMIT</span>}
-                        {underLimit && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">UNDER MIN</span>}
+                        {overLimit && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">OVER</span>}
+                        {underLimit && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">UNDER</span>}
                       </p>
-                      <p className="text-xs text-slate-400">{p.rate} {p.basis}</p>
+                      <p className="text-[11px] text-slate-400">
+                        {p.rate} {p.basis}{insufficient ? ` · only ${stock} ${unit} in stock` : ''}
+                      </p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold" style={{ color: outOfRange ? '#DC2626' : FERN }}>{total} {unit}</p>
-                      <p className="text-[10px] text-slate-400">{amt} {unit}/tank</p>
+                    <div className="w-16 text-center rounded-lg py-1.5" style={{ backgroundColor: '#FFF6DD' }}>
+                      <p className="text-sm font-bold text-slate-900 leading-none">{amt ?? '—'}</p>
+                      <p className="text-[8px] text-slate-500 uppercase mt-0.5">{unit}</p>
+                    </div>
+                    <div className="w-16 text-center">
+                      <p className="text-sm font-bold leading-none" style={{ color: outOfRange ? '#DC2626' : FERN }}>{total ?? '—'}</p>
+                      <p className="text-[8px] text-slate-400 uppercase mt-0.5">{unit}</p>
                     </div>
                   </div>
                 )
               })}
+              {sheet.products.filter((p) => p.product).length === 0 && (
+                <p className="py-3 font-body text-sm text-slate-400">No products on this sheet.</p>
+              )}
             </div>
           </Card>
 
-          {sheet.products.filter((p) => p.product).length > 0 && (
+          {/* Safety notice — carried over from the paper sheet */}
+          <Card>
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide text-red-500 mb-1">Before you spray</p>
+            <p className="font-body text-xs text-slate-600 leading-relaxed">
+              Check ALL nozzles before leaving the maintenance area. Calculate rates BEFORE filling the sprayer.
+            </p>
+          </Card>
+
+          {sheetTargets.length > 0 && (
             <Card>
-              <FieldLabel>Total Needed for This Spray</FieldLabel>
-              <p className="font-body text-[11px] text-slate-400 mb-3">Pull these quantities from stock before you start</p>
-              <div className="space-y-2">
-                {sheet.products.filter((p) => p.product).map((p) => {
-                  const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
-                  const total = amt !== null ? Math.round(amt * sheet.tanks * 10) / 10 : null
-                  const prodInfo = products?.find((pr) => pr.name === p.product)
-                  const stock = prodInfo?.stock ?? null
-                  const insufficient = stock !== null && total !== null && stock < total
-                  return (
-                    <div key={p.id} className="flex items-center justify-between rounded-xl px-3 py-2.5 font-body" style={{ backgroundColor: insufficient ? '#FEF2F2' : '#F0F6F2' }}>
-                      <span className="text-sm font-semibold text-slate-800">{p.product}</span>
-                      <div className="text-right">
-                        <span className="text-sm font-bold" style={{ color: insufficient ? '#DC2626' : FERN }}>{total} {unit}</span>
-                        {stock !== null && (
-                          <p className="text-[10px] mt-0.5" style={{ color: insufficient ? '#DC2626' : '#94A3B8' }}>
-                            {insufficient ? `Only ${stock} ${unit} in stock` : `${stock} ${unit} in stock`}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
+              <FieldLabel>Target</FieldLabel>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {sheetTargets.map((t) => (
+                  <span key={t} className="font-body text-xs font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: '#EDE7F6', color: '#7C3AED' }}>{t}</span>
+                ))}
               </div>
             </Card>
           )}
+
+          <Card>
+            <FieldLabel>Instructions</FieldLabel>
+            <p className="font-body text-sm text-slate-700 whitespace-pre-wrap">{sheet.instructions ? sheet.instructions : '—'}</p>
+          </Card>
+
+          <Card>
+            <FieldLabel>PPE Required</FieldLabel>
+            {sheet.ppe && sheet.ppe.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {sheet.ppe.map((item) => (
+                  <span key={item} className="font-body text-xs font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: '#FEF3DD', color: '#92660D' }}>{item}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="font-body text-sm text-slate-400 mt-1">—</p>
+            )}
+          </Card>
 
           <Card>
             <FieldLabel>Approval &amp; Distribution</FieldLabel>
