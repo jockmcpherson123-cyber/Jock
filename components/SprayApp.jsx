@@ -302,12 +302,11 @@ function SprayOpsModule({ user }) {
 
     // Auto-deduct stock for every product used on this sheet.
     const area = areas[saved.area] || {}
-    const dedSqft = effectiveSqft(saved.fillGallons, area)
     const deductions = []
     ;(saved.products || [])
       .filter((p) => p.product)
       .forEach((p) => {
-        const { value: amt } = calcAmount(parseFloat(p.rate), p.basis, dedSqft, p.forceGal)
+        const { value: amt } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
         if (amt === null) return
         const total = Math.round(amt * saved.tanks * 10) / 10
         deductions.push({ name: p.product, total })
@@ -884,21 +883,10 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             <InfoChip label="Gal/Tank" value={area.galTank} />
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mt-3">
-            <div>
-              <FieldLabel>{`Tanks (default ${area.tanks})`}</FieldLabel>
-              <input type="number" min={1} value={s.tanks} onChange={(e) => update({ tanks: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-            </div>
-            <div>
-              <FieldLabel>Water / Tank (gal)</FieldLabel>
-              <input type="number" step="any" value={s.fillGallons ?? ''} onChange={(e) => update({ fillGallons: e.target.value === '' ? null : Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder={`Full: ${area.galTank}`} />
-            </div>
+          <div className="mt-3">
+            <FieldLabel>{`Tanks (default ${area.tanks})`}</FieldLabel>
+            <input type="number" min={1} value={s.tanks} onChange={(e) => update({ tanks: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
           </div>
-          {isPartialFill(s.fillGallons, area) && (
-            <p className="font-body text-[11px] font-semibold mt-2" style={{ color: '#92660D' }}>
-              Partial tank — amounts scaled to {s.fillGallons} of {area.galTank} gal.
-            </p>
-          )}
         </Card>
 
         <Card>
@@ -928,7 +916,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
           </div>
           <div className="space-y-2.5">
             {s.products.map((p) => {
-              const { value: amt, unit: amtUnit } = calcAmount(parseFloat(p.rate), p.basis, effectiveSqft(s.fillGallons, area), p.forceGal)
+              const { value: amt, unit: amtUnit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
               const total = amt !== null ? Math.round(amt * s.tanks * 10) / 10 : null
               const prodInfo = products.find((pr) => pr.name === p.product)
               const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
@@ -1028,13 +1016,18 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
 
 // ── PRINTABLE SHEET ───────────────────────────────────────────────────────
 function PrintableSheet({ sheet, area, products, sheetTargets, courseInfo }) {
-  const printSqft = effectiveSqft(sheet.fillGallons, area)
-  const partialFill = isPartialFill(sheet.fillGallons, area)
   const totalRows = sheet.products.filter((p) => p.product).map((p) => {
-    const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, printSqft, p.forceGal)
+    const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
     const total = amt !== null ? Math.round(amt * sheet.tanks * 10) / 10 : null
     return { ...p, amt, total, unit }
   })
+  const partialGal = sheet.partialGallons
+  const partialRows = partialGal && area.galTank
+    ? sheet.products.filter((p) => p.product).map((p) => {
+        const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, effectiveSqft(partialGal, area), p.forceGal)
+        return { ...p, amt, unit }
+      })
+    : []
 
   return (
     <div className="print-only" style={{ display: 'none' }}>
@@ -1065,7 +1058,7 @@ function PrintableSheet({ sheet, area, products, sheetTargets, courseInfo }) {
               <td style={tdLabel}>Operator</td><td style={tdVal}>{sheet.operator || '—'}</td>
             </tr>
             <tr>
-              <td style={tdLabel}>Tanks</td><td style={tdVal}>{sheet.tanks}{partialFill ? ` × ${sheet.fillGallons} gal (partial)` : area.galTank ? ` × ${area.galTank} gal` : ''}</td>
+              <td style={tdLabel}>Tanks</td><td style={tdVal}>{sheet.tanks}{area.galTank ? ` × ${area.galTank} gal` : ''}</td>
               <td style={tdLabel}>Nozzle</td><td style={tdVal}>{area.nozzle || '—'}</td>
             </tr>
             <tr>
@@ -1106,6 +1099,24 @@ function PrintableSheet({ sheet, area, products, sheetTargets, courseInfo }) {
             ))}
           </tbody>
         </table>
+
+        {partialRows.length > 0 && (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, marginBottom: 12 }}>
+            <thead>
+              <tr style={{ backgroundColor: '#92660D', color: 'white' }}>
+                <th style={thStyle} colSpan={2}>Partial Fill — Extra Spray ({partialGal} gal)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {partialRows.map((p, i) => (
+                <tr key={p.id} style={{ backgroundColor: i % 2 === 0 ? '#fff' : '#F5F5F0' }}>
+                  <td style={tdRow}>{p.product}</td>
+                  <td style={{ ...tdRow, fontWeight: 700 }}>{p.amt ?? '—'} {p.unit}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
 
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, marginBottom: 12 }}>
           <tbody>
@@ -1170,11 +1181,10 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, a
   const [sig, setSig] = useState('')
   const [wx, setWx] = useState(sheet.weather || { temp: '', wind: '', humidity: '', windDir: '' })
   const [sprayedBy, setSprayedBy] = useState(sheet.completedBy || sheet.operator || '')
-  const [fill, setFill] = useState(sheet.fillGallons ?? '')
+  const [partialGal, setPartialGal] = useState(sheet.partialGallons ?? '')
+  const [showPartial, setShowPartial] = useState(sheet.partialGallons != null)
   const [wxLoading, setWxLoading] = useState(false)
   const area = areas[sheet.area] || {}
-  const effSqft = effectiveSqft(fill === '' ? null : fill, area)
-  const partial = isPartialFill(fill === '' ? null : fill, area)
   const sheetTargets = sheet.targets || (sheet.target ? [sheet.target] : [])
   const hasLocation = location && location.lat != null && location.lng != null
 
@@ -1191,14 +1201,13 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, a
     onLogSpray?.({
       ...sheet,
       weather: wx,
-      fillGallons: fill === '' ? null : Number(fill),
       completed: complete ? true : sheet.completed,
       completedBy: complete ? (sprayedBy || sheet.operator || '') : sheet.completedBy,
       completedAt: complete ? new Date().toISOString() : sheet.completedAt,
     })
   const reopen = () => onLogSpray?.({ ...sheet, completed: false })
-  // Save just the partial-fill change (no approval needed).
-  const saveFill = () => onLogSpray?.({ ...sheet, fillGallons: fill === '' ? null : Number(fill) })
+  // Save the optional partial-fill add-on (no approval needed — separate spray).
+  const savePartial = (gal) => onLogSpray?.({ ...sheet, partialGallons: gal === '' || gal == null ? null : Number(gal) })
 
   return (
     <div className="pt-6 pb-10 max-w-2xl mx-auto">
@@ -1246,22 +1255,6 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, a
             </Card>
           )}
 
-          {/* Partial-tank calculator — type the water going in, amounts auto-scale */}
-          <Card>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <FieldLabel noMargin>Water this tank (gal)</FieldLabel>
-                <p className="font-body text-[11px] text-slate-400 mt-0.5">Full tank is {area.galTank || '—'} gal. Enter less for a partial fill — product amounts recalculate.</p>
-              </div>
-              <input type="number" step="any" value={fill} onChange={(e) => setFill(e.target.value)} onBlur={saveFill} className="w-24 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body text-center" placeholder={area.galTank ? `${area.galTank}` : 'gal'} />
-            </div>
-            {partial && (
-              <p className="font-body text-[11px] font-semibold mt-2 rounded-lg px-3 py-2" style={{ backgroundColor: '#FFF6DD', color: '#92660D' }}>
-                Partial tank: amounts scaled to {fill} of {area.galTank} gal ({Math.round((Number(fill) / Number(area.galTank)) * 100)}% fill).
-              </p>
-            )}
-          </Card>
-
           {/* Products — amount per tank, with the total off to the side (your sheet's layout) */}
           <Card>
             <div className="flex items-center justify-between mb-1">
@@ -1273,7 +1266,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, a
             </div>
             <div className="divide-y divide-slate-100">
               {sheet.products.filter((p) => p.product).map((p) => {
-                const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, effSqft, p.forceGal)
+                const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
                 const total = amt !== null ? Math.round(amt * sheet.tanks * 10) / 10 : null
                 const prodInfo = products?.find((pr) => pr.name === p.product)
                 const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
@@ -1311,6 +1304,49 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, a
                 <p className="py-3 font-body text-sm text-slate-400">No products on this sheet.</p>
               )}
             </div>
+          </Card>
+
+          {/* Optional partial fill — a separate extra spray with the same mix. Does
+              not touch the main sheet above, and needs no re-approval. */}
+          <Card>
+            {!showPartial ? (
+              <button onClick={() => setShowPartial(true)} className="w-full flex items-center justify-center gap-1.5 font-body text-sm font-semibold py-1" style={{ color: FERN }}>
+                <Plus size={15} /> Add partial fill (extra tank)
+              </button>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-2">
+                  <FieldLabel noMargin>Partial Fill — Extra Spray</FieldLabel>
+                  <button onClick={() => { setShowPartial(false); setPartialGal(''); savePartial('') }} className="text-red-400 p-1"><Trash2 size={14} /></button>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-body text-[11px] text-slate-400">Gallons of water in this extra tank. Full tank is {area.galTank || '—'} gal.</p>
+                  <input type="number" step="any" value={partialGal} onChange={(e) => setPartialGal(e.target.value)} onBlur={(e) => savePartial(e.target.value)} className="w-24 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body text-center" placeholder="gal" />
+                </div>
+
+                {Number(partialGal) > 0 && Number(area.galTank) > 0 ? (
+                  <>
+                    <p className="font-body text-[11px] font-semibold rounded-lg px-3 py-2 my-2" style={{ backgroundColor: '#FFF6DD', color: '#92660D' }}>
+                      {partialGal} gal = {Math.round((Number(partialGal) / Number(area.galTank)) * 100)}% of a full tank
+                    </p>
+                    <div className="divide-y divide-slate-100">
+                      {sheet.products.filter((p) => p.product).map((p) => {
+                        const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, effectiveSqft(partialGal, area), p.forceGal)
+                        return (
+                          <div key={p.id} className="py-2 flex items-center justify-between font-body">
+                            <span className="text-sm font-semibold text-slate-800">{p.product}</span>
+                            <span className="text-sm font-bold" style={{ color: FERN }}>{amt ?? '—'} {unit}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <p className="font-body text-[11px] text-slate-400 mt-2">Add these amounts to the partial tank. This is an extra spray — it doesn't change the main sheet above.</p>
+                  </>
+                ) : (
+                  <p className="font-body text-sm text-slate-400 mt-2">Enter the gallons to see the amounts.</p>
+                )}
+              </>
+            )}
           </Card>
 
           {/* Safety notice — carried over from the paper sheet */}
