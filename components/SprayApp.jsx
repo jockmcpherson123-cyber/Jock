@@ -125,7 +125,7 @@ function roleLabel(role) {
 // ── SPRAY OPS MODULE ──────────────────────────────────────────────────────
 function SprayOpsModule({ user }) {
   const manage = canManage(user.role)
-  const [route, setRoute] = useState('dashboard')
+  const [route, setRoute] = useState(canManage(user.role) ? 'dashboard' : 'tospray')
   const [sheets, setSheets] = useState([])
   const [products, setProducts] = useState([])
   const [activeSheet, setActiveSheet] = useState(null)
@@ -407,7 +407,13 @@ function SprayOpsModule({ user }) {
           />
         )}
         {route === 'list' && (
-          <SheetList sheets={sheets} manage={manage} onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
+          <SheetList sheets={sheets} manage={manage} variant="manage" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
+        )}
+        {route === 'tospray' && (
+          <SheetList sheets={sheets} manage={manage} variant="tospray" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
+        )}
+        {route === 'records' && (
+          <SheetList sheets={sheets} manage={manage} variant="records" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
         )}
         {route === 'edit' && activeSheet && manage && (
           <SheetEditor
@@ -432,17 +438,22 @@ function SprayOpsModule({ user }) {
         )}
         {route === 'view' && activeSheet && (
           <SheetViewer
-            sheet={activeSheet} products={products} areas={areas} directors={directors} courseInfo={courseInfo}
+            sheet={activeSheet} products={products} areas={areas} directors={directors} operators={operators}
+            location={location} courseInfo={courseInfo}
             manage={manage} approve={canApprove(user.role)}
-            onBack={() => setRoute('dashboard')}
+            onBack={() => setRoute(manage ? 'dashboard' : 'tospray')}
             onEdit={() => setRoute('edit')}
             onApprove={approveSheet}
+            onLogSpray={async (updated) => {
+              const saved = await saveSheet(updated)
+              if (saved) { setActiveSheet(saved); showToast(updated.completed ? 'Filed in Records' : 'Spray details saved') }
+            }}
           />
         )}
         {route === 'chemicals' && manage && (
           <ChemicalLibrary products={products} onSaveProduct={saveProduct} onDeleteProduct={removeProduct} />
         )}
-        {route === 'inventory' && manage && (
+        {route === 'inventory' && (
           <Inventory products={products} deliveries={deliveries} onAddDelivery={addDelivery} />
         )}
         {route === 'weather' && <Weather location={location} onGoToSettings={() => manage && setRoute('settings')} />}
@@ -464,7 +475,7 @@ function SprayOpsModule({ user }) {
 function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
   const items = manage
     ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['weather', 'Weather'], ['inventory', 'Inventory'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
-    : [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['weather', 'Weather']]
+    : [['tospray', 'To Spray'], ['records', 'Records'], ['inventory', 'Inventory'], ['weather', 'Weather']]
 
   return (
     <div style={{ backgroundColor: FOREST }} className="text-white">
@@ -670,7 +681,11 @@ function SheetRow({ sheet, onClick, highlight }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 mb-1">
           <p className="font-body font-semibold text-sm text-slate-900 truncate">{sheet.sheetType}</p>
-          <StatusPill status={sheet.status} />
+          {sheet.completed ? (
+            <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide" style={{ backgroundColor: '#E8F3EC', color: FERN }}>Sprayed</span>
+          ) : (
+            <StatusPill status={sheet.status} />
+          )}
         </div>
         <p className="font-body text-xs text-slate-400 truncate">{sheet.area}</p>
         <div className="flex items-center gap-3 mt-1.5 font-body text-[11px] text-slate-400">
@@ -694,27 +709,49 @@ function StatusPill({ status }) {
 }
 
 // ── SHEET LIST ────────────────────────────────────────────────────────────
-function SheetList({ sheets, onOpen, onNew, manage }) {
-  const [filter, setFilter] = useState('all')
-  const filtered = filter === 'all' ? sheets : sheets.filter((s) => s.status === filter)
+const SHEET_FILTER_LABELS = { all: 'All', pending: 'Pending', tospray: 'To Spray', completed: 'Completed' }
+function matchSheetFilter(s, f) {
+  if (f === 'all') return true
+  if (f === 'pending') return s.status === 'pending'
+  if (f === 'tospray') return s.status === 'approved' && !s.completed
+  if (f === 'completed') return !!s.completed
+  return true
+}
+
+function SheetList({ sheets, onOpen, onNew, manage, variant = 'manage' }) {
+  const CONFIG = {
+    manage: { title: 'All Spray Sheets', sub: null, keys: ['tospray', 'pending', 'completed', 'all'], initial: 'tospray' },
+    tospray: { title: 'To Spray', sub: 'Approved and outstanding — mark them done as you go', keys: [], initial: 'tospray' },
+    records: { title: 'Records', sub: 'Completed sprays — open to print or review', keys: [], initial: 'completed' },
+  }
+  const cfg = CONFIG[variant] || CONFIG.manage
+  const [filter, setFilter] = useState(cfg.initial)
+  const active = cfg.keys.length ? filter : cfg.initial
+  const filtered = sheets.filter((s) => matchSheetFilter(s, active))
 
   return (
     <div className="pt-6">
-      <SectionHeader title="All Spray Sheets" />
-      <div className="flex gap-2 mb-4">
-        {['all', 'pending', 'approved'].map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition"
-            style={filter === f ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}
-          >
-            {f === 'all' ? 'All' : f === 'pending' ? 'Pending' : 'Approved'}
-          </button>
-        ))}
-      </div>
-      {filtered.length === 0 ? <EmptyState onNew={onNew} manage={manage} /> : (
-        <div className="space-y-2">
+      <SectionHeader title={cfg.title} subtitle={cfg.sub} />
+      {cfg.keys.length > 0 && (
+        <div className="flex gap-2 mb-4 mt-3 overflow-x-auto pb-1">
+          {cfg.keys.map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition whitespace-nowrap"
+              style={filter === f ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}
+            >
+              {SHEET_FILTER_LABELS[f]}
+            </button>
+          ))}
+        </div>
+      )}
+      {filtered.length === 0 ? (
+        <div className="mt-3 bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm shadow-sm">
+          {variant === 'tospray' ? 'Nothing to spray right now — all caught up.' : variant === 'records' ? 'No completed sprays yet.' : 'No sheets match this filter.'}
+        </div>
+      ) : (
+        <div className="space-y-2 mt-3">
           {filtered.map((s) => <SheetRow key={s.id} sheet={s} onClick={() => onOpen(s)} />)}
         </div>
       )}
@@ -1052,10 +1089,33 @@ const thStyle = { border: '1px solid #16291F', padding: '6px 8px', textAlign: 'l
 const tdRow = { border: '1px solid #ccc', padding: '5px 8px' }
 
 // ── SHEET VIEWER ──────────────────────────────────────────────────────────
-function SheetViewer({ sheet, onBack, onEdit, onApprove, products, areas, directors, courseInfo, manage, approve }) {
+function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, areas, directors, operators = [], location, courseInfo, manage, approve }) {
   const [sig, setSig] = useState('')
+  const [wx, setWx] = useState(sheet.weather || { temp: '', wind: '', humidity: '', windDir: '' })
+  const [sprayedBy, setSprayedBy] = useState(sheet.completedBy || sheet.operator || '')
+  const [wxLoading, setWxLoading] = useState(false)
   const area = areas[sheet.area] || {}
   const sheetTargets = sheet.targets || (sheet.target ? [sheet.target] : [])
+  const hasLocation = location && location.lat != null && location.lng != null
+
+  async function fillWx() {
+    if (!hasLocation) return
+    setWxLoading(true)
+    try {
+      const w = await fetchCurrent(location.lat, location.lng)
+      setWx((prev) => ({ ...prev, ...w }))
+    } catch { /* ignore */ }
+    setWxLoading(false)
+  }
+  const saveLog = (complete) =>
+    onLogSpray?.({
+      ...sheet,
+      weather: wx,
+      completed: complete ? true : sheet.completed,
+      completedBy: complete ? (sprayedBy || sheet.operator || '') : sheet.completedBy,
+      completedAt: complete ? new Date().toISOString() : sheet.completedAt,
+    })
+  const reopen = () => onLogSpray?.({ ...sheet, completed: false })
 
   return (
     <div className="pt-6 pb-10 max-w-2xl mx-auto">
@@ -1189,6 +1249,53 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, products, areas, direct
               </p>
             )}
           </Card>
+
+          {/* Field log — appears once approved; where the crew records the spray */}
+          {sheet.status === 'approved' && (
+            <Card>
+              {sheet.completed ? (
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Check size={15} style={{ color: FERN }} />
+                    <p className="font-body text-sm font-bold" style={{ color: FERN }}>Sprayed &amp; filed in Records</p>
+                  </div>
+                  <p className="font-body text-xs text-slate-500">
+                    {sheet.completedBy ? `By ${sheet.completedBy}` : ''}{sheet.completedAt ? ` · ${new Date(sheet.completedAt).toLocaleString()}` : ''}
+                  </p>
+                  <div className="flex gap-2 mt-3">
+                    <button onClick={() => window.print()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white" style={{ backgroundColor: FOREST }}>Print record</button>
+                    <button onClick={reopen} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full text-slate-500 border border-slate-200">Reopen (back to To Spray)</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-2">
+                    <FieldLabel noMargin>Log this spray</FieldLabel>
+                    {hasLocation && (
+                      <button type="button" onClick={fillWx} disabled={wxLoading} className="font-body text-xs font-bold flex items-center gap-1 disabled:opacity-50" style={{ color: FERN }}>
+                        {wxLoading ? <Loader2 className="animate-spin" size={13} /> : <Cloud size={13} />}
+                        {wxLoading ? 'Fetching…' : "Use today's weather"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    {[['temp', 'Temp °F'], ['wind', 'Wind mph'], ['humidity', 'Humidity %'], ['windDir', 'Wind dir']].map(([k, ph]) => (
+                      <input key={k} placeholder={ph} value={wx[k] || ''} onChange={(e) => setWx({ ...wx, [k]: e.target.value })} className="border border-slate-200 rounded-xl px-3 py-2 text-sm font-body" />
+                    ))}
+                  </div>
+                  <FieldLabel>Sprayed by</FieldLabel>
+                  <Select value={sprayedBy} onChange={setSprayedBy} options={operators} placeholder="Select…" />
+                  <div className="flex gap-2 mt-3">
+                    <button onClick={() => saveLog(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Save progress</button>
+                    <button onClick={() => saveLog(true)} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
+                      <Check size={15} /> Mark as sprayed
+                    </button>
+                  </div>
+                  <p className="font-body text-[11px] text-slate-400 mt-2">Use “Save progress” for multi-day sprays; “Mark as sprayed” files it in Records (still editable).</p>
+                </>
+              )}
+            </Card>
+          )}
         </div>
       </div>
     </div>
