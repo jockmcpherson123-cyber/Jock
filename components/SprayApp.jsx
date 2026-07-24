@@ -1196,15 +1196,29 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
   const [partialGal, setPartialGal] = useState(sheet.partialGallons ?? '')
   const [showPartial, setShowPartial] = useState(sheet.partialGallons != null)
   const [wxLoading, setWxLoading] = useState(false)
-  const [checks, setChecks] = useState(sheet.checkedProducts || [])
-  const [curTank, setCurTank] = useState(sheet.currentTank || 1)
   const area = areas[sheet.area] || {}
+  const productIds = sheet.products.filter((p) => p.product).map((p) => p.id)
+  const tankCount = sheet.tanks || 1
 
-  // Live sync: mirror another iPad's check-offs / current tank as they happen.
+  // Which products are in each tank (shared/synced), keyed by tank number.
+  const [tankChecks, setTankChecks] = useState(sheet.tankChecks || {})
+  // Which tank THIS device is filling — local only, so several iPads can each
+  // work a different tank at the same time.
+  const tankIsComplete = (checksObj, n) => {
+    const c = checksObj[String(n)] || []
+    return productIds.length > 0 && productIds.every((id) => c.includes(id))
+  }
+  const firstIncomplete = () => {
+    for (let n = 1; n <= tankCount; n++) if (!tankIsComplete(sheet.tankChecks || {}, n)) return n
+    return 1
+  }
+  const [curTank, setCurTank] = useState(firstIncomplete())
+
+  // Live sync: mirror the other iPads' check-offs as they happen. The current
+  // tank selection stays local so devices don't fight over it.
   useEffect(() => {
     const unsub = db.subscribeSheet(sheet.id, (fresh) => {
-      setChecks(fresh.checkedProducts || [])
-      setCurTank(fresh.currentTank || 1)
+      setTankChecks(fresh.tankChecks || {})
       if (fresh.weather) setWx(fresh.weather)
       onRemoteSheet?.(fresh)
     })
@@ -1212,25 +1226,21 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheet.id])
 
-  // Persist a check-off / tank change (broadcasts to the other iPads). No
-  // approval needed — this is field state on an already-approved sheet.
-  const pushLive = (nextChecks, nextTank) =>
-    onLogSpray?.({ ...sheet, checkedProducts: nextChecks, currentTank: nextTank, weather: wx, partialGallons: partialGal === '' ? null : Number(partialGal) }, { quiet: true })
+  const curChecks = tankChecks[String(curTank)] || []
+  const completedCount = Array.from({ length: tankCount }, (_, i) => i + 1).filter((n) => tankIsComplete(tankChecks, n)).length
+
+  // Save the check-off state (broadcasts to the other iPads). No approval needed.
+  const pushChecks = (next) => {
+    setTankChecks(next)
+    onLogSpray?.({ ...sheet, tankChecks: next, weather: wx, partialGallons: partialGal === '' ? null : Number(partialGal) }, { quiet: true })
+  }
   const toggleCheck = (pid) => {
-    const next = checks.includes(pid) ? checks.filter((x) => x !== pid) : [...checks, pid]
-    setChecks(next)
-    pushLive(next, curTank)
+    const c = tankChecks[String(curTank)] || []
+    const nextC = c.includes(pid) ? c.filter((x) => x !== pid) : [...c, pid]
+    pushChecks({ ...tankChecks, [String(curTank)]: nextC })
   }
-  const changeTank = (n) => {
-    setCurTank(n)
-    pushLive(checks, n)
-  }
-  const nextTank = () => {
-    const n = Math.min(curTank + 1, sheet.tanks || 1)
-    setChecks([]) // fresh checklist for the new tank
-    setCurTank(n)
-    pushLive([], n)
-  }
+  const changeTank = (n) => setCurTank(n) // local only
+  const goNextTank = () => setCurTank((t) => Math.min(t + 1, tankCount))
   const sheetTargets = sheet.targets || (sheet.target ? [sheet.target] : [])
   const hasLocation = location && location.lat != null && location.lng != null
 
@@ -1247,6 +1257,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
     onLogSpray?.({
       ...sheet,
       weather: wx,
+      tankChecks,
       completed: complete ? true : sheet.completed,
       completedBy: complete ? (sprayedBy || sheet.operator || '') : sheet.completedBy,
       completedAt: complete ? new Date().toISOString() : sheet.completedAt,
@@ -1254,9 +1265,9 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
   const reopen = () => onLogSpray?.({ ...sheet, completed: false })
   // Save the optional partial-fill add-on (no approval needed — separate spray).
   const savePartial = (gal) => onLogSpray?.({ ...sheet, partialGallons: gal === '' || gal == null ? null : Number(gal) }, { quiet: true })
-  // Manual save of the current sheet state (weather, check-offs, tank, partial).
+  // Manual save of the current sheet state (weather, check-offs, partial).
   const saveNow = () =>
-    onLogSpray?.({ ...sheet, weather: wx, checkedProducts: checks, currentTank: curTank, partialGallons: partialGal === '' ? null : Number(partialGal) })
+    onLogSpray?.({ ...sheet, weather: wx, tankChecks, partialGallons: partialGal === '' ? null : Number(partialGal) })
 
   return (
     <div className="pt-6 pb-10 max-w-2xl mx-auto">
@@ -1321,14 +1332,28 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
               </div>
             </div>
 
-            {(sheet.tanks || 1) > 1 && (
-              <div className="flex items-center gap-1.5 mb-2 flex-wrap rounded-xl px-2.5 py-2" style={{ backgroundColor: '#F0F6F2' }}>
-                <span className="font-body text-[10px] font-bold uppercase tracking-wide mr-1" style={{ color: FERN }}>Tank</span>
-                {Array.from({ length: sheet.tanks }, (_, i) => i + 1).map((n) => (
-                  <button key={n} onClick={() => changeTank(n)} className="w-7 h-7 rounded-full font-body text-xs font-bold transition" style={n === curTank ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid #E2E8F0' }}>{n}</button>
-                ))}
-                <button onClick={nextTank} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full ml-1" style={{ color: FERN, border: '1px solid #CFE3D6' }}>Next tank →</button>
-                <span className="font-body text-[10px] text-slate-400 ml-auto">tank {curTank} of {sheet.tanks}</span>
+            {tankCount > 1 && (
+              <div className="mb-2 rounded-xl px-2.5 py-2" style={{ backgroundColor: '#F0F6F2' }}>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-body text-[10px] font-bold uppercase tracking-wide mr-1" style={{ color: FERN }}>Tanks</span>
+                  {Array.from({ length: tankCount }, (_, i) => i + 1).map((n) => {
+                    const done = tankIsComplete(tankChecks, n)
+                    const some = (tankChecks[String(n)] || []).length > 0 && !done
+                    const isCur = n === curTank
+                    const bg = done ? FERN : some ? GOLD : 'white'
+                    const fg = done || some ? 'white' : '#64748B'
+                    return (
+                      <button key={n} onClick={() => changeTank(n)} className="w-8 h-8 rounded-full font-body text-xs font-bold transition flex items-center justify-center" style={{ backgroundColor: bg, color: fg, border: isCur ? `2px solid ${FOREST}` : '1px solid #E2E8F0' }}>
+                        {done ? <Check size={14} /> : n}
+                      </button>
+                    )
+                  })}
+                  <button onClick={goNextTank} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full ml-1" style={{ color: FERN, border: '1px solid #CFE3D6' }}>Next →</button>
+                  <span className="font-body text-[10px] font-semibold text-slate-500 ml-auto">{completedCount}/{tankCount} tanks done</span>
+                </div>
+                <p className="font-body text-[11px] mt-1.5 text-slate-500">
+                  Filling <b style={{ color: FOREST }}>Tank {curTank}</b>{tankIsComplete(tankChecks, curTank) ? ' — complete ✓' : ''}. Tap a tank to switch; other iPads can fill different tanks at the same time.
+                </p>
               </div>
             )}
 
@@ -1345,7 +1370,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                 const outOfRange = overLimit || underLimit
                 const stock = prodInfo?.stock ?? null
                 const insufficient = stock !== null && total !== null && stock < total
-                const checked = checks.includes(p.id)
+                const checked = curChecks.includes(p.id)
                 return (
                   <div key={p.id} className="py-2.5 flex items-center gap-2.5 font-body">
                     <button onClick={() => toggleCheck(p.id)} className="shrink-0" aria-label="Confirm in tank">
