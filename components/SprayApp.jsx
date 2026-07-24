@@ -60,6 +60,15 @@ function isPartialFill(fillGallons, area) {
   return gt > 0 && fg > 0 && fg !== gt
 }
 
+// Which grasses on this area a product warns against — the overlap of the
+// product's "avoid" list and the grasses present on the area. Empty = safe.
+function grassConflicts(prodInfo, area) {
+  const areaGrasses = area?.grasses || []
+  const avoid = prodInfo?.avoidGrasses || []
+  if (!areaGrasses.length || !avoid.length) return []
+  return avoid.filter((g) => areaGrasses.includes(g))
+}
+
 // ── ERROR BOUNDARY ────────────────────────────────────────────────────────
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -160,6 +169,7 @@ function SprayOpsModule({ user }) {
   const [sheetTypes, setSheetTypes] = useState([])
   const [courseInfo, setCourseInfo] = useState({ clubName: 'Congressional Country Club', deptName: 'Golf Maintenance' })
   const [location, setLocation] = useState({ address: '', lat: null, lng: null, timezone: 'America/New_York' })
+  const [grassTypes, setGrassTypes] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
@@ -194,6 +204,7 @@ function SprayOpsModule({ user }) {
       setSheetTypes(settings.sheetTypes)
       setCourseInfo(settings.courseInfo)
       setLocation(settings.location)
+      setGrassTypes(settings.grassTypes || [])
       // Load the newest program's applications so the dashboard can surface
       // what's planned for the days ahead.
       if (progs.length > 0) {
@@ -217,6 +228,7 @@ function SprayOpsModule({ user }) {
     if (patch.sheetTypes) setSheetTypes(patch.sheetTypes)
     if (patch.courseInfo) setCourseInfo(patch.courseInfo)
     if (patch.location) setLocation(patch.location)
+    if (patch.grassTypes) setGrassTypes(patch.grassTypes)
     try {
       await db.saveSettings(patch)
     } catch (e) {
@@ -489,7 +501,7 @@ function SprayOpsModule({ user }) {
           />
         )}
         {route === 'chemicals' && manage && (
-          <ChemicalLibrary products={products} onSaveProduct={saveProduct} onDeleteProduct={removeProduct} />
+          <ChemicalLibrary products={products} grassTypes={grassTypes} onSaveProduct={saveProduct} onDeleteProduct={removeProduct} />
         )}
         {route === 'inventory' && (
           <Inventory products={products} deliveries={deliveries} onAddDelivery={addDelivery} />
@@ -500,7 +512,7 @@ function SprayOpsModule({ user }) {
         {route === 'settings' && manage && (
           <SettingsPage
             areas={areas} operators={operators} directors={directors} targets={targets}
-            sheetTypes={sheetTypes} courseInfo={courseInfo} location={location}
+            sheetTypes={sheetTypes} courseInfo={courseInfo} location={location} grassTypes={grassTypes}
             onSave={async (patch) => { await saveSettings(patch); showToast('Settings updated') }}
           />
         )}
@@ -961,6 +973,11 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                       {underLimit && (
                         <p className="font-body text-[11px] font-semibold text-red-600 mb-2 flex items-center gap-1">⚠ Under label minimum — minimum is {labelMin} {p.basis}</p>
                       )}
+                      {grassConflicts(prodInfo, area).length > 0 && (
+                        <p className="font-body text-[11px] font-semibold text-red-600 mb-2 rounded-lg px-2 py-1.5" style={{ backgroundColor: '#FEF2F2' }}>
+                          ⚠ Grass safety: {p.product} can damage {grassConflicts(prodInfo, area).join(', ')} — this area ({(area.grasses || []).join(', ')}) has it. Check the label.
+                        </p>
+                      )}
                       {!outOfRange && (labelMin || labelMax) && (
                         <p className="font-body text-[10px] text-slate-400 mb-2">Label range: {labelMin ?? '—'}–{labelMax ?? '—'} {p.basis}</p>
                       )}
@@ -1387,6 +1404,9 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                       <p className="text-[11px] text-slate-400">
                         {p.rate} {p.basis}{insufficient ? ` · only ${stock} ${unit} in stock` : ''}
                       </p>
+                      {grassConflicts(prodInfo, area).length > 0 && (
+                        <p className="text-[10px] font-semibold text-red-600 mt-0.5">⚠ May damage {grassConflicts(prodInfo, area).join(', ')}</p>
+                      )}
                     </div>
                     <div className="w-16 text-center rounded-lg py-1.5" style={{ backgroundColor: '#FFF6DD' }}>
                       <p className="text-sm font-bold text-slate-900 leading-none">{amt ?? '—'}</p>
@@ -1653,7 +1673,7 @@ function LiquidFertCalculator({ draft, setDraft }) {
 }
 
 // ── CHEMICAL LIBRARY ──────────────────────────────────────────────────────
-function ChemicalLibrary({ products, onSaveProduct, onDeleteProduct }) {
+function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeleteProduct }) {
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
   const [filter, setFilter] = useState('All')
@@ -1664,7 +1684,7 @@ function ChemicalLibrary({ products, onSaveProduct, onDeleteProduct }) {
   }
   const startNew = () => {
     setEditing('new')
-    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '' })
+    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [] })
   }
   const cancelEdit = () => { setEditing(null); setDraft(null) }
 
@@ -1850,6 +1870,22 @@ function ChemicalLibrary({ products, onSaveProduct, onDeleteProduct }) {
                 </div>
               </div>
             </div>
+            <div className="rounded-xl p-3" style={{ backgroundColor: '#FEF2F2' }}>
+              <p className="font-body text-[11px] font-bold text-red-500 uppercase tracking-wide mb-1">Grass Safety — Avoid On</p>
+              <p className="font-body text-[10px] text-slate-500 mb-2">Select grasses this product can damage (from the label). A spray sheet warns if the area has one of these.</p>
+              <div className="flex flex-wrap gap-2">
+                {grassTypes.map((g) => {
+                  const on = (draft.avoidGrasses || []).includes(g)
+                  return (
+                    <button key={g} type="button" onClick={() => setDraft({ ...draft, avoidGrasses: on ? (draft.avoidGrasses || []).filter((x) => x !== g) : [...(draft.avoidGrasses || []), g] })} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: '#DC2626', color: 'white', borderColor: '#DC2626' } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>
+                      {g}
+                    </button>
+                  )
+                })}
+                {grassTypes.length === 0 && <p className="font-body text-xs text-slate-400">Add grass types in Settings → Lists first.</p>}
+              </div>
+            </div>
+
             <div className="flex gap-2 pt-1">
               <button onClick={cancelEdit} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
               <button onClick={saveDraft} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: FOREST }}>Save Product</button>
@@ -2174,7 +2210,7 @@ function NPKMini({ label, value, color }) {
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────
-function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, onSave }) {
+function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, onSave }) {
   const [section, setSection] = useState('course')
 
   return (
@@ -2192,8 +2228,8 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} onSave={onSave} />}
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
       {section === 'people' && <PeopleSettings operators={operators} directors={directors} onSave={onSave} />}
-      {section === 'areas' && <AreasSettings areas={areas} onSave={onSave} />}
-      {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} onSave={onSave} />}
+      {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassTypes} onSave={onSave} />}
+      {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} onSave={onSave} />}
     </div>
   )
 }
@@ -2315,23 +2351,24 @@ function PeopleSettings({ operators, directors, onSave }) {
   )
 }
 
-function ListsSettings({ targets, sheetTypes, onSave }) {
+function ListsSettings({ targets, sheetTypes, grassTypes, onSave }) {
   return (
     <div className="space-y-4">
       <NameListEditor title="Spray Targets" items={targets} accent="#7C3AED" onSave={(list) => onSave({ targets: list })} />
       <NameListEditor title="Sheet Types" items={sheetTypes} accent={FOREST} onSave={(list) => onSave({ sheetTypes: list })} />
+      <NameListEditor title="Grass Types" items={grassTypes || []} accent="#2E7D32" onSave={(list) => onSave({ grassTypes: list })} />
     </div>
   )
 }
 
-function AreasSettings({ areas, onSave }) {
+function AreasSettings({ areas, grassTypes = [], onSave }) {
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
 
-  const startEdit = (name) => { setEditing(name); setDraft({ name, ...areas[name] }) }
+  const startEdit = (name) => { setEditing(name); setDraft({ name, grasses: [], ...areas[name] }) }
   const startNew = () => {
     setEditing('__new__')
-    setDraft({ name: '', gear: '', psi: '', tanks: 1, galTank: 0, sprayRate: 0, nozzle: '', sqft: 0 })
+    setDraft({ name: '', gear: '', psi: '', tanks: 1, galTank: 0, sprayRate: 0, nozzle: '', sqft: 0, grasses: [] })
   }
   const cancel = () => { setEditing(null); setDraft(null) }
 
@@ -2343,6 +2380,7 @@ function AreasSettings({ areas, onSave }) {
       gear: draft.gear, psi: draft.psi,
       tanks: Number(draft.tanks) || 1, galTank: Number(draft.galTank) || 0,
       sprayRate: Number(draft.sprayRate) || 0, nozzle: draft.nozzle, sqft: Number(draft.sqft) || 0,
+      grasses: draft.grasses || [],
     }
     onSave({ areas: next })
     cancel()
@@ -2391,6 +2429,20 @@ function AreasSettings({ areas, onSave }) {
             <div>
               <FieldLabel>Area (sq ft)</FieldLabel>
               <input type="number" value={draft.sqft} onChange={(e) => setDraft({ ...draft, sqft: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="300000" />
+            </div>
+            <div>
+              <FieldLabel>Grasses on this area</FieldLabel>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {grassTypes.map((g) => {
+                  const on = (draft.grasses || []).includes(g)
+                  return (
+                    <button key={g} type="button" onClick={() => setDraft({ ...draft, grasses: on ? (draft.grasses || []).filter((x) => x !== g) : [...(draft.grasses || []), g] })} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>
+                      {g}
+                    </button>
+                  )
+                })}
+                {grassTypes.length === 0 && <p className="font-body text-xs text-slate-400">Add grass types in the Lists tab first.</p>}
+              </div>
             </div>
             <div className="flex gap-2 pt-1">
               <button onClick={cancel} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
