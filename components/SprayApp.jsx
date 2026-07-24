@@ -464,15 +464,23 @@ function SprayOpsModule({ user }) {
         )}
         {route === 'view' && activeSheet && (
           <SheetViewer
+            key={activeSheet.id}
             sheet={activeSheet} products={products} areas={areas} directors={directors} operators={operators}
             location={location} courseInfo={courseInfo}
             manage={manage} approve={canApprove(user.role)}
             onBack={() => setRoute(manage ? 'dashboard' : 'tospray')}
             onEdit={() => setRoute('edit')}
             onApprove={approveSheet}
-            onLogSpray={async (updated) => {
+            onLogSpray={async (updated, opts = {}) => {
               const saved = await saveSheet(updated)
-              if (saved) { setActiveSheet(saved); showToast(updated.completed ? 'Filed in Records' : 'Spray details saved') }
+              if (saved) {
+                setActiveSheet(saved)
+                if (!opts.quiet) showToast(updated.completed ? 'Filed in Records' : 'Spray details saved')
+              }
+            }}
+            onRemoteSheet={(fresh) => {
+              setActiveSheet((prev) => (prev && prev.id === fresh.id ? fresh : prev))
+              setSheets((prev) => prev.map((s) => (s.id === fresh.id ? fresh : s)))
             }}
           />
         )}
@@ -1177,14 +1185,48 @@ const thStyle = { border: '1px solid #16291F', padding: '6px 8px', textAlign: 'l
 const tdRow = { border: '1px solid #ccc', padding: '5px 8px' }
 
 // ── SHEET VIEWER ──────────────────────────────────────────────────────────
-function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, areas, directors, operators = [], location, courseInfo, manage, approve }) {
+function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], location, courseInfo, manage, approve }) {
   const [sig, setSig] = useState('')
   const [wx, setWx] = useState(sheet.weather || { temp: '', wind: '', humidity: '', windDir: '' })
   const [sprayedBy, setSprayedBy] = useState(sheet.completedBy || sheet.operator || '')
   const [partialGal, setPartialGal] = useState(sheet.partialGallons ?? '')
   const [showPartial, setShowPartial] = useState(sheet.partialGallons != null)
   const [wxLoading, setWxLoading] = useState(false)
+  const [checks, setChecks] = useState(sheet.checkedProducts || [])
+  const [curTank, setCurTank] = useState(sheet.currentTank || 1)
   const area = areas[sheet.area] || {}
+
+  // Live sync: mirror another iPad's check-offs / current tank as they happen.
+  useEffect(() => {
+    const unsub = db.subscribeSheet(sheet.id, (fresh) => {
+      setChecks(fresh.checkedProducts || [])
+      setCurTank(fresh.currentTank || 1)
+      if (fresh.weather) setWx(fresh.weather)
+      onRemoteSheet?.(fresh)
+    })
+    return unsub
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet.id])
+
+  // Persist a check-off / tank change (broadcasts to the other iPads). No
+  // approval needed — this is field state on an already-approved sheet.
+  const pushLive = (nextChecks, nextTank) =>
+    onLogSpray?.({ ...sheet, checkedProducts: nextChecks, currentTank: nextTank, weather: wx, partialGallons: partialGal === '' ? null : Number(partialGal) }, { quiet: true })
+  const toggleCheck = (pid) => {
+    const next = checks.includes(pid) ? checks.filter((x) => x !== pid) : [...checks, pid]
+    setChecks(next)
+    pushLive(next, curTank)
+  }
+  const changeTank = (n) => {
+    setCurTank(n)
+    pushLive(checks, n)
+  }
+  const nextTank = () => {
+    const n = Math.min(curTank + 1, sheet.tanks || 1)
+    setChecks([]) // fresh checklist for the new tank
+    setCurTank(n)
+    pushLive([], n)
+  }
   const sheetTargets = sheet.targets || (sheet.target ? [sheet.target] : [])
   const hasLocation = location && location.lat != null && location.lng != null
 
@@ -1207,7 +1249,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, a
     })
   const reopen = () => onLogSpray?.({ ...sheet, completed: false })
   // Save the optional partial-fill add-on (no approval needed — separate spray).
-  const savePartial = (gal) => onLogSpray?.({ ...sheet, partialGallons: gal === '' || gal == null ? null : Number(gal) })
+  const savePartial = (gal) => onLogSpray?.({ ...sheet, partialGallons: gal === '' || gal == null ? null : Number(gal) }, { quiet: true })
 
   return (
     <div className="pt-6 pb-10 max-w-2xl mx-auto">
@@ -1255,15 +1297,33 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, a
             </Card>
           )}
 
-          {/* Products — amount per tank, with the total off to the side (your sheet's layout) */}
+          {/* Products — amount per tank, with the total off to the side (your sheet's layout).
+              Tick each product as it goes in the tank; syncs live across iPads. */}
           <Card>
             <div className="flex items-center justify-between mb-1">
-              <FieldLabel noMargin>Products</FieldLabel>
+              <div className="flex items-center gap-2">
+                <FieldLabel noMargin>Products</FieldLabel>
+                <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: '#E8F3EC', color: FERN }}>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: FERN }} /> LIVE
+                </span>
+              </div>
               <div className="flex gap-3 pr-1">
                 <span className="w-16 text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide">Amt/Tank</span>
                 <span className="w-16 text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide">Total</span>
               </div>
             </div>
+
+            {(sheet.tanks || 1) > 1 && (
+              <div className="flex items-center gap-1.5 mb-2 flex-wrap rounded-xl px-2.5 py-2" style={{ backgroundColor: '#F0F6F2' }}>
+                <span className="font-body text-[10px] font-bold uppercase tracking-wide mr-1" style={{ color: FERN }}>Tank</span>
+                {Array.from({ length: sheet.tanks }, (_, i) => i + 1).map((n) => (
+                  <button key={n} onClick={() => changeTank(n)} className="w-7 h-7 rounded-full font-body text-xs font-bold transition" style={n === curTank ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid #E2E8F0' }}>{n}</button>
+                ))}
+                <button onClick={nextTank} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full ml-1" style={{ color: FERN, border: '1px solid #CFE3D6' }}>Next tank →</button>
+                <span className="font-body text-[10px] text-slate-400 ml-auto">tank {curTank} of {sheet.tanks}</span>
+              </div>
+            )}
+
             <div className="divide-y divide-slate-100">
               {sheet.products.filter((p) => p.product).map((p) => {
                 const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
@@ -1277,9 +1337,15 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, products, a
                 const outOfRange = overLimit || underLimit
                 const stock = prodInfo?.stock ?? null
                 const insufficient = stock !== null && total !== null && stock < total
+                const checked = checks.includes(p.id)
                 return (
-                  <div key={p.id} className="py-2.5 flex items-center gap-3 font-body">
-                    <div className="min-w-0 flex-1">
+                  <div key={p.id} className="py-2.5 flex items-center gap-2.5 font-body">
+                    <button onClick={() => toggleCheck(p.id)} className="shrink-0" aria-label="Confirm in tank">
+                      <span className="w-6 h-6 rounded-md border flex items-center justify-center transition" style={checked ? { backgroundColor: FERN, borderColor: FERN } : { borderColor: '#CBD5E1', backgroundColor: 'white' }}>
+                        {checked && <Check size={14} className="text-white" />}
+                      </span>
+                    </button>
+                    <div className="min-w-0 flex-1" style={{ opacity: checked ? 0.55 : 1 }}>
                       <p className="text-sm font-semibold text-slate-800 flex items-center gap-1.5 flex-wrap">
                         {p.product}
                         {overLimit && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">OVER</span>}
