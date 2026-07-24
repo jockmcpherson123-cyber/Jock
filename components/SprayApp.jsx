@@ -472,10 +472,14 @@ function SprayOpsModule({ user }) {
             onEdit={() => setRoute('edit')}
             onApprove={approveSheet}
             onLogSpray={async (updated, opts = {}) => {
-              const saved = await saveSheet(updated)
-              if (saved) {
+              try {
+                const saved = await db.updateSheet(updated)
                 setActiveSheet(saved)
+                setSheets((prev) => prev.map((s) => (s.id === saved.id ? saved : s)))
                 if (!opts.quiet) showToast(updated.completed ? 'Filed in Records' : 'Spray details saved')
+              } catch (e) {
+                console.error(e)
+                showToast('Could not save — check your connection')
               }
             }}
             onRemoteSheet={(fresh) => {
@@ -1250,6 +1254,9 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
   const reopen = () => onLogSpray?.({ ...sheet, completed: false })
   // Save the optional partial-fill add-on (no approval needed — separate spray).
   const savePartial = (gal) => onLogSpray?.({ ...sheet, partialGallons: gal === '' || gal == null ? null : Number(gal) }, { quiet: true })
+  // Manual save of the current sheet state (weather, check-offs, tank, partial).
+  const saveNow = () =>
+    onLogSpray?.({ ...sheet, weather: wx, checkedProducts: checks, currentTank: curTank, partialGallons: partialGal === '' ? null : Number(partialGal) })
 
   return (
     <div className="pt-6 pb-10 max-w-2xl mx-auto">
@@ -1257,6 +1264,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
         <button onClick={onBack} className="font-body text-sm font-medium text-slate-400">← Back</button>
         <div className="flex items-center gap-3">
           <StatusPill status={sheet.status} />
+          <button onClick={saveNow} className="font-body text-sm font-medium" style={{ color: FERN }}>Save</button>
           <button onClick={() => window.print()} className="font-body text-sm font-medium" style={{ color: FOREST }}>Print</button>
           {manage && sheet.status === 'pending' && (
             <button onClick={onEdit} className="font-body text-sm font-medium" style={{ color: FERN }}>Edit</button>
