@@ -1868,7 +1868,10 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               <FieldLabel>Product Name</FieldLabel>
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} disabled={editing !== 'new'} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body disabled:bg-slate-50 disabled:text-slate-400" />
             </div>
-            <AiLabelReader draft={draft} setDraft={setDraft} grassTypes={grassTypes} />
+            {/* AI label reader is switched off (costs pennies per scan). To turn
+                it back on, uncomment the line below — no other setup needed once
+                ANTHROPIC_API_KEY is in Vercel.
+            <AiLabelReader draft={draft} setDraft={setDraft} grassTypes={grassTypes} /> */}
             <div className="grid grid-cols-2 gap-3">
               <div><FieldLabel>Type</FieldLabel><Select value={draft.type} onChange={(v) => setDraft({ ...draft, type: v })} options={PRODUCT_TYPES} /></div>
               <div><FieldLabel>Default Unit</FieldLabel><Select value={draft.unit} onChange={(v) => setDraft({ ...draft, unit: v })} options={['oz', 'fl oz', 'lbs', 'gal', 'ml']} /></div>
