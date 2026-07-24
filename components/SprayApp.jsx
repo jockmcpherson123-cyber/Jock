@@ -14,7 +14,7 @@ import React, { useState, useEffect } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin,
+  Package, Truck, MapPin, Sparkles,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, downloadCSV,
@@ -1672,6 +1672,136 @@ function LiquidFertCalculator({ draft, setDraft }) {
   )
 }
 
+// ── AI LABEL READER ───────────────────────────────────────────────────────
+// Reads a pesticide/fertilizer label — from uploaded photos or just the product
+// name — and fills in the grass-safety fields (plus signal word, active
+// ingredient, REI). The user always reviews before it touches the form.
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const s = String(reader.result || '')
+      const comma = s.indexOf(',')
+      resolve({ media_type: file.type || 'image/jpeg', data: comma >= 0 ? s.slice(comma + 1) : s })
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [result, setResult] = useState(null)
+  const [imgCount, setImgCount] = useState(0)
+  const [images, setImages] = useState([])
+
+  const onPick = async (e) => {
+    const files = Array.from(e.target.files || []).slice(0, 4)
+    setError('')
+    try {
+      const encoded = await Promise.all(files.map(fileToBase64))
+      setImages(encoded)
+      setImgCount(encoded.length)
+    } catch {
+      setError('Could not read those photos. Try again.')
+    }
+  }
+
+  const analyze = async () => {
+    setError('')
+    setResult(null)
+    if (!draft.name?.trim() && images.length === 0) {
+      setError('Type the product name or add a label photo first.')
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await fetch('/api/analyze-label', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: draft.name || '', grassTypes, images }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setError(json.error || 'The AI could not read this. Enter details by hand.')
+      } else if (!json.result?.found) {
+        setError('The AI could not confidently identify this product. Add a clearer photo, or fill it in by hand.')
+        setResult(json.result || null)
+      } else {
+        setResult(json.result)
+      }
+    } catch {
+      setError('Could not reach the AI service. Check your connection and try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const apply = () => {
+    if (!result) return
+    setDraft((d) => ({
+      ...d,
+      avoidGrasses: Array.isArray(result.avoidGrasses) ? result.avoidGrasses : (d.avoidGrasses || []),
+      activeIngredient: result.activeIngredient || d.activeIngredient || '',
+      signalWord: result.signalWord || d.signalWord || '',
+      rei: result.rei || d.rei || '',
+      phi: result.phi || d.phi || '',
+      safetyNote: result.safetyNote || d.safetyNote || '',
+    }))
+    setResult(null)
+    setImages([])
+    setImgCount(0)
+  }
+
+  return (
+    <div className="rounded-xl p-3 border" style={{ backgroundColor: '#F5F3FF', borderColor: '#DDD6FE' }}>
+      <div className="flex items-center gap-1.5 mb-1">
+        <Sparkles size={14} style={{ color: '#7C3AED' }} />
+        <p className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: '#7C3AED' }}>Read the label with AI</p>
+      </div>
+      <p className="font-body text-[10px] text-slate-500 mb-2">
+        Snap a photo of the product label (or just use the name above) and the AI fills in grass-safety, signal word and re-entry time. <b>Always double-check against the physical label before you spray.</b>
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <label className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border cursor-pointer flex items-center gap-1.5" style={{ backgroundColor: 'white', color: '#7C3AED', borderColor: '#DDD6FE' }}>
+          <CloudUpload size={13} /> {imgCount > 0 ? `${imgCount} photo${imgCount > 1 ? 's' : ''} ready` : 'Add label photo'}
+          <input type="file" accept="image/*" multiple capture="environment" onChange={onPick} className="hidden" />
+        </label>
+        <button type="button" onClick={analyze} disabled={busy} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full text-white flex items-center gap-1.5 disabled:opacity-60" style={{ backgroundColor: '#7C3AED' }}>
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+          {busy ? 'Reading…' : (imgCount > 0 ? 'Read the photo' : 'Look up by name')}
+        </button>
+      </div>
+
+      {error && <p className="font-body text-[11px] mt-2 font-semibold" style={{ color: '#DC2626' }}>{error}</p>}
+
+      {result && result.found && (
+        <div className="mt-3 bg-white rounded-xl p-3 border" style={{ borderColor: '#DDD6FE' }}>
+          <p className="font-body text-[11px] font-bold text-slate-700 mb-2">Here's what the AI read — review, then apply:</p>
+          <div className="space-y-1.5 font-body text-[11px] text-slate-600">
+            {result.activeIngredient ? <div><b>Active ingredient:</b> {result.activeIngredient}</div> : null}
+            {result.signalWord ? <div><b>Signal word:</b> {result.signalWord}</div> : null}
+            {result.rei ? <div><b>Re-entry (REI):</b> {result.rei}</div> : null}
+            <div>
+              <b>Avoid on:</b>{' '}
+              {Array.isArray(result.avoidGrasses) && result.avoidGrasses.length
+                ? result.avoidGrasses.join(', ')
+                : <span className="text-slate-400">no grass risk flagged</span>}
+            </div>
+            {result.safetyNote ? <div className="text-amber-700"><b>Note:</b> {result.safetyNote}</div> : null}
+            <div className="text-[10px] text-slate-400">AI confidence: {result.confidence || 'unknown'}</div>
+          </div>
+          <div className="flex gap-2 mt-3">
+            <button type="button" onClick={() => setResult(null)} className="flex-1 py-2 rounded-lg text-[11px] font-semibold font-body text-slate-500 border border-slate-200">Discard</button>
+            <button type="button" onClick={apply} className="flex-1 py-2 rounded-lg text-[11px] font-bold font-body text-white" style={{ backgroundColor: '#7C3AED' }}>Apply to form</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── CHEMICAL LIBRARY ──────────────────────────────────────────────────────
 function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeleteProduct }) {
   const [editing, setEditing] = useState(null)
@@ -1738,6 +1868,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               <FieldLabel>Product Name</FieldLabel>
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} disabled={editing !== 'new'} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body disabled:bg-slate-50 disabled:text-slate-400" />
             </div>
+            <AiLabelReader draft={draft} setDraft={setDraft} grassTypes={grassTypes} />
             <div className="grid grid-cols-2 gap-3">
               <div><FieldLabel>Type</FieldLabel><Select value={draft.type} onChange={(v) => setDraft({ ...draft, type: v })} options={PRODUCT_TYPES} /></div>
               <div><FieldLabel>Default Unit</FieldLabel><Select value={draft.unit} onChange={(v) => setDraft({ ...draft, unit: v })} options={['oz', 'fl oz', 'lbs', 'gal', 'ml']} /></div>
@@ -1866,6 +1997,25 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                   <div className="relative">
                     <input type="number" step="any" value={draft.lowStockThreshold ?? ''} onChange={(e) => setDraft({ ...draft, lowStockThreshold: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 pr-12 text-sm font-body bg-white" placeholder="0 = no alert" />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 font-body text-xs font-semibold text-slate-400">{draft.unit || 'oz'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl p-3" style={{ backgroundColor: '#F8FAFC' }}>
+              <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: '#475569' }}>Label Facts</p>
+              <div className="space-y-3">
+                <div>
+                  <FieldLabel>Active Ingredient</FieldLabel>
+                  <input value={draft.activeIngredient ?? ''} onChange={(e) => setDraft({ ...draft, activeIngredient: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. Azoxystrobin" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <FieldLabel>Signal Word</FieldLabel>
+                    <Select value={draft.signalWord || ''} onChange={(v) => setDraft({ ...draft, signalWord: v })} options={['', 'Caution', 'Warning', 'Danger']} />
+                  </div>
+                  <div>
+                    <FieldLabel>Re-entry (REI)</FieldLabel>
+                    <input value={draft.rei ?? ''} onChange={(e) => setDraft({ ...draft, rei: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 12 hours" />
                   </div>
                 </div>
               </div>
