@@ -1895,8 +1895,8 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   }
   const downloadTemplate = async () => {
     const XLSX = await import('xlsx')
-    const headers = ['Name', 'Type', 'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A', 'Stock', 'Low Stock', 'N', 'P', 'K', 'Label link', 'SDS link', 'Avoid Grasses']
-    const example = ['Daconil Action', 'Fungicide', 1.8, 'oz / M', 'oz', 1.8, 3.6, '', '', 0, 0, '', '', '', 'https://example.com/label.pdf', 'https://example.com/sds.pdf', 'Bentgrass, Poa Annua']
+    const headers = ['Name', 'Type', 'Active Ingredient', 'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A', 'Stock', 'Low Stock', 'N', 'P', 'K', 'Label link', 'SDS link', 'Avoid Grasses']
+    const example = ['Daconil Action', 'Fungicide', 'Chlorothalonil + Acibenzolar-S-methyl', 1.8, 'oz / M', 'oz', 1.8, 3.6, '', '', 0, 0, '', '', '', 'https://example.com/label.pdf', 'https://example.com/sds.pdf', 'Bentgrass, Poa Annua']
     const ws = XLSX.utils.aoa_to_sheet([headers, example])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Chemical Library')
