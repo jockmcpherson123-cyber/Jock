@@ -10,7 +10,7 @@
 //    • It receives the current `user` (with role) from the server.
 // ════════════════════════════════════════════════════════════════════════
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
@@ -268,6 +268,13 @@ function SprayOpsModule({ user }) {
     }
   }
 
+  async function importProductsFromSheet(partials) {
+    const { added, updated } = await db.importProducts(partials)
+    await reloadProducts()
+    showToast(`Imported: ${added} new, ${updated} updated`)
+    return { added, updated }
+  }
+
   async function addDelivery(delivery) {
     try {
       await db.addDelivery(delivery)
@@ -501,7 +508,7 @@ function SprayOpsModule({ user }) {
           />
         )}
         {route === 'chemicals' && manage && (
-          <ChemicalLibrary products={products} grassTypes={grassTypes} onSaveProduct={saveProduct} onDeleteProduct={removeProduct} />
+          <ChemicalLibrary products={products} grassTypes={grassTypes} onSaveProduct={saveProduct} onDeleteProduct={removeProduct} onImport={importProductsFromSheet} />
         )}
         {route === 'inventory' && (
           <Inventory products={products} deliveries={deliveries} onAddDelivery={addDelivery} />
@@ -1864,10 +1871,48 @@ function DocumentsLibrary({ products, manage, onSaveProduct }) {
 }
 
 // ── CHEMICAL LIBRARY ──────────────────────────────────────────────────────
-function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeleteProduct }) {
+function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeleteProduct, onImport }) {
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
   const [filter, setFilter] = useState('All')
+  const [importPreview, setImportPreview] = useState(null) // { products, columns, count, error, fileName }
+  const [importing, setImporting] = useState(false)
+  const fileRef = useRef(null)
+
+  const pickFile = () => fileRef.current?.click()
+  const onFile = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-picking the same file
+    if (!file) return
+    try {
+      const { parseChemicalLibrary } = await import('@/lib/importXlsx')
+      const buf = await file.arrayBuffer()
+      const res = parseChemicalLibrary(buf)
+      setImportPreview({ ...res, fileName: file.name })
+    } catch (err) {
+      setImportPreview({ products: [], columns: [], count: 0, error: 'Could not read that file. Make sure it is a .xlsx or .xls spreadsheet.', fileName: file.name })
+    }
+  }
+  const downloadTemplate = async () => {
+    const XLSX = await import('xlsx')
+    const headers = ['Name', 'Type', 'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A', 'Stock', 'Low Stock', 'N', 'P', 'K', 'Label link', 'SDS link', 'Avoid Grasses']
+    const example = ['Daconil Action', 'Fungicide', 1.8, 'oz / M', 'oz', 1.8, 3.6, '', '', 0, 0, '', '', '', 'https://example.com/label.pdf', 'https://example.com/sds.pdf', 'Bentgrass, Poa Annua']
+    const ws = XLSX.utils.aoa_to_sheet([headers, example])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Chemical Library')
+    XLSX.writeFile(wb, 'chemical-library-template.xlsx')
+  }
+  const confirmImport = async () => {
+    if (!importPreview?.products?.length) return
+    setImporting(true)
+    try {
+      await onImport(importPreview.products)
+      setImportPreview(null)
+    } catch (err) {
+      setImportPreview((prev) => ({ ...prev, error: 'Could not save the import. Try again.' }))
+    }
+    setImporting(false)
+  }
 
   const startEdit = (p) => {
     setEditing(p.name)
@@ -1906,12 +1951,53 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
 
   return (
     <div className="pt-6 pb-10">
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center justify-between mb-1 gap-2">
         <SectionHeader title="Chemical Library" subtitle="Manage products, rates, and label maximums" noMargin />
-        <button onClick={startNew} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
-          <Plus size={14} /> Add Product
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={pickFile} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
+            <CloudUpload size={14} /> Import Excel
+          </button>
+          <button onClick={startNew} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
+            <Plus size={14} /> Add Product
+          </button>
+        </div>
       </div>
+      <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} className="hidden" />
+      <p className="font-body text-[11px] text-slate-400 mt-1.5">
+        First time importing? <button onClick={downloadTemplate} className="font-bold underline" style={{ color: FERN }}>Download a blank template</button> with the right columns, fill it in, then import it.
+      </p>
+
+      {importPreview && (
+        <div className="bg-white rounded-2xl border-2 p-4 mt-4 mb-2 shadow-sm" style={{ borderColor: GOLD }}>
+          <p className="font-display text-base font-semibold text-slate-900 mb-1">Import from “{importPreview.fileName}”</p>
+          {importPreview.error ? (
+            <p className="font-body text-sm text-red-600 mt-1">{importPreview.error}</p>
+          ) : (
+            <>
+              <p className="font-body text-sm text-slate-600">
+                Found <b>{importPreview.count}</b> product{importPreview.count !== 1 ? 's' : ''}. Columns recognized:
+              </p>
+              <div className="flex flex-wrap gap-1.5 my-2">
+                {importPreview.columns.map((c) => (
+                  <span key={c} className="font-body text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{c}</span>
+                ))}
+              </div>
+              <p className="font-body text-[11px] text-slate-400">
+                Matched to existing products by name — those get updated, new names get added. Any column you left out of the sheet keeps its current value. Nothing is deleted.
+              </p>
+            </>
+          )}
+          <div className="flex gap-2 pt-3">
+            <button onClick={() => setImportPreview(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+            {!importPreview.error && importPreview.count > 0 && (
+              <button onClick={confirmImport} disabled={importing} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-60 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
+                {importing ? <Loader2 size={15} className="animate-spin" /> : null}
+                {importing ? 'Importing…' : `Import ${importPreview.count} product${importPreview.count !== 1 ? 's' : ''}`}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-2 mt-4 mb-4 overflow-x-auto pb-1">
         {['All', ...PRODUCT_TYPES].map((t) => (
