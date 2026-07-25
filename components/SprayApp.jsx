@@ -19,7 +19,7 @@ import {
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, downloadCSV,
 } from '@/lib/calc'
-import { PRODUCT_TYPES } from '@/lib/defaults'
+import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { fetchCurrent } from '@/lib/weather'
 import { logout } from '@/app/actions/auth'
@@ -1874,7 +1874,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
             <AiLabelReader draft={draft} setDraft={setDraft} grassTypes={grassTypes} /> */}
             <div className="grid grid-cols-2 gap-3">
               <div><FieldLabel>Type</FieldLabel><Select value={draft.type} onChange={(v) => setDraft({ ...draft, type: v })} options={PRODUCT_TYPES} /></div>
-              <div><FieldLabel>Default Unit</FieldLabel><Select value={draft.unit} onChange={(v) => setDraft({ ...draft, unit: v })} options={['oz', 'fl oz', 'lbs', 'gal', 'ml']} /></div>
+              <div><FieldLabel>Default Unit</FieldLabel><Select value={draft.unit} onChange={(v) => setDraft({ ...draft, unit: v })} options={UNITS} /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -2142,7 +2142,7 @@ function Inventory({ products, deliveries, onAddDelivery }) {
               </div>
               <div>
                 <FieldLabel>Unit</FieldLabel>
-                <Select value={draft.unit} onChange={(v) => setDraft({ ...draft, unit: v })} options={['oz', 'fl oz', 'lbs', 'gal', 'ml']} />
+                <Select value={draft.unit} onChange={(v) => setDraft({ ...draft, unit: v })} options={UNITS} />
               </div>
             </div>
             {draft.product && draft.qty && (() => {
