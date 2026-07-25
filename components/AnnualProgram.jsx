@@ -101,12 +101,12 @@ function groupByEvent(list) {
 let _rowSeq = 0
 const rowKey = () => `r${Date.now()}_${_rowSeq++}`
 
-const money = (n) => (n == null ? '—' : `$${Math.round(n).toLocaleString()}`)
+const round1 = (n) => Math.round(n * 10) / 10
 
-// Early Order: add up the whole program into how much of each product to buy.
-// For each planned application, total product (oz) = rate × the area's size.
-// Then oz → cases → cost using the product's case size + cost. Also rolls up
-// spend by product type and by area (the way the spreadsheet's Early Order tab does).
+// Early Order: add up the whole program into how much of each product to buy,
+// like the spreadsheet's Totals tab. For each planned application, total product
+// (oz) = rate × the area's size. Then oz → cases using the product's case size,
+// with a breakdown of ounces by area. No cost — quantities and cases only.
 function computeEarlyOrder(apps, products, areas) {
   const prodByName = {}
   products.forEach((p) => { prodByName[p.name] = p })
@@ -119,6 +119,7 @@ function computeEarlyOrder(apps, products, areas) {
   }
 
   const perProduct = {}
+  const areaSet = new Set()
   let missingSqft = false
   apps.forEach((a) => {
     const sqft = sqftFor(a.area)
@@ -127,6 +128,7 @@ function computeEarlyOrder(apps, products, areas) {
     if (a.rateOzM != null && a.rateOzM !== '') oz = Number(a.rateOzM) * (sqft / 1000)
     else if (a.rateOzA != null && a.rateOzA !== '') oz = Number(a.rateOzA) * (sqft / 43560)
     if (!oz || !isFinite(oz)) return
+    areaSet.add(a.area)
     if (!perProduct[a.product]) perProduct[a.product] = { name: a.product, type: prodByName[a.product]?.type || a.type || 'Other', totalOz: 0, byArea: {} }
     perProduct[a.product].totalOz += oz
     perProduct[a.product].byArea[a.area] = (perProduct[a.product].byArea[a.area] || 0) + oz
@@ -135,25 +137,18 @@ function computeEarlyOrder(apps, products, areas) {
   const rows = Object.values(perProduct).map((r) => {
     const p = prodByName[r.name] || {}
     const ozPerCase = Number(p.ozPerCase) || 0
-    const costPerCase = Number(p.costPerCase) || 0
-    const cases = ozPerCase ? r.totalOz / ozPerCase : null
-    const cost = (cases != null && costPerCase) ? cases * costPerCase : null
-    return { ...r, ozPerCase, costPerCase, caseSize: p.caseSize || '', cases, cost, missingCost: !ozPerCase || !costPerCase }
-  }).sort((a, b) => (b.cost || 0) - (a.cost || 0) || b.totalOz - a.totalOz)
+    const unit = p.unit || 'oz'
+    const ozPerUnit = Number(p.ozPerUnit) || 0
+    const casesExact = ozPerCase ? r.totalOz / ozPerCase : null
+    const casesToOrder = casesExact != null ? Math.ceil(casesExact) : null
+    const totalInUnits = ozPerUnit ? r.totalOz / ozPerUnit : null
+    return { ...r, ozPerCase, unit, caseSize: p.caseSize || '', casesExact, casesToOrder, totalInUnits, missingCase: !ozPerCase }
+  }).sort((a, b) => b.totalOz - a.totalOz)
 
-  const byType = {}
-  const byArea = {}
-  let grandCost = 0
-  rows.forEach((r) => {
-    if (r.cost) { byType[r.type] = (byType[r.type] || 0) + r.cost; grandCost += r.cost }
-    if (r.cost && r.totalOz) {
-      Object.entries(r.byArea).forEach(([area, oz]) => { byArea[area] = (byArea[area] || 0) + r.cost * (oz / r.totalOz) })
-    }
-  })
-  const typeRows = Object.entries(byType).map(([type, cost]) => ({ type, cost })).sort((a, b) => b.cost - a.cost)
-  const areaRows = Object.entries(byArea).map(([area, cost]) => ({ area, cost })).sort((a, b) => b.cost - a.cost)
-  const missingCostCount = rows.filter((r) => r.missingCost).length
-  return { rows, typeRows, areaRows, grandCost, missingCostCount, missingSqft }
+  const areaList = [...areaSet].sort()
+  const casesTotal = rows.reduce((s, r) => s + (r.casesToOrder || 0), 0)
+  const missingCaseCount = rows.filter((r) => r.missingCase).length
+  return { rows, areaList, casesTotal, missingCaseCount, missingSqft }
 }
 
 // A distinct color per product type for quick visual scanning.
@@ -456,8 +451,13 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
   // Early-order totals for the whole season (respects the area filter).
   const earlyOrder = computeEarlyOrder(visibleApps, products, areas)
   const exportEarlyOrder = () => {
-    const rows = [['Product', 'Type', 'Total oz', 'Case size', 'Oz/case', 'Cases needed', 'Cost/case', 'Total cost']]
-    earlyOrder.rows.forEach((r) => rows.push([r.name, r.type, Math.round(r.totalOz), r.caseSize, r.ozPerCase || '', r.cases != null ? Math.ceil(r.cases) : '', r.costPerCase || '', r.cost != null ? Math.round(r.cost) : '']))
+    const areaCols = earlyOrder.areaList
+    const rows = [['Product', 'Type', 'Total oz', 'Case size', 'Oz/case', 'Cases needed', 'Cases to order', ...areaCols]]
+    earlyOrder.rows.forEach((r) => rows.push([
+      r.name, r.type, Math.round(r.totalOz), r.caseSize, r.ozPerCase || '',
+      r.casesExact != null ? round1(r.casesExact) : '', r.casesToOrder != null ? r.casesToOrder : '',
+      ...areaCols.map((a) => Math.round(r.byArea[a] || 0)),
+    ]))
     downloadCSV(rows, `Early_Order_${activeProgram?.year || ''}.csv`)
   }
 
@@ -859,75 +859,73 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
               })}
             </div>
           ) : (
-            /* Early Order — how much to buy for the season */
+            /* Early Order — how much to buy for the season (quantities + cases) */
             <div>
-              <div className="rounded-2xl p-4 mb-3 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Estimated season spend</p>
-                    <p className="font-display text-3xl font-bold mt-0.5">{money(earlyOrder.grandCost)}</p>
-                  </div>
-                  <button onClick={exportEarlyOrder} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
-                    <Package size={14} /> Export
-                  </button>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <div className="bg-white rounded-xl border border-black/5 px-3 py-2.5 shadow-sm">
+                  <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Products</p>
+                  <p className="font-display font-bold text-slate-900" style={{ fontSize: 20, marginTop: 2 }}>{earlyOrder.rows.length}</p>
                 </div>
+                <div className="bg-white rounded-xl border border-black/5 px-3 py-2.5 shadow-sm">
+                  <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Cases to order</p>
+                  <p className="font-display font-bold text-slate-900" style={{ fontSize: 20, marginTop: 2 }}>{earlyOrder.casesTotal}</p>
+                </div>
+                <button onClick={exportEarlyOrder} className="rounded-xl text-white shadow-sm flex flex-col items-center justify-center gap-1" style={{ backgroundColor: FOREST }}>
+                  <Package size={16} />
+                  <span className="font-body text-[11px] font-bold">Export CSV</span>
+                </button>
               </div>
 
-              {(earlyOrder.missingCostCount > 0 || earlyOrder.missingSqft) && (
+              {(earlyOrder.missingCaseCount > 0 || earlyOrder.missingSqft) && (
                 <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 p-3 mb-3">
                   <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
                   <p className="font-body text-[11px] text-amber-700">
-                    {earlyOrder.missingCostCount > 0 && <>{earlyOrder.missingCostCount} product{earlyOrder.missingCostCount !== 1 ? 's' : ''} missing case size or cost — add those in the Chemical Library (Ordering section) to include them in the dollar totals. </>}
-                    {earlyOrder.missingSqft && <>Some areas have no square footage set (Settings → Sprayer Areas), so their product totals can't be calculated.</>}
+                    {earlyOrder.missingCaseCount > 0 && <>{earlyOrder.missingCaseCount} product{earlyOrder.missingCaseCount !== 1 ? 's' : ''} missing “Oz/case” — add it in the Chemical Library (Ordering section) to get its cases-needed. </>}
+                    {earlyOrder.missingSqft && <>Some areas have no square footage set (Settings → Sprayer Areas), so their totals can't be calculated.</>}
                   </p>
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
-                  <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">By product type</p>
-                  {earlyOrder.typeRows.length === 0 ? <p className="font-body text-xs text-slate-400">No cost data yet.</p> : earlyOrder.typeRows.map((t) => (
-                    <div key={t.type} className="flex items-center justify-between py-1">
-                      <span className="font-body text-xs text-slate-600 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: typeColor(t.type) }} />{t.type}</span>
-                      <span className="font-body text-xs font-bold text-slate-800">{money(t.cost)}</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
-                  <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">By area</p>
-                  {earlyOrder.areaRows.length === 0 ? <p className="font-body text-xs text-slate-400">No cost data yet.</p> : earlyOrder.areaRows.map((a) => (
-                    <div key={a.area} className="flex items-center justify-between py-1">
-                      <span className="font-body text-xs text-slate-600 truncate">{a.area}</span>
-                      <span className="font-body text-xs font-bold text-slate-800">{money(a.cost)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Every product</p>
               <div className="space-y-2">
-                {earlyOrder.rows.map((r) => (
-                  <div key={r.name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: typeColor(r.type) }} />
-                    <div className="min-w-0 flex-1">
-                      <p className="font-body text-sm font-semibold text-slate-800 truncate">{r.name}</p>
-                      <p className="font-body text-[11px] text-slate-400">
-                        {Math.round(r.totalOz).toLocaleString()} oz total{r.cases != null ? ` · ${Math.ceil(r.cases)} case${Math.ceil(r.cases) !== 1 ? 's' : ''}` : ''}{r.caseSize ? ` (${r.caseSize})` : ''}
-                      </p>
+                {earlyOrder.rows.map((r) => {
+                  const areasUsed = Object.entries(r.byArea).sort((a, b) => b[1] - a[1])
+                  return (
+                    <div key={r.name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ backgroundColor: typeColor(r.type) }} />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-body text-sm font-semibold text-slate-800 truncate">{r.name}</p>
+                          <p className="font-body text-[11px] text-slate-400">
+                            {Math.round(r.totalOz).toLocaleString()} oz total{r.totalInUnits != null ? ` (${round1(r.totalInUnits)} ${r.unit})` : ''}{r.caseSize ? ` · ${r.caseSize}` : ''}{r.ozPerCase ? ` @ ${r.ozPerCase} oz/case` : ''}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          {r.casesToOrder != null ? (
+                            <>
+                              <p className="font-display text-lg font-bold text-slate-900 leading-none">{r.casesToOrder}</p>
+                              <p className="font-body text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">case{r.casesToOrder !== 1 ? 's' : ''} · need {round1(r.casesExact)}</p>
+                            </>
+                          ) : (
+                            <p className="font-body text-[11px] font-semibold text-amber-600">add oz/case</p>
+                          )}
+                        </div>
+                      </div>
+                      {areasUsed.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2 pl-5">
+                          {areasUsed.map(([area, oz]) => (
+                            <span key={area} className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{area}: {Math.round(oz).toLocaleString()} oz</span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-right shrink-0">
-                      {r.cost != null
-                        ? <p className="font-body text-sm font-bold text-slate-900">{money(r.cost)}</p>
-                        : <p className="font-body text-[11px] font-semibold text-amber-600">add cost</p>}
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
                 {earlyOrder.rows.length === 0 && (
-                  <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">Nothing to total yet — add planned sprays, and set area sizes + product costs.</div>
+                  <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">Nothing to total yet — add planned sprays and set area sizes.</div>
                 )}
               </div>
 
-              <p className="font-body text-[10px] text-slate-400 mt-3">Estimate only. Totals = each application's rate × the area's size, summed over the season, then converted to cases with each product's case size and cost. Verify against a quote before ordering.</p>
+              <p className="font-body text-[10px] text-slate-400 mt-3">Estimate for planning. Totals = each application's rate × the area's size, summed over the season, then converted to cases with each product's Oz/case. “Cases” rounds up to whole cases; “need” is the exact amount.</p>
             </div>
           )}
         </>
