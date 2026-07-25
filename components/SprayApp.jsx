@@ -170,6 +170,7 @@ function SprayOpsModule({ user }) {
   const [courseInfo, setCourseInfo] = useState({ clubName: 'Congressional Country Club', deptName: 'Golf Maintenance' })
   const [location, setLocation] = useState({ address: '', lat: null, lng: null, timezone: 'America/New_York' })
   const [grassTypes, setGrassTypes] = useState([])
+  const [applicatorLicenses, setApplicatorLicenses] = useState({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
@@ -205,6 +206,7 @@ function SprayOpsModule({ user }) {
       setCourseInfo(settings.courseInfo)
       setLocation(settings.location)
       setGrassTypes(settings.grassTypes || [])
+      setApplicatorLicenses(settings.applicatorLicenses || {})
       // Load the newest program's applications so the dashboard can surface
       // what's planned for the days ahead.
       if (progs.length > 0) {
@@ -229,6 +231,7 @@ function SprayOpsModule({ user }) {
     if (patch.courseInfo) setCourseInfo(patch.courseInfo)
     if (patch.location) setLocation(patch.location)
     if (patch.grassTypes) setGrassTypes(patch.grassTypes)
+    if (patch.applicatorLicenses) setApplicatorLicenses(patch.applicatorLicenses)
     try {
       await db.saveSettings(patch)
     } catch (e) {
@@ -485,6 +488,7 @@ function SprayOpsModule({ user }) {
           <SheetViewer
             key={activeSheet.id}
             sheet={activeSheet} products={products} areas={areas} directors={directors} operators={operators}
+            applicatorLicenses={applicatorLicenses}
             location={location} courseInfo={courseInfo}
             manage={manage} approve={canApprove(user.role)}
             onBack={() => setRoute(manage ? 'dashboard' : 'tospray')}
@@ -523,6 +527,7 @@ function SprayOpsModule({ user }) {
           <SettingsPage
             areas={areas} operators={operators} directors={directors} targets={targets}
             sheetTypes={sheetTypes} courseInfo={courseInfo} location={location} grassTypes={grassTypes}
+            applicatorLicenses={applicatorLicenses}
             onSave={async (patch) => { await saveSettings(patch); showToast('Settings updated') }}
           />
         )}
@@ -1146,6 +1151,26 @@ function PrintableSheet({ sheet, area, products, sheetTargets, courseInfo }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <tbody>
             <tr>
+              <td style={tdLabel}>Applicator</td>
+              <td style={tdVal}>{sheet.completedBy || sheet.operator || '_______________________'}</td>
+              <td style={tdLabel}>Date Applied</td>
+              <td style={tdVal}>{sheet.completedAt ? new Date(sheet.completedAt).toLocaleString() : '_______________________'}</td>
+            </tr>
+            <tr>
+              <td style={tdLabel}>Pesticide Lic #</td>
+              <td style={tdVal}>{sheet.applicatorPesticideLicense || '—'}</td>
+              <td style={tdLabel}>Fertilizer Lic #</td>
+              <td style={tdVal}>{sheet.applicatorFertilizerLicense || '—'}</td>
+            </tr>
+            <tr>
+              <td style={tdLabel}>Applicator Signature</td>
+              <td style={tdVal} colSpan={3}>
+                {sheet.applicatorSignature
+                  ? <img src={sheet.applicatorSignature} alt="Applicator signature" style={{ height: 48, maxWidth: '100%' }} />
+                  : '_______________________'}
+              </td>
+            </tr>
+            <tr>
               <td style={tdLabel}>Superintendent</td>
               <td style={tdVal}>{sheet.operator || '_______________________'}</td>
               <td style={tdLabel}>Date Submitted</td>
@@ -1177,11 +1202,86 @@ const tdVal = { border: '1px solid #ccc', padding: '5px 8px', width: '35%' }
 const thStyle = { border: '1px solid #16291F', padding: '6px 8px', textAlign: 'left', fontSize: 10, textTransform: 'uppercase' }
 const tdRow = { border: '1px solid #ccc', padding: '5px 8px' }
 
+// ── SIGNATURE PAD ─────────────────────────────────────────────────────────
+// A finger/stylus signature box for the iPad. Emits a PNG data URL via onChange
+// and can reload a previously saved signature.
+function SignaturePad({ value, onChange }) {
+  const canvasRef = useRef(null)
+  const drawing = useRef(false)
+  const last = useRef({ x: 0, y: 0 })
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    ctx.lineWidth = 2.5
+    ctx.lineCap = 'round'
+    ctx.strokeStyle = '#1A1A16'
+    if (value) {
+      const img = new Image()
+      img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      img.src = value
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const pos = (e) => {
+    const canvas = canvasRef.current
+    const rect = canvas.getBoundingClientRect()
+    return {
+      x: (e.clientX - rect.left) * (canvas.width / rect.width),
+      y: (e.clientY - rect.top) * (canvas.height / rect.height),
+    }
+  }
+  const start = (e) => { e.preventDefault(); drawing.current = true; last.current = pos(e) }
+  const move = (e) => {
+    if (!drawing.current) return
+    e.preventDefault()
+    const ctx = canvasRef.current.getContext('2d')
+    const p = pos(e)
+    ctx.beginPath(); ctx.moveTo(last.current.x, last.current.y); ctx.lineTo(p.x, p.y); ctx.stroke()
+    last.current = p
+  }
+  const end = () => {
+    if (!drawing.current) return
+    drawing.current = false
+    onChange(canvasRef.current.toDataURL('image/png'))
+  }
+  const clear = () => {
+    const canvas = canvasRef.current
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height)
+    onChange('')
+  }
+
+  return (
+    <div>
+      <div className="relative rounded-xl border-2 border-dashed border-slate-200 bg-white">
+        <canvas
+          ref={canvasRef}
+          width={600}
+          height={160}
+          className="w-full block"
+          style={{ height: 160, touchAction: 'none' }}
+          onPointerDown={start}
+          onPointerMove={move}
+          onPointerUp={end}
+          onPointerLeave={end}
+        />
+        <button type="button" onClick={clear} className="absolute top-2 right-2 font-body text-[11px] font-bold text-slate-400 bg-white/80 rounded-full px-2.5 py-0.5 border border-slate-200">Clear</button>
+      </div>
+      <p className="font-body text-[11px] text-slate-400 mt-1">Sign above with your finger or a stylus.</p>
+    </div>
+  )
+}
+
 // ── SHEET VIEWER ──────────────────────────────────────────────────────────
-function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], location, courseInfo, manage, approve }) {
+function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, location, courseInfo, manage, approve }) {
   const [sig, setSig] = useState('')
   const [wx, setWx] = useState(sheet.weather || { temp: '', wind: '', humidity: '', windDir: '' })
   const [sprayedBy, setSprayedBy] = useState(sheet.completedBy || sheet.operator || '')
+  // The applicator's drawn sign-off signature (data URL).
+  const [applicatorSig, setApplicatorSig] = useState(sheet.applicatorSignature || '')
+  const licenseFor = applicatorLicenses[sprayedBy] || {}
   const [partialGal, setPartialGal] = useState(sheet.partialGallons ?? '')
   const [showPartial, setShowPartial] = useState(sheet.partialGallons != null)
   const [wxLoading, setWxLoading] = useState(false)
@@ -1250,13 +1350,17 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
       completed: complete ? true : sheet.completed,
       completedBy: complete ? (sprayedBy || sheet.operator || '') : sheet.completedBy,
       completedAt: complete ? new Date().toISOString() : sheet.completedAt,
+      // Snapshot the signature + license numbers onto the record at sign-off.
+      applicatorSignature: applicatorSig || sheet.applicatorSignature || '',
+      applicatorPesticideLicense: complete ? (licenseFor.pesticide || '') : sheet.applicatorPesticideLicense,
+      applicatorFertilizerLicense: complete ? (licenseFor.fertilizer || '') : sheet.applicatorFertilizerLicense,
     })
   const reopen = () => onLogSpray?.({ ...sheet, completed: false })
   // Save the optional partial-fill add-on (no approval needed — separate spray).
   const savePartial = (gal) => onLogSpray?.({ ...sheet, partialGallons: gal === '' || gal == null ? null : Number(gal) }, { quiet: true })
-  // Manual save of the current sheet state (weather, check-offs, partial).
+  // Manual save of the current sheet state (weather, check-offs, partial, signature).
   const saveNow = () =>
-    onLogSpray?.({ ...sheet, weather: wx, tankChecks, partialGallons: partialGal === '' ? null : Number(partialGal) })
+    onLogSpray?.({ ...sheet, weather: wx, tankChecks, partialGallons: partialGal === '' ? null : Number(partialGal), applicatorSignature: applicatorSig || sheet.applicatorSignature || '' })
 
   return (
     <div className="pt-6 pb-10 max-w-2xl mx-auto">
@@ -1524,6 +1628,16 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                   <p className="font-body text-xs text-slate-500">
                     {sheet.completedBy ? `By ${sheet.completedBy}` : ''}{sheet.completedAt ? ` · ${new Date(sheet.completedAt).toLocaleString()}` : ''}
                   </p>
+                  {(sheet.applicatorPesticideLicense || sheet.applicatorFertilizerLicense) && (
+                    <p className="font-body text-[11px] text-slate-400 mt-0.5">
+                      {sheet.applicatorPesticideLicense ? `Pesticide Lic: ${sheet.applicatorPesticideLicense}` : ''}
+                      {sheet.applicatorPesticideLicense && sheet.applicatorFertilizerLicense ? ' · ' : ''}
+                      {sheet.applicatorFertilizerLicense ? `Fertilizer Lic: ${sheet.applicatorFertilizerLicense}` : ''}
+                    </p>
+                  )}
+                  {sheet.applicatorSignature && (
+                    <img src={sheet.applicatorSignature} alt="Applicator signature" className="mt-2 h-12 rounded border border-slate-100 bg-white" />
+                  )}
                   <div className="flex gap-2 mt-3">
                     <button onClick={() => window.print()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white" style={{ backgroundColor: FOREST }}>Print record</button>
                     <button onClick={reopen} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full text-slate-500 border border-slate-200">Reopen (back to To Spray)</button>
@@ -1547,6 +1661,21 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                   </div>
                   <FieldLabel>Sprayed by</FieldLabel>
                   <Select value={sprayedBy} onChange={setSprayedBy} options={operators} placeholder="Select…" />
+                  {sprayedBy && (licenseFor.pesticide || licenseFor.fertilizer) && (
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 font-body text-[11px] text-slate-500">
+                      {licenseFor.pesticide && <span>Pesticide Lic: <b className="text-slate-700">{licenseFor.pesticide}</b></span>}
+                      {licenseFor.fertilizer && <span>Fertilizer Lic: <b className="text-slate-700">{licenseFor.fertilizer}</b></span>}
+                    </div>
+                  )}
+                  {sprayedBy && !licenseFor.pesticide && !licenseFor.fertilizer && (
+                    <p className="font-body text-[11px] text-amber-600 mt-1.5">No license on file for {sprayedBy}. Add it in Settings → People.</p>
+                  )}
+
+                  <div className="mt-3">
+                    <FieldLabel>Applicator signature</FieldLabel>
+                    <SignaturePad value={applicatorSig} onChange={setApplicatorSig} />
+                  </div>
+
                   <div className="flex gap-2 mt-3">
                     <button onClick={() => saveLog(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Save progress</button>
                     <button onClick={() => saveLog(true)} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
@@ -2562,7 +2691,7 @@ function NPKMini({ label, value, color }) {
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────
-function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, onSave }) {
+function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, applicatorLicenses, onSave }) {
   const [section, setSection] = useState('course')
 
   return (
@@ -2579,7 +2708,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
 
       {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} onSave={onSave} />}
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
-      {section === 'people' && <PeopleSettings operators={operators} directors={directors} onSave={onSave} />}
+      {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} onSave={onSave} />}
       {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassTypes} onSave={onSave} />}
       {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} onSave={onSave} />}
     </div>
@@ -2694,12 +2823,71 @@ function NameListEditor({ title, items, onSave, accent }) {
   )
 }
 
-function PeopleSettings({ operators, directors, onSave }) {
+function PeopleSettings({ operators, directors, applicatorLicenses = {}, onSave }) {
   return (
     <div className="space-y-4">
-      <NameListEditor title="Applicators" items={operators} accent={FERN} onSave={(list) => onSave({ operators: list })} />
+      <ApplicatorsEditor operators={operators} licenses={applicatorLicenses} onSave={onSave} />
       <NameListEditor title="Directors / Approvers" items={directors} accent="#92660D" onSave={(list) => onSave({ directors: list })} />
     </div>
+  )
+}
+
+// Applicators plus their pesticide and fertilizer license numbers. The names
+// still drive every "who sprayed" dropdown; the license numbers ride along and
+// get snapshotted onto a spray sheet at sign-off.
+function ApplicatorsEditor({ operators, licenses, onSave }) {
+  const [newName, setNewName] = useState('')
+
+  const setLicense = (name, field, value) => {
+    const next = { ...licenses, [name]: { ...(licenses[name] || {}), [field]: value } }
+    onSave({ applicatorLicenses: next })
+  }
+  const addPerson = () => {
+    const n = newName.trim()
+    if (!n || operators.includes(n)) { setNewName(''); return }
+    onSave({ operators: [...operators, n] })
+    setNewName('')
+  }
+  const removePerson = (name) => {
+    const nextLic = { ...licenses }
+    delete nextLic[name]
+    onSave({ operators: operators.filter((o) => o !== name), applicatorLicenses: nextLic })
+  }
+
+  return (
+    <Card>
+      <p className="font-display text-base font-semibold text-slate-900 mb-1">Applicators</p>
+      <p className="font-body text-[11px] text-slate-400 mb-3">Add each applicator and their license numbers. These attach to the spray sheet when they sign off.</p>
+
+      <div className="space-y-3">
+        {operators.map((name) => (
+          <div key={name} className="rounded-xl border border-slate-100 p-3" style={{ backgroundColor: '#F8FAF9' }}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="font-body text-sm font-bold text-slate-800">{name}</p>
+              <button onClick={() => removePerson(name)} className="text-slate-300 hover:text-red-500 transition" aria-label={`Remove ${name}`}><Trash2 size={15} /></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <FieldLabel>Pesticide License #</FieldLabel>
+                <input value={licenses[name]?.pesticide ?? ''} onChange={(e) => setLicense(name, 'pesticide', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="e.g. MD-12345" />
+              </div>
+              <div>
+                <FieldLabel>Fertilizer License #</FieldLabel>
+                <input value={licenses[name]?.fertilizer ?? ''} onChange={(e) => setLicense(name, 'fertilizer', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="e.g. F-678" />
+              </div>
+            </div>
+          </div>
+        ))}
+        {operators.length === 0 && <p className="font-body text-sm text-slate-400">No applicators yet.</p>}
+      </div>
+
+      <div className="flex gap-2 mt-3">
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addPerson()} placeholder="Add an applicator's name…" className="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm font-body" />
+        <button onClick={addPerson} className="font-body text-xs font-bold px-3.5 py-2 rounded-xl text-white flex items-center gap-1.5" style={{ backgroundColor: FERN }}>
+          <Plus size={14} /> Add
+        </button>
+      </div>
+    </Card>
   )
 }
 
