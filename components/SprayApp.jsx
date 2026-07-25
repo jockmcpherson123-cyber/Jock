@@ -17,7 +17,7 @@ import {
   Package, Truck, MapPin, Sparkles,
 } from 'lucide-react'
 import {
-  uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, downloadCSV,
+  uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings, downloadCSV,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -481,7 +481,7 @@ function SprayOpsModule({ user }) {
         {route === 'edit' && activeSheet && manage && (
           <SheetEditor
             sheet={activeSheet} saving={saving} products={products} location={location}
-            areas={areas} operators={operators} targets={targets} sheetTypes={sheetTypes}
+            areas={areas} operators={operators} targets={targets} sheetTypes={sheetTypes} sheets={sheets}
             onSave={async (s) => {
               const saved = await saveSheet(s)
               if (saved) {
@@ -891,9 +891,10 @@ function InfoChip({ label, value }) {
 }
 
 // ── SHEET EDITOR ──────────────────────────────────────────────────────────
-function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes, location }) {
+function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes, location, sheets = [] }) {
   const [s, setS] = useState({ ...sheet, targets: sheet.targets || (sheet.target ? [sheet.target] : []) })
   const area = areas[s.area] || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
+  const rotationAlerts = rotationWarnings(s, sheets, products)
 
   const update = (patch) => setS((prev) => ({ ...prev, ...patch }))
   const updateProduct = (id, patch) => setS((prev) => ({ ...prev, products: prev.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))
@@ -951,6 +952,22 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             <input type="number" min={1} value={s.tanks} onChange={(e) => update({ tanks: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
           </div>
         </Card>
+
+        {rotationAlerts.length > 0 && (
+          <div className="rounded-2xl border p-3" style={{ backgroundColor: '#FEF2F2', borderColor: '#FECACA' }}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <AlertTriangle size={15} className="text-red-500" />
+              <p className="font-body text-[12px] font-bold text-red-700">Rotation warning</p>
+            </div>
+            <div className="space-y-1">
+              {rotationAlerts.map((w) => (
+                <p key={w.product} className="font-body text-[11px] text-red-600">
+                  <b>{w.product}</b> (Group {w.group}) — {w.prevProduct} hit {s.area} just {w.days} day{w.days !== 1 ? 's' : ''} ago (within {w.window}d). Consider a different group to avoid resistance.
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
 
         <Card>
           <div className="flex items-center justify-between mb-2">
@@ -2132,8 +2149,8 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   }
   const downloadTemplate = async () => {
     const XLSX = await import('xlsx')
-    const headers = ['Name', 'Type', 'Active Ingredient', 'Active %', 'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A', 'Stock', 'Low Stock', 'N', 'P', 'K', 'Case Size', 'Oz/Case', 'Cost/Case', 'Label link', 'SDS link', 'Avoid Grasses']
-    const example = ['Daconil Action', 'Fungicide', 'Chlorothalonil + Acibenzolar-S-methyl', 20.3, 1.8, 'oz / M', 'oz', 1.8, 3.6, '', '', 0, 0, '', '', '', '2.5 Gal', 320, 240, 'https://example.com/label.pdf', 'https://example.com/sds.pdf', 'Bentgrass, Poa Annua']
+    const headers = ['Name', 'Type', 'Active Ingredient', 'Active %', 'Chemical Group', 'Rotate After (days)', 'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A', 'Stock', 'Low Stock', 'N', 'P', 'K', 'Case Size', 'Oz/Case', 'Cost/Case', 'Label link', 'SDS link', 'Avoid Grasses']
+    const example = ['Daconil Action', 'Fungicide', 'Chlorothalonil + Acibenzolar-S-methyl', 20.3, 'M05', 14, 1.8, 'oz / M', 'oz', 1.8, 3.6, '', '', 0, 0, '', '', '', '2.5 Gal', 320, 240, 'https://example.com/label.pdf', 'https://example.com/sds.pdf', 'Bentgrass, Poa Annua']
     const ws = XLSX.utils.aoa_to_sheet([headers, example])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Chemical Library')
@@ -2157,7 +2174,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   }
   const startNew = () => {
     setEditing('new')
-    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '', caseSize: '', ozPerCase: '', costPerCase: '' })
+    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '', caseSize: '', ozPerCase: '', costPerCase: '', moaGroup: '', rotationDays: '' })
   }
   const cancelEdit = () => { setEditing(null); setDraft(null) }
 
@@ -2182,6 +2199,8 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       activePct: draft.activePct === '' || draft.activePct == null ? null : parseFloat(draft.activePct),
       ozPerCase: draft.ozPerCase === '' || draft.ozPerCase == null ? null : parseFloat(draft.ozPerCase),
       costPerCase: draft.costPerCase === '' || draft.costPerCase == null ? null : parseFloat(draft.costPerCase),
+      moaGroup: (draft.moaGroup || '').trim(),
+      rotationDays: draft.rotationDays === '' || draft.rotationDays == null ? null : parseInt(draft.rotationDays, 10),
     }
     onSaveProduct(cleaned)
     cancelEdit()
@@ -2434,6 +2453,20 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 </div>
               </div>
             </div>
+            <div className="rounded-xl p-3" style={{ backgroundColor: '#F5F3FF' }}>
+              <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: '#7C3AED' }}>Resistance / Rotation</p>
+              <p className="font-body text-[10px] text-slate-500 mb-2">The chemical group (FRAC for fungicides, HRAC herbicides, IRAC insecticides). The app warns if you spray the same group on an area again too soon.</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <FieldLabel>Chemical Group</FieldLabel>
+                  <input value={draft.moaGroup ?? ''} onChange={(e) => setDraft({ ...draft, moaGroup: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 11, P07, Group 4" />
+                </div>
+                <div>
+                  <FieldLabel>Rotate After (days)</FieldLabel>
+                  <input type="number" step="1" value={draft.rotationDays ?? ''} onChange={(e) => setDraft({ ...draft, rotationDays: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="21" />
+                </div>
+              </div>
+            </div>
             <div className="rounded-xl p-3" style={{ backgroundColor: '#FEF2F2' }}>
               <p className="font-body text-[11px] font-bold text-red-500 uppercase tracking-wide mb-1">Grass Safety — Avoid On</p>
               <p className="font-body text-[10px] text-slate-500 mb-2">Select grasses this product can damage (from the label). A spray sheet warns if the area has one of these.</p>
@@ -2657,6 +2690,7 @@ function Inventory({ products, deliveries, onAddDelivery }) {
 // ── REPORTS ───────────────────────────────────────────────────────────────
 function Reports({ sheets, products, areas }) {
   const [view, setView] = useState('byArea')
+  const [report, setReport] = useState('npk') // 'npk' | 'rotation'
   const npkData = aggregateNPK(sheets, products, areas)
 
   const totalN = Math.round(npkData.reduce((s, r) => s + r.n, 0) * 100) / 100
@@ -2706,12 +2740,25 @@ function Reports({ sheets, products, areas }) {
   return (
     <div className="pt-6 pb-10">
       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-        <SectionHeader title="N-P-K Reports" subtitle="Pulled automatically from every approved spray sheet" noMargin />
-        <button onClick={exportCSV} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
-          <Package size={14} /> Export Spreadsheet
-        </button>
+        <SectionHeader title="Reports" subtitle="Nutrients and chemical rotation, pulled from your sprays" noMargin />
+        {report === 'npk' && (
+          <button onClick={exportCSV} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
+            <Package size={14} /> Export Spreadsheet
+          </button>
+        )}
       </div>
 
+      <div className="flex gap-2 mt-4 mb-1">
+        {[['npk', 'Nutrients (N-P-K)'], ['rotation', 'Chemical Rotation']].map(([k, l]) => (
+          <button key={k} onClick={() => setReport(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full transition" style={report === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {report === 'rotation' && <RotationReport sheets={sheets} products={products} />}
+
+      {report === 'npk' && (<>
       <div className="grid grid-cols-3 gap-3 mt-5 mb-5">
         <NPKStat label="Total N" value={totalN} color="#2563EB" />
         <NPKStat label="Total P" value={totalP} color="#D97706" />
@@ -2796,6 +2843,55 @@ function Reports({ sheets, products, areas }) {
           ))}
         </div>
       )}
+      </>)}
+    </div>
+  )
+}
+
+// ── ROTATION REPORT ─────────────────────────────────────────────────────────
+// Per area, the chemical groups sprayed over time — repeats within the rotation
+// window are flagged so you can keep modes of action rotating.
+function RotationReport({ sheets, products }) {
+  const byArea = rotationByArea(sheets, products)
+  const areas = Object.keys(byArea).sort()
+  const taggedCount = products.filter((p) => (p.moaGroup || '').trim()).length
+
+  return (
+    <div className="mt-4">
+      {taggedCount === 0 && (
+        <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 p-3 mb-3">
+          <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
+          <p className="font-body text-[11px] text-amber-700">No products have a chemical group set yet. Add each product's group (FRAC/HRAC/IRAC) in the Chemical Library → Resistance / Rotation, and this fills in from your sprays.</p>
+        </div>
+      )}
+      {areas.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
+          No sprays with a chemical group yet. Approve or complete a sheet whose products have a group set.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {areas.map((area) => (
+            <div key={area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+              <p className="font-body font-semibold text-sm text-slate-900 mb-2">{area}</p>
+              <div className="space-y-1.5">
+                {byArea[area].map((e, i) => (
+                  <div key={i} className="flex items-center gap-2.5">
+                    <span className="font-body text-[11px] text-slate-400 w-14 shrink-0">{e.date ? fmtDate(e.date) : '—'}</span>
+                    <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={e.tooSoon ? { backgroundColor: '#FEE2E2', color: '#B91C1C' } : { backgroundColor: '#F0F6F2', color: FERN }}>
+                      Group {e.group}
+                    </span>
+                    <span className="font-body text-[12px] text-slate-700 truncate flex-1">{e.product}</span>
+                    {e.tooSoon && (
+                      <span className="font-body text-[10px] font-semibold text-red-600 shrink-0">⚠ {e.prev.days}d after Group {e.group}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="font-body text-[10px] text-slate-400 mt-3">Red = the same chemical group hit this area again within its rotation window (default 21 days, or the product's “Rotate After” setting). Rotate modes of action to slow resistance.</p>
     </div>
   )
 }
