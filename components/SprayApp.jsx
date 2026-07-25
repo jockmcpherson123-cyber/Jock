@@ -1919,6 +1919,33 @@ function normalizeUrl(u) {
   return `https://${s}`
 }
 
+// Shrink a photo/scan on the device before we store it, so a license copy is a
+// small (~100–200 KB) JPEG rather than a multi-megabyte camera image.
+function compressImage(file, maxDim = 1400, quality = 0.6) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const img = new Image()
+      img.onload = () => {
+        let { width, height } = img
+        if (width > maxDim || height > maxDim) {
+          if (width >= height) { height = Math.round(height * maxDim / width); width = maxDim }
+          else { width = Math.round(width * maxDim / height); height = maxDim }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/jpeg', quality))
+      }
+      img.onerror = reject
+      img.src = reader.result
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 function DocumentsLibrary({ products, manage, onSaveProduct }) {
   const [q, setQ] = useState('')
   const [missingOnly, setMissingOnly] = useState(false)
@@ -2832,6 +2859,33 @@ function PeopleSettings({ operators, directors, applicatorLicenses = {}, onSave 
   )
 }
 
+// One license: its number plus an optional scanned/photographed copy.
+function LicenseField({ label, placeholder, num, img, onNum, onImg }) {
+  return (
+    <div>
+      <FieldLabel>{label} #</FieldLabel>
+      <input value={num ?? ''} onChange={(e) => onNum(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder={placeholder} />
+      <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+        {img ? (
+          <>
+            <a href={img} target="_blank" rel="noopener noreferrer"><img src={img} alt={`${label} copy`} className="h-10 rounded border border-slate-200" /></a>
+            <label className="font-body text-[11px] font-bold cursor-pointer" style={{ color: FERN }}>
+              Replace
+              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onImg} />
+            </label>
+            <button type="button" onClick={() => onImg(null)} className="font-body text-[11px] font-bold text-slate-400">Remove</button>
+          </>
+        ) : (
+          <label className="font-body text-[11px] font-bold cursor-pointer flex items-center gap-1" style={{ color: FERN }}>
+            <CloudUpload size={12} /> Attach copy
+            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onImg} />
+          </label>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // Applicators plus their pesticide and fertilizer license numbers. The names
 // still drive every "who sprayed" dropdown; the license numbers ride along and
 // get snapshotted onto a spray sheet at sign-off.
@@ -2841,6 +2895,13 @@ function ApplicatorsEditor({ operators, licenses, onSave }) {
   const setLicense = (name, field, value) => {
     const next = { ...licenses, [name]: { ...(licenses[name] || {}), [field]: value } }
     onSave({ applicatorLicenses: next })
+  }
+  const handleImg = async (name, field, e) => {
+    if (e === null) { setLicense(name, field, ''); return }
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    try { setLicense(name, field, await compressImage(file)) } catch { /* ignore bad image */ }
   }
   const addPerson = () => {
     const n = newName.trim()
@@ -2867,14 +2928,12 @@ function ApplicatorsEditor({ operators, licenses, onSave }) {
               <button onClick={() => removePerson(name)} className="text-slate-300 hover:text-red-500 transition" aria-label={`Remove ${name}`}><Trash2 size={15} /></button>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <FieldLabel>Pesticide License #</FieldLabel>
-                <input value={licenses[name]?.pesticide ?? ''} onChange={(e) => setLicense(name, 'pesticide', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="e.g. MD-12345" />
-              </div>
-              <div>
-                <FieldLabel>Fertilizer License #</FieldLabel>
-                <input value={licenses[name]?.fertilizer ?? ''} onChange={(e) => setLicense(name, 'fertilizer', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="e.g. F-678" />
-              </div>
+              <LicenseField label="Pesticide License" placeholder="e.g. MD-12345"
+                num={licenses[name]?.pesticide} img={licenses[name]?.pesticideImg}
+                onNum={(v) => setLicense(name, 'pesticide', v)} onImg={(e) => handleImg(name, 'pesticideImg', e)} />
+              <LicenseField label="Fertilizer License" placeholder="e.g. F-678"
+                num={licenses[name]?.fertilizer} img={licenses[name]?.fertilizerImg}
+                onNum={(v) => setLicense(name, 'fertilizer', v)} onImg={(e) => handleImg(name, 'fertilizerImg', e)} />
             </div>
           </div>
         ))}
