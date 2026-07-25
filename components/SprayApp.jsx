@@ -347,7 +347,7 @@ function SprayOpsModule({ user }) {
     const firstArea = areaKeys[0]
     setActiveSheet({
       id: crypto.randomUUID(),
-      sheetType: sheetTypes[0] || 'Greens Spray',
+      sheetType: firstArea || 'Spray Sheet',
       date: new Date().toISOString().slice(0, 10),
       operator: '',
       area: firstArea,
@@ -385,7 +385,7 @@ function SprayOpsModule({ user }) {
     const area = matchSprayArea(planned[0].area)
     setActiveSheet({
       id: crypto.randomUUID(),
-      sheetType: sheetTypes[0] || 'Greens Spray',
+      sheetType: area || 'Spray Sheet',
       date: planned[0].plannedDate || new Date().toISOString().slice(0, 10),
       operator: '',
       area,
@@ -730,14 +730,13 @@ function SheetRow({ sheet, onClick, highlight }) {
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 mb-1">
-          <p className="font-body font-semibold text-sm text-slate-900 truncate">{sheet.sheetType}</p>
+          <p className="font-body font-semibold text-sm text-slate-900 truncate">{sheet.area}</p>
           {sheet.completed ? (
             <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide" style={{ backgroundColor: '#E8F3EC', color: FERN }}>Sprayed</span>
           ) : (
             <StatusPill status={sheet.status} />
           )}
         </div>
-        <p className="font-body text-xs text-slate-400 truncate">{sheet.area}</p>
         <div className="flex items-center gap-3 mt-1.5 font-body text-[11px] text-slate-400">
           <span className="flex items-center gap-1"><Calendar size={10} />{fmtDate(sheet.date)}</span>
           {sheet.operator && <span className="flex items-center gap-1"><User size={10} />{sheet.operator}</span>}
@@ -836,29 +835,16 @@ function InfoChip({ label, value }) {
 // ── SHEET EDITOR ──────────────────────────────────────────────────────────
 function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes, location }) {
   const [s, setS] = useState({ ...sheet, targets: sheet.targets || (sheet.target ? [sheet.target] : []) })
-  const [wxLoading, setWxLoading] = useState(false)
-  const [wxError, setWxError] = useState(null)
-  const hasLocation = location && location.lat != null && location.lng != null
   const area = areas[s.area] || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
 
-  async function fillWeather() {
-    if (!hasLocation) return
-    setWxLoading(true)
-    setWxError(null)
-    try {
-      const wx = await fetchCurrent(location.lat, location.lng)
-      setS((prev) => ({ ...prev, weather: { ...prev.weather, ...wx } }))
-    } catch (e) {
-      setWxError('Could not fetch weather')
-    }
-    setWxLoading(false)
-  }
   const update = (patch) => setS((prev) => ({ ...prev, ...patch }))
   const updateProduct = (id, patch) => setS((prev) => ({ ...prev, products: prev.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))
   const addRow = () => setS((prev) => ({ ...prev, products: [...prev.products, { id: uid(), product: '', rate: '', basis: '', forceGal: false }] }))
   const removeRow = (id) => setS((prev) => ({ ...prev, products: prev.products.filter((p) => p.id !== id) }))
 
-  const handleAreaChange = (areaName) => update({ area: areaName, tanks: areas[areaName].tanks })
+  // Area is now the sheet's identity — keep sheetType mirroring it so older
+  // records and any place that still reads sheetType show the area name.
+  const handleAreaChange = (areaName) => update({ area: areaName, sheetType: areaName, tanks: areas[areaName].tanks })
   const handleProductSelect = (id, name) => {
     const prod = products.find((p) => p.name === name)
     updateProduct(id, { product: name, basis: prod?.basis || '', defaultRate: prod?.rate ?? null })
@@ -882,8 +868,8 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
 
       <div className="space-y-4">
         <Card>
-          <FieldLabel>Sheet Type</FieldLabel>
-          <Select value={s.sheetType} onChange={(v) => update({ sheetType: v })} options={sheetTypes} />
+          <FieldLabel>Area</FieldLabel>
+          <Select value={s.area} onChange={handleAreaChange} options={Object.keys(areas)} />
 
           <div className="grid grid-cols-2 gap-3 mt-3">
             <div>
@@ -896,11 +882,6 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             </div>
           </div>
 
-          <div className="mt-3">
-            <FieldLabel>Area</FieldLabel>
-            <Select value={s.area} onChange={handleAreaChange} options={Object.keys(areas)} />
-          </div>
-
           <div className="grid grid-cols-3 gap-2 mt-3 bg-slate-50 rounded-xl p-3">
             <InfoChip label="Nozzle" value={area.nozzle} />
             <InfoChip label="PSI" value={area.psi} />
@@ -911,24 +892,6 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             <FieldLabel>{`Tanks (default ${area.tanks})`}</FieldLabel>
             <input type="number" min={1} value={s.tanks} onChange={(e) => update({ tanks: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
           </div>
-        </Card>
-
-        <Card>
-          <div className="flex items-center justify-between mb-1">
-            <FieldLabel noMargin>Weather</FieldLabel>
-            {hasLocation && (
-              <button type="button" onClick={fillWeather} disabled={wxLoading} className="font-body text-xs font-bold flex items-center gap-1 disabled:opacity-50" style={{ color: FERN }}>
-                {wxLoading ? <Loader2 className="animate-spin" size={13} /> : <Cloud size={13} />}
-                {wxLoading ? 'Fetching…' : "Use today's weather"}
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-2 mt-1">
-            {[['temp', 'Temp °F'], ['wind', 'Wind mph'], ['humidity', 'Humidity %'], ['windDir', 'Wind dir']].map(([k, ph]) => (
-              <input key={k} placeholder={ph} value={s.weather[k]} onChange={(e) => update({ weather: { ...s.weather, [k]: e.target.value } })} className="border border-slate-200 rounded-xl px-3 py-2 text-sm font-body" />
-            ))}
-          </div>
-          {wxError && <p className="font-body text-[11px] text-red-500 mt-1.5">{wxError}</p>}
         </Card>
 
         <Card>
@@ -1079,20 +1042,19 @@ function PrintableSheet({ sheet, area, products, sheetTargets, courseInfo }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, marginBottom: 12 }}>
           <tbody>
             <tr>
-              <td style={tdLabel}>Sheet Type</td><td style={tdVal}>{sheet.sheetType}</td>
+              <td style={tdLabel}>Area</td><td style={tdVal}>{sheet.area}</td>
               <td style={tdLabel}>Date</td><td style={tdVal}>{sheet.date}</td>
             </tr>
             <tr>
-              <td style={tdLabel}>Area</td><td style={tdVal}>{sheet.area}</td>
               <td style={tdLabel}>Operator</td><td style={tdVal}>{sheet.operator || '—'}</td>
-            </tr>
-            <tr>
               <td style={tdLabel}>Tanks</td><td style={tdVal}>{sheet.tanks}{area.galTank ? ` × ${area.galTank} gal` : ''}</td>
-              <td style={tdLabel}>Nozzle</td><td style={tdVal}>{area.nozzle || '—'}</td>
             </tr>
             <tr>
+              <td style={tdLabel}>Nozzle</td><td style={tdVal}>{area.nozzle || '—'}</td>
               <td style={tdLabel}>PSI</td><td style={tdVal}>{area.psi || '—'}</td>
-              <td style={tdLabel}>Target</td><td style={tdVal}>{sheetTargets.join(', ') || '—'}</td>
+            </tr>
+            <tr>
+              <td style={tdLabel}>Target</td><td style={tdVal} colSpan={3}>{sheetTargets.join(', ') || '—'}</td>
             </tr>
             <tr>
               <td style={tdLabel}>Weather</td>
@@ -1303,8 +1265,8 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
       <PrintableSheet sheet={sheet} area={area} products={products} sheetTargets={sheetTargets} courseInfo={courseInfo} />
 
       <div className="no-print">
-        <h2 className="font-display text-2xl font-semibold text-slate-900 mb-1">{sheet.sheetType}</h2>
-        <p className="font-body text-sm text-slate-400 mb-5">{fmtDate(sheet.date)} · {sheet.area}</p>
+        <h2 className="font-display text-2xl font-semibold text-slate-900 mb-1">{sheet.area}</h2>
+        <p className="font-body text-sm text-slate-400 mb-5">{fmtDate(sheet.date)}</p>
 
         <div className="space-y-4">
           <Card>
