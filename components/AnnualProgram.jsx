@@ -5,7 +5,7 @@
 // then browse it by area. (Editing individual applications, the early-order
 // calculator and auto-populating spray sheets come in the next phase.)
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil } from 'lucide-react'
+import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
 import { downloadCSV } from '@/lib/calc'
@@ -160,7 +160,7 @@ function typeColor(type) {
   }[type] || '#94A3B8'
 }
 
-export default function AnnualProgram({ areas, products = [], onProductsChanged }) {
+export default function AnnualProgram({ areas, products = [], onProductsChanged, onCreateSheet }) {
   const [programs, setPrograms] = useState([])
   const [activeProgram, setActiveProgram] = useState(null)
   const [apps, setApps] = useState([])
@@ -532,34 +532,42 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
     downloadCSV(rows, `Early_Order_${activeProgram?.year || ''}.csv`)
   }
 
-  // A whole planned spray: date + area + the tank mix. Tapping opens it to edit.
+  // A whole planned spray: date + area + the tank mix. Tapping the body opens it
+  // to edit; the footer button turns it straight into a spray sheet.
   const EventCard = (ev, opts = {}) => (
-    <button key={ev.key} onClick={() => openEvent(ev.items)} className="w-full text-left bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm hover:border-slate-200 transition">
-      <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#F0F6F2' }}>
-        <p className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
-          <Calendar size={12} />{fmtDateHeading(ev.date)}
-        </p>
-        <span className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'white', color: FERN }}>
-          {opts.badge != null ? opts.badge : ev.area}
-        </span>
-      </div>
-      <div className="divide-y divide-black/5">
-        {ev.items.map((a) => (
-          <div key={a.id} className="flex items-center gap-2.5 px-4 py-2.5">
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: typeColor(a.type) }} />
-            <div className="min-w-0 flex-1">
-              <p className="font-body text-sm font-semibold text-slate-800 truncate">{a.product}</p>
-              {(a.rateOzM || a.target) && (
-                <p className="font-body text-[11px] text-slate-400 truncate">{a.rateOzM ? `${a.rateOzM} oz/M` : ''}{a.rateOzM && a.target ? ' · ' : ''}{a.target || ''}</p>
+    <div key={ev.key} className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
+      <div onClick={() => openEvent(ev.items)} className="cursor-pointer hover:bg-slate-50/50 transition">
+        <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#F0F6F2' }}>
+          <p className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
+            <Calendar size={12} />{fmtDateHeading(ev.date)}
+          </p>
+          <span className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'white', color: FERN }}>
+            {opts.badge != null ? opts.badge : ev.area}
+          </span>
+        </div>
+        <div className="divide-y divide-black/5">
+          {ev.items.map((a) => (
+            <div key={a.id} className="flex items-center gap-2.5 px-4 py-2.5">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: typeColor(a.type) }} />
+              <div className="min-w-0 flex-1">
+                <p className="font-body text-sm font-semibold text-slate-800 truncate">{a.product}</p>
+                {(a.rateOzM || a.target) && (
+                  <p className="font-body text-[11px] text-slate-400 truncate">{a.rateOzM ? `${a.rateOzM} oz/M` : ''}{a.rateOzM && a.target ? ' · ' : ''}{a.target || ''}</p>
+                )}
+              </div>
+              {a.type && (
+                <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: `${typeColor(a.type)}18`, color: typeColor(a.type) }}>{a.type}</span>
               )}
             </div>
-            {a.type && (
-              <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: `${typeColor(a.type)}18`, color: typeColor(a.type) }}>{a.type}</span>
-            )}
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-    </button>
+      {onCreateSheet && (
+        <button onClick={() => onCreateSheet(ev.items)} className="w-full flex items-center justify-center gap-1.5 py-2.5 border-t border-black/5 font-body text-xs font-bold transition hover:bg-slate-50" style={{ color: FOREST }}>
+          <ClipboardList size={13} /> Create spray sheet
+        </button>
+      )}
+    </div>
   )
 
   return (
