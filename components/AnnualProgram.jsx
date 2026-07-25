@@ -104,6 +104,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
   const [toast, setToast] = useState(null)
   const [editApp, setEditApp] = useState(null) // application being added/edited
   const [copyForm, setCopyForm] = useState(null) // roll-forward form state
+  const [newForm, setNewForm] = useState(null) // blank-season form state
   const [viewMode, setViewMode] = useState('timeline') // 'timeline' | 'area'
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const fileRef = useRef(null)
@@ -268,6 +269,29 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
   function startCopy() {
     const nextYear = (activeProgram.year || new Date().getFullYear()) + 1
     setCopyForm({ year: nextYear, name: `${nextYear} Pesticide Plan`, shiftDays: 0 })
+  }
+
+  function startNewProgram() {
+    // Default to the next year we don't already have a program for.
+    const years = programs.map((p) => p.year).filter(Boolean)
+    let year = new Date().getFullYear()
+    while (years.includes(year)) year += 1
+    setNewForm({ year, name: `${year} Pesticide Plan` })
+  }
+
+  async function runNewProgram() {
+    setBusy(true)
+    try {
+      const prog = await db.createProgram({ year: Number(newForm.year), name: newForm.name })
+      setNewForm(null)
+      await loadPrograms()
+      await selectProgram(prog)
+      showToast('New season created — add applications when ready')
+    } catch (e) {
+      console.error(e)
+      showToast('Could not create the season')
+    }
+    setBusy(false)
   }
 
   async function runCopy() {
@@ -474,6 +498,30 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
         </div>
       )}
 
+      {/* Create a blank season */}
+      {newForm && (
+        <div className="bg-white rounded-2xl border-2 p-4 my-4 shadow-sm" style={{ borderColor: FOREST }}>
+          <p className="font-display text-base font-semibold text-slate-900 mb-1">Start a blank season</p>
+          <p className="font-body text-xs text-slate-400 mb-3">Creates an empty program for the year you choose. Add applications yourself, or import an Excel plan into it later.</p>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Year</label>
+              <input type="number" value={newForm.year} onChange={(e) => setNewForm({ ...newForm, year: e.target.value, name: `${e.target.value} Pesticide Plan` })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+            </div>
+            <div className="col-span-2">
+              <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Name</label>
+              <input value={newForm.name} onChange={(e) => setNewForm({ ...newForm, name: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setNewForm(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+            <button onClick={runNewProgram} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
+              {busy ? <><Loader2 className="animate-spin" size={15} /> Creating…</> : 'Create Season'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Roll forward to a new season */}
       {copyForm && (
         <div className="bg-white rounded-2xl border-2 p-4 my-4 shadow-sm" style={{ borderColor: FERN }}>
@@ -510,9 +558,14 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
           <p className="font-body text-sm text-slate-400 max-w-sm mx-auto mb-5">
             Import your existing Excel pesticide plan to load the whole season at once — every area's planned applications, plus your full product list.
           </p>
-          <button onClick={() => fileRef.current?.click()} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white inline-flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
-            <Upload size={14} /> Import from Excel
-          </button>
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <button onClick={() => fileRef.current?.click()} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white inline-flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
+              <Upload size={14} /> Import from Excel
+            </button>
+            <button onClick={startNewProgram} className="font-body text-xs font-bold px-4 py-2.5 rounded-full inline-flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FOREST, border: '1px solid rgba(0,0,0,0.12)' }}>
+              <Plus size={14} /> Start a blank season
+            </button>
+          </div>
         </div>
       )}
 
@@ -528,6 +581,9 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
                 )}
               </button>
             ))}
+            <button onClick={startNewProgram} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FOREST, border: '1px solid rgba(0,0,0,0.08)' }}>
+              <Plus size={13} /> New Season
+            </button>
             {activeProgram && (
               <button onClick={startCopy} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FERN, border: '1px solid rgba(0,0,0,0.08)' }}>
                 <CalendarPlus size={13} /> Roll forward
