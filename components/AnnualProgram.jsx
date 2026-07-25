@@ -84,6 +84,22 @@ function groupByArea(list) {
 
 const uniqueDays = (items) => new Set(items.filter((a) => a.plannedDate).map((a) => a.plannedDate)).size
 
+// A "spray event" = everything going on ONE area on ONE date (the tank mix).
+// Groups the underlying one-row-per-product records into those events.
+function groupByEvent(list) {
+  const map = {}
+  const order = []
+  list.forEach((a) => {
+    const key = `${a.area}||${a.plannedDate || 'none'}`
+    if (!map[key]) { map[key] = { key, area: a.area, date: a.plannedDate || null, items: [] }; order.push(key) }
+    map[key].items.push(a)
+  })
+  return order.map((k) => map[k])
+}
+
+let _rowSeq = 0
+const rowKey = () => `r${Date.now()}_${_rowSeq++}`
+
 // A distinct color per product type for quick visual scanning.
 function typeColor(type) {
   return {
@@ -203,67 +219,98 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
     }
   }
 
+  const blankRow = () => ({ key: rowKey(), product: '', rateOzM: '', rateOzA: '', basis: 'oz / M', type: '', target: '' })
+
+  // Start a brand-new planned spray (one date + one area + a tank mix).
   function startAddApp() {
     setEditApp({
-      programId: activeProgram.id,
+      originalIds: [],
       area: areaFilter !== 'all' ? areaFilter : '',
-      product: '',
-      rateOzM: '',
-      rateOzA: '',
-      basis: 'oz / M',
-      type: '',
-      target: '',
       plannedDate: new Date().toISOString().slice(0, 10),
+      products: [blankRow()],
     })
   }
 
-  function pickProduct(name) {
+  // Open an existing spray event (all products on that area + date) for editing.
+  function openEvent(items) {
+    setEditApp({
+      originalIds: items.map((i) => i.id),
+      area: items[0].area,
+      plannedDate: items[0].plannedDate || '',
+      products: items.map((i) => ({
+        key: i.id, id: i.id, product: i.product,
+        rateOzM: i.rateOzM ?? '', rateOzA: i.rateOzA ?? '',
+        basis: i.basis || 'oz / M', type: i.type || '', target: i.target || '',
+      })),
+    })
+  }
+
+  const updateRow = (key, patch) => setEditApp((prev) => ({ ...prev, products: prev.products.map((r) => (r.key === key ? { ...r, ...patch } : r)) }))
+  const addRow = () => setEditApp((prev) => ({ ...prev, products: [...prev.products, blankRow()] }))
+  const removeRow = (key) => setEditApp((prev) => ({ ...prev, products: prev.products.filter((r) => r.key !== key) }))
+  function pickProduct(key, name) {
     const prod = products.find((p) => p.name === name)
-    setEditApp((prev) => ({
-      ...prev,
+    updateRow(key, {
       product: name,
-      type: prod?.type || prev.type,
-      basis: prod?.basis || prev.basis,
-      rateOzM: prev.rateOzM === '' && prod?.rate != null ? prod.rate : prev.rateOzM,
-    }))
+      type: prod?.type || '',
+      basis: prod?.basis || 'oz / M',
+      rateOzM: prod?.rate != null ? prod.rate : '',
+    })
   }
 
   async function saveApp() {
-    if (!editApp.product || !editApp.area) {
-      showToast('Pick an area and a product first')
+    const rows = (editApp.products || []).filter((r) => r.product)
+    if (!editApp.area || rows.length === 0) {
+      showToast('Pick an area and at least one product')
       return
     }
     setBusy(true)
     try {
-      const saved = await db.upsertApplication({
-        ...editApp,
-        rateOzM: editApp.rateOzM === '' ? null : Number(editApp.rateOzM),
-        rateOzA: editApp.rateOzA === '' ? null : Number(editApp.rateOzA),
-      })
-      setApps((prev) => {
-        const exists = prev.some((a) => a.id === saved.id)
-        const next = exists ? prev.map((a) => (a.id === saved.id ? saved : a)) : [...prev, saved]
-        return next.sort((a, b) => String(a.plannedDate || '').localeCompare(String(b.plannedDate || '')))
-      })
+      // Save each product in the mix (sharing the same area + date).
+      for (const r of rows) {
+        await db.upsertApplication({
+          id: r.id,
+          programId: activeProgram.id,
+          area: editApp.area,
+          plannedDate: editApp.plannedDate || null,
+          product: r.product,
+          rateOzM: r.rateOzM === '' ? null : Number(r.rateOzM),
+          rateOzA: r.rateOzA === '' ? null : Number(r.rateOzA),
+          basis: r.basis || 'oz / M',
+          type: r.type || null,
+          target: r.target || null,
+        })
+      }
+      // Delete any products that were removed from the mix.
+      const keptIds = new Set(rows.filter((r) => r.id).map((r) => r.id))
+      for (const id of editApp.originalIds || []) {
+        if (!keptIds.has(id)) await db.deleteApplication(id)
+      }
+      setApps(await db.fetchApplications(activeProgram.id))
       setEditApp(null)
-      showToast('Application saved')
+      showToast('Planned spray saved')
     } catch (e) {
       console.error(e)
-      showToast('Could not save application')
+      showToast('Could not save — check your connection')
     }
     setBusy(false)
   }
 
-  async function removeApp(id) {
+  // Delete a whole planned spray (every product on that area + date).
+  async function deleteEvent() {
+    if (!editApp.originalIds?.length) { setEditApp(null); return }
+    if (!confirm('Delete this whole planned spray?')) return
+    setBusy(true)
     try {
-      await db.deleteApplication(id)
-      setApps((prev) => prev.filter((a) => a.id !== id))
+      for (const id of editApp.originalIds) await db.deleteApplication(id)
+      setApps(await db.fetchApplications(activeProgram.id))
       setEditApp(null)
-      showToast('Application removed')
+      showToast('Planned spray removed')
     } catch (e) {
       console.error(e)
-      showToast('Could not remove application')
+      showToast('Could not remove')
     }
+    setBusy(false)
   }
 
   function startCopy() {
@@ -340,19 +387,33 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
     { label: 'Season', value: seasonSpan, wide: true },
   ]
 
-  // One tappable application row, shared by both views.
-  const AppRow = (a, opts = {}) => (
-    <button key={a.id} onClick={() => setEditApp({ ...a, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', target: a.target || '' })} className={`w-full text-left flex items-center gap-3 px-4 py-3 transition hover:bg-slate-50 ${opts.border ? 'border-t border-black/5' : ''}`}>
-      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: typeColor(a.type) }} />
-      <div className="min-w-0 flex-1">
-        <p className="font-body text-sm font-semibold text-slate-800 truncate">{a.product}</p>
-        <p className="font-body text-[11px] text-slate-400 truncate">
-          {opts.showArea ? `${a.area} · ` : ''}{opts.showDate && a.plannedDate ? `${fmtDate(a.plannedDate)} · ` : ''}{a.rateOzM ? `${a.rateOzM} oz/M` : ''}{a.target ? ` · ${a.target}` : ''}
+  // A whole planned spray: date + area + the tank mix. Tapping opens it to edit.
+  const EventCard = (ev, opts = {}) => (
+    <button key={ev.key} onClick={() => openEvent(ev.items)} className="w-full text-left bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm hover:border-slate-200 transition">
+      <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#F0F6F2' }}>
+        <p className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
+          <Calendar size={12} />{fmtDateHeading(ev.date)}
         </p>
+        <span className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'white', color: FERN }}>
+          {opts.badge != null ? opts.badge : ev.area}
+        </span>
       </div>
-      {a.type && (
-        <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: `${typeColor(a.type)}18`, color: typeColor(a.type) }}>{a.type}</span>
-      )}
+      <div className="divide-y divide-black/5">
+        {ev.items.map((a) => (
+          <div key={a.id} className="flex items-center gap-2.5 px-4 py-2.5">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: typeColor(a.type) }} />
+            <div className="min-w-0 flex-1">
+              <p className="font-body text-sm font-semibold text-slate-800 truncate">{a.product}</p>
+              {(a.rateOzM || a.target) && (
+                <p className="font-body text-[11px] text-slate-400 truncate">{a.rateOzM ? `${a.rateOzM} oz/M` : ''}{a.rateOzM && a.target ? ' · ' : ''}{a.target || ''}</p>
+              )}
+            </div>
+            {a.type && (
+              <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: `${typeColor(a.type)}18`, color: typeColor(a.type) }}>{a.type}</span>
+            )}
+          </div>
+        ))}
+      </div>
     </button>
   )
 
@@ -446,12 +507,13 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
         </div>
       )}
 
-      {/* Application editor */}
+      {/* Planned-spray editor — one date + one area + a tank mix of products */}
       {editApp && (
         <div className="bg-white rounded-2xl border-2 p-4 my-4 shadow-sm" style={{ borderColor: GOLD }}>
-          <p className="font-display text-base font-semibold text-slate-900 mb-3">
-            {editApp.id ? 'Edit application' : 'Add application'}
+          <p className="font-display text-base font-semibold text-slate-900 mb-1">
+            {editApp.originalIds?.length ? 'Edit planned spray' : 'New planned spray'}
           </p>
+          <p className="font-body text-xs text-slate-400 mb-3">One area, one date, and everything going in the tank.</p>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -466,33 +528,49 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
                 <input type="date" value={editApp.plannedDate || ''} onChange={(e) => setEditApp({ ...editApp, plannedDate: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
               </div>
             </div>
+
             <div>
-              <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Product</label>
-              <select value={editApp.product} onChange={(e) => pickProduct(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white">
-                <option value="">Select product…</option>
-                {products.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-              </select>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide">Products in the tank</label>
+                <button onClick={addRow} className="font-body text-xs font-bold flex items-center gap-1" style={{ color: FERN }}><Plus size={13} /> Add product</button>
+              </div>
+              <div className="space-y-2">
+                {editApp.products.map((r) => (
+                  <div key={r.key} className="rounded-xl border border-slate-100 p-2.5" style={{ backgroundColor: '#F8FAF9' }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <select value={r.product} onChange={(e) => pickProduct(r.key, e.target.value)} className="flex-1 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white">
+                        <option value="">Select product…</option>
+                        {products.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+                      </select>
+                      {editApp.products.length > 1 && (
+                        <button onClick={() => removeRow(r.key)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove product"><Trash2 size={15} /></button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Rate oz/M</label>
+                        <input type="number" step="any" value={r.rateOzM} onChange={(e) => updateRow(r.key, { rateOzM: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+                      </div>
+                      <div>
+                        <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Rate oz/A</label>
+                        <input type="number" step="any" value={r.rateOzA} onChange={(e) => updateRow(r.key, { rateOzA: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+                      </div>
+                      <div>
+                        <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Target</label>
+                        <input value={r.target} onChange={(e) => updateRow(r.key, { target: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="e.g. Dollar Spot" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Rate oz/M</label>
-                <input type="number" step="any" value={editApp.rateOzM} onChange={(e) => setEditApp({ ...editApp, rateOzM: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-              </div>
-              <div>
-                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Rate oz/A</label>
-                <input type="number" step="any" value={editApp.rateOzA} onChange={(e) => setEditApp({ ...editApp, rateOzA: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-              </div>
-              <div>
-                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Target</label>
-                <input value={editApp.target} onChange={(e) => setEditApp({ ...editApp, target: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. Dollar Spot" />
-              </div>
-            </div>
+
             <div className="flex gap-2 pt-1">
-              {editApp.id && (
-                <button onClick={() => removeApp(editApp.id)} className="py-2.5 px-3 rounded-xl text-red-500 border border-red-100"><Trash2 size={15} /></button>
+              {editApp.originalIds?.length > 0 && (
+                <button onClick={deleteEvent} className="py-2.5 px-3 rounded-xl text-red-500 border border-red-100" aria-label="Delete planned spray"><Trash2 size={15} /></button>
               )}
               <button onClick={() => setEditApp(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
-              <button onClick={saveApp} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>Save</button>
+              <button onClick={saveApp} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save'}</button>
             </div>
           </div>
         </div>
@@ -651,19 +729,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
                       </button>
                       {!folded && (
                         <div className="space-y-3">
-                          {groupByDate(mg.items).map((g) => (
-                            <div key={g.date || 'none'} className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
-                              <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#F0F6F2' }}>
-                                <p className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
-                                  <Calendar size={12} />{fmtDateHeading(g.date)}
-                                </p>
-                                <span className="font-body text-[10px] font-semibold text-slate-400">
-                                  {g.items.length} application{g.items.length !== 1 ? 's' : ''}
-                                </span>
-                              </div>
-                              {g.items.map((a, i) => AppRow(a, { border: i !== 0, showArea: areaFilter === 'all' }))}
-                            </div>
-                          ))}
+                          {groupByEvent(mg.items).map((ev) => EventCard(ev))}
                         </div>
                       )}
                     </div>
@@ -673,18 +739,23 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
             </>
           ) : (
             /* By Area */
-            <div className="space-y-3">
+            <div className="space-y-4">
               {areaGroups.map((ag) => {
                 const folded = collapsed[`a:${ag.area}`]
+                const events = groupByEvent(ag.items)
                 return (
-                  <div key={ag.area} className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
-                    <button onClick={() => toggle(`a:${ag.area}`)} className="w-full flex items-center justify-between px-4 py-3" style={{ backgroundColor: '#F0F6F2' }}>
-                      <span className="font-body text-sm font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
-                        {folded ? <ChevronRight size={14} /> : <ChevronDown size={14} />}{ag.area}
+                  <div key={ag.area}>
+                    <button onClick={() => toggle(`a:${ag.area}`)} className="w-full flex items-center justify-between mb-2">
+                      <span className="font-display text-base font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
+                        {folded ? <ChevronRight size={16} /> : <ChevronDown size={16} />}{ag.area}
                       </span>
-                      <span className="font-body text-[10px] font-semibold text-slate-400">{ag.items.length} apps · {uniqueDays(ag.items)} days</span>
+                      <span className="font-body text-[11px] font-semibold text-slate-400">{events.length} spray{events.length !== 1 ? 's' : ''} · {uniqueDays(ag.items)} days</span>
                     </button>
-                    {!folded && ag.items.map((a, i) => AppRow(a, { border: i !== 0, showDate: true }))}
+                    {!folded && (
+                      <div className="space-y-3">
+                        {events.map((ev) => EventCard(ev, { badge: `${ev.items.length} product${ev.items.length !== 1 ? 's' : ''}` }))}
+                      </div>
+                    )}
                   </div>
                 )
               })}
