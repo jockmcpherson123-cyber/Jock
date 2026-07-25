@@ -1895,8 +1895,8 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   }
   const downloadTemplate = async () => {
     const XLSX = await import('xlsx')
-    const headers = ['Name', 'Type', 'Active Ingredient', 'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A', 'Stock', 'Low Stock', 'N', 'P', 'K', 'Label link', 'SDS link', 'Avoid Grasses']
-    const example = ['Daconil Action', 'Fungicide', 'Chlorothalonil + Acibenzolar-S-methyl', 1.8, 'oz / M', 'oz', 1.8, 3.6, '', '', 0, 0, '', '', '', 'https://example.com/label.pdf', 'https://example.com/sds.pdf', 'Bentgrass, Poa Annua']
+    const headers = ['Name', 'Type', 'Active Ingredient', 'Active %', 'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A', 'Stock', 'Low Stock', 'N', 'P', 'K', 'Label link', 'SDS link', 'Avoid Grasses']
+    const example = ['Daconil Action', 'Fungicide', 'Chlorothalonil + Acibenzolar-S-methyl', 20.3, 1.8, 'oz / M', 'oz', 1.8, 3.6, '', '', 0, 0, '', '', '', 'https://example.com/label.pdf', 'https://example.com/sds.pdf', 'Bentgrass, Poa Annua']
     const ws = XLSX.utils.aoa_to_sheet([headers, example])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Chemical Library')
@@ -1920,7 +1920,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   }
   const startNew = () => {
     setEditing('new')
-    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '' })
+    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '' })
   }
   const cancelEdit = () => { setEditing(null); setDraft(null) }
 
@@ -1942,6 +1942,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       nPerGal: draft.nPerGal === '' || draft.nPerGal == null ? 0 : parseFloat(draft.nPerGal),
       pPerGal: draft.pPerGal === '' || draft.pPerGal == null ? 0 : parseFloat(draft.pPerGal),
       kPerGal: draft.kPerGal === '' || draft.kPerGal == null ? 0 : parseFloat(draft.kPerGal),
+      activePct: draft.activePct === '' || draft.activePct == null ? null : parseFloat(draft.activePct),
     }
     onSaveProduct(cleaned)
     cancelEdit()
@@ -2154,9 +2155,15 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
             <div className="rounded-xl p-3" style={{ backgroundColor: '#F8FAFC' }}>
               <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: '#475569' }}>Label Facts</p>
               <div className="space-y-3">
-                <div>
-                  <FieldLabel>Active Ingredient</FieldLabel>
-                  <input value={draft.activeIngredient ?? ''} onChange={(e) => setDraft({ ...draft, activeIngredient: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. Azoxystrobin" />
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-2">
+                    <FieldLabel>Active Ingredient</FieldLabel>
+                    <input value={draft.activeIngredient ?? ''} onChange={(e) => setDraft({ ...draft, activeIngredient: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. Azoxystrobin" />
+                  </div>
+                  <div>
+                    <FieldLabel>Active %</FieldLabel>
+                    <input type="number" step="any" value={draft.activePct ?? ''} onChange={(e) => setDraft({ ...draft, activePct: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 20.3" />
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
