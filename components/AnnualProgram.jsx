@@ -387,6 +387,16 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
     { label: 'Season', value: seasonSpan, wide: true },
   ]
 
+  // What's due in the next 7 days (across the whole course) — shown on top so
+  // you see this week's sprays without scrolling.
+  const _today = new Date(); _today.setHours(0, 0, 0, 0)
+  const _in7 = new Date(_today); _in7.setDate(_in7.getDate() + 7)
+  const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const todayIso = isoLocal(_today)
+  const in7Iso = isoLocal(_in7)
+  const overdueEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate < todayIso).sort((a, b) => dateKey(b).localeCompare(dateKey(a)))).slice(0, 3)
+  const thisWeekEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate >= todayIso && a.plannedDate <= in7Iso))
+
   // A whole planned spray: date + area + the tank mix. Tapping opens it to edit.
   const EventCard = (ev, opts = {}) => (
     <button key={ev.key} onClick={() => openEvent(ev.items)} className="w-full text-left bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm hover:border-slate-200 transition">
@@ -666,6 +676,30 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
               <button onClick={startCopy} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FERN, border: '1px solid rgba(0,0,0,0.08)' }}>
                 <CalendarPlus size={13} /> Roll forward
               </button>
+            )}
+          </div>
+
+          {/* This week's sprays — on top, no scrolling needed */}
+          <div className="rounded-2xl p-4 mb-4 border-2" style={{ borderColor: GOLD, backgroundColor: '#FFFDF6' }}>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Calendar size={14} style={{ color: '#92660D' }} />
+              <p className="font-display text-base font-bold" style={{ color: '#92660D' }}>This Week</p>
+              <span className="font-body text-[11px] text-slate-400">next 7 days</span>
+            </div>
+            {thisWeekEvents.length === 0 ? (
+              <p className="font-body text-sm text-slate-500">Nothing scheduled in the next 7 days.{overdueEvents.length > 0 ? ' A few sprays are past their planned date — see below.' : ''}</p>
+            ) : (
+              <div className="space-y-2">
+                {thisWeekEvents.map((ev) => EventCard(ev))}
+              </div>
+            )}
+            {overdueEvents.length > 0 && (
+              <div className="mt-3">
+                <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#B91C1C' }}>Past their date</p>
+                <div className="space-y-2">
+                  {overdueEvents.map((ev) => EventCard(ev))}
+                </div>
+              </div>
             )}
           </div>
 
