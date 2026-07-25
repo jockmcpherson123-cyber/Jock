@@ -245,7 +245,14 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
       }
       if (imp.importProgram) {
         const prog = await db.createProgram({ year: Number(imp.year), name: imp.name })
-        await db.bulkInsertApplications(prog.id, imp.data.applications)
+        // Force every planned date into the season's year (the spreadsheet's
+        // second Date column is often blank, leaving an old template date).
+        const yr = Number(imp.year)
+        const normalized = imp.data.applications.map((a) => ({
+          ...a,
+          plannedDate: a.plannedDate ? `${yr}-${a.plannedDate.slice(5)}` : a.plannedDate,
+        }))
+        await db.bulkInsertApplications(prog.id, normalized)
       }
       setImp(null)
       await loadPrograms()
@@ -369,6 +376,26 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
     setCopyForm({ year: nextYear, name: `${nextYear} Pesticide Plan`, shiftDays: 0 })
   }
 
+  // Shift any planned dates that aren't in the program's year to that year,
+  // keeping month + day. Fixes old template dates pulled in on import.
+  async function normalizeDates() {
+    const yr = activeProgram.year
+    const toFix = apps.filter((a) => a.plannedDate && a.plannedDate.slice(0, 4) !== String(yr))
+    if (!toFix.length) return
+    setBusy(true)
+    try {
+      for (const a of toFix) {
+        await db.upsertApplication({ ...a, programId: activeProgram.id, plannedDate: `${yr}-${a.plannedDate.slice(5)}` })
+      }
+      setApps(await db.fetchApplications(activeProgram.id))
+      showToast(`Dates moved into ${yr}`)
+    } catch (e) {
+      console.error(e)
+      showToast('Could not fix the dates')
+    }
+    setBusy(false)
+  }
+
   function startNewProgram() {
     // Default to the next year we don't already have a program for.
     const years = programs.map((p) => p.year).filter(Boolean)
@@ -447,6 +474,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
   const in7Iso = isoLocal(_in7)
   const overdueEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate < todayIso).sort((a, b) => dateKey(b).localeCompare(dateKey(a)))).slice(0, 3)
   const thisWeekEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate >= todayIso && a.plannedDate <= in7Iso))
+  const offYearCount = activeProgram ? apps.filter((a) => a.plannedDate && a.plannedDate.slice(0, 4) !== String(activeProgram.year)).length : 0
 
   // Early-order totals for the whole season (respects the area filter).
   const earlyOrder = computeEarlyOrder(visibleApps, products, areas)
@@ -742,6 +770,19 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
               </button>
             )}
           </div>
+
+          {/* Off-year dates (old template dates pulled in on import) */}
+          {offYearCount > 0 && (
+            <div className="flex items-center gap-3 rounded-2xl bg-amber-50 border border-amber-200 p-3 mb-4">
+              <AlertTriangle size={18} className="text-amber-500 shrink-0" />
+              <p className="font-body text-[12px] text-amber-800 flex-1">
+                <b>{offYearCount}</b> spray{offYearCount !== 1 ? 's have' : ' has'} a date outside {activeProgram.year} (old dates from the spreadsheet). Move {offYearCount !== 1 ? 'them' : 'it'} into {activeProgram.year}, keeping the same month &amp; day?
+              </p>
+              <button onClick={normalizeDates} disabled={busy} className="font-body text-xs font-bold px-3 py-2 rounded-full text-white shrink-0 disabled:opacity-50" style={{ backgroundColor: '#92660D' }}>
+                {busy ? 'Fixing…' : `Fix to ${activeProgram.year}`}
+              </button>
+            </div>
+          )}
 
           {/* This week's sprays — on top, no scrolling needed */}
           <div className="rounded-2xl p-4 mb-4 border-2" style={{ borderColor: GOLD, backgroundColor: '#FFFDF6' }}>
