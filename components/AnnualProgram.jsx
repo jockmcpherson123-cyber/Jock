@@ -5,9 +5,10 @@
 // then browse it by area. (Editing individual applications, the early-order
 // calculator and auto-populating spray sheets come in the next phase.)
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin } from 'lucide-react'
+import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
+import { downloadCSV } from '@/lib/calc'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -99,6 +100,61 @@ function groupByEvent(list) {
 
 let _rowSeq = 0
 const rowKey = () => `r${Date.now()}_${_rowSeq++}`
+
+const money = (n) => (n == null ? '—' : `$${Math.round(n).toLocaleString()}`)
+
+// Early Order: add up the whole program into how much of each product to buy.
+// For each planned application, total product (oz) = rate × the area's size.
+// Then oz → cases → cost using the product's case size + cost. Also rolls up
+// spend by product type and by area (the way the spreadsheet's Early Order tab does).
+function computeEarlyOrder(apps, products, areas) {
+  const prodByName = {}
+  products.forEach((p) => { prodByName[p.name] = p })
+  const areaKeys = Object.keys(areas || {})
+  const sqftFor = (name) => {
+    if (areas[name]?.sqft) return areas[name].sqft
+    const n = String(name || '').toLowerCase()
+    const k = areaKeys.find((x) => x.toLowerCase().startsWith(n)) || areaKeys.find((x) => x.toLowerCase().includes(n))
+    return k ? areas[k].sqft || 0 : 0
+  }
+
+  const perProduct = {}
+  let missingSqft = false
+  apps.forEach((a) => {
+    const sqft = sqftFor(a.area)
+    if (!sqft) { missingSqft = true; return }
+    let oz = 0
+    if (a.rateOzM != null && a.rateOzM !== '') oz = Number(a.rateOzM) * (sqft / 1000)
+    else if (a.rateOzA != null && a.rateOzA !== '') oz = Number(a.rateOzA) * (sqft / 43560)
+    if (!oz || !isFinite(oz)) return
+    if (!perProduct[a.product]) perProduct[a.product] = { name: a.product, type: prodByName[a.product]?.type || a.type || 'Other', totalOz: 0, byArea: {} }
+    perProduct[a.product].totalOz += oz
+    perProduct[a.product].byArea[a.area] = (perProduct[a.product].byArea[a.area] || 0) + oz
+  })
+
+  const rows = Object.values(perProduct).map((r) => {
+    const p = prodByName[r.name] || {}
+    const ozPerCase = Number(p.ozPerCase) || 0
+    const costPerCase = Number(p.costPerCase) || 0
+    const cases = ozPerCase ? r.totalOz / ozPerCase : null
+    const cost = (cases != null && costPerCase) ? cases * costPerCase : null
+    return { ...r, ozPerCase, costPerCase, caseSize: p.caseSize || '', cases, cost, missingCost: !ozPerCase || !costPerCase }
+  }).sort((a, b) => (b.cost || 0) - (a.cost || 0) || b.totalOz - a.totalOz)
+
+  const byType = {}
+  const byArea = {}
+  let grandCost = 0
+  rows.forEach((r) => {
+    if (r.cost) { byType[r.type] = (byType[r.type] || 0) + r.cost; grandCost += r.cost }
+    if (r.cost && r.totalOz) {
+      Object.entries(r.byArea).forEach(([area, oz]) => { byArea[area] = (byArea[area] || 0) + r.cost * (oz / r.totalOz) })
+    }
+  })
+  const typeRows = Object.entries(byType).map(([type, cost]) => ({ type, cost })).sort((a, b) => b.cost - a.cost)
+  const areaRows = Object.entries(byArea).map(([area, cost]) => ({ area, cost })).sort((a, b) => b.cost - a.cost)
+  const missingCostCount = rows.filter((r) => r.missingCost).length
+  return { rows, typeRows, areaRows, grandCost, missingCostCount, missingSqft }
+}
 
 // A distinct color per product type for quick visual scanning.
 function typeColor(type) {
@@ -396,6 +452,14 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
   const in7Iso = isoLocal(_in7)
   const overdueEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate < todayIso).sort((a, b) => dateKey(b).localeCompare(dateKey(a)))).slice(0, 3)
   const thisWeekEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate >= todayIso && a.plannedDate <= in7Iso))
+
+  // Early-order totals for the whole season (respects the area filter).
+  const earlyOrder = computeEarlyOrder(visibleApps, products, areas)
+  const exportEarlyOrder = () => {
+    const rows = [['Product', 'Type', 'Total oz', 'Case size', 'Oz/case', 'Cases needed', 'Cost/case', 'Total cost']]
+    earlyOrder.rows.forEach((r) => rows.push([r.name, r.type, Math.round(r.totalOz), r.caseSize, r.ozPerCase || '', r.cases != null ? Math.ceil(r.cases) : '', r.costPerCase || '', r.cost != null ? Math.round(r.cost) : '']))
+    downloadCSV(rows, `Early_Order_${activeProgram?.year || ''}.csv`)
+  }
 
   // A whole planned spray: date + area + the tank mix. Tapping opens it to edit.
   const EventCard = (ev, opts = {}) => (
@@ -715,7 +779,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
 
           {/* View toggle */}
           <div className="flex items-center gap-2 mb-3">
-            {[['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin]].map(([k, label, Icon]) => (
+            {[['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setViewMode(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 transition" style={viewMode === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
                 <Icon size={13} /> {label}
               </button>
@@ -771,7 +835,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
                 })}
               </div>
             </>
-          ) : (
+          ) : viewMode === 'area' ? (
             /* By Area */
             <div className="space-y-4">
               {areaGroups.map((ag) => {
@@ -793,6 +857,77 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
                   </div>
                 )
               })}
+            </div>
+          ) : (
+            /* Early Order — how much to buy for the season */
+            <div>
+              <div className="rounded-2xl p-4 mb-3 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Estimated season spend</p>
+                    <p className="font-display text-3xl font-bold mt-0.5">{money(earlyOrder.grandCost)}</p>
+                  </div>
+                  <button onClick={exportEarlyOrder} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
+                    <Package size={14} /> Export
+                  </button>
+                </div>
+              </div>
+
+              {(earlyOrder.missingCostCount > 0 || earlyOrder.missingSqft) && (
+                <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 p-3 mb-3">
+                  <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
+                  <p className="font-body text-[11px] text-amber-700">
+                    {earlyOrder.missingCostCount > 0 && <>{earlyOrder.missingCostCount} product{earlyOrder.missingCostCount !== 1 ? 's' : ''} missing case size or cost — add those in the Chemical Library (Ordering section) to include them in the dollar totals. </>}
+                    {earlyOrder.missingSqft && <>Some areas have no square footage set (Settings → Sprayer Areas), so their product totals can't be calculated.</>}
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">By product type</p>
+                  {earlyOrder.typeRows.length === 0 ? <p className="font-body text-xs text-slate-400">No cost data yet.</p> : earlyOrder.typeRows.map((t) => (
+                    <div key={t.type} className="flex items-center justify-between py-1">
+                      <span className="font-body text-xs text-slate-600 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: typeColor(t.type) }} />{t.type}</span>
+                      <span className="font-body text-xs font-bold text-slate-800">{money(t.cost)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">By area</p>
+                  {earlyOrder.areaRows.length === 0 ? <p className="font-body text-xs text-slate-400">No cost data yet.</p> : earlyOrder.areaRows.map((a) => (
+                    <div key={a.area} className="flex items-center justify-between py-1">
+                      <span className="font-body text-xs text-slate-600 truncate">{a.area}</span>
+                      <span className="font-body text-xs font-bold text-slate-800">{money(a.cost)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Every product</p>
+              <div className="space-y-2">
+                {earlyOrder.rows.map((r) => (
+                  <div key={r.name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: typeColor(r.type) }} />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-body text-sm font-semibold text-slate-800 truncate">{r.name}</p>
+                      <p className="font-body text-[11px] text-slate-400">
+                        {Math.round(r.totalOz).toLocaleString()} oz total{r.cases != null ? ` · ${Math.ceil(r.cases)} case${Math.ceil(r.cases) !== 1 ? 's' : ''}` : ''}{r.caseSize ? ` (${r.caseSize})` : ''}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      {r.cost != null
+                        ? <p className="font-body text-sm font-bold text-slate-900">{money(r.cost)}</p>
+                        : <p className="font-body text-[11px] font-semibold text-amber-600">add cost</p>}
+                    </div>
+                  </div>
+                ))}
+                {earlyOrder.rows.length === 0 && (
+                  <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">Nothing to total yet — add planned sprays, and set area sizes + product costs.</div>
+                )}
+              </div>
+
+              <p className="font-body text-[10px] text-slate-400 mt-3">Estimate only. Totals = each application's rate × the area's size, summed over the season, then converted to cases with each product's case size and cost. Verify against a quote before ordering.</p>
             </div>
           )}
         </>
