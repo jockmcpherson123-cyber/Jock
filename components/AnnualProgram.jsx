@@ -5,7 +5,7 @@
 // then browse it by area. (Editing individual applications, the early-order
 // calculator and auto-populating spray sheets come in the next phase.)
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package } from 'lucide-react'
+import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
 import { downloadCSV } from '@/lib/calc'
@@ -172,6 +172,8 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
   const [editApp, setEditApp] = useState(null) // application being added/edited
   const [copyForm, setCopyForm] = useState(null) // roll-forward form state
   const [newForm, setNewForm] = useState(null) // blank-season form state
+  const [editProgForm, setEditProgForm] = useState(null) // rename/edit-season form
+  const [orderEdit, setOrderEdit] = useState(null) // { name, caseSize, ozPerCase } for early-order inline edit
   const [viewMode, setViewMode] = useState('timeline') // 'timeline' | 'area'
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const fileRef = useRef(null)
@@ -396,6 +398,44 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
     setBusy(false)
   }
 
+  function startEditProgram() {
+    setEditProgForm({ id: activeProgram.id, year: activeProgram.year, name: activeProgram.name || `${activeProgram.year} Program` })
+  }
+  async function runEditProgram() {
+    setBusy(true)
+    try {
+      const updated = await db.updateProgram(editProgForm.id, { year: Number(editProgForm.year), name: editProgForm.name })
+      setPrograms((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
+      setActiveProgram(updated)
+      setEditProgForm(null)
+      showToast('Season updated')
+    } catch (e) {
+      console.error(e)
+      showToast('Could not update the season')
+    }
+    setBusy(false)
+  }
+
+  function startOrderEdit(r) {
+    const p = products.find((x) => x.name === r.name) || {}
+    setOrderEdit({ name: r.name, caseSize: p.caseSize ?? '', ozPerCase: p.ozPerCase ?? '' })
+  }
+  async function saveOrderEdit() {
+    const p = products.find((x) => x.name === orderEdit.name)
+    if (!p) { setOrderEdit(null); return }
+    setBusy(true)
+    try {
+      await db.upsertProduct({ ...p, caseSize: orderEdit.caseSize, ozPerCase: orderEdit.ozPerCase === '' ? null : Number(orderEdit.ozPerCase) })
+      await onProductsChanged?.()
+      setOrderEdit(null)
+      showToast('Product updated')
+    } catch (e) {
+      console.error(e)
+      showToast('Could not save the product')
+    }
+    setBusy(false)
+  }
+
   function startNewProgram() {
     // Default to the next year we don't already have a program for.
     const years = programs.map((p) => p.year).filter(Boolean)
@@ -469,10 +509,13 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
   // you see this week's sprays without scrolling.
   const _today = new Date(); _today.setHours(0, 0, 0, 0)
   const _in7 = new Date(_today); _in7.setDate(_in7.getDate() + 7)
+  const _ago30 = new Date(_today); _ago30.setDate(_ago30.getDate() - 30)
   const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   const todayIso = isoLocal(_today)
   const in7Iso = isoLocal(_in7)
-  const overdueEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate < todayIso).sort((a, b) => dateKey(b).localeCompare(dateKey(a)))).slice(0, 3)
+  const ago30Iso = isoLocal(_ago30)
+  // Only surface RECENTLY-missed sprays (last 30 days) — not a whole past season.
+  const overdueEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate < todayIso && a.plannedDate >= ago30Iso).sort((a, b) => dateKey(b).localeCompare(dateKey(a)))).slice(0, 3)
   const thisWeekEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate >= todayIso && a.plannedDate <= in7Iso))
   const offYearCount = activeProgram ? apps.filter((a) => a.plannedDate && a.plannedDate.slice(0, 4) !== String(activeProgram.year)).length : 0
 
@@ -609,9 +652,10 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
         </div>
       )}
 
-      {/* Planned-spray editor — one date + one area + a tank mix of products */}
+      {/* Planned-spray editor — opens as a centered popup so you edit in place */}
       {editApp && (
-        <div className="bg-white rounded-2xl border-2 p-4 my-4 shadow-sm" style={{ borderColor: GOLD }}>
+        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-3 overflow-y-auto" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditApp(null)}>
+        <div className="bg-white rounded-2xl border-2 p-4 shadow-2xl my-6 w-full max-w-lg" style={{ borderColor: GOLD }} onClick={(e) => e.stopPropagation()}>
           <p className="font-display text-base font-semibold text-slate-900 mb-1">
             {editApp.originalIds?.length ? 'Edit planned spray' : 'New planned spray'}
           </p>
@@ -673,6 +717,31 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
               )}
               <button onClick={() => setEditApp(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
               <button onClick={saveApp} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save'}</button>
+            </div>
+          </div>
+        </div>
+        </div>
+      )}
+
+      {/* Edit / rename the season */}
+      {editProgForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditProgForm(null)}>
+          <div className="bg-white rounded-2xl border-2 p-4 shadow-2xl w-full max-w-md" style={{ borderColor: FOREST }} onClick={(e) => e.stopPropagation()}>
+            <p className="font-display text-base font-semibold text-slate-900 mb-3">Edit season</p>
+            <div className="grid grid-cols-3 gap-3 mb-3">
+              <div>
+                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Year</label>
+                <input type="number" value={editProgForm.year} onChange={(e) => setEditProgForm({ ...editProgForm, year: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+              </div>
+              <div className="col-span-2">
+                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Name</label>
+                <input value={editProgForm.name} onChange={(e) => setEditProgForm({ ...editProgForm, name: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+              </div>
+            </div>
+            <p className="font-body text-[11px] text-slate-400 mb-3">Changing the year only relabels the season — it doesn't move the spray dates. Use the “Fix to year” banner for that.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setEditProgForm(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+              <button onClick={runEditProgram} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save'}</button>
             </div>
           </div>
         </div>
@@ -764,6 +833,11 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
             <button onClick={startNewProgram} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FOREST, border: '1px solid rgba(0,0,0,0.08)' }}>
               <Plus size={13} /> New Season
             </button>
+            {activeProgram && (
+              <button onClick={startEditProgram} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+                <Pencil size={12} /> Edit season
+              </button>
+            )}
             {activeProgram && (
               <button onClick={startCopy} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FERN, border: '1px solid rgba(0,0,0,0.08)' }}>
                 <CalendarPlus size={13} /> Roll forward
@@ -930,12 +1004,13 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
               <div className="space-y-2">
                 {earlyOrder.rows.map((r) => {
                   const areasUsed = Object.entries(r.byArea).sort((a, b) => b[1] - a[1])
+                  const editing = orderEdit?.name === r.name
                   return (
                     <div key={r.name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
-                      <div className="flex items-start gap-3">
+                      <button onClick={() => startOrderEdit(r)} className="w-full text-left flex items-start gap-3">
                         <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ backgroundColor: typeColor(r.type) }} />
                         <div className="min-w-0 flex-1">
-                          <p className="font-body text-sm font-semibold text-slate-800 truncate">{r.name}</p>
+                          <p className="font-body text-sm font-semibold text-slate-800 truncate flex items-center gap-1">{r.name} <Pencil size={11} className="text-slate-300 shrink-0" /></p>
                           <p className="font-body text-[11px] text-slate-400">
                             {Math.round(r.totalOz).toLocaleString()} oz total{r.totalInUnits != null ? ` (${round1(r.totalInUnits)} ${r.unit})` : ''}{r.caseSize ? ` · ${r.caseSize}` : ''}{r.ozPerCase ? ` @ ${r.ozPerCase} oz/case` : ''}
                           </p>
@@ -950,8 +1025,24 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
                             <p className="font-body text-[11px] font-semibold text-amber-600">add oz/case</p>
                           )}
                         </div>
-                      </div>
-                      {areasUsed.length > 0 && (
+                      </button>
+                      {editing && (
+                        <div className="mt-2 pt-2 border-t border-slate-100 grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Case size</label>
+                            <input value={orderEdit.caseSize} onChange={(e) => setOrderEdit({ ...orderEdit, caseSize: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="4 x 1 Gal" />
+                          </div>
+                          <div>
+                            <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Oz / case</label>
+                            <input type="number" step="any" value={orderEdit.ozPerCase} onChange={(e) => setOrderEdit({ ...orderEdit, ozPerCase: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="512" />
+                          </div>
+                          <div className="col-span-2 flex gap-2">
+                            <button onClick={() => setOrderEdit(null)} className="flex-1 py-2 rounded-lg text-[12px] font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+                            <button onClick={saveOrderEdit} disabled={busy} className="flex-1 py-2 rounded-lg text-[12px] font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>Save</button>
+                          </div>
+                        </div>
+                      )}
+                      {!editing && areasUsed.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 mt-2 pl-5">
                           {areasUsed.map(([area, oz]) => (
                             <span key={area} className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{area}: {Math.round(oz).toLocaleString()} oz</span>
