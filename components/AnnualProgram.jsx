@@ -5,7 +5,7 @@
 // then browse it by area. (Editing individual applications, the early-order
 // calculator and auto-populating spray sheets come in the next phase.)
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus } from 'lucide-react'
+import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
 
@@ -41,6 +41,58 @@ function groupByDate(list) {
   return groups
 }
 
+// Sort key that pushes undated applications to the very end.
+const dateKey = (a) => a.plannedDate || '9999-99-99'
+
+// The 'YYYY-MM' month bucket for an application.
+function monthKey(d) {
+  return d ? d.slice(0, 7) : 'none'
+}
+function fmtMonth(key) {
+  if (key === 'none') return 'No date set'
+  const [y, m] = key.split('-')
+  return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+}
+function fmtMonthShort(key) {
+  if (key === 'none') return 'No date'
+  const [y, m] = key.split('-')
+  return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-US', { month: 'short' })
+}
+
+// Group by month (date-ordered), each month carrying its date sub-groups.
+function groupByMonth(list) {
+  const sorted = [...list].sort((a, b) => dateKey(a).localeCompare(dateKey(b)))
+  const groups = []
+  const index = {}
+  sorted.forEach((a) => {
+    const key = monthKey(a.plannedDate)
+    if (index[key] == null) { index[key] = groups.length; groups.push({ key, items: [] }) }
+    groups[index[key]].items.push(a)
+  })
+  return groups
+}
+
+// Group by area (area-name order), each area date-sorted.
+function groupByArea(list) {
+  const byArea = {}
+  list.forEach((a) => { (byArea[a.area] = byArea[a.area] || []).push(a) })
+  return Object.keys(byArea).sort().map((area) => ({
+    area,
+    items: byArea[area].sort((a, b) => dateKey(a).localeCompare(dateKey(b))),
+  }))
+}
+
+const uniqueDays = (items) => new Set(items.filter((a) => a.plannedDate).map((a) => a.plannedDate)).size
+
+// A distinct color per product type for quick visual scanning.
+function typeColor(type) {
+  return {
+    Fungicide: '#3A6B4A', Herbicide: '#D97706', Insecticide: '#DC2626',
+    'Growth Reg': '#7C3AED', Fertilizer: '#2563EB', Biological: '#0D9488',
+    'Wetting Agent': '#64748B',
+  }[type] || '#94A3B8'
+}
+
 export default function AnnualProgram({ areas, products = [], onProductsChanged }) {
   const [programs, setPrograms] = useState([])
   const [activeProgram, setActiveProgram] = useState(null)
@@ -52,7 +104,14 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
   const [toast, setToast] = useState(null)
   const [editApp, setEditApp] = useState(null) // application being added/edited
   const [copyForm, setCopyForm] = useState(null) // roll-forward form state
+  const [viewMode, setViewMode] = useState('timeline') // 'timeline' | 'area'
+  const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const fileRef = useRef(null)
+
+  const toggle = (k) => setCollapsed((c) => ({ ...c, [k]: !c[k] }))
+  const scrollToMonth = (key) => {
+    document.getElementById(`month-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(null), 3000) }
 
@@ -241,8 +300,37 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
   // Per-area counts for the current program.
   const areaCounts = {}
   apps.forEach((a) => { areaCounts[a.area] = (areaCounts[a.area] || 0) + 1 })
-  const areaNames = Object.keys(areaCounts)
+  const areaNames = Object.keys(areaCounts).sort()
   const visibleApps = areaFilter === 'all' ? apps : apps.filter((a) => a.area === areaFilter)
+
+  // Derived groupings + a season summary for the redesigned browse views.
+  const monthGroups = groupByMonth(visibleApps)
+  const areaGroups = groupByArea(visibleApps)
+  const thisMonth = new Date().toISOString().slice(0, 7)
+  const datedApps = visibleApps.filter((a) => a.plannedDate).map((a) => a.plannedDate).sort()
+  const seasonSpan = datedApps.length ? `${fmtDate(datedApps[0])} – ${fmtDate(datedApps[datedApps.length - 1])}` : '—'
+  const summary = [
+    { label: 'Applications', value: visibleApps.length },
+    { label: 'Spray days', value: uniqueDays(visibleApps) },
+    { label: 'Areas', value: new Set(visibleApps.map((a) => a.area)).size },
+    { label: 'Season', value: seasonSpan, wide: true },
+  ]
+
+  // One tappable application row, shared by both views.
+  const AppRow = (a, opts = {}) => (
+    <button key={a.id} onClick={() => setEditApp({ ...a, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', target: a.target || '' })} className={`w-full text-left flex items-center gap-3 px-4 py-3 transition hover:bg-slate-50 ${opts.border ? 'border-t border-black/5' : ''}`}>
+      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: typeColor(a.type) }} />
+      <div className="min-w-0 flex-1">
+        <p className="font-body text-sm font-semibold text-slate-800 truncate">{a.product}</p>
+        <p className="font-body text-[11px] text-slate-400 truncate">
+          {opts.showArea ? `${a.area} · ` : ''}{opts.showDate && a.plannedDate ? `${fmtDate(a.plannedDate)} · ` : ''}{a.rateOzM ? `${a.rateOzM} oz/M` : ''}{a.target ? ` · ${a.target}` : ''}
+        </p>
+      </div>
+      {a.type && (
+        <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: `${typeColor(a.type)}18`, color: typeColor(a.type) }}>{a.type}</span>
+      )}
+    </button>
+  )
 
   return (
     <div className="pt-6 pb-10">
@@ -447,6 +535,25 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
             )}
           </div>
 
+          {/* Season summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+            {summary.map((s) => (
+              <div key={s.label} className={`bg-white rounded-xl border border-black/5 px-3 py-2.5 shadow-sm ${s.wide ? 'col-span-2 sm:col-span-1' : ''}`}>
+                <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">{s.label}</p>
+                <p className="font-display font-bold text-slate-900" style={{ fontSize: s.wide ? 13 : 20, lineHeight: 1.2, marginTop: 2 }}>{s.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* View toggle */}
+          <div className="flex items-center gap-2 mb-3">
+            {[['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin]].map(([k, label, Icon]) => (
+              <button key={k} onClick={() => setViewMode(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 transition" style={viewMode === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+                <Icon size={13} /> {label}
+              </button>
+            ))}
+          </div>
+
           {/* Area filter */}
           <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
             <button onClick={() => setAreaFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={areaFilter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
@@ -459,37 +566,72 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged 
             ))}
           </div>
 
-          {/* Applications list */}
           {visibleApps.length === 0 ? (
             <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No applications in this program.</div>
-          ) : (
-            <div className="space-y-3">
-              {groupByDate(visibleApps).map((g) => (
-                <div key={g.date || 'none'} className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
-                  {/* Date heading — one per spray day */}
-                  <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#F0F6F2' }}>
-                    <p className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
-                      <Calendar size={12} />{fmtDateHeading(g.date)}
-                    </p>
-                    <span className="font-body text-[10px] font-semibold text-slate-400">
-                      {g.items.length} application{g.items.length !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-                  {g.items.map((a, i) => (
-                    <button key={a.id} onClick={() => setEditApp({ ...a, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', target: a.target || '' })} className={`w-full text-left flex items-center gap-3 px-4 py-3 transition hover:bg-slate-50 ${i !== 0 ? 'border-t border-black/5' : ''}`}>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-body text-sm font-semibold text-slate-800 truncate">{a.product}</p>
-                        <p className="font-body text-[11px] text-slate-400 truncate">
-                          {areaFilter === 'all' ? `${a.area} · ` : ''}{a.rateOzM} oz/M{a.target ? ` · ${a.target}` : ''}
-                        </p>
-                      </div>
-                      {a.type && (
-                        <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{a.type}</span>
-                      )}
+          ) : viewMode === 'timeline' ? (
+            <>
+              {/* Month jump bar */}
+              {monthGroups.length > 1 && (
+                <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 -mx-1 px-1">
+                  {monthGroups.map((g) => (
+                    <button key={g.key} onClick={() => scrollToMonth(g.key)} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap flex items-center gap-1 transition" style={g.key === thisMonth ? { backgroundColor: GOLD, color: FOREST } : { backgroundColor: '#F0F6F2', color: FERN }}>
+                      {fmtMonthShort(g.key)} <span className="opacity-60">{g.items.length}</span>
                     </button>
                   ))}
                 </div>
-              ))}
+              )}
+
+              {/* Months → spray days */}
+              <div className="space-y-4">
+                {monthGroups.map((mg) => {
+                  const folded = collapsed[`m:${mg.key}`]
+                  return (
+                    <div key={mg.key} id={`month-${mg.key}`} style={{ scrollMarginTop: 12 }}>
+                      <button onClick={() => toggle(`m:${mg.key}`)} className="w-full flex items-center justify-between mb-2 group">
+                        <span className="font-display text-base font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
+                          {folded ? <ChevronRight size={16} /> : <ChevronDown size={16} />}{fmtMonth(mg.key)}
+                        </span>
+                        <span className="font-body text-[11px] font-semibold text-slate-400">{mg.items.length} apps · {uniqueDays(mg.items)} days</span>
+                      </button>
+                      {!folded && (
+                        <div className="space-y-3">
+                          {groupByDate(mg.items).map((g) => (
+                            <div key={g.date || 'none'} className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
+                              <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#F0F6F2' }}>
+                                <p className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
+                                  <Calendar size={12} />{fmtDateHeading(g.date)}
+                                </p>
+                                <span className="font-body text-[10px] font-semibold text-slate-400">
+                                  {g.items.length} application{g.items.length !== 1 ? 's' : ''}
+                                </span>
+                              </div>
+                              {g.items.map((a, i) => AppRow(a, { border: i !== 0, showArea: areaFilter === 'all' }))}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          ) : (
+            /* By Area */
+            <div className="space-y-3">
+              {areaGroups.map((ag) => {
+                const folded = collapsed[`a:${ag.area}`]
+                return (
+                  <div key={ag.area} className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
+                    <button onClick={() => toggle(`a:${ag.area}`)} className="w-full flex items-center justify-between px-4 py-3" style={{ backgroundColor: '#F0F6F2' }}>
+                      <span className="font-body text-sm font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
+                        {folded ? <ChevronRight size={14} /> : <ChevronDown size={14} />}{ag.area}
+                      </span>
+                      <span className="font-body text-[10px] font-semibold text-slate-400">{ag.items.length} apps · {uniqueDays(ag.items)} days</span>
+                    </button>
+                    {!folded && ag.items.map((a, i) => AppRow(a, { border: i !== 0, showDate: true }))}
+                  </div>
+                )
+              })}
             </div>
           )}
         </>
