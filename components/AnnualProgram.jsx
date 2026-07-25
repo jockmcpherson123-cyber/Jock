@@ -532,11 +532,12 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
     downloadCSV(rows, `Early_Order_${activeProgram?.year || ''}.csv`)
   }
 
-  // A whole planned spray: date + area + the tank mix. Tapping the body opens it
-  // to edit; the footer button turns it straight into a spray sheet.
+  // A whole planned spray: date + area + the tank mix. Tapping the card opens it
+  // to edit; a separate button sits underneath (in the gap before the next spray)
+  // to turn it straight into a spray sheet.
   const EventCard = (ev, opts = {}) => (
-    <div key={ev.key} className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
-      <div onClick={() => openEvent(ev.items)} className="cursor-pointer hover:bg-slate-50/50 transition">
+    <div key={ev.key}>
+      <div onClick={() => openEvent(ev.items)} className="cursor-pointer bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm hover:border-slate-200 transition">
         <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#F0F6F2' }}>
           <p className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
             <Calendar size={12} />{fmtDateHeading(ev.date)}
@@ -563,8 +564,8 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
         </div>
       </div>
       {onCreateSheet && (
-        <button onClick={() => onCreateSheet(ev.items)} className="w-full flex items-center justify-center gap-1.5 py-2.5 border-t border-black/5 font-body text-xs font-bold transition hover:bg-slate-50" style={{ color: FOREST }}>
-          <ClipboardList size={13} /> Create spray sheet
+        <button onClick={() => onCreateSheet(ev.items)} className="mt-1.5 w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed font-body text-xs font-bold transition hover:bg-white" style={{ color: FOREST, borderColor: GOLD, backgroundColor: '#FFFDF6' }}>
+          <ClipboardList size={13} /> Create spray sheet for this
         </button>
       )}
     </div>
