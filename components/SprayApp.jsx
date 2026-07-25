@@ -171,6 +171,7 @@ function SprayOpsModule({ user }) {
   const [location, setLocation] = useState({ address: '', lat: null, lng: null, timezone: 'America/New_York' })
   const [grassTypes, setGrassTypes] = useState([])
   const [applicatorLicenses, setApplicatorLicenses] = useState({})
+  const [directorPins, setDirectorPins] = useState({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
@@ -207,6 +208,7 @@ function SprayOpsModule({ user }) {
       setLocation(settings.location)
       setGrassTypes(settings.grassTypes || [])
       setApplicatorLicenses(settings.applicatorLicenses || {})
+      setDirectorPins(settings.directorPins || {})
       // Load the newest program's applications so the dashboard can surface
       // what's planned for the days ahead.
       if (progs.length > 0) {
@@ -232,6 +234,7 @@ function SprayOpsModule({ user }) {
     if (patch.location) setLocation(patch.location)
     if (patch.grassTypes) setGrassTypes(patch.grassTypes)
     if (patch.applicatorLicenses) setApplicatorLicenses(patch.applicatorLicenses)
+    if (patch.directorPins) setDirectorPins(patch.directorPins)
     try {
       await db.saveSettings(patch)
     } catch (e) {
@@ -317,8 +320,8 @@ function SprayOpsModule({ user }) {
     }
   }
 
-  async function approveSheet(sig) {
-    const updated = { ...activeSheet, status: 'approved', directorSig: sig, directorDate: new Date().toISOString() }
+  async function approveSheet(sig, signature = '') {
+    const updated = { ...activeSheet, status: 'approved', directorSig: sig, directorSignature: signature || activeSheet.directorSignature || '', directorDate: new Date().toISOString() }
     const saved = await saveSheet(updated)
     if (!saved) return
 
@@ -488,7 +491,7 @@ function SprayOpsModule({ user }) {
           <SheetViewer
             key={activeSheet.id}
             sheet={activeSheet} products={products} areas={areas} directors={directors} operators={operators}
-            applicatorLicenses={applicatorLicenses}
+            applicatorLicenses={applicatorLicenses} directorPins={directorPins}
             location={location} courseInfo={courseInfo}
             manage={manage} approve={canApprove(user.role)}
             onBack={() => setRoute(manage ? 'dashboard' : 'tospray')}
@@ -527,7 +530,7 @@ function SprayOpsModule({ user }) {
           <SettingsPage
             areas={areas} operators={operators} directors={directors} targets={targets}
             sheetTypes={sheetTypes} courseInfo={courseInfo} location={location} grassTypes={grassTypes}
-            applicatorLicenses={applicatorLicenses}
+            applicatorLicenses={applicatorLicenses} directorPins={directorPins}
             onSave={async (patch) => { await saveSettings(patch); showToast('Settings updated') }}
           />
         )}
@@ -1183,6 +1186,14 @@ function PrintableSheet({ sheet, area, products, sheetTargets, courseInfo }) {
               <td style={tdVal}>{sheet.directorDate ? new Date(sheet.directorDate).toLocaleString() : '_______________________'}</td>
             </tr>
             <tr>
+              <td style={tdLabel}>Director Signature</td>
+              <td style={tdVal} colSpan={3}>
+                {sheet.directorSignature
+                  ? <img src={sheet.directorSignature} alt="Director signature" style={{ height: 48, maxWidth: '100%' }} />
+                  : '_______________________'}
+              </td>
+            </tr>
+            <tr>
               <td style={tdLabel}>Status</td>
               <td style={tdVal} colSpan={3}>{sheet.status === 'approved' ? 'APPROVED' : 'PENDING APPROVAL'}</td>
             </tr>
@@ -1275,8 +1286,11 @@ function SignaturePad({ value, onChange }) {
 }
 
 // ── SHEET VIEWER ──────────────────────────────────────────────────────────
-function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, location, courseInfo, manage, approve }) {
+function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, directorPins = {}, location, courseInfo, manage, approve }) {
   const [sig, setSig] = useState('')
+  const [dirPin, setDirPin] = useState('')
+  const [dirSig, setDirSig] = useState('')
+  const [pinError, setPinError] = useState('')
   const [wx, setWx] = useState(sheet.weather || { temp: '', wind: '', humidity: '', windDir: '' })
   const [sprayedBy, setSprayedBy] = useState(sheet.completedBy || sheet.operator || '')
   // The applicator's drawn sign-off signature (data URL).
@@ -1355,6 +1369,14 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
       applicatorPesticideLicense: complete ? (licenseFor.pesticide || '') : sheet.applicatorPesticideLicense,
       applicatorFertilizerLicense: complete ? (licenseFor.fertilizer || '') : sheet.applicatorFertilizerLicense,
     })
+  // Director approval: verify the PIN (if one is set) before signing off.
+  const doApprove = () => {
+    if (!sig) return
+    const required = directorPins[sig]
+    if (required && dirPin !== required) { setPinError("That PIN doesn't match — try again."); return }
+    setPinError('')
+    onApprove(sig, dirSig)
+  }
   const reopen = () => onLogSpray?.({ ...sheet, completed: false })
   // Save the optional partial-fill add-on (no approval needed — separate spray).
   const savePartial = (gal) => onLogSpray?.({ ...sheet, partialGallons: gal === '' || gal == null ? null : Number(gal) }, { quiet: true })
@@ -1603,10 +1625,29 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
 
             {sheet.status === 'pending' && approve && (
               <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
-                <Select value={sig} onChange={setSig} options={directors} placeholder="Select director to approve..." />
-                <button onClick={() => sig && onApprove(sig)} disabled={!sig} className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
+                <Select value={sig} onChange={(v) => { setSig(v); setPinError('') }} options={directors} placeholder="Select director to approve..." />
+                {sig && (
+                  <>
+                    <div>
+                      <FieldLabel>Approval PIN {directorPins[sig] ? '' : '(none set — add one in Settings → People)'}</FieldLabel>
+                      <input type="password" inputMode="numeric" value={dirPin} onChange={(e) => { setDirPin(e.target.value.replace(/\D/g, '').slice(0, 8)); setPinError('') }} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tracking-widest" placeholder="Enter your PIN" />
+                      {pinError && <p className="font-body text-[11px] text-red-500 mt-1">{pinError}</p>}
+                    </div>
+                    <div>
+                      <FieldLabel>Director signature</FieldLabel>
+                      <SignaturePad value={dirSig} onChange={setDirSig} />
+                    </div>
+                  </>
+                )}
+                <button onClick={doApprove} disabled={!sig || !dirSig || (directorPins[sig] && !dirPin)} className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
                   <CloudUpload size={15} /> Approve &amp; Push to iPads
                 </button>
+              </div>
+            )}
+            {sheet.status === 'approved' && sheet.directorSignature && (
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <p className="font-body text-[11px] text-slate-400 mb-1">Director signature — {sheet.directorSig}</p>
+                <img src={sheet.directorSignature} alt="Director signature" className="h-12 rounded border border-slate-100 bg-white" />
               </div>
             )}
             {sheet.status === 'pending' && !approve && (
@@ -2718,7 +2759,7 @@ function NPKMini({ label, value, color }) {
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────
-function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, applicatorLicenses, onSave }) {
+function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, applicatorLicenses, directorPins, onSave }) {
   const [section, setSection] = useState('course')
 
   return (
@@ -2735,7 +2776,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
 
       {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} onSave={onSave} />}
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
-      {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} onSave={onSave} />}
+      {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} onSave={onSave} />}
       {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassTypes} onSave={onSave} />}
       {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} onSave={onSave} />}
     </div>
@@ -2850,12 +2891,74 @@ function NameListEditor({ title, items, onSave, accent }) {
   )
 }
 
-function PeopleSettings({ operators, directors, applicatorLicenses = {}, onSave }) {
+function PeopleSettings({ operators, directors, applicatorLicenses = {}, directorPins = {}, onSave }) {
   return (
     <div className="space-y-4">
       <ApplicatorsEditor operators={operators} licenses={applicatorLicenses} onSave={onSave} />
-      <NameListEditor title="Directors / Approvers" items={directors} accent="#92660D" onSave={(list) => onSave({ directors: list })} />
+      <DirectorsEditor directors={directors} pins={directorPins} onSave={onSave} />
     </div>
+  )
+}
+
+// Directors / approvers plus a private PIN each types to approve a spray sheet.
+function DirectorsEditor({ directors, pins, onSave }) {
+  const [newName, setNewName] = useState('')
+  const [show, setShow] = useState({})
+
+  const setPin = (name, value) => {
+    const digits = value.replace(/\D/g, '').slice(0, 8)
+    onSave({ directorPins: { ...pins, [name]: digits } })
+  }
+  const addPerson = () => {
+    const n = newName.trim()
+    if (!n || directors.includes(n)) { setNewName(''); return }
+    onSave({ directors: [...directors, n] })
+    setNewName('')
+  }
+  const removePerson = (name) => {
+    const nextPins = { ...pins }
+    delete nextPins[name]
+    onSave({ directors: directors.filter((d) => d !== name), directorPins: nextPins })
+  }
+
+  return (
+    <Card>
+      <p className="font-display text-base font-semibold text-slate-900 mb-1">Directors / Approvers</p>
+      <p className="font-body text-[11px] text-slate-400 mb-3">Each director sets a private PIN. They type it (and sign) to approve a spray sheet — proving it was really them.</p>
+
+      <div className="space-y-3">
+        {directors.map((name) => (
+          <div key={name} className="rounded-xl border border-slate-100 p-3" style={{ backgroundColor: '#FDFBF4' }}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="font-body text-sm font-bold text-slate-800">{name}</p>
+              <button onClick={() => removePerson(name)} className="text-slate-300 hover:text-red-500 transition" aria-label={`Remove ${name}`}><Trash2 size={15} /></button>
+            </div>
+            <FieldLabel>Approval PIN {pins[name] ? '' : '(not set)'}</FieldLabel>
+            <div className="relative max-w-[220px]">
+              <input
+                type={show[name] ? 'text' : 'password'}
+                inputMode="numeric"
+                value={pins[name] ?? ''}
+                onChange={(e) => setPin(name, e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 pr-14 text-sm font-body bg-white tracking-widest"
+                placeholder="4–8 digits"
+              />
+              <button type="button" onClick={() => setShow((s) => ({ ...s, [name]: !s[name] }))} className="absolute right-2 top-1/2 -translate-y-1/2 font-body text-[11px] font-bold" style={{ color: '#92660D' }}>
+                {show[name] ? 'Hide' : 'Show'}
+              </button>
+            </div>
+          </div>
+        ))}
+        {directors.length === 0 && <p className="font-body text-sm text-slate-400">No directors yet.</p>}
+      </div>
+
+      <div className="flex gap-2 mt-3">
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addPerson()} placeholder="Add a director's name…" className="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm font-body" />
+        <button onClick={addPerson} className="font-body text-xs font-bold px-3.5 py-2 rounded-xl text-white flex items-center gap-1.5" style={{ backgroundColor: '#92660D' }}>
+          <Plus size={14} /> Add
+        </button>
+      </div>
+    </Card>
   )
 }
 
