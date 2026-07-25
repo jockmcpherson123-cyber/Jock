@@ -506,6 +506,9 @@ function SprayOpsModule({ user }) {
         {route === 'inventory' && (
           <Inventory products={products} deliveries={deliveries} onAddDelivery={addDelivery} />
         )}
+        {route === 'documents' && (
+          <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? saveProduct : undefined} />
+        )}
         {route === 'weather' && <Weather location={location} onGoToSettings={() => manage && setRoute('settings')} />}
         {route === 'program' && manage && <AnnualProgram areas={areas} products={products} onProductsChanged={reloadProducts} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} />}
@@ -524,8 +527,8 @@ function SprayOpsModule({ user }) {
 // ── TOP NAV ───────────────────────────────────────────────────────────────
 function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
   const items = manage
-    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['weather', 'Weather'], ['inventory', 'Inventory'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
-    : [['tospray', 'To Spray'], ['records', 'Records'], ['inventory', 'Inventory'], ['weather', 'Weather']]
+    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['weather', 'Weather'], ['inventory', 'Inventory'], ['documents', 'Labels & SDS'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
+    : [['tospray', 'To Spray'], ['records', 'Records'], ['inventory', 'Inventory'], ['documents', 'Labels & SDS'], ['weather', 'Weather']]
 
   return (
     <div style={{ backgroundColor: FOREST }} className="text-white">
@@ -1369,6 +1372,12 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                       {grassConflicts(prodInfo, area).length > 0 && (
                         <p className="text-[10px] font-semibold text-red-600 mt-0.5">⚠ May damage {grassConflicts(prodInfo, area).join(', ')}</p>
                       )}
+                      {(prodInfo?.labelUrl || prodInfo?.sdsUrl) && (
+                        <div className="flex gap-2 mt-1" onClick={(e) => e.stopPropagation()}>
+                          {prodInfo?.labelUrl && <a href={normalizeUrl(prodInfo.labelUrl)} target="_blank" rel="noopener noreferrer" className="text-[11px] font-bold" style={{ color: '#2563EB' }}>Label ↗</a>}
+                          {prodInfo?.sdsUrl && <a href={normalizeUrl(prodInfo.sdsUrl)} target="_blank" rel="noopener noreferrer" className="text-[11px] font-bold" style={{ color: '#2563EB' }}>SDS ↗</a>}
+                        </div>
+                      )}
                     </div>
                     <div className="w-16 text-center rounded-lg py-1.5" style={{ backgroundColor: '#FFF6DD' }}>
                       <p className="text-sm font-bold text-slate-900 leading-none">{amt ?? '—'}</p>
@@ -1764,6 +1773,96 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
   )
 }
 
+// ── LABELS & SDS ──────────────────────────────────────────────────────────
+// Make sure a pasted link has a scheme so it opens as an external site rather
+// than a path inside our app.
+function normalizeUrl(u) {
+  const s = String(u || '').trim()
+  if (!s) return ''
+  if (/^https?:\/\//i.test(s)) return s
+  return `https://${s}`
+}
+
+function DocumentsLibrary({ products, manage, onSaveProduct }) {
+  const [q, setQ] = useState('')
+  const [missingOnly, setMissingOnly] = useState(false)
+  // Local copy of the links so managers can type without a save round-trip per keystroke.
+  const [edits, setEdits] = useState({})
+
+  const valOf = (p, field) => (edits[p.name]?.[field] ?? p[field] ?? '')
+  const setField = (name, field, v) => setEdits((e) => ({ ...e, [name]: { ...e[name], [field]: v } }))
+  const commit = (p, field) => {
+    const next = normalizeUrl(valOf(p, field))
+    if (next === (p[field] || '')) return
+    onSaveProduct?.({ ...p, [field]: next })
+  }
+
+  const withDocs = products.filter((p) => p.labelUrl || p.sdsUrl).length
+  const filtered = products
+    .filter((p) => p.name.toLowerCase().includes(q.toLowerCase()))
+    .filter((p) => (missingOnly ? !(p.labelUrl && p.sdsUrl) : true))
+
+  return (
+    <div className="pt-6 pb-10">
+      <SectionHeader title="Labels & SDS" subtitle="Every product's label and Safety Data Sheet, one tap away" noMargin />
+
+      <div className="bg-white rounded-2xl border border-black/5 p-4 mt-4 mb-4 shadow-sm flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#EFF6FF' }}>
+          <ClipboardList size={18} style={{ color: '#2563EB' }} />
+        </div>
+        <div className="min-w-0">
+          <p className="font-body text-sm font-bold text-slate-800">{withDocs} of {products.length} products have documents</p>
+          <p className="font-body text-[11px] text-slate-400">{manage ? 'Paste a label or SDS link on any product below — it saves as you go.' : 'Tap a document to open it. Ask a manager to add any that are missing.'}</p>
+        </div>
+      </div>
+
+      <div className="flex gap-2 mb-4">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search products…" className="flex-1 border border-slate-200 rounded-full px-4 py-2 text-sm font-body bg-white" />
+        <button onClick={() => setMissingOnly(!missingOnly)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={missingOnly ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+          Missing only
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {filtered.map((p) => (
+          <div key={p.name} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <p className="font-body font-semibold text-sm text-slate-900 truncate">{p.name}</p>
+              <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{p.type}</span>
+            </div>
+            {manage ? (
+              <div className="grid sm:grid-cols-2 gap-3">
+                {[['labelUrl', 'Label link'], ['sdsUrl', 'SDS link']].map(([field, label]) => (
+                  <div key={field}>
+                    <div className="flex items-center justify-between mb-1">
+                      <FieldLabel noMargin>{label}</FieldLabel>
+                      {p[field] && <a href={normalizeUrl(p[field])} target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold" style={{ color: '#2563EB' }}>Open ↗</a>}
+                    </div>
+                    <input value={valOf(p, field)} onChange={(e) => setField(p.name, field, e.target.value)} onBlur={() => commit(p, field)} placeholder="https://…" inputMode="url" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                {[['labelUrl', 'Label'], ['sdsUrl', 'SDS']].map(([field, label]) => (
+                  p[field] ? (
+                    <a key={field} href={normalizeUrl(p[field])} target="_blank" rel="noopener noreferrer" className="flex-1 text-center font-body text-xs font-bold px-3 py-2.5 rounded-xl text-white" style={{ backgroundColor: '#2563EB' }}>Open {label} ↗</a>
+                  ) : (
+                    <span key={field} className="flex-1 text-center font-body text-xs font-semibold px-3 py-2.5 rounded-xl text-slate-400 bg-slate-50">No {label} yet</span>
+                  )
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        {filtered.length === 0 && (
+          <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No products match.</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── CHEMICAL LIBRARY ──────────────────────────────────────────────────────
 function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeleteProduct }) {
   const [editing, setEditing] = useState(null)
@@ -1776,7 +1875,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   }
   const startNew = () => {
     setEditing('new')
-    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [] })
+    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '' })
   }
   const cancelEdit = () => { setEditing(null); setDraft(null) }
 
@@ -1998,6 +2097,21 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                   )
                 })}
                 {grassTypes.length === 0 && <p className="font-body text-xs text-slate-400">Add grass types in Settings → Lists first.</p>}
+              </div>
+            </div>
+
+            <div className="rounded-xl p-3" style={{ backgroundColor: '#EFF6FF' }}>
+              <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: '#2563EB' }}>Documents — Label & SDS</p>
+              <p className="font-body text-[10px] text-slate-500 mb-2">Paste the web link to this product's label and Safety Data Sheet. The crew can open them from the spray sheet and the Labels &amp; SDS screen.</p>
+              <div className="space-y-2">
+                <div>
+                  <FieldLabel>Label link</FieldLabel>
+                  <input value={draft.labelUrl ?? ''} onChange={(e) => setDraft({ ...draft, labelUrl: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="https://…" inputMode="url" />
+                </div>
+                <div>
+                  <FieldLabel>SDS link</FieldLabel>
+                  <input value={draft.sdsUrl ?? ''} onChange={(e) => setDraft({ ...draft, sdsUrl: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="https://…" inputMode="url" />
+                </div>
               </div>
             </div>
 
