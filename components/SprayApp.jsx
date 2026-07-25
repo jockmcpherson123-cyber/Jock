@@ -266,6 +266,18 @@ function SprayOpsModule({ user }) {
     }
   }
 
+  async function removeSheet(sheet) {
+    setSheets((prev) => prev.filter((s) => s.id !== sheet.id))
+    if (activeSheet?.id === sheet.id) { setActiveSheet(null); setRoute('list') }
+    try {
+      await db.deleteSheet(sheet.id)
+      showToast('Spray sheet deleted')
+    } catch (e) {
+      console.error(e)
+      showToast('Could not delete — check your connection')
+    }
+  }
+
   async function reloadProducts() {
     try {
       setProducts(await db.fetchProducts())
@@ -458,7 +470,7 @@ function SprayOpsModule({ user }) {
           />
         )}
         {route === 'list' && (
-          <SheetList sheets={sheets} manage={manage} variant="manage" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
+          <SheetList sheets={sheets} manage={manage} variant="manage" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} onDelete={removeSheet} />
         )}
         {route === 'tospray' && (
           <SheetList sheets={sheets} manage={manage} variant="tospray" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
@@ -785,7 +797,8 @@ function matchSheetFilter(s, f) {
   return true
 }
 
-function SheetList({ sheets, onOpen, onNew, manage, variant = 'manage' }) {
+function SheetList({ sheets, onOpen, onNew, onDelete, manage, variant = 'manage' }) {
+  const [confirmDelete, setConfirmDelete] = useState(null) // sheet pending deletion
   const CONFIG = {
     manage: { title: 'All Spray Sheets', sub: null, keys: ['tospray', 'pending', 'completed', 'all'], initial: 'tospray' },
     tospray: { title: 'To Spray', sub: 'Approved and outstanding — mark them done as you go', keys: [], initial: 'tospray' },
@@ -819,7 +832,34 @@ function SheetList({ sheets, onOpen, onNew, manage, variant = 'manage' }) {
         </div>
       ) : (
         <div className="space-y-2 mt-3">
-          {filtered.map((s) => <SheetRow key={s.id} sheet={s} onClick={() => onOpen(s)} />)}
+          {filtered.map((s) => (
+            <div key={s.id} className="flex items-stretch gap-2">
+              <div className="flex-1 min-w-0"><SheetRow sheet={s} onClick={() => onOpen(s)} /></div>
+              {onDelete && (
+                <button onClick={() => setConfirmDelete(s)} className="shrink-0 px-3 rounded-2xl border border-red-100 text-red-400 hover:bg-red-50 transition flex items-center justify-center" aria-label="Delete sheet">
+                  <Trash2 size={16} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setConfirmDelete(null)}>
+          <div className="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle size={18} className="text-red-500" />
+              <p className="font-display text-base font-bold text-slate-900">Delete this spray sheet?</p>
+            </div>
+            <p className="font-body text-sm text-slate-500 mb-4">
+              <b>{confirmDelete.area}</b> · {fmtDate(confirmDelete.date)}. This permanently removes the sheet and its records. This cannot be undone.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmDelete(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+              <button onClick={() => { onDelete(confirmDelete); setConfirmDelete(null) }} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: '#DC2626' }}>Delete</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
