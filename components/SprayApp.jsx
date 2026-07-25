@@ -17,7 +17,7 @@ import {
   Package, Truck, MapPin, Sparkles,
 } from 'lucide-react'
 import {
-  uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, downloadCSV,
+  uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, downloadCSV,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -2237,6 +2237,14 @@ function Reports({ sheets, products, areas }) {
   const totalP = Math.round(npkData.reduce((s, r) => s + r.p, 0) * 100) / 100
   const totalK = Math.round(npkData.reduce((s, r) => s + r.k, 0) * 100) / 100
 
+  const diag = npkDiagnostics(sheets, products, areas)
+  const diagItems = [
+    diag.missingAnalysis.length && { title: 'Missing N-P-K analysis', fix: 'Open Chemical Library → edit each product → fill in the N %, P %, K % from the bag (e.g. 21-0-0 = N 21). Until then it counts as zero.', items: diag.missingAnalysis },
+    diag.unapprovedSheets.length && { title: 'Sheets not approved yet', fix: 'Reports only count approved sheets. A director needs to approve these for their fertilizer to show.', items: diag.unapprovedSheets },
+    diag.missingSqft.length && { title: 'Areas missing square footage', fix: 'Set the area size in Settings → Areas. Without it, the app can\'t work out pounds applied.', items: diag.missingSqft },
+    diag.basisIssue.length && { title: 'Check the rate basis', fix: 'These fertilizers use a rate basis that doesn\'t match their form — granular needs lbs/M or lbs/A; liquid needs gal/M or gal/A. Fix the basis on the sheet or in the library.', items: diag.basisIssue },
+  ].filter(Boolean)
+
   const byArea = {}
   npkData.forEach((r) => {
     if (!byArea[r.area]) byArea[r.area] = { area: r.area, n: 0, p: 0, k: 0, sqft: r.sqft, months: [] }
@@ -2283,6 +2291,28 @@ function Reports({ sheets, products, areas }) {
         <NPKStat label="Total P" value={totalP} color="#D97706" />
         <NPKStat label="Total K" value={totalK} color="#7C3AED" />
       </div>
+
+      {diagItems.length > 0 && (
+        <div className="bg-amber-50 rounded-2xl border border-amber-200 p-4 mb-4">
+          <div className="flex items-start gap-2 mb-2">
+            <AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={16} />
+            <p className="font-body text-sm font-bold text-amber-800">Some fertilizer isn't counting — here's why</p>
+          </div>
+          <div className="space-y-3">
+            {diagItems.map((d) => (
+              <div key={d.title}>
+                <p className="font-body text-[13px] font-bold text-amber-800">{d.title}</p>
+                <p className="font-body text-[11px] text-amber-700 mb-1">{d.fix}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {d.items.map((it) => (
+                    <span key={it} className="font-body text-[11px] font-semibold px-2 py-0.5 rounded-full bg-white text-amber-700 border border-amber-200">{it}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-2 mb-4">
         {[['byArea', 'By Area'], ['byMonth', 'By Month']].map(([k, l]) => (
