@@ -1208,7 +1208,7 @@ function PrintableSheet({ sheet, area, products, sheetTargets, courseInfo }) {
     : []
 
   return (
-    <div className="print-only" style={{ display: 'none' }}>
+    <div id="printable-sheet" className="print-only" style={{ display: 'none' }}>
       <style>{`
         @media print {
           @page { margin: 0.5in; size: portrait; }
@@ -1552,6 +1552,33 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
   const saveNow = () =>
     onLogSpray?.({ ...sheet, weather: wx, tankChecks, partialGallons: partialGal === '' ? null : Number(partialGal), applicatorSignature: applicatorSig || sheet.applicatorSignature || '' })
 
+  // Export the printable spray record as a downloadable PDF (saves to Files).
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const exportPdf = async () => {
+    const el = document.getElementById('printable-sheet')
+    if (!el) return
+    setPdfBusy(true)
+    const prev = el.getAttribute('style') || 'display:none'
+    // Make it laid out (off-screen) so it can be captured.
+    el.setAttribute('style', 'display:block;position:fixed;left:0;top:0;width:760px;background:#fff;z-index:-1')
+    try {
+      const html2pdf = (await import('html2pdf.js')).default
+      const safe = `${sheet.area || 'Spray'}-${sheet.date || ''}`.replace(/[^\w-]+/g, '_')
+      await html2pdf().set({
+        margin: 8,
+        filename: `Spray-Sheet_${safe}.pdf`,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
+      }).from(el).save()
+    } catch (e) {
+      console.error(e)
+    } finally {
+      el.setAttribute('style', prev)
+      setPdfBusy(false)
+    }
+  }
+
   return (
     <div className="pt-6 pb-10 max-w-2xl mx-auto">
       <div className="no-print flex items-center justify-between mb-5">
@@ -1560,6 +1587,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
           <StatusPill status={sheet.status} />
           <button onClick={saveNow} className="font-body text-sm font-medium" style={{ color: FERN }}>Save</button>
           <button onClick={() => window.print()} className="font-body text-sm font-medium" style={{ color: FOREST }}>Print</button>
+          <button onClick={exportPdf} disabled={pdfBusy} className="font-body text-sm font-medium disabled:opacity-50" style={{ color: FOREST }}>{pdfBusy ? 'PDF…' : 'Export PDF'}</button>
           {manage && sheet.status === 'pending' && (
             <button onClick={onEdit} className="font-body text-sm font-medium" style={{ color: FERN }}>Edit</button>
           )}
@@ -1849,6 +1877,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                   )}
                   <div className="flex gap-2 mt-3">
                     <button onClick={() => window.print()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white" style={{ backgroundColor: FOREST }}>Print record</button>
+                    <button onClick={exportPdf} disabled={pdfBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full disabled:opacity-50" style={{ color: FOREST, border: `1px solid ${FOREST}` }}>{pdfBusy ? 'Exporting…' : 'Export PDF'}</button>
                     <button onClick={reopen} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full text-slate-500 border border-slate-200">Reopen (back to To Spray)</button>
                   </div>
                 </div>
