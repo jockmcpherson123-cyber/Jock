@@ -271,6 +271,12 @@ function SprayOpsModule({ user }) {
     }
   }
 
+  async function importHistory(sheets) {
+    const n = await db.bulkInsertSheets(sheets)
+    setSheets(await db.fetchSheets())
+    showToast(`Imported ${n} historical spray${n !== 1 ? 's' : ''}`)
+  }
+
   async function removeSheet(sheet) {
     setSheets((prev) => prev.filter((s) => s.id !== sheet.id))
     if (activeSheet?.id === sheet.id) { setActiveSheet(null); setRoute('list') }
@@ -505,7 +511,7 @@ function SprayOpsModule({ user }) {
           />
         )}
         {route === 'list' && (
-          <SheetList sheets={sheets} manage={manage} variant="manage" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} onDelete={removeSheet} />
+          <SheetList sheets={sheets} manage={manage} variant="manage" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} onDelete={removeSheet} onImportHistory={importHistory} />
         )}
         {route === 'tospray' && (
           <SheetList sheets={sheets} manage={manage} variant="tospray" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
@@ -832,8 +838,44 @@ function matchSheetFilter(s, f) {
   return true
 }
 
-function SheetList({ sheets, onOpen, onNew, onDelete, manage, variant = 'manage' }) {
+function SheetList({ sheets, onOpen, onNew, onDelete, onImportHistory, manage, variant = 'manage' }) {
   const [confirmDelete, setConfirmDelete] = useState(null) // sheet pending deletion
+  const [histPrev, setHistPrev] = useState(null) // { sheets, count, rowCount, error, fileName }
+  const [histBusy, setHistBusy] = useState(false)
+  const histFileRef = useRef(null)
+
+  const onHistFile = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    try {
+      const { parseSprayHistory } = await import('@/lib/importXlsx')
+      const res = parseSprayHistory(await file.arrayBuffer())
+      setHistPrev({ ...res, fileName: file.name })
+    } catch {
+      setHistPrev({ sheets: [], count: 0, error: 'Could not read that file. Make sure it is a .xlsx spreadsheet.', fileName: file.name })
+    }
+  }
+  const confirmHist = async () => {
+    if (!histPrev?.sheets?.length) return
+    setHistBusy(true)
+    try { await onImportHistory(histPrev.sheets); setHistPrev(null) }
+    catch { setHistPrev((p) => ({ ...p, error: 'Could not save the import. Try again.' })) }
+    setHistBusy(false)
+  }
+  const downloadHistTemplate = async () => {
+    const XLSX = await import('xlsx')
+    const headers = ['Date', 'Area', 'Product', 'Rate', 'Basis', 'Target', 'Applicator', 'Tanks']
+    const ex = [
+      ['2025-06-14', 'Blue Greens', 'Daconil Action', 1.8, 'oz / M', 'Dollar Spot', 'Jock McPherson', 2],
+      ['2025-06-14', 'Blue Greens', 'Primo MAXX', 0.2, 'oz / M', 'Growth Reg', 'Jock McPherson', 2],
+      ['2025-06-21', 'Gold Fairways', 'Acelepryn', 8, 'oz / A', 'Grubs', 'Kevin Johnson', 4],
+    ]
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...ex])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Spray History')
+    XLSX.writeFile(wb, 'spray-history-template.xlsx')
+  }
   const CONFIG = {
     manage: { title: 'All Spray Sheets', sub: null, keys: ['tospray', 'pending', 'completed', 'all'], initial: 'tospray' },
     tospray: { title: 'To Spray', sub: 'Approved and outstanding — mark them done as you go', keys: [], initial: 'tospray' },
@@ -846,7 +888,41 @@ function SheetList({ sheets, onOpen, onNew, onDelete, manage, variant = 'manage'
 
   return (
     <div className="pt-6">
-      <SectionHeader title={cfg.title} subtitle={cfg.sub} />
+      <div className="flex items-start justify-between gap-2">
+        <SectionHeader title={cfg.title} subtitle={cfg.sub} noMargin />
+        {onImportHistory && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={downloadHistTemplate} className="font-body text-[11px] font-bold px-3 py-2 rounded-full border" style={{ color: FERN, borderColor: '#E2E8F0', backgroundColor: 'white' }}>Template</button>
+            <button onClick={() => histFileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
+              <CloudUpload size={14} /> Import History
+            </button>
+          </div>
+        )}
+      </div>
+      <input ref={histFileRef} type="file" accept=".xlsx,.xls" onChange={onHistFile} className="hidden" />
+
+      {histPrev && (
+        <div className="bg-white rounded-2xl border-2 p-4 mt-4 shadow-sm" style={{ borderColor: GOLD }}>
+          <p className="font-display text-base font-semibold text-slate-900 mb-1">Import history from “{histPrev.fileName}”</p>
+          {histPrev.error ? (
+            <p className="font-body text-sm text-red-600 mt-1">{histPrev.error}</p>
+          ) : (
+            <p className="font-body text-sm text-slate-600">
+              Found <b>{histPrev.rowCount}</b> product line{histPrev.rowCount !== 1 ? 's' : ''} across <b>{histPrev.count}</b> spray day{histPrev.count !== 1 ? 's' : ''}. These import as completed sprays so they feed all your reports (rotation, usage, GDD, days-since). Nothing is deleted.
+            </p>
+          )}
+          <div className="flex gap-2 pt-3">
+            <button onClick={() => setHistPrev(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+            {!histPrev.error && histPrev.count > 0 && (
+              <button onClick={confirmHist} disabled={histBusy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-60 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
+                {histBusy ? <Loader2 size={15} className="animate-spin" /> : null}
+                {histBusy ? 'Importing…' : `Import ${histPrev.count} spray day${histPrev.count !== 1 ? 's' : ''}`}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {cfg.keys.length > 0 && (
         <div className="flex gap-2 mb-4 mt-3 overflow-x-auto pb-1">
           {cfg.keys.map((f) => (
