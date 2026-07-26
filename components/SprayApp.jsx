@@ -3610,9 +3610,15 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
 // ── CLIPPING YIELDS ─────────────────────────────────────────────────────────
 // Log clipping volume per area over time — the feedback loop for growth-reg
 // performance. Each area shows its recent entries as simple bars.
+const GREEN_OPTIONS = [
+  ...Array.from({ length: 18 }, (_, i) => `Green ${i + 1}`),
+  'Practice Green', 'Putting Green', 'Chipping Green', 'Short Game Green', 'Nursery Green',
+]
+const greenNum = (s) => { const m = String(s).match(/\d+/); return m ? Number(m[0]) : 999 }
+const sortGreens = (a, b) => greenNum(a) - greenNum(b) || String(a).localeCompare(String(b))
+
 function ClippingsTab({ clippings, areas, onAdd, onDelete }) {
-  const areaNames = Object.keys(areas || {})
-  const [draft, setDraft] = useState({ area: areaNames[0] || '', date: new Date().toISOString().slice(0, 10), volume: '', unit: 'baskets', notes: '' })
+  const [draft, setDraft] = useState({ area: 'Green 1', date: new Date().toISOString().slice(0, 10), volume: '', unit: 'baskets', notes: '' })
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState('all')
 
@@ -3637,8 +3643,8 @@ function ClippingsTab({ clippings, areas, onAdd, onDelete }) {
         <p className="font-display text-base font-semibold text-slate-900 mb-3">Log clipping yield</p>
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
-            <FieldLabel>Area</FieldLabel>
-            <Select value={draft.area} onChange={(v) => setDraft({ ...draft, area: v })} options={areaNames} placeholder="Select…" />
+            <FieldLabel>Green</FieldLabel>
+            <Select value={draft.area} onChange={(v) => setDraft({ ...draft, area: v })} options={GREEN_OPTIONS} placeholder="Select…" />
           </div>
           <div>
             <FieldLabel>Date</FieldLabel>
@@ -3663,7 +3669,7 @@ function ClippingsTab({ clippings, areas, onAdd, onDelete }) {
       {/* Trend bars per area */}
       {Object.keys(byArea).length > 0 && (
         <div className="space-y-3">
-          {Object.entries(byArea).sort((a, b) => a[0].localeCompare(b[0])).map(([area, list]) => {
+          {Object.entries(byArea).sort((a, b) => sortGreens(a[0], b[0])).map(([area, list]) => {
             const recent = [...list].sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-12)
             const max = Math.max(...recent.map((c) => c.volume || 0), 1)
             return (
@@ -3687,7 +3693,7 @@ function ClippingsTab({ clippings, areas, onAdd, onDelete }) {
       <div>
         <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
           <button onClick={() => setFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>All</button>
-          {Object.keys(byArea).sort().map((a) => (
+          {Object.keys(byArea).sort(sortGreens).map((a) => (
             <button key={a} onClick={() => setFilter(a)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === a ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{a}</button>
           ))}
         </div>
