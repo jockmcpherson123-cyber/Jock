@@ -3470,14 +3470,16 @@ function TurfPerformanceModule() {
   const [route, setRoute] = useState('dashboard')
   const [turf, setTurf] = useState({ location: null, sheets: [], products: [], areas: {} })
   const [daily, setDaily] = useState([])
+  const [clippings, setClippings] = useState([])
   const [loadingTurf, setLoadingTurf] = useState(true)
 
   useEffect(() => {
     (async () => {
       setLoadingTurf(true)
       try {
-        const [settings, sheets, products] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts()])
+        const [settings, sheets, products, clips] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts(), db.fetchClippings().catch(() => [])])
         setTurf({ location: settings.location, sheets, products, areas: settings.areas })
+        setClippings(clips)
         if (settings.location?.lat != null) {
           try { setDaily(await fetchSeasonDaily(settings.location.lat, settings.location.lng)) } catch (e) { console.error(e) }
         }
@@ -3485,6 +3487,10 @@ function TurfPerformanceModule() {
       setLoadingTurf(false)
     })()
   }, [])
+
+  async function reloadClippings() {
+    try { setClippings(await db.fetchClippings()) } catch (e) { console.error(e) }
+  }
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
@@ -3510,7 +3516,12 @@ function TurfPerformanceModule() {
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <GddPgrTab daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} hasLocation={turf.location?.lat != null} />
         )}
-        {route === 'clippings' && <ComingSoonCard title="Clipping Yields" desc="Log clipping volume by green and date. This is measured manually on the course and entered here." />}
+        {route === 'clippings' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <ClippingsTab clippings={clippings} areas={turf.areas}
+              onAdd={async (c) => { await db.addClipping(c); await reloadClippings() }}
+              onDelete={async (id) => { await db.deleteClipping(id); await reloadClippings() }} />
+        )}
         {route === 'speed' && <ComingSoonCard title="Greens Speed" desc="Log Stimpmeter readings by green and date to track consistency over time." />}
       </div>
     </div>
@@ -3592,6 +3603,111 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
         </div>
       </div>
       <p className="font-body text-[10px] text-slate-400">Weather is pulled from your course location (Open-Meteo). GDD updates daily.</p>
+    </div>
+  )
+}
+
+// ── CLIPPING YIELDS ─────────────────────────────────────────────────────────
+// Log clipping volume per area over time — the feedback loop for growth-reg
+// performance. Each area shows its recent entries as simple bars.
+function ClippingsTab({ clippings, areas, onAdd, onDelete }) {
+  const areaNames = Object.keys(areas || {})
+  const [draft, setDraft] = useState({ area: areaNames[0] || '', date: new Date().toISOString().slice(0, 10), volume: '', unit: 'baskets', notes: '' })
+  const [busy, setBusy] = useState(false)
+  const [filter, setFilter] = useState('all')
+
+  const save = async () => {
+    if (!draft.area || draft.volume === '') return
+    setBusy(true)
+    try {
+      await onAdd({ area: draft.area, date: draft.date, volume: Number(draft.volume), unit: draft.unit, notes: draft.notes })
+      setDraft({ ...draft, volume: '', notes: '' })
+    } catch (e) { console.error(e) }
+    setBusy(false)
+  }
+
+  const shown = filter === 'all' ? clippings : clippings.filter((c) => c.area === filter)
+  // Group by area for the trend bars.
+  const byArea = {}
+  clippings.forEach((c) => { (byArea[c.area] = byArea[c.area] || []).push(c) })
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border-2 p-4 shadow-sm" style={{ borderColor: GOLD }}>
+        <p className="font-display text-base font-semibold text-slate-900 mb-3">Log clipping yield</p>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <FieldLabel>Area</FieldLabel>
+            <Select value={draft.area} onChange={(v) => setDraft({ ...draft, area: v })} options={areaNames} placeholder="Select…" />
+          </div>
+          <div>
+            <FieldLabel>Date</FieldLabel>
+            <input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+          </div>
+          <div>
+            <FieldLabel>Volume</FieldLabel>
+            <input type="number" step="any" value={draft.volume} onChange={(e) => setDraft({ ...draft, volume: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 12" />
+          </div>
+          <div>
+            <FieldLabel>Unit</FieldLabel>
+            <Select value={draft.unit} onChange={(v) => setDraft({ ...draft, unit: v })} options={['baskets', 'L', 'gal', 'ft³']} />
+          </div>
+        </div>
+        <div className="mb-3">
+          <FieldLabel>Notes (optional)</FieldLabel>
+          <input value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. after mowing greens, damp" />
+        </div>
+        <button onClick={save} disabled={busy || !draft.area || draft.volume === ''} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Log it'}</button>
+      </div>
+
+      {/* Trend bars per area */}
+      {Object.keys(byArea).length > 0 && (
+        <div className="space-y-3">
+          {Object.entries(byArea).sort((a, b) => a[0].localeCompare(b[0])).map(([area, list]) => {
+            const recent = [...list].sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-12)
+            const max = Math.max(...recent.map((c) => c.volume || 0), 1)
+            return (
+              <div key={area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+                <p className="font-body font-semibold text-sm text-slate-900 mb-2">{area}</p>
+                <div className="flex items-end gap-1.5 h-20">
+                  {recent.map((c) => (
+                    <div key={c.id} className="flex-1 flex flex-col items-center justify-end" title={`${fmtDate(c.date)}: ${c.volume} ${c.unit}`}>
+                      <div className="w-full rounded-t" style={{ height: `${Math.max(4, ((c.volume || 0) / max) * 100)}%`, backgroundColor: FERN }} />
+                    </div>
+                  ))}
+                </div>
+                <p className="font-body text-[10px] text-slate-400 mt-1">Last {recent.length} logs · latest {recent[recent.length - 1]?.volume} {recent[recent.length - 1]?.unit}</p>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* History */}
+      <div>
+        <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+          <button onClick={() => setFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>All</button>
+          {Object.keys(byArea).sort().map((a) => (
+            <button key={a} onClick={() => setFilter(a)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === a ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{a}</button>
+          ))}
+        </div>
+        {shown.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No clipping logs yet.</div>
+        ) : (
+          <div className="space-y-2">
+            {shown.map((c) => (
+              <div key={c.id} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-sm font-semibold text-slate-800 truncate">{c.area}</p>
+                  <p className="font-body text-[11px] text-slate-400">{fmtDate(c.date)}{c.notes ? ` · ${c.notes}` : ''}</p>
+                </div>
+                <p className="font-display text-base font-bold text-slate-900 shrink-0">{c.volume} <span className="font-body text-[11px] font-medium text-slate-400">{c.unit}</span></p>
+                <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
