@@ -890,11 +890,11 @@ function SheetList({ sheets, onOpen, onNew, onDelete, onImportHistory, manage, v
     <div className="pt-6">
       <div className="flex items-start justify-between gap-2">
         <SectionHeader title={cfg.title} subtitle={cfg.sub} noMargin />
-        {onImportHistory && (
+        {onImportHistory && active === 'completed' && (
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={downloadHistTemplate} className="font-body text-[11px] font-bold px-3 py-2 rounded-full border" style={{ color: FERN, borderColor: '#E2E8F0', backgroundColor: 'white' }}>Template</button>
             <button onClick={() => histFileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
-              <CloudUpload size={14} /> Import History
+              <CloudUpload size={14} /> Import Records
             </button>
           </div>
         )}

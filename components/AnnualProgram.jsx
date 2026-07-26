@@ -176,7 +176,49 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
   const [orderEdit, setOrderEdit] = useState(null) // { name, caseSize, ozPerCase } for early-order inline edit
   const [viewMode, setViewMode] = useState('timeline') // 'timeline' | 'area'
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
+  const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
   const fileRef = useRef(null)
+  const flatFileRef = useRef(null)
+
+  async function onFlatFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    try {
+      const { parseProgramFlat } = await import('@/lib/importXlsx')
+      const res = parseProgramFlat(await file.arrayBuffer())
+      setFlatPrev({ ...res, fileName: file.name })
+    } catch {
+      setFlatPrev({ apps: [], count: 0, error: 'Could not read that file. Make sure it is a .xlsx spreadsheet.', fileName: file.name })
+    }
+  }
+  async function confirmFlat() {
+    if (!flatPrev?.apps?.length || !activeProgram) return
+    setBusy(true)
+    try {
+      await db.bulkInsertApplications(activeProgram.id, flatPrev.apps)
+      setApps(await db.fetchApplications(activeProgram.id))
+      setFlatPrev(null)
+      showToast(`Imported ${flatPrev.count} planned application${flatPrev.count !== 1 ? 's' : ''}`)
+    } catch (e) {
+      console.error(e)
+      setFlatPrev((p) => ({ ...p, error: 'Could not save the import. Try again.' }))
+    }
+    setBusy(false)
+  }
+  async function downloadFlatTemplate() {
+    const XLSX = await import('xlsx')
+    const headers = ['Date', 'Area', 'Product', 'Rate', 'Basis', 'Target']
+    const ex = [
+      ['2026-05-12', 'Blue Greens', 'Daconil Action', 1.8, 'oz / M', 'Dollar Spot'],
+      ['2026-05-12', 'Blue Greens', 'Primo MAXX', 0.2, 'oz / M', 'Growth Reg'],
+      ['2026-05-26', 'Gold Fairways', 'Acelepryn', 8, 'oz / A', 'Grubs'],
+    ]
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...ex])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Program')
+    XLSX.writeFile(wb, 'annual-program-template.xlsx')
+  }
 
   const toggle = (k) => setCollapsed((c) => ({ ...c, [k]: !c[k] }))
   const scrollToMonth = (key) => {
@@ -590,12 +632,44 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
               <Plus size={14} /> Add Application
             </button>
           )}
+          {activeProgram && (
+            <>
+              <button onClick={downloadFlatTemplate} className="font-body text-[11px] font-bold px-3 py-2 rounded-full border" style={{ color: FERN, borderColor: '#E2E8F0', backgroundColor: 'white' }}>Template</button>
+              <input ref={flatFileRef} type="file" accept=".xlsx,.xls" onChange={onFlatFile} className="hidden" />
+              <button onClick={() => flatFileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
+                <Upload size={14} /> Import Sprays
+              </button>
+            </>
+          )}
           <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFileChosen} className="hidden" />
           <button onClick={() => fileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
-            <Upload size={14} /> Import from Excel
+            <Upload size={14} /> Full Plan
           </button>
         </div>
       </div>
+
+      {/* Simple-list import preview */}
+      {flatPrev && (
+        <div className="bg-white rounded-2xl border-2 p-4 my-4 shadow-sm" style={{ borderColor: GOLD }}>
+          <p className="font-display text-base font-semibold text-slate-900 mb-1">Import sprays into {activeProgram?.name || 'this season'}</p>
+          {flatPrev.error ? (
+            <p className="font-body text-sm text-red-600 mt-1">{flatPrev.error}</p>
+          ) : (
+            <p className="font-body text-sm text-slate-600">
+              Found <b>{flatPrev.count}</b> planned application{flatPrev.count !== 1 ? 's' : ''} in “{flatPrev.fileName}”. These add to the current season as planned sprays. Match product names to your Chemical Library so rates and groups link up.
+            </p>
+          )}
+          <div className="flex gap-2 pt-3">
+            <button onClick={() => setFlatPrev(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+            {!flatPrev.error && flatPrev.count > 0 && (
+              <button onClick={confirmFlat} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-60 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
+                {busy ? <Loader2 size={15} className="animate-spin" /> : null}
+                {busy ? 'Importing…' : `Import ${flatPrev.count}`}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Import preview / confirm */}
       {imp && (
