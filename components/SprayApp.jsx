@@ -177,6 +177,7 @@ function SprayOpsModule({ user }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
+  const [dismissLic, setDismissLic] = useState(false)
 
   const showToast = (msg) => {
     setToast(msg)
@@ -461,6 +462,36 @@ function SprayOpsModule({ user }) {
       )}
 
       <TopNav route={route} setRoute={setRoute} onNew={newSheet} courseInfo={courseInfo} manage={manage} />
+
+      {(() => {
+        if (dismissLic) return null
+        const alerts = computeLicenseAlerts(applicatorLicenses)
+        if (alerts.length === 0) return null
+        const anyExpired = alerts.some((a) => a.level === 'expired')
+        return (
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-4">
+            <div className="rounded-2xl border-2 p-3" style={anyExpired ? { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' } : { backgroundColor: '#FEF3DD', borderColor: '#FDE9C8' }}>
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={18} className="shrink-0 mt-0.5" style={{ color: anyExpired ? '#B91C1C' : '#92660D' }} />
+                <div className="flex-1 min-w-0">
+                  <p className="font-body text-sm font-bold" style={{ color: anyExpired ? '#B91C1C' : '#92660D' }}>
+                    {anyExpired ? 'License expired' : 'License expiring soon'}
+                  </p>
+                  <div className="mt-1 space-y-0.5">
+                    {alerts.map((a) => (
+                      <p key={`${a.name}-${a.type}`} className="font-body text-[12px]" style={{ color: a.level === 'expired' ? '#B91C1C' : '#92660D' }}>
+                        <b>{a.name}</b> — {a.type} license {a.label.toLowerCase()}
+                      </p>
+                    ))}
+                  </div>
+                  {manage && <p className="font-body text-[11px] text-slate-500 mt-1">Update dates in Settings → People.</p>}
+                </div>
+                <button onClick={() => setDismissLic(true)} className="font-body text-[11px] font-bold text-slate-400 shrink-0">Dismiss</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-24">
         {route === 'dashboard' && (
@@ -3245,11 +3276,38 @@ function DirectorsEditor({ directors, pins, onSave }) {
 }
 
 // One license: its number plus an optional scanned/photographed copy.
-function LicenseField({ label, placeholder, num, img, onNum, onImg }) {
+function licenseStatus(exp) {
+  if (!exp) return null
+  const days = Math.round((new Date(exp + 'T00:00:00').getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000)
+  if (days < 0) return { level: 'expired', days, label: `Expired ${-days}d ago` }
+  if (days <= 60) return { level: 'soon', days, label: `Expires in ${days}d` }
+  return { level: 'ok', days, label: `Valid · ${days}d left` }
+}
+
+// All applicator licenses that are expired or expiring within 60 days.
+function computeLicenseAlerts(licenses) {
+  const out = []
+  Object.entries(licenses || {}).forEach(([name, lic]) => {
+    ;['pesticide', 'fertilizer'].forEach((type) => {
+      const st = licenseStatus(lic[`${type}Exp`])
+      if (st && (st.level === 'expired' || st.level === 'soon')) out.push({ name, type, ...st })
+    })
+  })
+  return out.sort((a, b) => (a.level === 'expired' ? 0 : 1) - (b.level === 'expired' ? 0 : 1) || a.days - b.days)
+}
+
+function LicenseField({ label, placeholder, num, img, exp, onNum, onImg, onExp }) {
+  const st = licenseStatus(exp)
+  const stColor = st ? (st.level === 'expired' ? '#B91C1C' : st.level === 'soon' ? '#92660D' : FERN) : '#94A3B8'
   return (
     <div>
       <FieldLabel>{label} #</FieldLabel>
       <input value={num ?? ''} onChange={(e) => onNum(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder={placeholder} />
+      <div className="mt-1.5">
+        <FieldLabel>Expiry date</FieldLabel>
+        <input type="date" value={exp ?? ''} onChange={(e) => onExp(e.target.value)} className="w-full border rounded-xl px-3 py-2 text-sm font-body bg-white" style={{ borderColor: st && st.level !== 'ok' ? stColor : '#E2E8F0' }} />
+        {st && <p className="font-body text-[10px] font-bold mt-1" style={{ color: stColor }}>{st.label}</p>}
+      </div>
       <div className="mt-1.5 flex items-center gap-2 flex-wrap">
         {img ? (
           <>
@@ -3314,11 +3372,11 @@ function ApplicatorsEditor({ operators, licenses, onSave }) {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <LicenseField label="Pesticide License" placeholder="e.g. MD-12345"
-                num={licenses[name]?.pesticide} img={licenses[name]?.pesticideImg}
-                onNum={(v) => setLicense(name, 'pesticide', v)} onImg={(e) => handleImg(name, 'pesticideImg', e)} />
+                num={licenses[name]?.pesticide} img={licenses[name]?.pesticideImg} exp={licenses[name]?.pesticideExp}
+                onNum={(v) => setLicense(name, 'pesticide', v)} onImg={(e) => handleImg(name, 'pesticideImg', e)} onExp={(v) => setLicense(name, 'pesticideExp', v)} />
               <LicenseField label="Fertilizer License" placeholder="e.g. F-678"
-                num={licenses[name]?.fertilizer} img={licenses[name]?.fertilizerImg}
-                onNum={(v) => setLicense(name, 'fertilizer', v)} onImg={(e) => handleImg(name, 'fertilizerImg', e)} />
+                num={licenses[name]?.fertilizer} img={licenses[name]?.fertilizerImg} exp={licenses[name]?.fertilizerExp}
+                onNum={(v) => setLicense(name, 'fertilizer', v)} onImg={(e) => handleImg(name, 'fertilizerImg', e)} onExp={(v) => setLicense(name, 'fertilizerExp', v)} />
             </div>
           </div>
         ))}
