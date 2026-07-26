@@ -17,7 +17,8 @@ import {
   Package, Truck, MapPin, Sparkles,
 } from 'lucide-react'
 import {
-  uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings, downloadCSV,
+  uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -2748,15 +2749,18 @@ function Reports({ sheets, products, areas }) {
         )}
       </div>
 
-      <div className="flex gap-2 mt-4 mb-1">
-        {[['npk', 'Nutrients (N-P-K)'], ['rotation', 'Chemical Rotation']].map(([k, l]) => (
-          <button key={k} onClick={() => setReport(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full transition" style={report === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+      <div className="flex gap-2 mt-4 mb-1 overflow-x-auto pb-1">
+        {[['npk', 'Nutrients'], ['rotation', 'Rotation'], ['usage', 'Product Usage'], ['history', 'Spray History'], ['since', 'Days Since']].map(([k, l]) => (
+          <button key={k} onClick={() => setReport(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap transition" style={report === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
         ))}
       </div>
 
       {report === 'rotation' && <RotationReport sheets={sheets} products={products} />}
+      {report === 'usage' && <ProductUsageReport sheets={sheets} products={products} areas={areas} />}
+      {report === 'history' && <SprayHistoryReport sheets={sheets} />}
+      {report === 'since' && <DaysSinceReport sheets={sheets} />}
 
       {report === 'npk' && (<>
       <div className="grid grid-cols-3 gap-3 mt-5 mb-5">
@@ -2892,6 +2896,125 @@ function RotationReport({ sheets, products }) {
         </div>
       )}
       <p className="font-body text-[10px] text-slate-400 mt-3">Red = the same chemical group hit this area again within its rotation window (default 21 days, or the product's “Rotate After” setting). Rotate modes of action to slow resistance.</p>
+    </div>
+  )
+}
+
+// ── PRODUCT USAGE REPORT ────────────────────────────────────────────────────
+// How much of each product actually went out (from approved/completed sheets).
+function ProductUsageReport({ sheets, products, areas }) {
+  const rows = productUsage(sheets, products, areas)
+  const exportCSV = () => {
+    const out = [['Product', 'Type', 'Applications', 'Total applied', 'Unit']]
+    rows.forEach((r) => out.push([r.name, r.type, r.apps, r.total, r.unit]))
+    downloadCSV(out, `Product_Usage_${new Date().toISOString().slice(0, 10)}.csv`)
+  }
+  return (
+    <div className="mt-4">
+      {rows.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">No sprays recorded yet. Approve or complete a sheet to see usage.</div>
+      ) : (
+        <>
+          <div className="flex justify-end mb-2">
+            <button onClick={exportCSV} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}><Package size={14} /> Export</button>
+          </div>
+          <div className="space-y-2">
+            {rows.map((r) => {
+              const areasUsed = Object.entries(r.byArea).sort((a, b) => b[1] - a[1])
+              return (
+                <div key={r.name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-body text-sm font-semibold text-slate-800 truncate">{r.name}</p>
+                      <p className="font-body text-[11px] text-slate-400">{r.apps} application{r.apps !== 1 ? 's' : ''}{r.type ? ` · ${r.type}` : ''}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-display text-lg font-bold text-slate-900 leading-none">{r.total.toLocaleString()}</p>
+                      <p className="font-body text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">{r.unit} applied</p>
+                    </div>
+                  </div>
+                  {areasUsed.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {areasUsed.map(([area, amt]) => (
+                        <span key={area} className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{area}: {Math.round(amt * 10) / 10} {r.unit}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── SPRAY HISTORY REPORT ────────────────────────────────────────────────────
+function SprayHistoryReport({ sheets }) {
+  const [area, setArea] = useState('all')
+  const all = sprayHistory(sheets)
+  const areaNames = [...new Set(all.map((h) => h.area))].sort()
+  const rows = area === 'all' ? all : all.filter((h) => h.area === area)
+  const exportCSV = () => {
+    const out = [['Date', 'Area', 'Applicator', 'Status', 'Tanks', 'Products']]
+    rows.forEach((h) => out.push([h.date || '', h.area, h.operator, h.status, h.tanks, h.products.join('; ')]))
+    downloadCSV(out, `Spray_History_${new Date().toISOString().slice(0, 10)}.csv`)
+  }
+  return (
+    <div className="mt-4">
+      <div className="flex gap-2 mb-3 overflow-x-auto pb-1 items-center">
+        <select value={area} onChange={(e) => setArea(e.target.value)} className="border border-slate-200 rounded-full px-3 py-1.5 text-xs font-body bg-white">
+          <option value="all">All areas</option>
+          {areaNames.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <button onClick={exportCSV} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}><Package size={13} /> Export</button>
+      </div>
+      {rows.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">No sprays to show.</div>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((h) => (
+            <div key={h.id} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-body text-xs font-bold text-slate-900">{h.area}</span>
+                <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide" style={h.status === 'Sprayed' ? { backgroundColor: '#E8F3EC', color: FERN } : h.status === 'approved' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEF3DD', color: '#92660D' }}>{h.status}</span>
+                <span className="font-body text-[11px] text-slate-400 ml-auto">{h.date ? fmtDate(h.date) : '—'}</span>
+              </div>
+              <p className="font-body text-[11px] text-slate-500 truncate">{h.products.join(', ') || 'No products'}</p>
+              {h.operator && <p className="font-body text-[10px] text-slate-400 mt-0.5">By {h.operator}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── DAYS SINCE LAST SPRAY ───────────────────────────────────────────────────
+function DaysSinceReport({ sheets }) {
+  const rows = daysSinceByArea(sheets)
+  return (
+    <div className="mt-4">
+      {rows.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">No sprays recorded yet.</div>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((r) => (
+            <div key={r.area} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="font-body text-sm font-semibold text-slate-800">{r.area}</p>
+                <p className="font-body text-[11px] text-slate-400">Last sprayed {r.date ? fmtDate(r.date) : '—'}</p>
+              </div>
+              <div className="text-right">
+                <p className="font-display text-lg font-bold leading-none" style={{ color: r.days > 30 ? '#B91C1C' : '#1E293B' }}>{r.days}</p>
+                <p className="font-body text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">days ago</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="font-body text-[10px] text-slate-400 mt-3">Days since each area's most recent approved or completed spray. Red past 30 days.</p>
     </div>
   )
 }
