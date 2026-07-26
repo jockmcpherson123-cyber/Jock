@@ -171,6 +171,7 @@ function SprayOpsModule({ user }) {
   const [courseInfo, setCourseInfo] = useState({ clubName: 'Congressional Country Club', deptName: 'Golf Maintenance' })
   const [location, setLocation] = useState({ address: '', lat: null, lng: null, timezone: 'America/New_York' })
   const [grassTypes, setGrassTypes] = useState([])
+  const [soilTypes, setSoilTypes] = useState([])
   const [applicatorLicenses, setApplicatorLicenses] = useState({})
   const [directorPins, setDirectorPins] = useState({})
   const [loading, setLoading] = useState(true)
@@ -208,6 +209,7 @@ function SprayOpsModule({ user }) {
       setCourseInfo(settings.courseInfo)
       setLocation(settings.location)
       setGrassTypes(settings.grassTypes || [])
+      setSoilTypes(settings.soilTypes || [])
       setApplicatorLicenses(settings.applicatorLicenses || {})
       setDirectorPins(settings.directorPins || {})
       // Load the newest program's applications so the dashboard can surface
@@ -234,6 +236,7 @@ function SprayOpsModule({ user }) {
     if (patch.courseInfo) setCourseInfo(patch.courseInfo)
     if (patch.location) setLocation(patch.location)
     if (patch.grassTypes) setGrassTypes(patch.grassTypes)
+    if (patch.soilTypes) setSoilTypes(patch.soilTypes)
     if (patch.applicatorLicenses) setApplicatorLicenses(patch.applicatorLicenses)
     if (patch.directorPins) setDirectorPins(patch.directorPins)
     try {
@@ -542,7 +545,7 @@ function SprayOpsModule({ user }) {
         {route === 'settings' && manage && (
           <SettingsPage
             areas={areas} operators={operators} directors={directors} targets={targets}
-            sheetTypes={sheetTypes} courseInfo={courseInfo} location={location} grassTypes={grassTypes}
+            sheetTypes={sheetTypes} courseInfo={courseInfo} location={location} grassTypes={grassTypes} soilTypes={soilTypes}
             applicatorLicenses={applicatorLicenses} directorPins={directorPins}
             onSave={async (patch) => { await saveSettings(patch); showToast('Settings updated') }}
           />
@@ -3038,7 +3041,7 @@ function NPKMini({ label, value, color }) {
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────
-function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, applicatorLicenses, directorPins, onSave }) {
+function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, soilTypes, applicatorLicenses, directorPins, onSave }) {
   const [section, setSection] = useState('course')
 
   return (
@@ -3056,8 +3059,8 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} onSave={onSave} />}
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
       {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} onSave={onSave} />}
-      {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassTypes} onSave={onSave} />}
-      {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} onSave={onSave} />}
+      {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassTypes} soilTypes={soilTypes} onSave={onSave} />}
+      {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} soilTypes={soilTypes} onSave={onSave} />}
     </div>
   )
 }
@@ -3332,24 +3335,25 @@ function ApplicatorsEditor({ operators, licenses, onSave }) {
   )
 }
 
-function ListsSettings({ targets, sheetTypes, grassTypes, onSave }) {
+function ListsSettings({ targets, sheetTypes, grassTypes, soilTypes, onSave }) {
   return (
     <div className="space-y-4">
       <NameListEditor title="Spray Targets" items={targets} accent="#7C3AED" onSave={(list) => onSave({ targets: list })} />
       <NameListEditor title="Sheet Types" items={sheetTypes} accent={FOREST} onSave={(list) => onSave({ sheetTypes: list })} />
       <NameListEditor title="Grass Types" items={grassTypes || []} accent="#2E7D32" onSave={(list) => onSave({ grassTypes: list })} />
+      <NameListEditor title="Soil Types" items={soilTypes || []} accent="#92660D" onSave={(list) => onSave({ soilTypes: list })} />
     </div>
   )
 }
 
-function AreasSettings({ areas, grassTypes = [], onSave }) {
+function AreasSettings({ areas, grassTypes = [], soilTypes = [], onSave }) {
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
 
-  const startEdit = (name) => { setEditing(name); setDraft({ name, grasses: [], ...areas[name] }) }
+  const startEdit = (name) => { setEditing(name); setDraft({ name, grasses: [], soilType: '', ...areas[name] }) }
   const startNew = () => {
     setEditing('__new__')
-    setDraft({ name: '', gear: '', psi: '', tanks: 1, galTank: 0, sprayRate: 0, nozzle: '', sqft: 0, grasses: [] })
+    setDraft({ name: '', gear: '', psi: '', tanks: 1, galTank: 0, sprayRate: 0, nozzle: '', sqft: 0, grasses: [], soilType: '' })
   }
   const cancel = () => { setEditing(null); setDraft(null) }
 
@@ -3362,6 +3366,7 @@ function AreasSettings({ areas, grassTypes = [], onSave }) {
       tanks: Number(draft.tanks) || 1, galTank: Number(draft.galTank) || 0,
       sprayRate: Number(draft.sprayRate) || 0, nozzle: draft.nozzle, sqft: Number(draft.sqft) || 0,
       grasses: draft.grasses || [],
+      soilType: draft.soilType || '',
     }
     onSave({ areas: next })
     cancel()
@@ -3424,6 +3429,11 @@ function AreasSettings({ areas, grassTypes = [], onSave }) {
                 })}
                 {grassTypes.length === 0 && <p className="font-body text-xs text-slate-400">Add grass types in the Lists tab first.</p>}
               </div>
+            </div>
+            <div>
+              <FieldLabel>Soil type</FieldLabel>
+              <Select value={draft.soilType || ''} onChange={(v) => setDraft({ ...draft, soilType: v })} options={soilTypes} placeholder="None / select…" />
+              {soilTypes.length === 0 && <p className="font-body text-xs text-slate-400 mt-1">Add soil types in the Lists tab first.</p>}
             </div>
             <div className="flex gap-2 pt-1">
               <button onClick={cancel} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
