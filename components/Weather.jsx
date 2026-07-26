@@ -5,7 +5,7 @@
 // All from Open-Meteo using the club's saved location — no API key required.
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind } from 'lucide-react'
-import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay } from '@/lib/weather'
+import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress } from '@/lib/weather'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -29,6 +29,7 @@ function fmtDay(d) {
 export default function Weather({ location, onGoToSettings }) {
   const [state, setState] = useState({ loading: true, error: null, daily: null, summary: null })
   const [current, setCurrent] = useState(null)
+  const [etPct, setEtPct] = useState(80) // % of ET to replace with irrigation
 
   const hasLocation = location && location.lat != null && location.lng != null
 
@@ -203,6 +204,48 @@ export default function Weather({ location, onGoToSettings }) {
         )
       })()}
 
+      {/* ET & irrigation */}
+      {forecast.some((d) => d.et != null) && (
+        <div>
+          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+            <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide">ET &amp; Irrigation</p>
+            <div className="flex items-center gap-1.5">
+              <span className="font-body text-[11px] text-slate-400">Replace</span>
+              <input type="number" value={etPct} onChange={(e) => setEtPct(Math.max(0, Math.min(150, Number(e.target.value) || 0)))} className="w-14 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
+              <span className="font-body text-[11px] text-slate-400">% of ET</span>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
+            <div className="flex items-center px-4 py-2 border-b border-black/5 font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+              <span className="w-28">Day</span>
+              <span className="flex-1 text-right">ET</span>
+              <span className="flex-1 text-right">Rain</span>
+              <span className="flex-1 text-right">Put back tonight</span>
+            </div>
+            {forecast.map((d) => {
+              const need = irrigationNeed(d, etPct / 100)
+              const stress = turfStress(d)
+              const sc = SPRAY_STYLES[stress.level === 'high' ? 'poor' : stress.level === 'moderate' ? 'caution' : 'good']
+              return (
+                <div key={d.date} className="px-4 py-2.5 border-t border-black/5 first:border-t-0">
+                  <div className="flex items-center font-body text-sm">
+                    <span className="w-28 font-semibold text-slate-700">{fmtDay(d.date)}</span>
+                    <span className="flex-1 text-right text-slate-800">{d.et != null ? `${d.et.toFixed(2)}"` : '—'}</span>
+                    <span className="flex-1 text-right text-slate-500">{d.precip}"</span>
+                    <span className="flex-1 text-right font-bold" style={{ color: FERN }}>{need != null ? `${need.toFixed(2)}"` : '—'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: sc.bg, color: sc.fg }}>Turf stress: {stress.level}</span>
+                    <span className="font-body text-[10px] text-slate-400 truncate">{stress.label}</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <p className="font-body text-[10px] text-slate-400 mt-2">“Put back tonight” = ET × {etPct}% minus rain (inches) — a starting point for replacing what the turf lost. Reference ET (FAO) from Open-Meteo; dial the % to your program and cross-check your own ET/soil-moisture readings.</p>
+        </div>
+      )}
+
       {/* Forecast */}
       <div>
         <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">7-Day Forecast</p>
@@ -310,6 +353,7 @@ function HourlyGraph({ raw, forecast }) {
           <span className="font-body text-sm text-slate-700 flex items-center gap-1"><Droplets size={13} className="text-emerald-500" />{cur.rh != null ? `${Math.round(cur.rh)}%` : '—'}</span>
           <span className="font-body text-sm text-slate-700 flex items-center gap-1"><CloudRain size={13} className="text-blue-400" />{cur.prob != null ? `${Math.round(cur.prob)}%` : '—'}</span>
           <span className="font-body text-sm text-slate-700 flex items-center gap-1"><Wind size={13} className="text-slate-400" />{cur.wind != null ? `${Math.round(cur.wind)} mph` : '—'}</span>
+          <span className="font-body text-sm text-slate-700 flex items-center gap-1"><TrendingUp size={13} className="text-violet-500" />{cur.et != null ? `${cur.et.toFixed(3)}" ET` : '—'}</span>
         </div>
       )}
 
