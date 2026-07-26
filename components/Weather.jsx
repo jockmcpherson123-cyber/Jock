@@ -4,8 +4,8 @@
 // disease-risk readouts (Dollar Spot, Brown Patch) computed from the weather.
 // All from Open-Meteo using the club's saved location — no API key required.
 import { useState, useEffect } from 'react'
-import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin } from 'lucide-react'
-import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily } from '@/lib/weather'
+import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind } from 'lucide-react'
+import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow } from '@/lib/weather'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -16,6 +16,11 @@ const RISK_STYLES = {
   moderate: { bg: '#FEF3DD', fg: '#92660D', label: 'Moderate' },
   high: { bg: '#FEE2E2', fg: '#DC2626', label: 'Elevated' },
 }
+const SPRAY_STYLES = {
+  good: { bg: '#E8F3EC', fg: FERN, label: 'Good' },
+  caution: { bg: '#FEF3DD', fg: '#92660D', label: 'Caution' },
+  poor: { bg: '#FEE2E2', fg: '#DC2626', label: 'Poor' },
+}
 
 function fmtDay(d) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
@@ -23,6 +28,7 @@ function fmtDay(d) {
 
 export default function Weather({ location, onGoToSettings }) {
   const [state, setState] = useState({ loading: true, error: null, daily: null, summary: null })
+  const [current, setCurrent] = useState(null)
 
   const hasLocation = location && location.lat != null && location.lng != null
 
@@ -37,6 +43,9 @@ export default function Weather({ location, onGoToSettings }) {
         const data = await fetchWeather(location.lat, location.lng)
         const daily = dailyFromHourly(data)
         const summary = summarize(daily)
+
+        // Live current conditions (best-effort — doesn't block the page).
+        try { const c = await fetchCurrent(location.lat, location.lng); if (!cancelled) setCurrent(c) } catch { /* ignore */ }
 
         let season = []
         try { season = await fetchSeasonDaily(location.lat, location.lng) } catch { season = [] }
@@ -108,6 +117,21 @@ export default function Weather({ location, onGoToSettings }) {
         </div>
       </div>
 
+      {/* Live now */}
+      {current && (current.temp || current.wind) && (
+        <div className="rounded-2xl p-4 text-white shadow-sm flex items-center justify-between flex-wrap gap-3" style={{ backgroundColor: FOREST }}>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#4ADE80' }} />
+            <span className="font-body text-[11px] font-bold uppercase tracking-wide opacity-80">Live now</span>
+          </div>
+          <div className="flex items-center gap-5">
+            <span className="font-display text-2xl font-bold">{current.temp}°</span>
+            <span className="font-body text-sm flex items-center gap-1.5"><Wind size={14} />{current.wind} mph {current.windDir}</span>
+            <span className="font-body text-sm flex items-center gap-1.5"><Droplets size={14} />{current.humidity}%</span>
+          </div>
+        </div>
+      )}
+
       {/* Today conditions */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Stat icon={<Thermometer size={15} />} label="High / Low" value={todayRow ? `${Math.round(todayRow.tMax)}° / ${Math.round(todayRow.tMin)}°` : '—'} accent={GOLD} />
@@ -140,6 +164,41 @@ export default function Weather({ location, onGoToSettings }) {
           />
         </div>
       </div>
+
+      {/* Spray windows */}
+      {(() => {
+        const rated = forecast.map((d) => ({ ...d, spray: sprayWindow(d) }))
+        const firstGood = rated.find((d) => d.spray.level === 'good')
+        const todayRated = rated[0]
+        return (
+          <div>
+            <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Spray Windows</p>
+            {todayRated && todayRated.spray.level !== 'good' && (
+              <div className="rounded-2xl border p-3 mb-2 flex items-start gap-2" style={{ backgroundColor: SPRAY_STYLES[todayRated.spray.level].bg, borderColor: SPRAY_STYLES[todayRated.spray.level].fg + '40' }}>
+                <AlertTriangle size={16} className="shrink-0 mt-0.5" style={{ color: SPRAY_STYLES[todayRated.spray.level].fg }} />
+                <p className="font-body text-[12px]" style={{ color: SPRAY_STYLES[todayRated.spray.level].fg }}>
+                  Today looks <b>{SPRAY_STYLES[todayRated.spray.level].label.toLowerCase()}</b> for spraying ({todayRated.spray.reasons.join(', ')}).
+                  {firstGood && firstGood.date !== todayRated.date ? <> Consider <b>{fmtDay(firstGood.date)}</b> — {firstGood.spray.reasons.join(', ').toLowerCase()}.</> : ''}
+                </p>
+              </div>
+            )}
+            <div className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
+              {rated.map((d, i) => {
+                const st = SPRAY_STYLES[d.spray.level]
+                return (
+                  <div key={d.date} className={`flex items-center gap-3 px-4 py-3 ${i !== 0 ? 'border-t border-black/5' : ''}`}>
+                    <span className="font-body text-sm font-semibold text-slate-700 w-28 shrink-0">{fmtDay(d.date)}</span>
+                    <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>{st.label}</span>
+                    <span className="font-body text-[11px] text-slate-500 flex-1 truncate">{d.spray.reasons.join(' · ')}</span>
+                    <span className="font-body text-[11px] text-slate-400 shrink-0 flex items-center gap-1"><Wind size={11} />{d.windMax}</span>
+                  </div>
+                )
+              })}
+            </div>
+            <p className="font-body text-[10px] text-slate-400 mt-2">Based on daytime wind and rain outlook. Poor = windy (15+ mph) or rain likely; Caution = breezy (10+) or rain possible. A guide — use your judgment on the day.</p>
+          </div>
+        )
+      })()}
 
       {/* Forecast */}
       <div>
