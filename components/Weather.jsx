@@ -3,9 +3,9 @@
 // Weather tab: live local conditions, a short forecast, GDD accumulation, and
 // disease-risk readouts (Dollar Spot, Brown Patch) computed from the weather.
 // All from Open-Meteo using the club's saved location — no API key required.
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind } from 'lucide-react'
-import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow } from '@/lib/weather'
+import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay } from '@/lib/weather'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -54,7 +54,7 @@ export default function Weather({ location, onGoToSettings }) {
         const gddNow = gdd.length ? gdd[gdd.length - 1].acc : summary.gddNow
         const fullSeason = merged.length > 0
 
-        if (!cancelled) setState({ loading: false, error: null, daily, summary: { ...summary, gddNow }, fullSeason })
+        if (!cancelled) setState({ loading: false, error: null, daily, summary: { ...summary, gddNow }, fullSeason, raw: data })
       } catch (e) {
         if (!cancelled) setState({ loading: false, error: e.message || 'Could not load weather', daily: null, summary: null })
       }
@@ -132,6 +132,9 @@ export default function Weather({ location, onGoToSettings }) {
         </div>
       )}
 
+      {/* Hourly graph — scrub across the day */}
+      {state.raw && <HourlyGraph raw={state.raw} forecast={forecast} />}
+
       {/* Today conditions */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Stat icon={<Thermometer size={15} />} label="High / Low" value={todayRow ? `${Math.round(todayRow.tMax)}° / ${Math.round(todayRow.tMin)}°` : '—'} accent={GOLD} />
@@ -195,7 +198,7 @@ export default function Weather({ location, onGoToSettings }) {
                 )
               })}
             </div>
-            <p className="font-body text-[10px] text-slate-400 mt-2">Based on daytime wind and rain outlook. Poor = windy (15+ mph) or rain likely; Caution = breezy (10+) or rain possible. A guide — use your judgment on the day.</p>
+            <p className="font-body text-[10px] text-slate-400 mt-2">Rated on your <b>6am–noon</b> spray window (wind + rain). Poor = windy (15+ mph) or rain likely; Caution = breezy (10+) or rain possible. A guide — use your judgment on the day.</p>
           </div>
         )
       })()}
@@ -246,6 +249,90 @@ export default function Weather({ location, onGoToSettings }) {
           weather station, we can wire it in as the source for maximum accuracy.
         </p>
       </div>
+    </div>
+  )
+}
+
+// Interactive hour-by-hour graph. Drag/tap across it to read that hour's temp,
+// humidity, rain chance and wind. Highlights the 6am–noon spray window.
+function fmtHour(h) {
+  const ampm = h < 12 ? 'AM' : 'PM'
+  const hr = ((h + 11) % 12) + 1
+  return `${hr} ${ampm}`
+}
+function HourlyGraph({ raw, forecast }) {
+  const days = (forecast || []).slice(0, 5)
+  const [date, setDate] = useState(days[0]?.date)
+  const hours = hourlyForDay(raw, date || days[0]?.date)
+  const svgRef = useRef(null)
+  const isToday = date === new Date().toISOString().slice(0, 10)
+  const [active, setActive] = useState(null)
+
+  // Default the scrubber to the current hour (today) or 9 AM.
+  const defaultHour = isToday ? new Date().getHours() : 9
+  const activeHour = active != null ? active : defaultHour
+  const cur = hours.find((h) => h.hour === activeHour) || hours[Math.min(activeHour, hours.length - 1)] || hours[0]
+
+  if (!hours.length) return null
+
+  const W = 720, H = 190
+  const temps = hours.map((h) => h.temp).filter((v) => v != null)
+  const tMin = Math.min(...temps), tMax = Math.max(...temps)
+  const range = (tMax - tMin) || 1
+  const x = (hour) => 12 + (hour / 23) * (W - 24)
+  const y = (t) => (H - 26) - ((t - tMin) / range) * (H - 60)
+  const line = hours.filter((h) => h.temp != null).map((h) => `${x(h.hour)},${y(h.temp)}`).join(' ')
+
+  const onMove = (e) => {
+    const rect = svgRef.current.getBoundingClientRect()
+    const px = (e.clientX - rect.left) / rect.width
+    setActive(Math.max(0, Math.min(23, Math.round(px * 23))))
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide">Hour by Hour</p>
+        <div className="flex gap-1.5 overflow-x-auto">
+          {days.map((d) => (
+            <button key={d.date} onClick={() => { setDate(d.date); setActive(null) }} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap transition" style={date === d.date ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: '#F0F6F2', color: FERN }}>
+              {new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Readout for the scrubbed hour */}
+      {cur && (
+        <div className="flex items-center gap-4 mb-2 flex-wrap">
+          <span className="font-display text-lg font-bold text-slate-900 w-16">{fmtHour(cur.hour)}</span>
+          <span className="font-body text-sm text-slate-700 flex items-center gap-1"><Thermometer size={13} className="text-amber-500" />{cur.temp != null ? `${Math.round(cur.temp)}°` : '—'}</span>
+          <span className="font-body text-sm text-slate-700 flex items-center gap-1"><Droplets size={13} className="text-emerald-500" />{cur.rh != null ? `${Math.round(cur.rh)}%` : '—'}</span>
+          <span className="font-body text-sm text-slate-700 flex items-center gap-1"><CloudRain size={13} className="text-blue-400" />{cur.prob != null ? `${Math.round(cur.prob)}%` : '—'}</span>
+          <span className="font-body text-sm text-slate-700 flex items-center gap-1"><Wind size={13} className="text-slate-400" />{cur.wind != null ? `${Math.round(cur.wind)} mph` : '—'}</span>
+        </div>
+      )}
+
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full block" style={{ touchAction: 'none' }}
+        onPointerDown={onMove} onPointerMove={(e) => { if (e.buttons || e.pointerType === 'touch') onMove(e) }}>
+        {/* 6am–noon spray window shading */}
+        <rect x={x(6)} y={6} width={x(12) - x(6)} height={H - 26} fill="#3A6B4A" opacity="0.07" />
+        <text x={(x(6) + x(12)) / 2} y={16} textAnchor="middle" fontSize="9" fill="#3A6B4A" opacity="0.8">spray window</text>
+        {/* temp line */}
+        <polyline points={line} fill="none" stroke={GOLD} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        {/* scrubber */}
+        {cur && cur.temp != null && (
+          <>
+            <line x1={x(cur.hour)} y1={6} x2={x(cur.hour)} y2={H - 20} stroke="#94A3B8" strokeWidth="1" strokeDasharray="3 3" />
+            <circle cx={x(cur.hour)} cy={y(cur.temp)} r="5" fill={FOREST} stroke="white" strokeWidth="2" />
+          </>
+        )}
+        {/* x-axis labels */}
+        {[0, 6, 12, 18, 23].map((hr) => (
+          <text key={hr} x={x(hr)} y={H - 5} textAnchor="middle" fontSize="10" fill="#94A3B8">{fmtHour(hr)}</text>
+        ))}
+      </svg>
+      <p className="font-body text-[10px] text-slate-400 mt-1">Drag across the graph to read any hour. Shaded band is your 6am–noon spray window.</p>
     </div>
   )
 }
