@@ -3519,7 +3519,7 @@ function TurfPerformanceModule() {
         {route === 'clippings' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <ClippingsTab clippings={clippings} areas={turf.areas}
-              onAdd={async (c) => { await db.addClipping(c); await reloadClippings() }}
+              onAddMany={async (list) => { await db.addClippings(list); await reloadClippings() }}
               onDelete={async (id) => { await db.deleteClipping(id); await reloadClippings() }} />
         )}
         {route === 'speed' && <ComingSoonCard title="Greens Speed" desc="Log Stimpmeter readings by green and date to track consistency over time." />}
@@ -3617,53 +3617,84 @@ const GREEN_OPTIONS = [
 const greenNum = (s) => { const m = String(s).match(/\d+/); return m ? Number(m[0]) : 999 }
 const sortGreens = (a, b) => greenNum(a) - greenNum(b) || String(a).localeCompare(String(b))
 
-function ClippingsTab({ clippings, areas, onAdd, onDelete }) {
-  const [draft, setDraft] = useState({ area: 'Green 1', date: new Date().toISOString().slice(0, 10), volume: '', unit: 'baskets', notes: '' })
+function ClippingsTab({ clippings, areas, onAddMany, onDelete }) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [unit, setUnit] = useState('baskets')
+  const [notes, setNotes] = useState('')
+  const [selected, setSelected] = useState([]) // green names being logged
+  const [vols, setVols] = useState({}) // green -> volume
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState('all')
 
+  const toggleGreen = (g) => setSelected((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]))
+  const setVol = (g, v) => setVols((prev) => ({ ...prev, [g]: v }))
+
+  const entries = selected.filter((g) => vols[g] !== '' && vols[g] != null)
   const save = async () => {
-    if (!draft.area || draft.volume === '') return
+    if (entries.length === 0) return
     setBusy(true)
     try {
-      await onAdd({ area: draft.area, date: draft.date, volume: Number(draft.volume), unit: draft.unit, notes: draft.notes })
-      setDraft({ ...draft, volume: '', notes: '' })
+      await onAddMany(entries.map((g) => ({ area: g, date, volume: Number(vols[g]), unit, notes })))
+      setVols({})
+      setNotes('')
+      // keep the selected greens so the same set is ready next time
     } catch (e) { console.error(e) }
     setBusy(false)
   }
 
   const shown = filter === 'all' ? clippings : clippings.filter((c) => c.area === filter)
-  // Group by area for the trend bars.
   const byArea = {}
   clippings.forEach((c) => { (byArea[c.area] = byArea[c.area] || []).push(c) })
 
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-2xl border-2 p-4 shadow-sm" style={{ borderColor: GOLD }}>
-        <p className="font-display text-base font-semibold text-slate-900 mb-3">Log clipping yield</p>
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Log clipping yield</p>
+        <p className="font-body text-[11px] text-slate-400 mb-3">Pick every green you collected today, then enter each one's volume — logs them all at once.</p>
+
+        <FieldLabel>Greens</FieldLabel>
+        <div className="flex flex-wrap gap-1.5 mt-1 mb-3">
+          {GREEN_OPTIONS.map((g) => {
+            const on = selected.includes(g)
+            return (
+              <button key={g} type="button" onClick={() => toggleGreen(g)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>
+                {g.replace('Green ', '')}
+              </button>
+            )
+          })}
+        </div>
+
+        {selected.length > 0 && (
+          <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F8FAF9' }}>
+            <FieldLabel>Volume per green ({unit})</FieldLabel>
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              {[...selected].sort(sortGreens).map((g) => (
+                <div key={g} className="flex items-center gap-2">
+                  <span className="font-body text-xs font-semibold text-slate-600 w-20 shrink-0 truncate">{g}</span>
+                  <input type="number" step="any" value={vols[g] ?? ''} onChange={(e) => setVol(g, e.target.value)} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="0" />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
-            <FieldLabel>Green</FieldLabel>
-            <Select value={draft.area} onChange={(v) => setDraft({ ...draft, area: v })} options={GREEN_OPTIONS} placeholder="Select…" />
-          </div>
-          <div>
             <FieldLabel>Date</FieldLabel>
-            <input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-          </div>
-          <div>
-            <FieldLabel>Volume</FieldLabel>
-            <input type="number" step="any" value={draft.volume} onChange={(e) => setDraft({ ...draft, volume: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 12" />
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
           </div>
           <div>
             <FieldLabel>Unit</FieldLabel>
-            <Select value={draft.unit} onChange={(v) => setDraft({ ...draft, unit: v })} options={['baskets', 'L', 'gal', 'ft³']} />
+            <Select value={unit} onChange={setUnit} options={['baskets', 'L', 'gal', 'ft³']} />
           </div>
         </div>
         <div className="mb-3">
           <FieldLabel>Notes (optional)</FieldLabel>
-          <input value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. after mowing greens, damp" />
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. damp, double-cut" />
         </div>
-        <button onClick={save} disabled={busy || !draft.area || draft.volume === ''} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Log it'}</button>
+        <button onClick={save} disabled={busy || entries.length === 0} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
+          {busy ? 'Saving…' : `Log ${entries.length || ''} green${entries.length !== 1 ? 's' : ''}`.trim()}
+        </button>
       </div>
 
       {/* Trend bars per area */}
