@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/license-check", "schedule": "0 13 * * *" }
+  ]
+}
