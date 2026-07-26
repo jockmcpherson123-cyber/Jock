@@ -1559,8 +1559,11 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
     if (!el) return
     setPdfBusy(true)
     const prev = el.getAttribute('style') || 'display:none'
-    // Make it laid out (off-screen) so it can be captured.
-    el.setAttribute('style', 'display:block;position:fixed;left:0;top:0;width:760px;background:#fff;z-index:-1')
+    // Lay it out off-screen (not display:none, not fixed — html2canvas needs
+    // real layout and dislikes fixed/negative-z elements).
+    el.setAttribute('style', 'display:block;position:absolute;left:-10000px;top:0;width:760px;background:#ffffff')
+    // Let the browser lay it out before capturing.
+    await new Promise((r) => setTimeout(r, 60))
     try {
       const html2pdf = (await import('html2pdf.js')).default
       const safe = `${sheet.area || 'Spray'}-${sheet.date || ''}`.replace(/[^\w-]+/g, '_')
@@ -1568,7 +1571,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
         margin: 8,
         filename: `Spray-Sheet_${safe}.pdf`,
         image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 800, scrollX: 0, scrollY: 0 },
         jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
       }).from(el).save()
     } catch (e) {
