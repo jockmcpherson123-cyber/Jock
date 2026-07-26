@@ -22,7 +22,7 @@ import {
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
-import { fetchCurrent } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince } from '@/lib/weather'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import SprayCalendar from '@/components/SprayCalendar'
@@ -3458,6 +3458,23 @@ function AreasSettings({ areas, grassTypes = [], onSave }) {
 // ════════════════════════════════════════════════════════════════════════
 function TurfPerformanceModule() {
   const [route, setRoute] = useState('dashboard')
+  const [turf, setTurf] = useState({ location: null, sheets: [], products: [], areas: {} })
+  const [daily, setDaily] = useState([])
+  const [loadingTurf, setLoadingTurf] = useState(true)
+
+  useEffect(() => {
+    (async () => {
+      setLoadingTurf(true)
+      try {
+        const [settings, sheets, products] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts()])
+        setTurf({ location: settings.location, sheets, products, areas: settings.areas })
+        if (settings.location?.lat != null) {
+          try { setDaily(await fetchSeasonDaily(settings.location.lat, settings.location.lng)) } catch (e) { console.error(e) }
+        }
+      } catch (e) { console.error(e) }
+      setLoadingTurf(false)
+    })()
+  }, [])
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
@@ -3479,10 +3496,92 @@ function TurfPerformanceModule() {
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-24 pt-6">
         {route === 'dashboard' && <TurfDashboardPlaceholder />}
-        {route === 'gdd' && <ComingSoonCard title="Growing Degree Days" desc="Daily GDD pulled automatically from a nearby weather station, accumulated by base temperature — the foundation for PGR timing." />}
+        {route === 'gdd' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <GddPgrTab daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} hasLocation={turf.location?.lat != null} />
+        )}
         {route === 'clippings' && <ComingSoonCard title="Clipping Yields" desc="Log clipping volume by green and date. This is measured manually on the course and entered here." />}
         {route === 'speed' && <ComingSoonCard title="Greens Speed" desc="Log Stimpmeter readings by green and date to track consistency over time." />}
       </div>
+    </div>
+  )
+}
+
+// ── GDD + GROWTH-REG TRACKER ────────────────────────────────────────────────
+// Season GDD, plus GDD accumulated since each area's last growth-regulator
+// application (base 32°F) against a reapply target — the Primo/Anuew model.
+function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
+  const [target, setTarget] = useState(200)
+
+  if (!hasLocation) {
+    return <ComingSoonCard title="Set your location first" desc="Growing Degree Days come from your course location. Add your address in Spray Ops → Settings → Location, then come back." />
+  }
+
+  const gddSeries = gddFromDaily(daily)
+  const seasonGdd = gddSeries.length ? gddSeries[gddSeries.length - 1].acc : 0
+
+  const pgrNames = new Set(products.filter((p) => p.type === 'Growth Reg').map((p) => p.name))
+  const lastByArea = {}
+  ;(sheets || [])
+    .filter((s) => (s.status === 'approved' || s.completed) && s.date)
+    .forEach((s) => {
+      const pgr = (s.products || []).filter((p) => pgrNames.has(p.product)).map((p) => p.product)
+      if (pgr.length === 0) return
+      if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: pgr }
+    })
+
+  const areaRows = Object.keys(areas).map((area) => {
+    const last = lastByArea[area]
+    const gdd = last ? gddSince(daily, last.date, 32) : null
+    const pct = gdd != null && target > 0 ? Math.min(100, Math.round((gdd / target) * 100)) : 0
+    let status = 'none'
+    if (gdd != null) status = gdd >= target ? 'due' : gdd >= target * 0.8 ? 'soon' : 'ok'
+    return { area, last, gdd, pct, status }
+  }).sort((a, b) => (b.gdd ?? -1) - (a.gdd ?? -1))
+
+  const statusStyle = { due: { bg: '#FEE2E2', fg: '#B91C1C', label: 'Reapply now' }, soon: { bg: '#FEF3DD', fg: '#92660D', label: 'Soon' }, ok: { bg: '#E8F3EC', fg: FERN, label: 'On track' } }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl p-4 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
+        <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Season GDD (base 50°F)</p>
+        <p className="font-display text-3xl font-bold mt-0.5">{Math.round(seasonGdd).toLocaleString()}</p>
+        <p className="font-body text-[11px] opacity-70 mt-0.5">Accumulated since Jan 1 · {daily.length} days of weather</p>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+        <div className="flex items-center justify-between mb-1">
+          <p className="font-display text-base font-semibold text-slate-900">Growth-Reg Timing</p>
+          <div className="flex items-center gap-1.5">
+            <span className="font-body text-[11px] text-slate-400">Reapply target</span>
+            <input type="number" value={target} onChange={(e) => setTarget(Number(e.target.value) || 0)} className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
+            <span className="font-body text-[11px] text-slate-400">GDD</span>
+          </div>
+        </div>
+        <p className="font-body text-[11px] text-slate-400 mb-3">GDD since each area's last growth-reg spray (base 32°F). ~200 is a common greens target; fairways run higher.</p>
+        <div className="space-y-3">
+          {areaRows.map((r) => (
+            <div key={r.area}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-body text-sm font-semibold text-slate-800">{r.area}</span>
+                {r.gdd != null ? (
+                  <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: statusStyle[r.status].bg, color: statusStyle[r.status].fg }}>
+                    {r.gdd} / {target} · {statusStyle[r.status].label}
+                  </span>
+                ) : (
+                  <span className="font-body text-[10px] text-slate-400">No growth-reg app logged</span>
+                )}
+              </div>
+              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                <div className="h-full rounded-full transition-all" style={{ width: `${r.pct}%`, backgroundColor: r.gdd == null ? '#E2E8F0' : statusStyle[r.status].fg }} />
+              </div>
+              {r.last && <p className="font-body text-[10px] text-slate-400 mt-0.5">Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)}</p>}
+            </div>
+          ))}
+          {areaRows.length === 0 && <p className="font-body text-sm text-slate-400">No areas set up yet.</p>}
+        </div>
+      </div>
+      <p className="font-body text-[10px] text-slate-400">Weather is pulled from your course location (Open-Meteo). GDD updates daily.</p>
     </div>
   )
 }
