@@ -4606,15 +4606,6 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
     { k: 'mg', label: 'Mg', val: (t) => t.mg, floor: MLSN.Mg },
     { k: 's', label: 'S', val: (t) => t.s, floor: MLSN.S },
     { k: 'na', label: 'Na', val: (t) => t.na },
-    { k: 'fe', label: 'Fe', val: (t) => t.micros?.fe },
-    { k: 'mn', label: 'Mn', val: (t) => t.micros?.mn },
-    { k: 'cu', label: 'Cu', val: (t) => t.micros?.cu },
-    { k: 'zn', label: 'Zn', val: (t) => t.micros?.zn },
-    { k: 'b', label: 'B', val: (t) => t.micros?.b },
-    { k: 'bsK', label: 'K sat%', val: (t) => t.baseSat?.k, unit: '%' },
-    { k: 'bsCa', label: 'Ca sat%', val: (t) => t.baseSat?.ca, unit: '%' },
-    { k: 'bsMg', label: 'Mg sat%', val: (t) => t.baseSat?.mg, unit: '%' },
-    { k: 'bsNa', label: 'Na sat%', val: (t) => t.baseSat?.na, unit: '%' },
   ]
   const trendDef = TREND_KEYS.find((x) => x.k === trendKey) || TREND_KEYS[4]
   const seriesForDef = (def, tests) => {
