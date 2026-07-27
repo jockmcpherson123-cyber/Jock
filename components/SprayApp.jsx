@@ -4225,6 +4225,18 @@ function convertSoilToPpm(form) {
   }
 }
 
+// A numeric field for the soil form. Defined at module scope (not inside the tab)
+// so its identity is stable across renders — otherwise React remounts the input
+// on every keystroke and it loses focus after one character.
+function SoilNum({ label, ph, value, onChange }) {
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <input type="number" step="any" inputMode="decimal" value={value ?? ''} onChange={(e) => onChange(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder={ph} />
+    </div>
+  )
+}
+
 function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd, onDelete }) {
   const areaNames = Object.keys(areas || {})
   // The location can be a settings area (Blue Greens) OR an individual green /
@@ -4287,12 +4299,9 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
   soilTests.forEach((t) => { if (!latestByArea[t.area]) latestByArea[t.area] = t })
   const latest = Object.values(latestByArea)
 
-  const Num = ({ k, label, ph }) => (
-    <div>
-      <FieldLabel>{label}</FieldLabel>
-      <input type="number" step="any" value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder={ph} />
-    </div>
-  )
+  // Render a numeric field bound to a form key. Called as a function (not <Num/>)
+  // so it renders the stable module-level SoilNum directly and keeps focus.
+  const num = (k, label, ph) => <SoilNum key={k} label={label} ph={ph} value={form[k]} onChange={(v) => set(k, v)} />
 
   return (
     <div className="space-y-4">
@@ -4348,11 +4357,11 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
               </div>
             </div>
             <div className="grid grid-cols-3 gap-2.5">
-              <Num k="p" label={form.units === 'logan' ? 'P₂O₅' : 'P'} ph={form.units === 'logan' ? 'lb/ac' : 'ppm'} />
-              <Num k="k" label="K" ph={form.units === 'logan' ? 'lb/ac' : 'ppm'} />
-              <Num k="ca" label="Ca" ph={form.units === 'logan' ? 'lb/ac' : 'ppm'} />
-              <Num k="mg" label="Mg" ph={form.units === 'logan' ? 'lb/ac' : 'ppm'} />
-              <Num k="s" label="S" ph="ppm" />
+              {num('p', form.units === 'logan' ? 'P₂O₅' : 'P', form.units === 'logan' ? 'lb/ac' : 'ppm')}
+              {num('k', 'K', form.units === 'logan' ? 'lb/ac' : 'ppm')}
+              {num('ca', 'Ca', form.units === 'logan' ? 'lb/ac' : 'ppm')}
+              {num('mg', 'Mg', form.units === 'logan' ? 'lb/ac' : 'ppm')}
+              {num('s', 'S', 'ppm')}
             </div>
             {form.units === 'logan' && (
               <p className="font-body text-[10px] text-slate-400 mt-2">Logan reports P as P₂O₅ and K/Ca/Mg in lb/acre — the app converts them to ppm on save (sulfur is already ppm). Use the “Value Found” numbers.</p>
@@ -4362,10 +4371,10 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
           <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F8FAFC' }}>
             <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2 text-slate-500">Soil chemistry</p>
             <div className="grid grid-cols-4 gap-2.5">
-              <Num k="ph" label="pH" ph="6.3" />
-              <Num k="cec" label="CEC / TEC" ph="opt." />
-              <Num k="om" label="OM %" ph="opt." />
-              <Num k="na" label="Na" ph={form.units === 'logan' ? 'lb/ac' : 'ppm'} />
+              {num('ph', 'pH', '6.3')}
+              {num('cec', 'CEC / TEC', 'opt.')}
+              {num('om', 'OM %', 'opt.')}
+              {num('na', 'Na', form.units === 'logan' ? 'lb/ac' : 'ppm')}
             </div>
           </div>
 
@@ -4376,11 +4385,11 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
             </button>
             {showMicros && (
               <div className="grid grid-cols-5 gap-2 mt-2">
-                <Num k="fe" label="Fe" ph="ppm" />
-                <Num k="mn" label="Mn" ph="ppm" />
-                <Num k="cu" label="Cu" ph="ppm" />
-                <Num k="zn" label="Zn" ph="ppm" />
-                <Num k="b" label="B" ph="ppm" />
+                {num('fe', 'Fe', 'ppm')}
+                {num('mn', 'Mn', 'ppm')}
+                {num('cu', 'Cu', 'ppm')}
+                {num('zn', 'Zn', 'ppm')}
+                {num('b', 'B', 'ppm')}
               </div>
             )}
           </div>
@@ -4392,11 +4401,11 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
             </button>
             {showBaseSat && (
               <div className="grid grid-cols-5 gap-2 mt-2">
-                <Num k="bsCa" label="Ca" ph="%" />
-                <Num k="bsMg" label="Mg" ph="%" />
-                <Num k="bsK" label="K" ph="%" />
-                <Num k="bsNa" label="Na" ph="%" />
-                <Num k="bsH" label="H" ph="%" />
+                {num('bsCa', 'Ca', '%')}
+                {num('bsMg', 'Mg', '%')}
+                {num('bsK', 'K', '%')}
+                {num('bsNa', 'Na', '%')}
+                {num('bsH', 'H', '%')}
               </div>
             )}
           </div>
