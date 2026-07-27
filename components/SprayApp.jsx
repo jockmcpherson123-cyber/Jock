@@ -24,7 +24,7 @@ import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
-import { recommend, MLSN } from '@/lib/soil'
+import { recommend, suggestedAnnualN, MLSN } from '@/lib/soil'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import SprayCalendar from '@/components/SprayCalendar'
@@ -4213,6 +4213,18 @@ function SoilTestsTab({ soilTests, areas, onAdd, onDelete }) {
   const [showForm, setShowForm] = useState(false)
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
+  // When the area changes, prefill the N target from its grass variety (the user
+  // can still type over it). Track the last suggestion so we only auto-fill when
+  // the field hasn't been hand-edited.
+  const areaGrasses = areas[form.area]?.grasses || []
+  const nSuggest = suggestedAnnualN(areaGrasses)
+  const pickArea = (v) => setForm((f) => {
+    const g = areas[v]?.grasses || []
+    const s = suggestedAnnualN(g)
+    const untouched = f.annualN === '' || f.annualN === String(suggestedAnnualN(areas[f.area]?.grasses || []).n)
+    return { ...f, area: v, annualN: untouched ? String(s.n) : f.annualN }
+  })
+
   const save = async () => {
     if (!form.area || !form.date) { setMsg({ type: 'err', text: 'Pick an area and a date first.' }); return }
     setBusy(true); setMsg(null)
@@ -4261,7 +4273,8 @@ function SoilTestsTab({ soilTests, areas, onAdd, onDelete }) {
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div>
               <FieldLabel>Area</FieldLabel>
-              <Select value={form.area} onChange={(v) => set('area', v)} options={areaNames.length ? areaNames : ['—']} />
+              <Select value={form.area} onChange={pickArea} options={areaNames.length ? areaNames : ['—']} />
+              {areaGrasses.length > 0 && <p className="font-body text-[10px] text-slate-400 mt-1 truncate">{areaGrasses.join(', ')}{areas[form.area]?.soilType ? ` · ${areas[form.area].soilType}` : ''}</p>}
             </div>
             <div>
               <FieldLabel>Test date</FieldLabel>
@@ -4294,6 +4307,7 @@ function SoilTestsTab({ soilTests, areas, onAdd, onDelete }) {
             <div>
               <FieldLabel>Annual N target (lb / M / yr)</FieldLabel>
               <input type="number" step="any" value={form.annualN ?? ''} onChange={(e) => set('annualN', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 4" />
+              <p className="font-body text-[10px] text-slate-400 mt-1">{nSuggest.matched ? `Typical for ${areaGrasses.join(', ')}: ${nSuggest.n} — adjust as needed.` : 'Set your season N goal for this area.'}</p>
             </div>
             <div>
               <FieldLabel>Lab (optional)</FieldLabel>
@@ -4313,24 +4327,34 @@ function SoilTestsTab({ soilTests, areas, onAdd, onDelete }) {
       {latest.length === 0 ? (
         !showForm && <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No soil tests yet. Add one to get an MLSN fertility plan.</div>
       ) : (
-        latest.map((t) => <SoilRecCard key={t.id} test={t} onDelete={onDelete} />)
+        latest.map((t) => <SoilRecCard key={t.id} test={t} area={areas[t.area]} onDelete={onDelete} />)
       )}
     </div>
   )
 }
 
-function SoilRecCard({ test, onDelete }) {
-  const rec = recommend(test, test.annualN ?? 4)
+function SoilRecCard({ test, area = {}, onDelete }) {
+  const grasses = area.grasses || []
+  const soilType = area.soilType || ''
+  const rec = recommend(test, test.annualN, { grasses, soilType })
   const tested = rec.rows.filter((r) => r.status !== 'notest')
+  const context = [grasses.join(', '), soilType].filter(Boolean).join(' · ')
   return (
     <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="min-w-0">
           <p className="font-body text-sm font-semibold text-slate-900 truncate">{test.area}</p>
-          <p className="font-body text-[11px] text-slate-400">Tested {fmtDate(test.date)}{test.lab ? ` · ${test.lab}` : ''} · N target {test.annualN ?? 4} lb/M/yr</p>
+          <p className="font-body text-[11px] text-slate-400">Tested {fmtDate(test.date)}{test.lab ? ` · ${test.lab}` : ''} · N {rec.annualN} lb/M/yr{rec.nSource === 'grass' ? ' (from grass)' : ''}</p>
+          {context && <p className="font-body text-[10px] text-slate-400 truncate">{context}</p>}
         </div>
         <button onClick={() => onDelete(test.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
       </div>
+
+      {rec.soil?.note && (
+        <div className="rounded-xl px-3 py-2 mb-2 font-body text-[11px]" style={{ backgroundColor: rec.soil.sandy ? '#FEF3DD' : '#F0F6F2', color: rec.soil.sandy ? '#92660D' : FERN }}>
+          {rec.soil.note}
+        </div>
+      )}
 
       {rec.ph && (
         <div className="rounded-xl px-3 py-2 mb-3 font-body text-[12px]" style={{ backgroundColor: rec.ph.status === 'ok' ? '#E8F3EC' : '#FEF3DD', color: rec.ph.status === 'ok' ? FERN : '#92660D' }}>
