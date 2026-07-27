@@ -4013,6 +4013,18 @@ const GREEN_OPTIONS = [
 const greenNum = (s) => { const m = String(s).match(/\d+/); return m ? Number(m[0]) : 999 }
 const sortGreens = (a, b) => greenNum(a) - greenNum(b) || String(a).localeCompare(String(b))
 
+// Turn a Supabase save error into something the crew can act on. A missing table
+// is the common one — it means the phase migration hasn't been run yet.
+function saveErrorText(e, migration) {
+  const m = String(e?.message || e || '').toLowerCase()
+  if (e?.code === '42P01' || m.includes('does not exist') || m.includes('could not find the table') || m.includes('schema cache')) {
+    return `The database table isn't set up yet. Run ${migration} once in Supabase → SQL Editor, then try again.`
+  }
+  return e?.message ? `Could not save: ${e.message}` : 'Could not save — check your connection and try again.'
+}
+const clipErrorText = (e) => saveErrorText(e, 'supabase/phase10.sql')
+const practiceErrorText = (e) => saveErrorText(e, 'supabase/phase11.sql')
+
 function ClippingsTab({ clippings, areas, onAddMany, onDelete }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [unit, setUnit] = useState('baskets')
@@ -4021,6 +4033,7 @@ function ClippingsTab({ clippings, areas, onAddMany, onDelete }) {
   const [vols, setVols] = useState({}) // green -> volume
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState('all')
+  const [msg, setMsg] = useState(null) // { type: 'ok' | 'err', text }
 
   const toggleGreen = (g) => setSelected((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]))
   const setVol = (g, v) => setVols((prev) => ({ ...prev, [g]: v }))
@@ -4029,12 +4042,17 @@ function ClippingsTab({ clippings, areas, onAddMany, onDelete }) {
   const save = async () => {
     if (entries.length === 0) return
     setBusy(true)
+    setMsg(null)
     try {
       await onAddMany(entries.map((g) => ({ area: g, date, volume: Number(vols[g]), unit, notes })))
       setVols({})
       setNotes('')
+      setMsg({ type: 'ok', text: `Logged ${entries.length} green${entries.length !== 1 ? 's' : ''}.` })
       // keep the selected greens so the same set is ready next time
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      setMsg({ type: 'err', text: clipErrorText(e) })
+    }
     setBusy(false)
   }
 
@@ -4088,9 +4106,17 @@ function ClippingsTab({ clippings, areas, onAddMany, onDelete }) {
           <FieldLabel>Notes (optional)</FieldLabel>
           <input value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. damp, double-cut" />
         </div>
+        {msg && (
+          <div className="rounded-xl px-3 py-2 mb-2 font-body text-[12px] font-semibold" style={msg.type === 'ok' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}>
+            {msg.text}
+          </div>
+        )}
         <button onClick={save} disabled={busy || entries.length === 0} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
           {busy ? 'Saving…' : `Log ${entries.length || ''} green${entries.length !== 1 ? 's' : ''}`.trim()}
         </button>
+        {entries.length === 0 && selected.length > 0 && (
+          <p className="font-body text-[11px] text-slate-400 mt-1.5 text-center">Enter a volume for at least one green to save.</p>
+        )}
       </div>
 
       {/* Trend bars per area */}
@@ -4160,6 +4186,7 @@ function PracticesTab({ practices, areas, onAddMany, onDelete }) {
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState('all')
+  const [msg, setMsg] = useState(null) // { type: 'ok' | 'err', text }
 
   const toggleArea = (a) => setSelected((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]))
   const allOn = selected.length === areaNames.length && areaNames.length > 0
@@ -4168,11 +4195,16 @@ function PracticesTab({ practices, areas, onAddMany, onDelete }) {
   const save = async () => {
     if (selected.length === 0) return
     setBusy(true)
+    setMsg(null)
     try {
       await onAddMany(selected.map((a) => ({ area: a, practice, date, value: value === '' ? null : Number(value), unit, notes })))
       setValue(''); setNotes('')
+      setMsg({ type: 'ok', text: `Logged ${practice} on ${selected.length} area${selected.length !== 1 ? 's' : ''}.` })
       // keep the practice + selected areas ready for the next log
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      setMsg({ type: 'err', text: practiceErrorText(e) })
+    }
     setBusy(false)
   }
 
@@ -4238,6 +4270,11 @@ function PracticesTab({ practices, areas, onAddMany, onDelete }) {
           <FieldLabel>Notes (optional)</FieldLabel>
           <input value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. .100 HOC, double-cut, sand topdress" />
         </div>
+        {msg && (
+          <div className="rounded-xl px-3 py-2 mb-2 font-body text-[12px] font-semibold" style={msg.type === 'ok' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}>
+            {msg.text}
+          </div>
+        )}
         <button onClick={save} disabled={busy || selected.length === 0} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
           {busy ? 'Saving…' : `Log ${practice}${selected.length ? ` · ${selected.length} area${selected.length !== 1 ? 's' : ''}` : ''}`}
         </button>
