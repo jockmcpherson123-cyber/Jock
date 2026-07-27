@@ -18,7 +18,7 @@ import {
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
-  productUsage, sprayHistory, daysSinceByArea, downloadCSV,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -718,6 +718,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       {/* Calendar — upcoming (planned) and past (actual) sprays at a glance */}
       <SprayCalendar
         sheets={sheets}
+        products={products}
         programApps={manage ? programApps : []}
         onOpenSheet={onOpen}
         onCreateFromProgram={manage ? onCreateFromProgram : undefined}
@@ -3016,13 +3017,14 @@ function Reports({ sheets, products, areas }) {
       </div>
 
       <div className="flex gap-2 mt-4 mb-1 overflow-x-auto pb-1">
-        {[['npk', 'Nutrients'], ['rotation', 'Rotation'], ['usage', 'Product Usage'], ['history', 'Spray History'], ['since', 'Days Since']].map(([k, l]) => (
+        {[['npk', 'Nutrients'], ['cost', 'Cost'], ['rotation', 'Rotation'], ['usage', 'Product Usage'], ['history', 'Spray History'], ['since', 'Days Since']].map(([k, l]) => (
           <button key={k} onClick={() => setReport(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap transition" style={report === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
         ))}
       </div>
 
+      {report === 'cost' && <CostReport sheets={sheets} products={products} areas={areas} />}
       {report === 'rotation' && <RotationReport sheets={sheets} products={products} />}
       {report === 'usage' && <ProductUsageReport sheets={sheets} products={products} areas={areas} />}
       {report === 'history' && <SprayHistoryReport sheets={sheets} />}
@@ -3168,6 +3170,99 @@ function RotationReport({ sheets, products }) {
 
 // ── PRODUCT USAGE REPORT ────────────────────────────────────────────────────
 // How much of each product actually went out (from approved/completed sheets).
+// ── COST / BUDGET REPORT ────────────────────────────────────────────────────
+// What the program has actually cost, from applied amounts × case pricing.
+function CostReport({ sheets, products, areas }) {
+  const [view, setView] = useState('product') // 'product' | 'area' | 'month'
+  const data = productCosts(sheets, products, areas)
+  const money = (n) => `$${(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const monthLabel = (m) => { const [y, mm] = m.split('-'); return new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) }
+
+  const lists = {
+    product: data.rows.map((r) => ({ key: r.name, label: r.name, sub: `${r.apps} application${r.apps !== 1 ? 's' : ''}${r.type ? ` · ${r.type}` : ''}`, cost: r.cost })),
+    area: data.byArea.map((r) => ({ key: r.area, label: r.area, sub: '', cost: r.cost })),
+    month: data.byMonth.map((r) => ({ key: r.month, label: monthLabel(r.month), sub: '', cost: r.cost })),
+  }
+  const rows = lists[view]
+  const max = Math.max(1, ...rows.map((r) => r.cost))
+
+  const exportCSV = () => {
+    const out = [['Product', 'Type', 'Applications', 'Cost ($)']]
+    data.rows.forEach((r) => out.push([r.name, r.type, r.apps, r.cost]))
+    out.push([])
+    out.push(['Area', 'Cost ($)'])
+    data.byArea.forEach((r) => out.push([r.area, r.cost]))
+    out.push([])
+    out.push(['Month', 'Cost ($)'])
+    data.byMonth.forEach((r) => out.push([r.month, r.cost]))
+    out.push([])
+    out.push(['Total', data.totalCost])
+    downloadCSV(out, `Spray_Costs_${new Date().toISOString().slice(0, 10)}.csv`)
+  }
+
+  const hasData = data.rows.length > 0
+  return (
+    <div className="mt-4">
+      <div className="rounded-2xl p-4 text-white shadow-sm mb-4 flex items-end justify-between" style={{ backgroundColor: FOREST }}>
+        <div>
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Total Spent (approved &amp; completed)</p>
+          <p className="font-display text-3xl font-bold mt-0.5">{money(data.totalCost)}</p>
+        </div>
+        {hasData && (
+          <button onClick={exportCSV} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: GOLD, color: FOREST }}>
+            <Package size={14} /> Export
+          </button>
+        )}
+      </div>
+
+      {data.missing.length > 0 && (
+        <div className="bg-amber-50 rounded-2xl border border-amber-200 p-4 mb-4">
+          <div className="flex items-start gap-2 mb-1.5">
+            <AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={16} />
+            <p className="font-body text-sm font-bold text-amber-800">Some products aren't priced yet</p>
+          </div>
+          <p className="font-body text-[11px] text-amber-700 mb-2">Add a case price and case size (oz per case) in Chemical Library so these count toward the total.</p>
+          <div className="flex flex-wrap gap-1.5">
+            {data.missing.map((m) => <span key={m} className="font-body text-[11px] font-semibold px-2 py-0.5 rounded-full bg-white text-amber-700 border border-amber-200">{m}</span>)}
+          </div>
+        </div>
+      )}
+
+      {!hasData ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
+          No priced sprays yet. Add case pricing in Chemical Library and approve a sheet to see costs here.
+        </div>
+      ) : (
+        <>
+          <div className="flex gap-2 mb-3">
+            {[['product', 'By Product'], ['area', 'By Area'], ['month', 'By Month']].map(([k, l]) => (
+              <button key={k} onClick={() => setView(k)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition" style={view === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+                {l}
+              </button>
+            ))}
+          </div>
+          <div className="space-y-2">
+            {rows.map((r) => (
+              <div key={r.key} className="bg-white rounded-2xl border border-black/5 p-3.5 shadow-sm">
+                <div className="flex items-center justify-between gap-3 mb-1.5">
+                  <div className="min-w-0">
+                    <p className="font-body text-sm font-semibold text-slate-800 truncate">{r.label}</p>
+                    {r.sub && <p className="font-body text-[11px] text-slate-400">{r.sub}</p>}
+                  </div>
+                  <p className="font-display text-base font-bold text-slate-900 shrink-0">{money(r.cost)}</p>
+                </div>
+                <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${Math.max(3, Math.round((r.cost / max) * 100))}%`, backgroundColor: FERN }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function ProductUsageReport({ sheets, products, areas }) {
   const rows = productUsage(sheets, products, areas)
   const exportCSV = () => {

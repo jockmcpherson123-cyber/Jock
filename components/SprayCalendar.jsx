@@ -4,7 +4,8 @@
 // program) and actual spray sheets (past and upcoming) at a glance. Tap a day
 // to see what's on it and, for planned work, start a spray sheet from it.
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Calendar as CalIcon } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Calendar as CalIcon, RotateCw } from 'lucide-react'
+import { rotationWarnings } from '@/lib/calc'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -29,8 +30,11 @@ function todayKey() {
   return ymd(n.getFullYear(), n.getMonth(), n.getDate())
 }
 
-export default function SprayCalendar({ sheets = [], programApps = [], onOpenSheet, onCreateFromProgram }) {
+export default function SprayCalendar({ sheets = [], products = [], programApps = [], onOpenSheet, onCreateFromProgram }) {
   const now = new Date()
+  // FRAC/IRAC/HRAC group per product name, for the resistance-code chips.
+  const moaOf = {}
+  products.forEach((p) => { if (p.moaGroup) moaOf[p.name] = String(p.moaGroup).trim() })
   const [view, setView] = useState({ y: now.getFullYear(), m: now.getMonth() }) // m: 0-based
   const [selected, setSelected] = useState(todayKey())
 
@@ -166,17 +170,43 @@ export default function SprayCalendar({ sheets = [], programApps = [], onOpenShe
         ) : (
           <div className="space-y-2">
             {/* Actual spray sheets */}
-            {selSheets.map((s) => (
-              <button key={s.id} onClick={() => onOpenSheet?.(s)} className="w-full text-left bg-white rounded-2xl border border-black/5 p-4 flex items-center justify-between shadow-sm">
-                <div className="min-w-0">
-                  <p className="font-body text-sm font-semibold text-slate-800 truncate">{s.sheetType} · {s.area}</p>
-                  <p className="font-body text-[11px] text-slate-400">{s.products?.filter((p) => p.product).length || 0} products</p>
-                </div>
-                <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide" style={s.status === 'approved' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEF3DD', color: '#92660D' }}>
-                  {s.status}
-                </span>
-              </button>
-            ))}
+            {selSheets.map((s) => {
+              const lines = (s.products || []).filter((p) => p.product)
+              const warns = new Set(rotationWarnings(s, sheets, products).map((w) => w.product))
+              return (
+                <button key={s.id} onClick={() => onOpenSheet?.(s)} className="w-full text-left bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="font-body text-sm font-semibold text-slate-800 truncate">{s.sheetType} · {s.area}</p>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {warns.size > 0 && (
+                        <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1" style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}>
+                          <RotateCw size={9} /> Rotation
+                        </span>
+                      )}
+                      <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide" style={s.status === 'approved' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEF3DD', color: '#92660D' }}>
+                        {s.status}
+                      </span>
+                    </div>
+                  </div>
+                  {lines.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {lines.map((p, i) => {
+                        const code = moaOf[p.product]
+                        const risky = warns.has(p.product)
+                        return (
+                          <span key={i} className="font-body text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: risky ? '#FEF2F2' : '#F0F6F2', color: risky ? '#B91C1C' : FERN, border: risky ? '1px solid #FECACA' : '1px solid transparent' }}>
+                            {p.product}
+                            {code && <span className="font-bold opacity-70" style={{ fontSize: '9px' }}>· {code}</span>}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="font-body text-[11px] text-slate-400">No products</p>
+                  )}
+                </button>
+              )
+            })}
 
             {/* Planned from the program (one card per area) */}
             {Object.entries(plannedByArea).map(([area, items]) => (
@@ -187,7 +217,17 @@ export default function SprayCalendar({ sheets = [], programApps = [], onOpenShe
                     <p className="font-body text-sm font-semibold text-slate-800 truncate">{area}</p>
                     <span className="font-body text-[10px] text-slate-400">planned</span>
                   </div>
-                  <p className="font-body text-[11px] text-slate-400 truncate">{items.map((a) => a.product).join(', ')}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {items.map((a, i) => {
+                      const code = moaOf[a.product]
+                      return (
+                        <span key={i} className="font-body text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: '#FBF6E7', color: '#92660D' }}>
+                          {a.product}
+                          {code && <span className="font-bold opacity-70" style={{ fontSize: '9px' }}>· {code}</span>}
+                        </span>
+                      )
+                    })}
+                  </div>
                 </div>
                 {onCreateFromProgram && (
                   <button onClick={() => onCreateFromProgram(items)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white shrink-0 flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
