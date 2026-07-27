@@ -24,6 +24,7 @@ import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
+import { recommend, MLSN } from '@/lib/soil'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import SprayCalendar from '@/components/SprayCalendar'
@@ -3868,16 +3869,18 @@ function TurfPerformanceModule() {
   const [daily, setDaily] = useState([])
   const [clippings, setClippings] = useState([])
   const [practices, setPractices] = useState([])
+  const [soilTests, setSoilTests] = useState([])
   const [loadingTurf, setLoadingTurf] = useState(true)
 
   useEffect(() => {
     (async () => {
       setLoadingTurf(true)
       try {
-        const [settings, sheets, products, clips, pracs] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts(), db.fetchClippings().catch(() => []), db.fetchCulturalPractices().catch(() => [])])
+        const [settings, sheets, products, clips, pracs, soils] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts(), db.fetchClippings().catch(() => []), db.fetchCulturalPractices().catch(() => []), db.fetchSoilTests().catch(() => [])])
         setTurf({ location: settings.location, sheets, products, areas: settings.areas })
         setClippings(clips)
         setPractices(pracs)
+        setSoilTests(soils)
         if (settings.location?.lat != null) {
           try { setDaily(await fetchSeasonDaily(settings.location.lat, settings.location.lng)) } catch (e) { console.error(e) }
         }
@@ -3892,6 +3895,9 @@ function TurfPerformanceModule() {
   async function reloadPractices() {
     try { setPractices(await db.fetchCulturalPractices()) } catch (e) { console.error(e) }
   }
+  async function reloadSoilTests() {
+    try { setSoilTests(await db.fetchSoilTests()) } catch (e) { console.error(e) }
+  }
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
@@ -3902,7 +3908,7 @@ function TurfPerformanceModule() {
             <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
           </div>
           <div className="flex gap-1 font-body text-sm overflow-x-auto">
-            {[['dashboard', 'Dashboard'], ['gdd', 'Growing Degree Days'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed']].map(([key, label]) => (
+            {[['dashboard', 'Dashboard'], ['gdd', 'Growing Degree Days'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed']].map(([key, label]) => (
               <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
                 {label}
               </button>
@@ -3922,6 +3928,12 @@ function TurfPerformanceModule() {
           : <ClippingsTab clippings={clippings} areas={turf.areas}
               onAddMany={async (list) => { await db.addClippings(list); await reloadClippings() }}
               onDelete={async (id) => { await db.deleteClipping(id); await reloadClippings() }} />
+        )}
+        {route === 'soil' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <SoilTestsTab soilTests={soilTests} areas={turf.areas}
+              onAdd={async (t) => { await db.addSoilTest(t); await reloadSoilTests() }}
+              onDelete={async (id) => { await db.deleteSoilTest(id); await reloadSoilTests() }} />
         )}
         {route === 'practices' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
@@ -4178,6 +4190,181 @@ function ClippingsTab({ clippings, areas, onAddMany, onDelete }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ── SOIL TESTS + MLSN FERTILITY RECOMMENDATIONS ─────────────────────────────
+// Enter a soil test per area, and the app turns it into a plain fertilizer plan
+// using the MLSN guidelines (keep each nutrient above a proven floor; feed what
+// the plant uses over the year).
+const SOIL_STATUS = {
+  deficient: { bg: '#FEE2E2', fg: '#B91C1C', bar: '#DC2626', label: 'Below MLSN — build up' },
+  maintain: { bg: '#FEF3DD', fg: '#92660D', bar: '#D97706', label: 'OK — feed to maintain' },
+  adequate: { bg: '#E8F3EC', fg: FERN, bar: FERN, label: 'Plenty in reserve' },
+  notest: { bg: '#F1F5F9', fg: '#64748B', bar: '#CBD5E1', label: 'Not tested' },
+}
+function SoilTestsTab({ soilTests, areas, onAdd, onDelete }) {
+  const areaNames = Object.keys(areas || {})
+  const blank = { area: areaNames[0] || '', date: new Date().toISOString().slice(0, 10), annualN: '4', ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', lab: '', notes: '' }
+  const [form, setForm] = useState(blank)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [showForm, setShowForm] = useState(false)
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
+
+  const save = async () => {
+    if (!form.area || !form.date) { setMsg({ type: 'err', text: 'Pick an area and a date first.' }); return }
+    setBusy(true); setMsg(null)
+    try {
+      await onAdd(form)
+      setForm({ ...blank, area: form.area, annualN: form.annualN })
+      setShowForm(false)
+      setMsg({ type: 'ok', text: `Soil test saved for ${form.area}.` })
+    } catch (e) {
+      console.error(e)
+      setMsg({ type: 'err', text: saveErrorText(e, 'supabase/phase12.sql') })
+    }
+    setBusy(false)
+  }
+
+  // Latest test per area drives the recommendation cards (tests come newest-first).
+  const latestByArea = {}
+  soilTests.forEach((t) => { if (!latestByArea[t.area]) latestByArea[t.area] = t })
+  const latest = Object.values(latestByArea)
+
+  const Num = ({ k, label, ph }) => (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <input type="number" step="any" value={form[k] ?? ''} onChange={(e) => set(k, e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder={ph} />
+    </div>
+  )
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="font-display text-lg font-semibold text-slate-900">Soil Tests</p>
+          <p className="font-body text-[11px] text-slate-400">Enter lab results in ppm (Mehlich-3) — the app builds an MLSN fertility plan.</p>
+        </div>
+        <button onClick={() => { setShowForm((v) => !v); setMsg(null) }} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
+          <Plus size={14} /> {showForm ? 'Close' : 'Add test'}
+        </button>
+      </div>
+
+      {msg && (
+        <div className="rounded-xl px-3 py-2 font-body text-[12px] font-semibold" style={msg.type === 'ok' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}>{msg.text}</div>
+      )}
+
+      {showForm && (
+        <div className="bg-white rounded-2xl border-2 p-4 shadow-sm" style={{ borderColor: GOLD }}>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <FieldLabel>Area</FieldLabel>
+              <Select value={form.area} onChange={(v) => set('area', v)} options={areaNames.length ? areaNames : ['—']} />
+            </div>
+            <div>
+              <FieldLabel>Test date</FieldLabel>
+              <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+            </div>
+          </div>
+
+          <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F0F6F2' }}>
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: FERN }}>Nutrients (ppm)</p>
+            <div className="grid grid-cols-3 gap-2.5">
+              <Num k="p" label="P" ph="ppm" />
+              <Num k="k" label="K" ph="ppm" />
+              <Num k="ca" label="Ca" ph="ppm" />
+              <Num k="mg" label="Mg" ph="ppm" />
+              <Num k="s" label="S" ph="ppm" />
+            </div>
+          </div>
+
+          <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F8FAFC' }}>
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2 text-slate-500">Soil chemistry</p>
+            <div className="grid grid-cols-4 gap-2.5">
+              <Num k="ph" label="pH" ph="6.3" />
+              <Num k="bufferPh" label="Buffer" ph="opt." />
+              <Num k="om" label="OM %" ph="opt." />
+              <Num k="cec" label="CEC" ph="opt." />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <FieldLabel>Annual N target (lb / M / yr)</FieldLabel>
+              <input type="number" step="any" value={form.annualN ?? ''} onChange={(e) => set('annualN', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 4" />
+            </div>
+            <div>
+              <FieldLabel>Lab (optional)</FieldLabel>
+              <input value={form.lab} onChange={(e) => set('lab', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. Waypoint" />
+            </div>
+          </div>
+          <div className="mb-3">
+            <FieldLabel>Notes (optional)</FieldLabel>
+            <input value={form.notes} onChange={(e) => set('notes', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. sampled greens 0–4 inch" />
+          </div>
+          <p className="font-body text-[10px] text-slate-400 mb-3">Annual N drives how much nutrient the plant will use over the year. The recommendation keeps each nutrient at or above its MLSN floor (P {MLSN.P}, K {MLSN.K}, Ca {MLSN.Ca}, Mg {MLSN.Mg}, S {MLSN.S} ppm) while covering that use.</p>
+          <button onClick={save} disabled={busy} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save soil test'}</button>
+        </div>
+      )}
+
+      {/* Recommendation cards — latest test per area */}
+      {latest.length === 0 ? (
+        !showForm && <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No soil tests yet. Add one to get an MLSN fertility plan.</div>
+      ) : (
+        latest.map((t) => <SoilRecCard key={t.id} test={t} onDelete={onDelete} />)
+      )}
+    </div>
+  )
+}
+
+function SoilRecCard({ test, onDelete }) {
+  const rec = recommend(test, test.annualN ?? 4)
+  const tested = rec.rows.filter((r) => r.status !== 'notest')
+  return (
+    <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="min-w-0">
+          <p className="font-body text-sm font-semibold text-slate-900 truncate">{test.area}</p>
+          <p className="font-body text-[11px] text-slate-400">Tested {fmtDate(test.date)}{test.lab ? ` · ${test.lab}` : ''} · N target {test.annualN ?? 4} lb/M/yr</p>
+        </div>
+        <button onClick={() => onDelete(test.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+      </div>
+
+      {rec.ph && (
+        <div className="rounded-xl px-3 py-2 mb-3 font-body text-[12px]" style={{ backgroundColor: rec.ph.status === 'ok' ? '#E8F3EC' : '#FEF3DD', color: rec.ph.status === 'ok' ? FERN : '#92660D' }}>
+          {rec.ph.text}
+        </div>
+      )}
+
+      {tested.length === 0 ? (
+        <p className="font-body text-[12px] text-slate-400">No nutrient values entered on this test.</p>
+      ) : (
+        <div className="space-y-2.5">
+          {tested.map((r) => {
+            const st = SOIL_STATUS[r.status]
+            return (
+              <div key={r.key}>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-body text-sm font-semibold text-slate-800">{r.label}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {r.applyLbM > 0 && <span className="font-body text-[12px] font-bold" style={{ color: st.fg }}>Apply {r.applyLbM} lb/M</span>}
+                    <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: st.bg, color: st.fg }}>{st.label}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${Math.max(3, Math.min(100, Math.round((r.soilPpm / (r.mlsnPpm * 2)) * 100)))}%`, backgroundColor: st.bar }} />
+                  </div>
+                  <span className="font-body text-[10px] text-slate-400 shrink-0 w-24 text-right">{r.soilPpm} / {r.mlsnPpm} ppm min</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <p className="font-body text-[10px] text-slate-400 mt-3">MLSN plan — “Apply” is pounds of the nutrient per 1,000 sq ft for the year. Split it across your fertilizer applications. Guidance only; pair with agronomic judgment.</p>
     </div>
   )
 }
