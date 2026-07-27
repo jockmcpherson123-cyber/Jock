@@ -14,7 +14,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X,
+  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -4385,13 +4385,63 @@ function convertSoilToPpm(form) {
   }
 }
 
+// Plain-English meaning for each soil field, keyed by its form key. Shown on tap
+// (iPad) or hover (desktop) so the crew doesn't need to remember the shorthand.
+const SOIL_GLOSSARY = {
+  p: 'Phosphorus — root development and energy transfer.',
+  k: 'Potassium — wear/heat/drought tolerance and water regulation.',
+  ca: 'Calcium — cell-wall strength and root growth.',
+  mg: 'Magnesium — the core of chlorophyll (green colour).',
+  s: 'Sulfur — proteins and chlorophyll; mildly acidifying.',
+  ph: 'pH — acidity/alkalinity. Ideal ~6.0–6.5; drives how available other nutrients are.',
+  cec: 'CEC / TEC — the soil’s nutrient-holding capacity. Low (≈ sand) means nutrients leach.',
+  om: 'Organic Matter — decomposed material; helps hold moisture and nutrients.',
+  na: 'Sodium — too much harms soil structure and roots; flush it on sand.',
+  fe: 'Iron — deep green colour without pushing extra growth.',
+  mn: 'Manganese — enzyme and chlorophyll function.',
+  cu: 'Copper — enzyme function; deficiency is rare.',
+  zn: 'Zinc — growth hormones and enzymes.',
+  b: 'Boron — cell walls and growing points; needed in tiny amounts.',
+  bsCa: 'Calcium base saturation — % of the soil’s exchange sites held by calcium.',
+  bsMg: 'Magnesium base saturation — % of exchange sites held by magnesium.',
+  bsK: 'Potassium base saturation — % of exchange sites held by potassium.',
+  bsNa: 'Sodium base saturation — % held by sodium; keep this low.',
+  bsH: 'Exchangeable hydrogen — the acidity-holding portion of the exchange sites.',
+}
+
+// A little "i" that reveals a definition on tap (mobile) or hover (desktop).
+function InfoTip({ text }) {
+  const [open, setOpen] = useState(false)
+  if (!text) return null
+  return (
+    <span className="relative inline-flex align-middle">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onBlur={() => setOpen(false)}
+        className="ml-1 text-slate-300 hover:text-slate-500"
+        aria-label="What is this?"
+      >
+        <Info size={11} />
+      </button>
+      {open && (
+        <span className="absolute z-30 left-0 top-full mt-1 w-44 rounded-lg px-2.5 py-1.5 shadow-lg font-body text-[10px] leading-snug normal-case tracking-normal font-medium" style={{ backgroundColor: '#1A1A16', color: '#F7F5EF' }}>
+          {text}
+        </span>
+      )}
+    </span>
+  )
+}
+
 // A numeric field for the soil form. Defined at module scope (not inside the tab)
 // so its identity is stable across renders — otherwise React remounts the input
 // on every keystroke and it loses focus after one character.
-function SoilNum({ label, ph, value, onChange }) {
+function SoilNum({ label, ph, value, onChange, tip }) {
   return (
     <div>
-      <FieldLabel>{label}</FieldLabel>
+      <FieldLabel><span className="inline-flex items-center">{label}<InfoTip text={tip} /></span></FieldLabel>
       <input type="number" step="any" inputMode="decimal" value={value ?? ''} onChange={(e) => onChange(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder={ph} />
     </div>
   )
@@ -4461,7 +4511,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
 
   // Render a numeric field bound to a form key. Called as a function (not <Num/>)
   // so it renders the stable module-level SoilNum directly and keeps focus.
-  const num = (k, label, ph) => <SoilNum key={k} label={label} ph={ph} value={form[k]} onChange={(v) => set(k, v)} />
+  const num = (k, label, ph) => <SoilNum key={k} label={label} ph={ph} tip={SOIL_GLOSSARY[k]} value={form[k]} onChange={(v) => set(k, v)} />
 
   return (
     <div className="space-y-4">
