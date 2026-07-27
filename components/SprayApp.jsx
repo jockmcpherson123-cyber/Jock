@@ -3856,15 +3856,17 @@ function TurfPerformanceModule() {
   const [turf, setTurf] = useState({ location: null, sheets: [], products: [], areas: {} })
   const [daily, setDaily] = useState([])
   const [clippings, setClippings] = useState([])
+  const [practices, setPractices] = useState([])
   const [loadingTurf, setLoadingTurf] = useState(true)
 
   useEffect(() => {
     (async () => {
       setLoadingTurf(true)
       try {
-        const [settings, sheets, products, clips] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts(), db.fetchClippings().catch(() => [])])
+        const [settings, sheets, products, clips, pracs] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts(), db.fetchClippings().catch(() => []), db.fetchCulturalPractices().catch(() => [])])
         setTurf({ location: settings.location, sheets, products, areas: settings.areas })
         setClippings(clips)
+        setPractices(pracs)
         if (settings.location?.lat != null) {
           try { setDaily(await fetchSeasonDaily(settings.location.lat, settings.location.lng)) } catch (e) { console.error(e) }
         }
@@ -3876,6 +3878,9 @@ function TurfPerformanceModule() {
   async function reloadClippings() {
     try { setClippings(await db.fetchClippings()) } catch (e) { console.error(e) }
   }
+  async function reloadPractices() {
+    try { setPractices(await db.fetchCulturalPractices()) } catch (e) { console.error(e) }
+  }
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
@@ -3886,7 +3891,7 @@ function TurfPerformanceModule() {
             <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
           </div>
           <div className="flex gap-1 font-body text-sm overflow-x-auto">
-            {[['dashboard', 'Dashboard'], ['gdd', 'Growing Degree Days'], ['clippings', 'Clipping Yields'], ['speed', 'Greens Speed']].map(([key, label]) => (
+            {[['dashboard', 'Dashboard'], ['gdd', 'Growing Degree Days'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed']].map(([key, label]) => (
               <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
                 {label}
               </button>
@@ -3906,6 +3911,12 @@ function TurfPerformanceModule() {
           : <ClippingsTab clippings={clippings} areas={turf.areas}
               onAddMany={async (list) => { await db.addClippings(list); await reloadClippings() }}
               onDelete={async (id) => { await db.deleteClipping(id); await reloadClippings() }} />
+        )}
+        {route === 'practices' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <PracticesTab practices={practices} areas={turf.areas}
+              onAddMany={async (list) => { await db.addCulturalPractices(list); await reloadPractices() }}
+              onDelete={async (id) => { await db.deleteCulturalPractice(id); await reloadPractices() }} />
         )}
         {route === 'speed' && <ComingSoonCard title="Greens Speed" desc="Log Stimpmeter readings by green and date to track consistency over time." />}
       </div>
@@ -4125,6 +4136,142 @@ function ClippingsTab({ clippings, areas, onAddMany, onDelete }) {
                 </div>
                 <p className="font-display text-base font-bold text-slate-900 shrink-0">{c.volume} <span className="font-body text-[11px] font-medium text-slate-400">{c.unit}</span></p>
                 <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── CULTURAL PRACTICES ──────────────────────────────────────────────────────
+// Log the non-spray work — mow, roll, topdress, aerify and the rest — across
+// several areas at once, so the record shows everything that touched the turf,
+// not just chemicals.
+const PRACTICE_OPTIONS = ['Mow', 'Roll', 'Brush', 'Groom', 'Verticut', 'Topdress', 'Aerify', 'Spike/Slice', 'Blow/Drag', 'Water-in']
+function PracticesTab({ practices, areas, onAddMany, onDelete }) {
+  const areaNames = Object.keys(areas || {})
+  const [practice, setPractice] = useState('Mow')
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [selected, setSelected] = useState([])
+  const [value, setValue] = useState('')
+  const [unit, setUnit] = useState('')
+  const [notes, setNotes] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [filter, setFilter] = useState('all')
+
+  const toggleArea = (a) => setSelected((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]))
+  const allOn = selected.length === areaNames.length && areaNames.length > 0
+  const toggleAll = () => setSelected(allOn ? [] : [...areaNames])
+
+  const save = async () => {
+    if (selected.length === 0) return
+    setBusy(true)
+    try {
+      await onAddMany(selected.map((a) => ({ area: a, practice, date, value: value === '' ? null : Number(value), unit, notes })))
+      setValue(''); setNotes('')
+      // keep the practice + selected areas ready for the next log
+    } catch (e) { console.error(e) }
+    setBusy(false)
+  }
+
+  const shown = filter === 'all' ? practices : practices.filter((p) => p.practice === filter)
+  const usedPractices = [...new Set(practices.map((p) => p.practice))]
+  // Last-14-days count per practice, for the quick summary strip.
+  const cutoff = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10)
+  const recentCounts = {}
+  practices.filter((p) => p.date >= cutoff).forEach((p) => { recentCounts[p.practice] = (recentCounts[p.practice] || 0) + 1 })
+  const summary = Object.entries(recentCounts).sort((a, b) => b[1] - a[1])
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border-2 p-4 shadow-sm" style={{ borderColor: GOLD }}>
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Log a practice</p>
+        <p className="font-body text-[11px] text-slate-400 mb-3">Pick what you did and every area it happened on — logs them all at once.</p>
+
+        <FieldLabel>Practice</FieldLabel>
+        <div className="flex flex-wrap gap-1.5 mt-1 mb-3">
+          {PRACTICE_OPTIONS.map((p) => {
+            const on = practice === p
+            return (
+              <button key={p} type="button" onClick={() => setPractice(p)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FOREST, color: 'white', borderColor: FOREST } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>
+                {p}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="flex items-center justify-between mb-1">
+          <FieldLabel>Areas</FieldLabel>
+          {areaNames.length > 0 && (
+            <button type="button" onClick={toggleAll} className="font-body text-[11px] font-bold" style={{ color: FERN }}>{allOn ? 'Clear all' : 'Select all'}</button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1.5 mt-1 mb-3">
+          {areaNames.map((a) => {
+            const on = selected.includes(a)
+            return (
+              <button key={a} type="button" onClick={() => toggleArea(a)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>
+                {a}
+              </button>
+            )
+          })}
+          {areaNames.length === 0 && <p className="font-body text-xs text-slate-400">Add areas in Spray Ops → Settings first.</p>}
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <div>
+            <FieldLabel>Date</FieldLabel>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+          </div>
+          <div>
+            <FieldLabel>Amount (opt.)</FieldLabel>
+            <input type="number" step="any" value={value} onChange={(e) => setValue(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 2" />
+          </div>
+          <div>
+            <FieldLabel>Unit (opt.)</FieldLabel>
+            <input value={unit} onChange={(e) => setUnit(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="passes, lbs/M" />
+          </div>
+        </div>
+        <div className="mb-3">
+          <FieldLabel>Notes (optional)</FieldLabel>
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. .100 HOC, double-cut, sand topdress" />
+        </div>
+        <button onClick={save} disabled={busy || selected.length === 0} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
+          {busy ? 'Saving…' : `Log ${practice}${selected.length ? ` · ${selected.length} area${selected.length !== 1 ? 's' : ''}` : ''}`}
+        </button>
+      </div>
+
+      {summary.length > 0 && (
+        <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+          <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Last 14 days</p>
+          <div className="flex flex-wrap gap-1.5">
+            {summary.map(([p, n]) => (
+              <span key={p} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{p} · {n}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+          <button onClick={() => setFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>All</button>
+          {usedPractices.map((p) => (
+            <button key={p} onClick={() => setFilter(p)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === p ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{p}</button>
+          ))}
+        </div>
+        {shown.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No practices logged yet.</div>
+        ) : (
+          <div className="space-y-2">
+            {shown.map((p) => (
+              <div key={p.id} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-sm font-semibold text-slate-800 truncate">{p.practice} · {p.area}</p>
+                  <p className="font-body text-[11px] text-slate-400 truncate">{fmtDate(p.date)}{p.value != null ? ` · ${p.value}${p.unit ? ` ${p.unit}` : ''}` : ''}{p.notes ? ` · ${p.notes}` : ''}</p>
+                </div>
+                <button onClick={() => onDelete(p.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
               </div>
             ))}
           </div>
