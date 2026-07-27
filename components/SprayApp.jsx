@@ -24,7 +24,7 @@ import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
-import { recommend, suggestedAnnualN, MLSN } from '@/lib/soil'
+import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import SprayCalendar from '@/components/SprayCalendar'
@@ -4241,8 +4241,9 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
   const contextFor = (name) => (areas[name] ? { grasses: areas[name].grasses || [], soilType: areas[name].soilType || '' } : greensSeed())
 
   const seed0 = contextFor(areaOptions[0] || '')
-  const blank = { area: areaOptions[0] || '', date: new Date().toISOString().slice(0, 10), annualN: String(suggestedAnnualN(seed0.grasses).n), units: 'ppm', ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', na: '', fe: '', mn: '', cu: '', zn: '', b: '', lab: '', notes: '', grasses: seed0.grasses, soilType: seed0.soilType }
+  const blank = { area: areaOptions[0] || '', date: new Date().toISOString().slice(0, 10), annualN: String(suggestedAnnualN(seed0.grasses).n), units: 'ppm', ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', na: '', fe: '', mn: '', cu: '', zn: '', b: '', bsCa: '', bsMg: '', bsK: '', bsNa: '', bsH: '', lab: '', notes: '', grasses: seed0.grasses, soilType: seed0.soilType }
   const [showMicros, setShowMicros] = useState(false)
+  const [showBaseSat, setShowBaseSat] = useState(false)
   const [form, setForm] = useState(blank)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
@@ -4267,7 +4268,10 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
       // Store macronutrients as ppm so the engine is unit-agnostic; sodium and
       // micros ride in `extras` for the record (they don't drive the MLSN plan).
       const conv = convertSoilToPpm(form)
-      await onAdd({ ...form, ...conv, extras: { na: conv.na, fe: form.fe, mn: form.mn, cu: form.cu, zn: form.zn, b: form.b } })
+      await onAdd({ ...form, ...conv, extras: {
+        na: conv.na, fe: form.fe, mn: form.mn, cu: form.cu, zn: form.zn, b: form.b,
+        baseSat: { ca: form.bsCa, mg: form.bsMg, k: form.bsK, na: form.bsNa, h: form.bsH },
+      } })
       setForm((f) => ({ ...blank, area: f.area, grasses: f.grasses, soilType: f.soilType, annualN: f.annualN, units: f.units }))
       setShowForm(false)
       setMsg({ type: 'ok', text: `Soil test saved for ${form.area}.` })
@@ -4377,6 +4381,22 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
                 <Num k="cu" label="Cu" ph="ppm" />
                 <Num k="zn" label="Zn" ph="ppm" />
                 <Num k="b" label="B" ph="ppm" />
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F1F5F9' }}>
+            <button type="button" onClick={() => setShowBaseSat((v) => !v)} className="w-full flex items-center justify-between">
+              <span className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-500">Base saturation (%) — optional</span>
+              <ChevronRight size={14} className="text-slate-400" style={{ transform: showBaseSat ? 'rotate(90deg)' : 'none' }} />
+            </button>
+            {showBaseSat && (
+              <div className="grid grid-cols-5 gap-2 mt-2">
+                <Num k="bsCa" label="Ca" ph="%" />
+                <Num k="bsMg" label="Mg" ph="%" />
+                <Num k="bsK" label="K" ph="%" />
+                <Num k="bsNa" label="Na" ph="%" />
+                <Num k="bsH" label="H" ph="%" />
               </div>
             )}
           </div>
@@ -4491,6 +4511,25 @@ function SoilRecCard({ test, area = {}, onDelete }) {
                 ))}
               </div>
             )}
+          </div>
+        )
+      })()}
+
+      {(() => {
+        const bs = baseSaturation(test.baseSat || {})
+        if (bs.length === 0) return null
+        const tone = { ok: { bg: '#E8F3EC', fg: FERN }, low: { bg: '#FEF3DD', fg: '#92660D' }, high: { bg: '#FEE2E2', fg: '#B91C1C' } }
+        return (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Base saturation (ideal band)</p>
+            <div className="flex flex-wrap gap-1.5">
+              {bs.map((r) => {
+                const t = tone[r.status] || tone.ok
+                const range = r.key === 'na' ? `<${r.hi}%` : `${r.lo}–${r.hi}%`
+                return <span key={r.key} className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: t.bg, color: t.fg }}>{r.label} {r.value}% <span className="opacity-60">({range})</span></span>
+              })}
+            </div>
+            <p className="font-body text-[9px] text-slate-400 mt-1.5">Informational — MLSN drives the plan above, not base saturation.</p>
           </div>
         )
       })()}
