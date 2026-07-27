@@ -1019,8 +1019,10 @@ function DiseaseProtectionCard({ rows }) {
                 <span className="font-body text-sm font-semibold text-slate-800 truncate">{r.area}</span>
                 <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>{badge}</span>
               </div>
-              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(4, r.pct)}%`, backgroundColor: st.bar }} />
+              <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                {/* Expired shows a full status-coloured bar so it's clearly visible,
+                    not an empty sliver. Otherwise it fills to the cover remaining. */}
+                <div className="h-full rounded-full transition-all" style={{ width: r.status === 'expired' ? '100%' : `${Math.max(8, r.pct)}%`, backgroundColor: st.bar }} />
               </div>
               <p className="font-body text-[10px] text-slate-400 mt-0.5 truncate">
                 Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)} · {r.mode === 'temp' ? `${r.window}-day label, heat-adjusted` : `${r.window}-day window`}
