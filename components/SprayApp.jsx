@@ -4213,14 +4213,15 @@ const P2O5_TO_P = 0.4364
 function convertSoilToPpm(form) {
   const n = (v) => (v === '' || v == null || isNaN(Number(v)) ? '' : Number(v))
   const r1 = (v) => (v === '' ? '' : Math.round(v * 10) / 10)
-  if (form.units !== 'logan') return { p: form.p, k: form.k, ca: form.ca, mg: form.mg, s: form.s }
-  const p = n(form.p), k = n(form.k), ca = n(form.ca), mg = n(form.mg)
+  if (form.units !== 'logan') return { p: form.p, k: form.k, ca: form.ca, mg: form.mg, s: form.s, na: form.na }
+  const p = n(form.p), k = n(form.k), ca = n(form.ca), mg = n(form.mg), na = n(form.na)
   return {
     p: r1(p === '' ? '' : p * P2O5_TO_P * LBAC_TO_PPM),
     k: r1(k === '' ? '' : k * LBAC_TO_PPM),
     ca: r1(ca === '' ? '' : ca * LBAC_TO_PPM),
     mg: r1(mg === '' ? '' : mg * LBAC_TO_PPM),
-    s: form.s, // Logan reports sulfur in ppm already
+    na: r1(na === '' ? '' : na * LBAC_TO_PPM),
+    s: form.s, // Logan reports sulfur (and micros) in ppm already
   }
 }
 
@@ -4240,7 +4241,8 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
   const contextFor = (name) => (areas[name] ? { grasses: areas[name].grasses || [], soilType: areas[name].soilType || '' } : greensSeed())
 
   const seed0 = contextFor(areaOptions[0] || '')
-  const blank = { area: areaOptions[0] || '', date: new Date().toISOString().slice(0, 10), annualN: String(suggestedAnnualN(seed0.grasses).n), units: 'ppm', ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', lab: '', notes: '', grasses: seed0.grasses, soilType: seed0.soilType }
+  const blank = { area: areaOptions[0] || '', date: new Date().toISOString().slice(0, 10), annualN: String(suggestedAnnualN(seed0.grasses).n), units: 'ppm', ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', na: '', fe: '', mn: '', cu: '', zn: '', b: '', lab: '', notes: '', grasses: seed0.grasses, soilType: seed0.soilType }
+  const [showMicros, setShowMicros] = useState(false)
   const [form, setForm] = useState(blank)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
@@ -4262,8 +4264,10 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
     if (!form.area || !form.date) { setMsg({ type: 'err', text: 'Pick a location and a date first.' }); return }
     setBusy(true); setMsg(null)
     try {
-      // Store nutrients as ppm so the recommendation engine is unit-agnostic.
-      await onAdd({ ...form, ...convertSoilToPpm(form) })
+      // Store macronutrients as ppm so the engine is unit-agnostic; sodium and
+      // micros ride in `extras` for the record (they don't drive the MLSN plan).
+      const conv = convertSoilToPpm(form)
+      await onAdd({ ...form, ...conv, extras: { na: conv.na, fe: form.fe, mn: form.mn, cu: form.cu, zn: form.zn, b: form.b } })
       setForm((f) => ({ ...blank, area: f.area, grasses: f.grasses, soilType: f.soilType, annualN: f.annualN, units: f.units }))
       setShowForm(false)
       setMsg({ type: 'ok', text: `Soil test saved for ${form.area}.` })
@@ -4355,10 +4359,26 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
             <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2 text-slate-500">Soil chemistry</p>
             <div className="grid grid-cols-4 gap-2.5">
               <Num k="ph" label="pH" ph="6.3" />
-              <Num k="bufferPh" label="Buffer" ph="opt." />
+              <Num k="cec" label="CEC / TEC" ph="opt." />
               <Num k="om" label="OM %" ph="opt." />
-              <Num k="cec" label="CEC" ph="opt." />
+              <Num k="na" label="Na" ph={form.units === 'logan' ? 'lb/ac' : 'ppm'} />
             </div>
+          </div>
+
+          <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#FBF7EF' }}>
+            <button type="button" onClick={() => setShowMicros((v) => !v)} className="w-full flex items-center justify-between">
+              <span className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: '#92660D' }}>Micronutrients (ppm) — optional</span>
+              <ChevronRight size={14} className="text-slate-400" style={{ transform: showMicros ? 'rotate(90deg)' : 'none' }} />
+            </button>
+            {showMicros && (
+              <div className="grid grid-cols-5 gap-2 mt-2">
+                <Num k="fe" label="Fe" ph="ppm" />
+                <Num k="mn" label="Mn" ph="ppm" />
+                <Num k="cu" label="Cu" ph="ppm" />
+                <Num k="zn" label="Zn" ph="ppm" />
+                <Num k="b" label="B" ph="ppm" />
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3 mb-3">
@@ -4448,6 +4468,33 @@ function SoilRecCard({ test, area = {}, onDelete }) {
           })}
         </div>
       )}
+
+      {(() => {
+        const na = test.na
+        const hasNa = na != null && na !== ''
+        const highNa = hasNa && Number(na) >= 50
+        const micros = test.micros || {}
+        const microChips = Object.entries({ Fe: micros.fe, Mn: micros.mn, Cu: micros.cu, Zn: micros.zn, B: micros.b }).filter(([, v]) => v != null && v !== '')
+        if (!hasNa && microChips.length === 0) return null
+        return (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            {hasNa && (
+              <div className="rounded-xl px-3 py-2 mb-2 font-body text-[11px]" style={highNa ? { backgroundColor: '#FEF3DD', color: '#92660D' } : { backgroundColor: '#F8FAFC', color: '#64748B' }}>
+                Sodium {na} ppm{highNa ? ' — elevated for a sand green; flush with irrigation and consider gypsum to displace it.' : ' — in a comfortable range.'}
+              </div>
+            )}
+            {microChips.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 self-center">Micros:</span>
+                {microChips.map(([k, v]) => (
+                  <span key={k} className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#FBF7EF', color: '#92660D' }}>{k} {v}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       <p className="font-body text-[10px] text-slate-400 mt-3">MLSN plan — “Apply” is pounds of the nutrient per 1,000 sq ft for the year. Split it across your fertilizer applications. Guidance only; pair with agronomic judgment.</p>
     </div>
   )
