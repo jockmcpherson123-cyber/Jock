@@ -139,16 +139,37 @@ function computeEarlyOrder(apps, products, areas) {
     const ozPerCase = Number(p.ozPerCase) || 0
     const unit = p.unit || 'oz'
     const ozPerUnit = Number(p.ozPerUnit) || 0
-    const casesExact = ozPerCase ? r.totalOz / ozPerCase : null
+    // Net the season need against what's already on the shelf, so we order the
+    // gap — not the whole year over again. Stock is converted into the same oz
+    // the season total is in.
+    const onHandOz = stockToOz(p.stock, unit)
+    const netOz = Math.max(0, r.totalOz - onHandOz)
+    const casesExact = ozPerCase ? netOz / ozPerCase : null
     const casesToOrder = casesExact != null ? Math.ceil(casesExact) : null
     const totalInUnits = ozPerUnit ? r.totalOz / ozPerUnit : null
-    return { ...r, ozPerCase, unit, caseSize: p.caseSize || '', casesExact, casesToOrder, totalInUnits, missingCase: !ozPerCase }
+    const costPerCase = Number(p.costPerCase) || 0
+    const estCost = casesToOrder != null && costPerCase ? Math.round(casesToOrder * costPerCase * 100) / 100 : null
+    return { ...r, ozPerCase, unit, caseSize: p.caseSize || '', onHandOz, netOz, casesExact, casesToOrder, totalInUnits, costPerCase, estCost, missingCase: !ozPerCase }
   }).sort((a, b) => b.totalOz - a.totalOz)
 
   const areaList = [...areaSet].sort()
   const casesTotal = rows.reduce((s, r) => s + (r.casesToOrder || 0), 0)
+  const estTotalCost = Math.round(rows.reduce((s, r) => s + (r.estCost || 0), 0) * 100) / 100
   const missingCaseCount = rows.filter((r) => r.missingCase).length
-  return { rows, areaList, casesTotal, missingCaseCount, missingSqft }
+  return { rows, areaList, casesTotal, estTotalCost, missingCaseCount, missingSqft }
+}
+
+// Convert a stock amount into ounces so it can be netted against a season total.
+// Liquids go through fluid ounces, dry products through weight ounces — matching
+// how "oz per case" is stored for each.
+function stockToOz(stock, unit) {
+  const q = Number(stock)
+  if (!q || q <= 0) return 0
+  const vol = { gal: 128, qt: 32, pt: 16, 'fl oz': 1, oz: 1, L: 33.814, ml: 0.033814 }
+  const wt = { lbs: 16, kg: 35.274, g: 0.035274 }
+  if (vol[unit] != null) return q * vol[unit]
+  if (wt[unit] != null) return q * wt[unit]
+  return 0
 }
 
 // A distinct color per product type for quick visual scanning.
@@ -565,12 +586,15 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
   const earlyOrder = computeEarlyOrder(visibleApps, products, areas)
   const exportEarlyOrder = () => {
     const areaCols = earlyOrder.areaList
-    const rows = [['Product', 'Type', 'Total oz', 'Case size', 'Oz/case', 'Cases needed', 'Cases to order', ...areaCols]]
+    const rows = [['Product', 'Type', 'Total oz needed', 'On hand oz', 'Net oz', 'Case size', 'Oz/case', 'Cases needed', 'Cases to order', 'Cost/case', 'Est. cost', ...areaCols]]
     earlyOrder.rows.forEach((r) => rows.push([
-      r.name, r.type, Math.round(r.totalOz), r.caseSize, r.ozPerCase || '',
+      r.name, r.type, Math.round(r.totalOz), Math.round(r.onHandOz || 0), Math.round(r.netOz || 0), r.caseSize, r.ozPerCase || '',
       r.casesExact != null ? round1(r.casesExact) : '', r.casesToOrder != null ? r.casesToOrder : '',
+      r.costPerCase || '', r.estCost != null ? r.estCost : '',
       ...areaCols.map((a) => Math.round(r.byArea[a] || 0)),
     ]))
+    rows.push([])
+    rows.push(['', '', '', '', '', '', '', '', earlyOrder.casesTotal, '', earlyOrder.estTotalCost])
     downloadCSV(rows, `Early_Order_${activeProgram?.year || ''}.csv`)
   }
 
@@ -1061,12 +1085,14 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
             <div>
               <div className="grid grid-cols-3 gap-2 mb-3">
                 <div className="bg-white rounded-xl border border-black/5 px-3 py-2.5 shadow-sm">
-                  <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Products</p>
-                  <p className="font-display font-bold text-slate-900" style={{ fontSize: 20, marginTop: 2 }}>{earlyOrder.rows.length}</p>
-                </div>
-                <div className="bg-white rounded-xl border border-black/5 px-3 py-2.5 shadow-sm">
                   <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Cases to order</p>
                   <p className="font-display font-bold text-slate-900" style={{ fontSize: 20, marginTop: 2 }}>{earlyOrder.casesTotal}</p>
+                  <p className="font-body text-[9px] text-slate-400 leading-tight">net of stock on hand</p>
+                </div>
+                <div className="bg-white rounded-xl border border-black/5 px-3 py-2.5 shadow-sm">
+                  <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Est. cost</p>
+                  <p className="font-display font-bold text-slate-900" style={{ fontSize: 20, marginTop: 2 }}>{earlyOrder.estTotalCost > 0 ? `$${earlyOrder.estTotalCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—'}</p>
+                  <p className="font-body text-[9px] text-slate-400 leading-tight">priced products only</p>
                 </div>
                 <button onClick={exportEarlyOrder} className="rounded-xl text-white shadow-sm flex flex-col items-center justify-center gap-1" style={{ backgroundColor: FOREST }}>
                   <Package size={16} />
@@ -1095,7 +1121,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
                         <div className="min-w-0 flex-1">
                           <p className="font-body text-sm font-semibold text-slate-800 truncate flex items-center gap-1">{r.name} <Pencil size={11} className="text-slate-300 shrink-0" /></p>
                           <p className="font-body text-[11px] text-slate-400">
-                            {Math.round(r.totalOz).toLocaleString()} oz total{r.totalInUnits != null ? ` (${round1(r.totalInUnits)} ${r.unit})` : ''}{r.caseSize ? ` · ${r.caseSize}` : ''}{r.ozPerCase ? ` @ ${r.ozPerCase} oz/case` : ''}
+                            {Math.round(r.totalOz).toLocaleString()} oz needed{r.onHandOz > 0 ? ` − ${Math.round(r.onHandOz).toLocaleString()} on hand` : ''}{r.caseSize ? ` · ${r.caseSize}` : ''}{r.ozPerCase ? ` @ ${r.ozPerCase} oz/case` : ''}
                           </p>
                         </div>
                         <div className="text-right shrink-0">
@@ -1103,6 +1129,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
                             <>
                               <p className="font-display text-lg font-bold text-slate-900 leading-none">{r.casesToOrder}</p>
                               <p className="font-body text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">case{r.casesToOrder !== 1 ? 's' : ''} · need {round1(r.casesExact)}</p>
+                              {r.estCost != null && <p className="font-body text-[11px] font-bold mt-0.5" style={{ color: FERN }}>${r.estCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>}
                             </>
                           ) : (
                             <p className="font-body text-[11px] font-semibold text-amber-600">add oz/case</p>
@@ -1140,7 +1167,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
                 )}
               </div>
 
-              <p className="font-body text-[10px] text-slate-400 mt-3">Estimate for planning. Totals = each application's rate × the area's size, summed over the season, then converted to cases with each product's Oz/case. “Cases” rounds up to whole cases; “need” is the exact amount.</p>
+              <p className="font-body text-[10px] text-slate-400 mt-3">Estimate for planning. Totals = each application's rate × the area's size, summed over the season, minus current stock on hand, then converted to cases with each product's Oz/case. “Cases” rounds up to whole cases; “need” is the exact amount. Cost = cases × the product's cost per case.</p>
             </div>
           )}
         </>
