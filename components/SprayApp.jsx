@@ -1381,6 +1381,117 @@ const tdVal = { border: '1px solid #ccc', padding: '5px 8px', width: '35%' }
 const thStyle = { border: '1px solid #16291F', padding: '6px 8px', textAlign: 'left', fontSize: 10, textTransform: 'uppercase' }
 const tdRow = { border: '1px solid #ccc', padding: '5px 8px' }
 
+// ── Self-contained spray-record HTML (for print + PDF) ──────────────────────
+// Builds a standalone HTML string from a single sheet. Rendered into an isolated
+// iframe (print) or a detached element (PDF) so only THIS sheet is ever output —
+// no global print-CSS hacks, no shared ids, no other sheets leaking in.
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+}
+function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], courseInfo = {}) {
+  const L = 'border:1px solid #ccc;padding:5px 8px;background:#F0F0EA;font-weight:700;width:15%'
+  const V = 'border:1px solid #ccc;padding:5px 8px;width:35%'
+  const TH = 'border:1px solid #16291F;padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;color:#fff'
+  const R = 'border:1px solid #ccc;padding:5px 8px'
+  const tbl = 'width:100%;border-collapse:collapse;font-size:11px;margin-bottom:12px'
+  const blank = '_______________________'
+
+  const rows = (sheet.products || []).filter((p) => p.product).map((p) => {
+    const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
+    const total = amt !== null ? Math.round(amt * (sheet.tanks || 1) * 10) / 10 : null
+    return { ...p, amt, total, unit }
+  })
+  const productRows = rows.map((p, i) => `<tr style="background:${i % 2 === 0 ? '#fff' : '#F5F5F0'}">
+    <td style="${R}">${esc(p.product)}</td><td style="${R}">${esc(p.rate)}</td><td style="${R}">${esc(p.basis)}</td>
+    <td style="${R}">${p.amt ?? '—'} ${esc(p.unit || '')}</td><td style="${R};font-weight:700">${p.total ?? '—'} ${esc(p.unit || '')}</td></tr>`).join('')
+
+  const partialGal = sheet.partialGallons
+  let partialTable = ''
+  if (partialGal && area.galTank) {
+    const pr = rows.map((p, i) => {
+      const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, effectiveSqft(partialGal, area), p.forceGal)
+      return `<tr style="background:${i % 2 === 0 ? '#fff' : '#F5F5F0'}"><td style="${R}">${esc(p.product)}</td><td style="${R};font-weight:700">${amt ?? '—'} ${esc(unit || '')}</td></tr>`
+    }).join('')
+    partialTable = `<table style="${tbl}"><thead><tr style="background:#92660D;color:#fff"><th style="${TH}" colspan="2">Partial Fill — Extra Spray (${esc(partialGal)} gal)</th></tr></thead><tbody>${pr}</tbody></table>`
+  }
+  const sig = (v) => v ? `<img src="${v}" style="height:48px;max-width:100%" />` : blank
+  const w = sheet.weather || {}
+
+  return `<div style="font-family:Arial,sans-serif;color:#111">
+    <div style="text-align:center;border-bottom:2px solid #16291F;padding-bottom:10px;margin-bottom:14px">
+      <div style="font-size:18px;font-weight:700">${esc(courseInfo.clubName || 'Golf Club')}</div>
+      <div style="font-size:12px;color:#555">${esc(courseInfo.deptName || 'Grounds Operations')} — Spray Record</div>
+    </div>
+    <table style="${tbl}"><tbody>
+      <tr><td style="${L}">Area</td><td style="${V}">${esc(sheet.area)}</td><td style="${L}">Date</td><td style="${V}">${esc(sheet.date)}</td></tr>
+      <tr><td style="${L}">Operator</td><td style="${V}">${esc(sheet.operator || '—')}</td><td style="${L}">Tanks</td><td style="${V}">${esc(sheet.tanks)}${area.galTank ? ` × ${esc(area.galTank)} gal` : ''}</td></tr>
+      <tr><td style="${L}">Nozzle</td><td style="${V}">${esc(area.nozzle || '—')}</td><td style="${L}">PSI</td><td style="${V}">${esc(area.psi || '—')}</td></tr>
+      <tr><td style="${L}">Target</td><td style="${V}" colspan="3">${esc(sheetTargets.join(', ') || '—')}</td></tr>
+      <tr><td style="${L}">Weather</td><td style="${V}" colspan="3">${w.temp ? `${esc(w.temp)}°F` : '—'} · ${w.wind ? `${esc(w.wind)} mph wind` : '—'} · ${w.humidity ? `${esc(w.humidity)}% humidity` : '—'} · ${esc(w.windDir || '—')}</td></tr>
+    </tbody></table>
+    <table style="${tbl}"><thead><tr style="background:#16291F"><th style="${TH}">Product</th><th style="${TH}">Rate</th><th style="${TH}">Basis</th><th style="${TH}">Amt/Tank</th><th style="${TH}">Total</th></tr></thead><tbody>${productRows}</tbody></table>
+    ${partialTable}
+    <table style="${tbl}"><tbody>
+      <tr><td style="${L}">PPE</td><td style="${V}" colspan="3">${esc((sheet.ppe || []).join(', ') || '—')}</td></tr>
+      <tr><td style="${L}">Instructions</td><td style="${V}" colspan="3">${esc(sheet.instructions || '—')}</td></tr>
+    </tbody></table>
+    <table style="${tbl}"><tbody><tr><td style="${L};background:#FEF2F2">Safety Notice</td><td style="${V}" colspan="3">Check ALL nozzles before leaving maintenance area. Calculate rates BEFORE filling sprayer.</td></tr></tbody></table>
+    <table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>
+      <tr><td style="${L}">Applicator</td><td style="${V}">${esc(sheet.completedBy || sheet.operator || blank)}</td><td style="${L}">Date Applied</td><td style="${V}">${sheet.completedAt ? esc(new Date(sheet.completedAt).toLocaleString()) : blank}</td></tr>
+      <tr><td style="${L}">Pesticide Lic #</td><td style="${V}">${esc(sheet.applicatorPesticideLicense || '—')}</td><td style="${L}">Fertilizer Lic #</td><td style="${V}">${esc(sheet.applicatorFertilizerLicense || '—')}</td></tr>
+      <tr><td style="${L}">Applicator Signature</td><td style="${V}" colspan="3">${sig(sheet.applicatorSignature)}</td></tr>
+      <tr><td style="${L}">Superintendent</td><td style="${V}">${esc(sheet.operator || blank)}</td><td style="${L}">Date Submitted</td><td style="${V}">${sheet.createdAt ? esc(new Date(sheet.createdAt).toLocaleDateString()) : blank}</td></tr>
+      <tr><td style="${L}">Director Approval</td><td style="${V}">${esc(sheet.directorSig || blank)}</td><td style="${L}">Date Approved</td><td style="${V}">${sheet.directorDate ? esc(new Date(sheet.directorDate).toLocaleString()) : blank}</td></tr>
+      <tr><td style="${L}">Director Signature</td><td style="${V}" colspan="3">${sig(sheet.directorSignature)}</td></tr>
+      <tr><td style="${L}">Status</td><td style="${V}" colspan="3">${sheet.status === 'approved' ? 'APPROVED' : 'PENDING APPROVAL'}</td></tr>
+    </tbody></table>
+    <p style="font-size:9px;color:#888;margin-top:20px;text-align:center">Printed ${esc(new Date().toLocaleString())} — Sheet ID: ${esc(sheet.id)}</p>
+  </div>`
+}
+
+// Print one record via an isolated hidden iframe (only this sheet prints).
+function printRecordHTML(bodyHtml) {
+  const iframe = document.createElement('iframe')
+  Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
+  document.body.appendChild(iframe)
+  const doc = iframe.contentWindow.document
+  doc.open()
+  doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in;size:portrait}body{margin:0;font-family:Arial,sans-serif;color:#111}</style></head><body>${bodyHtml}</body></html>`)
+  doc.close()
+  let fired = false
+  const go = () => { if (fired) return; fired = true; try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }
+  const imgs = doc.images
+  if (imgs && imgs.length) {
+    let n = 0
+    const done = () => { if (++n >= imgs.length) go() }
+    Array.from(imgs).forEach((im) => { if (im.complete) done(); else { im.onload = done; im.onerror = done } })
+    setTimeout(go, 1500)
+  } else {
+    setTimeout(go, 200)
+  }
+}
+
+// Export one record to PDF from a detached, off-screen element.
+async function pdfRecordHTML(bodyHtml, filename) {
+  const holder = document.createElement('div')
+  Object.assign(holder.style, { position: 'absolute', left: '-10000px', top: '0', width: '760px', background: '#ffffff' })
+  holder.innerHTML = bodyHtml
+  document.body.appendChild(holder)
+  await new Promise((r) => setTimeout(r, 60))
+  try {
+    const html2pdf = (await import('html2pdf.js')).default
+    await html2pdf().set({
+      margin: 8,
+      filename,
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+      jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
+    }).from(holder).save()
+  } finally {
+    holder.remove()
+  }
+}
+
 // ── SIGNATURE PAD ─────────────────────────────────────────────────────────
 // A finger/stylus signature box for the iPad. Emits a PNG data URL via onChange
 // and can reload a previously saved signature.
@@ -1552,34 +1663,18 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
   const saveNow = () =>
     onLogSpray?.({ ...sheet, weather: wx, tankChecks, partialGallons: partialGal === '' ? null : Number(partialGal), applicatorSignature: applicatorSig || sheet.applicatorSignature || '' })
 
-  // Export the printable spray record as a downloadable PDF (saves to Files).
+  // Print / export this one record — built as isolated HTML so only this sheet
+  // is ever output (fixes the "other sheets show up" + blank-PDF bugs).
   const [pdfBusy, setPdfBusy] = useState(false)
+  const buildRecordHtml = () => sheetRecordHTML(sheet, area, products, sheetTargets, courseInfo)
+  const printRecord = () => printRecordHTML(buildRecordHtml())
   const exportPdf = async () => {
-    const el = document.getElementById('printable-sheet')
-    if (!el) return
     setPdfBusy(true)
-    const prev = el.getAttribute('style') || 'display:none'
-    // Lay it out off-screen (not display:none, not fixed — html2canvas needs
-    // real layout and dislikes fixed/negative-z elements).
-    el.setAttribute('style', 'display:block;position:absolute;left:-10000px;top:0;width:760px;background:#ffffff')
-    // Let the browser lay it out before capturing.
-    await new Promise((r) => setTimeout(r, 60))
     try {
-      const html2pdf = (await import('html2pdf.js')).default
       const safe = `${sheet.area || 'Spray'}-${sheet.date || ''}`.replace(/[^\w-]+/g, '_')
-      await html2pdf().set({
-        margin: 8,
-        filename: `Spray-Sheet_${safe}.pdf`,
-        image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 800, scrollX: 0, scrollY: 0 },
-        jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
-      }).from(el).save()
-    } catch (e) {
-      console.error(e)
-    } finally {
-      el.setAttribute('style', prev)
-      setPdfBusy(false)
-    }
+      await pdfRecordHTML(buildRecordHtml(), `Spray-Sheet_${safe}.pdf`)
+    } catch (e) { console.error(e) }
+    setPdfBusy(false)
   }
 
   return (
@@ -1589,7 +1684,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
         <div className="flex items-center gap-3">
           <StatusPill status={sheet.status} />
           <button onClick={saveNow} className="font-body text-sm font-medium" style={{ color: FERN }}>Save</button>
-          <button onClick={() => window.print()} className="font-body text-sm font-medium" style={{ color: FOREST }}>Print</button>
+          <button onClick={printRecord} className="font-body text-sm font-medium" style={{ color: FOREST }}>Print</button>
           <button onClick={exportPdf} disabled={pdfBusy} className="font-body text-sm font-medium disabled:opacity-50" style={{ color: FOREST }}>{pdfBusy ? 'PDF…' : 'Export PDF'}</button>
           {manage && sheet.status === 'pending' && (
             <button onClick={onEdit} className="font-body text-sm font-medium" style={{ color: FERN }}>Edit</button>
@@ -1597,7 +1692,6 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
         </div>
       </div>
 
-      <PrintableSheet sheet={sheet} area={area} products={products} sheetTargets={sheetTargets} courseInfo={courseInfo} />
 
       <div className="no-print">
         <h2 className="font-display text-2xl font-semibold text-slate-900 mb-1">{sheet.area}</h2>
@@ -1879,7 +1973,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                     <img src={sheet.applicatorSignature} alt="Applicator signature" className="mt-2 h-12 rounded border border-slate-100 bg-white" />
                   )}
                   <div className="flex gap-2 mt-3">
-                    <button onClick={() => window.print()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white" style={{ backgroundColor: FOREST }}>Print record</button>
+                    <button onClick={printRecord} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white" style={{ backgroundColor: FOREST }}>Print record</button>
                     <button onClick={exportPdf} disabled={pdfBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full disabled:opacity-50" style={{ color: FOREST, border: `1px solid ${FOREST}` }}>{pdfBusy ? 'Exporting…' : 'Export PDF'}</button>
                     <button onClick={reopen} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full text-slate-500 border border-slate-200">Reopen (back to To Spray)</button>
                   </div>
