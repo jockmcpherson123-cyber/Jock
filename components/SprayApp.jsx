@@ -4396,15 +4396,31 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
 
       {showForm && (
         <div className="bg-white rounded-2xl border-2 p-4 shadow-sm" style={{ borderColor: GOLD }}>
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div>
-              <FieldLabel>Area or hole</FieldLabel>
-              <Select value={form.area} onChange={pickArea} options={areaOptions.length ? areaOptions : ['—']} />
+          <div className="mb-3">
+            <FieldLabel>Where was this sampled?</FieldLabel>
+            {areaNames.length > 0 && (
+              <>
+                <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mt-1 mb-1">Areas</p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {areaNames.map((a) => {
+                    const on = form.area === a
+                    return <button key={a} type="button" onClick={() => pickArea(a)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FOREST, color: 'white', borderColor: FOREST } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{a}</button>
+                  })}
+                </div>
+              </>
+            )}
+            <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Greens / holes</p>
+            <div className="flex flex-wrap gap-1.5">
+              {GREEN_OPTIONS.map((g) => {
+                const on = form.area === g
+                return <button key={g} type="button" onClick={() => pickArea(g)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{g.replace('Green ', '#')}</button>
+              })}
             </div>
-            <div>
-              <FieldLabel>Test date</FieldLabel>
-              <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-            </div>
+          </div>
+
+          <div className="mb-3">
+            <FieldLabel>Test date</FieldLabel>
+            <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
           </div>
 
           <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F5FAF6' }}>
