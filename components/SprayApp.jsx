@@ -65,6 +65,48 @@ function isPartialFill(fillGallons, area) {
   return gt > 0 && fg > 0 && fg !== gt
 }
 
+// ── Inventory deduction helpers (pure) ───────────────────────────────────────
+// Product used by ONE partial-fill tank of `gallons`, per product, in the calc
+// unit. Combined by product name so repeat lines add up.
+function partialDeductions(sheet, area, gallons) {
+  if (!(Number(gallons) > 0) || !(Number(area?.galTank) > 0)) return []
+  const map = {}
+  ;(sheet.products || []).filter((p) => p.product).forEach((p) => {
+    const { value, unit } = calcAmount(parseFloat(p.rate), p.basis, effectiveSqft(gallons, area), p.forceGal)
+    if (value != null) map[p.product] = { name: p.product, unit, total: (map[p.product]?.total || 0) + value }
+  })
+  return Object.values(map)
+}
+
+// Total product to pull from inventory when a sheet is approved: the main tanks
+// PLUS the optional partial-fill extra tank.
+function sheetDeductions(sheet, area) {
+  const tanks = sheet.tanks || 1
+  const map = {}
+  ;(sheet.products || []).filter((p) => p.product).forEach((p) => {
+    const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area?.sqft, p.forceGal)
+    if (amt == null) return
+    map[p.product] = { name: p.product, unit, total: (map[p.product]?.total || 0) + amt * tanks }
+  })
+  partialDeductions(sheet, area, sheet.partialGallons).forEach((d) => {
+    map[d.name] = { name: d.name, unit: d.unit, total: (map[d.name]?.total || 0) + d.total }
+  })
+  return Object.values(map)
+}
+
+// The inventory change when a sheet's partial fill goes from oldGal to newGal —
+// positive totals pull stock, negative totals put it back (partial reduced).
+function partialDelta(sheet, area, oldGal, newGal) {
+  const map = {}
+  partialDeductions(sheet, area, newGal).forEach((d) => { map[d.name] = { name: d.name, unit: d.unit, total: d.total } })
+  partialDeductions(sheet, area, oldGal).forEach((d) => {
+    map[d.name] = map[d.name]
+      ? { ...map[d.name], total: map[d.name].total - d.total }
+      : { name: d.name, unit: d.unit, total: -d.total }
+  })
+  return Object.values(map).filter((d) => Math.abs(d.total) > 1e-6)
+}
+
 // Which grasses on this area a product warns against — the overlap of the
 // product's "avoid" list and the grasses present on the area. Empty = safe.
 function grassConflicts(prodInfo, area) {
@@ -347,29 +389,15 @@ function SprayOpsModule({ user }) {
     }
   }
 
-  async function approveSheet(sig, signature = '') {
-    const updated = { ...activeSheet, status: 'approved', directorSig: sig, directorSignature: signature || activeSheet.directorSignature || '', directorDate: new Date().toISOString() }
-    const saved = await saveSheet(updated)
-    if (!saved) return
-
-    // Auto-deduct stock for every product used on this sheet.
-    const area = areas[saved.area] || {}
-    const deductions = []
-    ;(saved.products || [])
-      .filter((p) => p.product)
-      .forEach((p) => {
-        const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
-        if (amt === null) return
-        const total = amt * saved.tanks
-        deductions.push({ name: p.product, total, unit })
-      })
-
+  // Apply a list of {name, total, unit} deductions to inventory. A negative total
+  // puts stock back (used when a partial fill is reduced or removed). Converts the
+  // sprayed amount into each product's own stock unit first.
+  async function deductStock(deductions) {
+    if (!deductions || deductions.length === 0) return
     let nextProducts = [...products]
     for (const ded of deductions) {
       const prod = nextProducts.find((pr) => pr.name === ded.name)
       if (!prod) continue
-      // Convert the sprayed amount into the product's stock unit before deducting
-      // (e.g. a liquid sprayed in oz but stocked in gallons).
       const used = convertUnits(ded.total, ded.unit, prod.unit)
       const newStock = Math.max(0, Math.round(((prod.stock || 0) - used) * 100) / 100)
       const updatedProd = { ...prod, stock: newStock }
@@ -381,6 +409,19 @@ function SprayOpsModule({ user }) {
       }
     }
     setProducts(nextProducts)
+  }
+
+  async function approveSheet(sig, signature = '') {
+    // Record how much partial fill we're deducting now, so later edits to the
+    // partial only adjust the difference.
+    const partialNow = Number(activeSheet.partialGallons) || 0
+    const updated = { ...activeSheet, status: 'approved', directorSig: sig, directorSignature: signature || activeSheet.directorSignature || '', directorDate: new Date().toISOString(), partialStockDeducted: partialNow }
+    const saved = await saveSheet(updated)
+    if (!saved) return
+
+    // Auto-deduct stock for the main tanks + any partial fill on this sheet.
+    const area = areas[saved.area] || {}
+    await deductStock(sheetDeductions(saved, area))
     setActiveSheet(saved)
     showToast('Approved — stock deducted, now live on all iPads')
   }
@@ -561,8 +602,21 @@ function SprayOpsModule({ user }) {
             onLogSpray={async (updated, opts = {}) => {
               try {
                 const saved = await db.updateSheet(updated)
-                setActiveSheet(saved)
-                setSheets((prev) => prev.map((s) => (s.id === saved.id ? saved : s)))
+                let finalSheet = saved
+                // Once the main stock is committed (sheet approved or completed),
+                // keep the partial-fill deduction in sync — pulling or restoring
+                // only the difference, so editing the partial never double-counts.
+                if (saved.status === 'approved' || saved.completed) {
+                  const area = areas[saved.area] || {}
+                  const already = Number(saved.partialStockDeducted) || 0
+                  const now = Number(saved.partialGallons) || 0
+                  if (already !== now && Number(area.galTank) > 0) {
+                    await deductStock(partialDelta(saved, area, already, now))
+                    finalSheet = await db.updateSheet({ ...saved, partialStockDeducted: now })
+                  }
+                }
+                setActiveSheet(finalSheet)
+                setSheets((prev) => prev.map((s) => (s.id === finalSheet.id ? finalSheet : s)))
                 if (!opts.quiet) showToast(updated.completed ? 'Filed in Records' : 'Spray details saved')
               } catch (e) {
                 console.error(e)
