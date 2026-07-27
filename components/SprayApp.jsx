@@ -138,6 +138,28 @@ function soilSection(name) {
   return 'Other'
 }
 const SECTION_ORDER = ['Greens', 'Tees', 'Fairways', 'Approaches', 'Collars', 'Intermediate', 'Rough', 'Natives', 'Other']
+// Sections always offered as tabs so the course structure is visible even before
+// a section has any samples.
+const DEFAULT_SECTIONS = ['Greens', 'Tees', 'Fairways', 'Approaches', 'Rough']
+
+// Average a set of soil tests into one synthetic reading — used to treat a whole
+// section (e.g. every green sampled) as a single result, since it's managed the
+// same across the section.
+function averageTests(tests, section) {
+  const keys = ['ph', 'cec', 'om', 'p', 'k', 'ca', 'mg', 's', 'na']
+  const out = { id: `avg-${section}`, area: section }
+  keys.forEach((key) => {
+    const nums = tests.map((t) => t[key]).filter((v) => v != null && v !== '' && !isNaN(Number(v))).map(Number)
+    out[key] = nums.length ? Math.round((nums.reduce((s, v) => s + v, 0) / nums.length) * 100) / 100 : ''
+  })
+  const ns = tests.map((t) => Number(t.annualN)).filter((v) => !isNaN(v) && v > 0)
+  out.annualN = ns.length ? Math.round((ns.reduce((s, v) => s + v, 0) / ns.length) * 10) / 10 : null
+  out.grasses = (tests.find((t) => t.grasses && t.grasses.length) || {}).grasses || []
+  out.soilType = (tests.find((t) => t.soilType) || {}).soilType || ''
+  out.date = tests.map((t) => t.date).filter(Boolean).sort().slice(-1)[0] || ''
+  out.count = tests.length
+  return out
+}
 
 // Which grasses on this area a product warns against — the overlap of the
 // product's "avoid" list and the grasses present on the area. Empty = safe.
@@ -4528,16 +4550,20 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
   }
 
   // Group everything by course section (Greens / Tees / Fairways / …) for tabs.
-  const sections = SECTION_ORDER.filter((sec) => soilTests.some((t) => soilSection(t.area) === sec))
+  // Always show the common sections, plus any others that have data.
+  const presentSections = SECTION_ORDER.filter((sec) => soilTests.some((t) => soilSection(t.area) === sec))
+  const sections = SECTION_ORDER.filter((sec) => DEFAULT_SECTIONS.includes(sec) || presentSections.includes(sec))
   const [section, setSection] = useState(null)
   const [trendKey, setTrendKey] = useState('k')
-  const activeSection = section && sections.includes(section) ? section : (sections[0] || null)
+  const activeSection = section && sections.includes(section) ? section : (presentSections[0] || 'Greens')
   const sectionTests = soilTests.filter((t) => soilSection(t.area) === activeSection)
 
-  // Latest test per area within the section drives the recommendation cards.
+  // Latest test per hole/area within the section...
   const latestByArea = {}
   sectionTests.forEach((t) => { if (!latestByArea[t.area]) latestByArea[t.area] = t })
   const latest = Object.values(latestByArea)
+  // ...combined into ONE averaged reading, so the whole section reads as one.
+  const sectionAvg = latest.length ? averageTests(latest, activeSection) : null
 
   // Section trend: one point per test date = average across every green/area
   // sampled that round (we treat the whole section the same, so it reads as one).
@@ -4703,22 +4729,24 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
         </div>
       )}
 
-      {soilTests.length === 0 ? (
-        !showForm && <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No soil tests yet. Add one to get an MLSN fertility plan.</div>
-      ) : (
-        <>
-          {/* Section tabs — Greens / Tees / Fairways / … */}
-          {sections.length > 1 && (
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {sections.map((sec) => (
-                <button key={sec} onClick={() => setSection(sec)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap transition" style={sec === activeSection ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
-                  {sec}
-                </button>
-              ))}
-            </div>
-          )}
+      {/* Section tabs — Greens / Tees / Fairways / … (always shown) */}
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {sections.map((sec) => {
+          const has = presentSections.includes(sec)
+          return (
+            <button key={sec} onClick={() => setSection(sec)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap transition" style={sec === activeSection ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: has ? '#64748B' : '#B4BAC4', border: '1px solid rgba(0,0,0,0.08)' }}>
+              {sec}
+            </button>
+          )
+        })}
+      </div>
 
-          {/* Section trend — course average per test date */}
+      {sectionAvg ? (
+        <>
+          {/* One combined reading for the whole section (holes averaged together) */}
+          <SoilRecCard test={sectionAvg} area={resolveArea(areas, latest[0]?.area)} titleOverride={`${activeSection} — average of ${sectionAvg.count} sample${sectionAvg.count !== 1 ? 's' : ''}`} />
+
+          {/* Section trend — one point per test date, averaged across the section */}
           {trendSeries.length >= 2 && (
             <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
               <div className="flex items-center justify-between mb-1">
@@ -4734,15 +4762,28 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
             </div>
           )}
 
-          {/* Recommendation cards — latest test per area in this section */}
-          {latest.map((t) => <SoilRecCard key={t.id} test={t} area={resolveArea(areas, t.area)} onDelete={onDelete} />)}
+          {/* The individual samples that make up this section (to review / delete) */}
+          <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+            <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Samples in {activeSection.toLowerCase()}</p>
+            <div className="space-y-1.5">
+              {latest.map((t) => (
+                <div key={t.id} className="flex items-center justify-between gap-2">
+                  <span className="font-body text-sm text-slate-700 truncate">{t.area}</span>
+                  <span className="font-body text-[11px] text-slate-400 shrink-0">{fmtDate(t.date)}</span>
+                  <button onClick={() => onDelete(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={14} /></button>
+                </div>
+              ))}
+            </div>
+          </div>
         </>
+      ) : (
+        !showForm && <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No soil tests in {activeSection} yet. Tap “Add test” and pick a {activeSection === 'Greens' ? 'green/hole' : activeSection.toLowerCase().replace(/s$/, '')}.</div>
       )}
     </div>
   )
 }
 
-function SoilRecCard({ test, area = {}, onDelete }) {
+function SoilRecCard({ test, area = {}, onDelete, titleOverride }) {
   // Prefer the grass/soil captured on the test (works for per-hole tests); fall
   // back to the settings area if an older test didn't store it.
   const grasses = (test.grasses && test.grasses.length ? test.grasses : area.grasses) || []
@@ -4754,11 +4795,11 @@ function SoilRecCard({ test, area = {}, onDelete }) {
     <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="min-w-0">
-          <p className="font-body text-sm font-semibold text-slate-900 truncate">{test.area}</p>
-          <p className="font-body text-[11px] text-slate-400">Tested {fmtDate(test.date)}{test.lab ? ` · ${test.lab}` : ''} · N {rec.annualN} lb/M/yr{rec.nSource === 'grass' ? ' (from grass)' : ''}</p>
+          <p className="font-body text-sm font-semibold text-slate-900 truncate">{titleOverride || test.area}</p>
+          <p className="font-body text-[11px] text-slate-400">{test.date ? `Latest ${fmtDate(test.date)}` : ''}{test.lab ? ` · ${test.lab}` : ''} · N {rec.annualN} lb/M/yr{rec.nSource === 'grass' ? ' (from grass)' : ''}</p>
           {context && <p className="font-body text-[10px] text-slate-400 truncate">{context}</p>}
         </div>
-        <button onClick={() => onDelete(test.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+        {onDelete && <button onClick={() => onDelete(test.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>}
       </div>
 
       {rec.soil?.note && (
