@@ -354,17 +354,20 @@ function SprayOpsModule({ user }) {
     ;(saved.products || [])
       .filter((p) => p.product)
       .forEach((p) => {
-        const { value: amt } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
+        const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
         if (amt === null) return
-        const total = Math.round(amt * saved.tanks * 10) / 10
-        deductions.push({ name: p.product, total })
+        const total = amt * saved.tanks
+        deductions.push({ name: p.product, total, unit })
       })
 
     let nextProducts = [...products]
     for (const ded of deductions) {
       const prod = nextProducts.find((pr) => pr.name === ded.name)
       if (!prod) continue
-      const newStock = Math.max(0, Math.round(((prod.stock || 0) - ded.total) * 100) / 100)
+      // Convert the sprayed amount into the product's stock unit before deducting
+      // (e.g. a liquid sprayed in oz but stocked in gallons).
+      const used = convertUnits(ded.total, ded.unit, prod.unit)
+      const newStock = Math.max(0, Math.round(((prod.stock || 0) - used) * 100) / 100)
       const updatedProd = { ...prod, stock: newStock }
       nextProducts = nextProducts.map((pr) => (pr.name === ded.name ? updatedProd : pr))
       try {
