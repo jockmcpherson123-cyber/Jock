@@ -793,29 +793,6 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       )}
 
       <section>
-        <SectionHeader title="Today's Spray Status" subtitle={new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} />
-        <div className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
-          {Object.keys(areas).map((area, i) => {
-            const sheet = sheets.find((s) => s.area === area && s.date === today)
-            return (
-              <div key={area} className={`flex items-center justify-between px-4 py-3 ${i !== 0 ? 'border-t border-black/5' : ''}`}>
-                <div className="flex items-center gap-3">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: !sheet ? '#D1D5DB' : sheet.status === 'approved' ? FERN : '#D97706' }} />
-                  <span className="font-body text-sm text-slate-700 truncate max-w-[160px] sm:max-w-none">{area}</span>
-                </div>
-                <span className="font-body text-xs font-medium text-slate-400">
-                  {!sheet ? 'Not scheduled' : sheet.status === 'approved' ? 'Approved' : 'Pending'}
-                </span>
-              </div>
-            )
-          })}
-          {Object.keys(areas).length === 0 && (
-            <div className="px-4 py-6 text-center font-body text-sm text-slate-400">No spray areas configured yet.</div>
-          )}
-        </div>
-      </section>
-
-      <section>
         <div className="flex items-center justify-between mb-3">
           <SectionHeader title="Recent Sheets" noMargin />
           <button onClick={onSeeAll} className="font-body text-xs font-semibold flex items-center gap-0.5" style={{ color: FERN }}>
