@@ -18,7 +18,7 @@ import {
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
-  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, productRateForN,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -43,6 +43,8 @@ const canApprove = (role) => role === 'director'
 
 // Standard PPE options and common field instructions (quick-insert on a sheet).
 const PPE_OPTIONS = ['Gloves', 'Long Sleeves', 'Eye Protection', 'Respirator', 'Coveralls', 'Chemical Boots']
+// Rate bases the crew can pick from. "/ M" = per 1,000 sq ft, "/ A" = per acre.
+const BASIS_OPTIONS = ['oz / M', 'oz / A', 'lbs / M', 'lbs / A', 'g / M', 'g / A', 'gal / M', 'gal / A']
 const QUICK_INSTRUCTIONS = ['Water in 0.1"', 'Do not mow for 24h', 'Avoid overlap near bunkers', 'Spray when turf is dry']
 
 // A full tank (area.galTank of water) covers area.sqft. If the crew only fills a
@@ -1188,6 +1190,7 @@ function InfoChip({ label, value }) {
 // ── SHEET EDITOR ──────────────────────────────────────────────────────────
 function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes, location, sheets = [] }) {
   const [s, setS] = useState({ ...sheet, targets: sheet.targets || (sheet.target ? [sheet.target] : []) })
+  const [nTargets, setNTargets] = useState({}) // per-line "feed by N" target (lb N/M)
   const area = areas[s.area] || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
   const rotationAlerts = rotationWarnings(s, sheets, products)
 
@@ -1296,9 +1299,27 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                       <div className="grid grid-cols-2 gap-2 mb-1">
                         <input type="number" step="any" placeholder={p.defaultRate ? `Default ${p.defaultRate}` : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="border-2 rounded-lg px-2.5 py-2 text-sm font-semibold font-body" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
                         <select value={p.basis} onChange={(e) => updateProduct(p.id, { basis: e.target.value })} className="border border-slate-200 rounded-lg px-2 py-2 text-xs font-body bg-white">
-                          {['oz / M', 'oz / A', 'lbs / M', 'lbs / A', 'gal / M', 'gal / A'].map((b) => <option key={b}>{b}</option>)}
+                          {BASIS_OPTIONS.map((b) => <option key={b}>{b}</option>)}
                         </select>
                       </div>
+
+                      {prodInfo?.type === 'Fertilizer' && (() => {
+                        const canN = productRateForN(1, prodInfo) != null
+                        return (
+                          <div className="flex items-center gap-2 mb-2 rounded-lg px-2.5 py-1.5 flex-wrap" style={{ backgroundColor: '#EFF6FF' }}>
+                            <span className="font-body text-[11px] font-bold shrink-0" style={{ color: '#2563EB' }}>Feed by N</span>
+                            {canN ? (
+                              <>
+                                <input type="number" step="any" inputMode="decimal" value={nTargets[p.id] ?? ''} onChange={(e) => setNTargets((t) => ({ ...t, [p.id]: e.target.value }))} placeholder="0.10" className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body bg-white" />
+                                <span className="font-body text-[11px] text-slate-500">lb N / M</span>
+                                <button type="button" onClick={() => { const r = productRateForN(nTargets[p.id], prodInfo); if (r) updateProduct(p.id, r) }} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full text-white shrink-0" style={{ backgroundColor: '#2563EB' }}>Set rate</button>
+                              </>
+                            ) : (
+                              <span className="font-body text-[11px] text-slate-500">Add this product's N {prodInfo.fertForm === 'liquid' ? '(lb N/gal)' : '%'} in the Chemical Library to dose by nitrogen.</span>
+                            )}
+                          </div>
+                        )
+                      })()}
 
                       {overLimit && (
                         <p className="font-body text-[11px] font-semibold text-red-600 mb-2 flex items-center gap-1">⚠ Over label maximum — limit is {labelMax} {p.basis}</p>
@@ -2553,7 +2574,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 <FieldLabel>Default Rate</FieldLabel>
                 <input type="number" step="any" value={draft.rate ?? ''} onChange={(e) => setDraft({ ...draft, rate: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 1.8" />
               </div>
-              <div><FieldLabel>Default Basis</FieldLabel><Select value={draft.basis} onChange={(v) => setDraft({ ...draft, basis: v })} options={['oz / M', 'oz / A', 'lbs / M', 'lbs / A', 'gal / M', 'gal / A']} /></div>
+              <div><FieldLabel>Default Basis</FieldLabel><Select value={draft.basis} onChange={(v) => setDraft({ ...draft, basis: v })} options={BASIS_OPTIONS} /></div>
             </div>
             <div className="rounded-xl p-3" style={{ backgroundColor: '#FEF2F2' }}>
               <p className="font-body text-[11px] font-bold text-red-500 uppercase tracking-wide mb-2">Label Rate Range</p>
