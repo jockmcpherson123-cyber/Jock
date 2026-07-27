@@ -4156,6 +4156,43 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
 // ── CLIPPING YIELDS ─────────────────────────────────────────────────────────
 // Log clipping volume per area over time — the feedback loop for growth-reg
 // performance. Each area shows its recent entries as simple bars.
+// Reusable mini line chart (pure SVG, no libraries). Feed it points in time order
+// and it draws a filled trend line with a dashed average and an emphasized latest
+// point — used for clipping yields and available for any other metric.
+function TrendChart({ points = [], color = FERN, height = 120, unit = '', showAvg = true }) {
+  const data = points
+    .filter((p) => p.value != null && p.value !== '' && !isNaN(Number(p.value)))
+    .map((p) => ({ date: p.date, value: Number(p.value) }))
+  if (data.length === 0) return <p className="font-body text-[11px] text-slate-400">No data yet.</p>
+  const W = 320, padL = 6, padR = 6, padT = 14, padB = 4
+  const vals = data.map((d) => d.value)
+  const min = Math.min(...vals), max = Math.max(...vals)
+  const range = max - min || Math.abs(max) || 1
+  const n = data.length
+  const X = (i) => padL + (n === 1 ? (W - padL - padR) / 2 : (i / (n - 1)) * (W - padL - padR))
+  const Y = (v) => padT + (1 - (v - min) / range) * (height - padT - padB)
+  const line = data.map((d, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(d.value).toFixed(1)}`).join(' ')
+  const areaPath = `${line} L${X(n - 1).toFixed(1)},${height - padB} L${X(0).toFixed(1)},${height - padB} Z`
+  const mean = vals.reduce((s, v) => s + v, 0) / n
+  const last = data[n - 1]
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${height}`} width="100%" style={{ display: 'block', overflow: 'visible' }}>
+        {showAvg && n > 1 && <line x1={padL} x2={W - padR} y1={Y(mean)} y2={Y(mean)} stroke="#CBD5E1" strokeWidth="1" strokeDasharray="3 3" />}
+        <path d={areaPath} fill={color} opacity="0.12" />
+        <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {data.map((d, i) => <circle key={i} cx={X(i)} cy={Y(d.value)} r={i === n - 1 ? 3.5 : 2} fill={color} />)}
+        <text x={X(n - 1)} y={Y(last.value) - 7} textAnchor="end" fontSize="11" fontWeight="700" fill={color} style={{ fontVariantNumeric: 'tabular-nums' }}>{last.value}</text>
+      </svg>
+      <div className="flex justify-between font-body text-[9px] text-slate-400 mt-1.5" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        <span>{fmtDate(data[0].date)}</span>
+        {n > 1 && <span>avg {Math.round(mean * 10) / 10}{unit ? ` ${unit}` : ''}</span>}
+        <span>{fmtDate(last.date)}</span>
+      </div>
+    </div>
+  )
+}
+
 const GREEN_OPTIONS = [
   ...Array.from({ length: 18 }, (_, i) => `Green ${i + 1}`),
   'Practice Green', 'Putting Green', 'Chipping Green', 'Short Game Green', 'Nursery Green',
@@ -4269,23 +4306,19 @@ function ClippingsTab({ clippings, areas, onAddMany, onDelete }) {
         )}
       </div>
 
-      {/* Trend bars per area */}
+      {/* Trend graph per area */}
       {Object.keys(byArea).length > 0 && (
         <div className="space-y-3">
           {Object.entries(byArea).sort((a, b) => sortGreens(a[0], b[0])).map(([area, list]) => {
-            const recent = [...list].sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-12)
-            const max = Math.max(...recent.map((c) => c.volume || 0), 1)
+            const recent = [...list].sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-20)
+            const latest = recent[recent.length - 1]
             return (
               <div key={area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
-                <p className="font-body font-semibold text-sm text-slate-900 mb-2">{area}</p>
-                <div className="flex items-end gap-1.5 h-20">
-                  {recent.map((c) => (
-                    <div key={c.id} className="flex-1 flex flex-col items-center justify-end" title={`${fmtDate(c.date)}: ${c.volume} ${c.unit}`}>
-                      <div className="w-full rounded-t" style={{ height: `${Math.max(4, ((c.volume || 0) / max) * 100)}%`, backgroundColor: FERN }} />
-                    </div>
-                  ))}
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
+                  <p className="font-body text-[10px] text-slate-400">{recent.length} log{recent.length !== 1 ? 's' : ''} · latest {latest?.volume} {latest?.unit}</p>
                 </div>
-                <p className="font-body text-[10px] text-slate-400 mt-1">Last {recent.length} logs · latest {recent[recent.length - 1]?.volume} {recent[recent.length - 1]?.unit}</p>
+                <TrendChart points={recent.map((c) => ({ date: c.date, value: c.volume }))} unit={latest?.unit || ''} />
               </div>
             )
           })}
