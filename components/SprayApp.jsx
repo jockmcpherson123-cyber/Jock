@@ -4802,21 +4802,26 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
           {/* One combined reading — the whole section averaged, or a single hole */}
           <SoilRecCard test={sectionAvg} area={resolveArea(areas, latest[0]?.area)} titleOverride={pick === 'all' ? `${activeSection} — average of ${sectionAvg.count} sample${sectionAvg.count !== 1 ? 's' : ''}` : pick} />
 
-          {/* Section trend — one point per test date, averaged across the section */}
-          {trendSeries.length >= 2 && (
-            <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-1">
-                <p className="font-body text-sm font-semibold text-slate-900">{pick === 'all' ? activeSection : pick} trend</p>
-                <p className="font-body text-[10px] text-slate-400">{pick === 'all' ? `avg across ${activeSection.toLowerCase()} each test` : 'this location over time'}</p>
-              </div>
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {TREND_KEYS.map((t) => (
-                  <button key={t.k} onClick={() => setTrendKey(t.k)} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full transition" style={t.k === trendKey ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: '#F0F6F2', color: FERN }}>{t.label}</button>
-                ))}
-              </div>
-              <TrendChart points={trendSeries} unit={trendDef.unit || 'ppm'} refLine={trendDef.floor ? { value: trendDef.floor, label: `MLSN ${trendDef.floor}` } : null} />
+          {/* Trend graph — pick any metric; the card stays put so you can switch */}
+          <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-1">
+              <p className="font-body text-sm font-semibold text-slate-900">{pick === 'all' ? activeSection : pick} trend</p>
+              <p className="font-body text-[10px] text-slate-400">{pick === 'all' ? `avg across ${activeSection.toLowerCase()} each test` : 'this location over time'}</p>
             </div>
-          )}
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {TREND_KEYS.map((t) => (
+                <button key={t.k} onClick={() => setTrendKey(t.k)} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full transition" style={t.k === trendKey ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: '#F0F6F2', color: FERN }}>{t.label}</button>
+              ))}
+            </div>
+            {trendSeries.length === 0 ? (
+              <p className="font-body text-[12px] text-slate-400 py-4 text-center">No {trendDef.label} entered on these tests yet.</p>
+            ) : (
+              <>
+                <TrendChart points={trendSeries} unit={trendDef.unit || 'ppm'} refLine={trendDef.floor ? { value: trendDef.floor, label: `MLSN ${trendDef.floor}` } : null} />
+                {trendSeries.length < 2 && <p className="font-body text-[10px] text-slate-400 mt-1.5 text-center">Add another test date to draw the trend line.</p>}
+              </>
+            )}
+          </div>
 
           {/* The individual samples that make up this section (to review / delete) */}
           <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
