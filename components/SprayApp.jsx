@@ -4578,32 +4578,54 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
   const sections = SECTION_ORDER.filter((sec) => DEFAULT_SECTIONS.includes(sec) || presentSections.includes(sec))
   const [section, setSection] = useState(null)
   const [trendKey, setTrendKey] = useState('k')
+  const [areaPick, setAreaPick] = useState('all') // 'all' = whole section, else one hole
   const activeSection = section && sections.includes(section) ? section : (presentSections[0] || 'Greens')
   const sectionTests = soilTests.filter((t) => soilSection(t.area) === activeSection)
 
-  // Latest test per hole/area within the section...
-  const latestByArea = {}
-  sectionTests.forEach((t) => { if (!latestByArea[t.area]) latestByArea[t.area] = t })
-  const latest = Object.values(latestByArea)
-  // ...combined into ONE averaged reading, so the whole section reads as one.
-  const sectionAvg = latest.length ? averageTests(latest, activeSection) : null
+  // Holes/areas that have tests in this section, for the individual-area picker.
+  const sectionAreas = [...new Set(sectionTests.map((t) => t.area))].sort(sortGreens)
+  const pick = areaPick !== 'all' && sectionAreas.includes(areaPick) ? areaPick : 'all'
+  const viewTests = pick === 'all' ? sectionTests : sectionTests.filter((t) => t.area === pick)
 
-  // Section trend: one point per test date = average across every green/area
-  // sampled that round (we treat the whole section the same, so it reads as one).
-  const byDate = {}
-  sectionTests.forEach((t) => { (byDate[t.date] ||= []).push(t) })
-  const trendDates = Object.keys(byDate).sort()
-  const avgSeries = (key) => trendDates.map((d) => {
-    const nums = byDate[d].map((r) => r[key]).filter((v) => v != null && v !== '' && !isNaN(Number(v))).map(Number)
-    return { date: d, value: nums.length ? Math.round((nums.reduce((s, v) => s + v, 0) / nums.length) * 100) / 100 : null }
-  }).filter((p) => p.value != null)
+  // Latest test per hole/area in view...
+  const latestByArea = {}
+  viewTests.forEach((t) => { if (!latestByArea[t.area]) latestByArea[t.area] = t })
+  const latest = Object.values(latestByArea)
+  // ...combined into ONE reading (the whole section averaged, or a single hole).
+  const sectionAvg = latest.length ? averageTests(latest, pick === 'all' ? activeSection : pick) : null
+
+  // Trend: one point per test date, averaged across whatever is in view.
+  // Every metric that gets entered is graphable (accessor handles nested fields).
   const TREND_KEYS = [
-    { k: 'ph', label: 'pH' }, { k: 'p', label: 'P', floor: MLSN.P }, { k: 'k', label: 'K', floor: MLSN.K },
-    { k: 'ca', label: 'Ca', floor: MLSN.Ca }, { k: 'mg', label: 'Mg', floor: MLSN.Mg }, { k: 's', label: 'S', floor: MLSN.S },
-    { k: 'om', label: 'OM%' }, { k: 'na', label: 'Na' },
+    { k: 'ph', label: 'pH', val: (t) => t.ph },
+    { k: 'om', label: 'OM%', val: (t) => t.om, unit: '%' },
+    { k: 'cec', label: 'CEC', val: (t) => t.cec },
+    { k: 'p', label: 'P', val: (t) => t.p, floor: MLSN.P },
+    { k: 'k', label: 'K', val: (t) => t.k, floor: MLSN.K },
+    { k: 'ca', label: 'Ca', val: (t) => t.ca, floor: MLSN.Ca },
+    { k: 'mg', label: 'Mg', val: (t) => t.mg, floor: MLSN.Mg },
+    { k: 's', label: 'S', val: (t) => t.s, floor: MLSN.S },
+    { k: 'na', label: 'Na', val: (t) => t.na },
+    { k: 'fe', label: 'Fe', val: (t) => t.micros?.fe },
+    { k: 'mn', label: 'Mn', val: (t) => t.micros?.mn },
+    { k: 'cu', label: 'Cu', val: (t) => t.micros?.cu },
+    { k: 'zn', label: 'Zn', val: (t) => t.micros?.zn },
+    { k: 'b', label: 'B', val: (t) => t.micros?.b },
+    { k: 'bsK', label: 'K sat%', val: (t) => t.baseSat?.k, unit: '%' },
+    { k: 'bsCa', label: 'Ca sat%', val: (t) => t.baseSat?.ca, unit: '%' },
+    { k: 'bsMg', label: 'Mg sat%', val: (t) => t.baseSat?.mg, unit: '%' },
+    { k: 'bsNa', label: 'Na sat%', val: (t) => t.baseSat?.na, unit: '%' },
   ]
-  const trendDef = TREND_KEYS.find((x) => x.k === trendKey) || TREND_KEYS[2]
-  const trendSeries = avgSeries(trendDef.k)
+  const trendDef = TREND_KEYS.find((x) => x.k === trendKey) || TREND_KEYS[4]
+  const seriesForDef = (def, tests) => {
+    const byDate = {}
+    tests.forEach((t) => { (byDate[t.date] ||= []).push(t) })
+    return Object.keys(byDate).sort().map((d) => {
+      const nums = byDate[d].map(def.val).filter((v) => v != null && v !== '' && !isNaN(Number(v))).map(Number)
+      return { date: d, value: nums.length ? Math.round((nums.reduce((s, v) => s + v, 0) / nums.length) * 100) / 100 : null }
+    }).filter((p) => p.value != null)
+  }
+  const trendSeries = seriesForDef(trendDef, viewTests)
 
   // Render a numeric field bound to a form key. Called as a function (not <Num/>)
   // so it renders the stable module-level SoilNum directly and keeps focus.
@@ -4765,24 +4787,34 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
         })}
       </div>
 
+      {/* Area picker — whole section average, or one hole on its own */}
+      {sectionAreas.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1 -mt-1">
+          <button onClick={() => setAreaPick('all')} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={pick === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>All (avg)</button>
+          {sectionAreas.map((a) => (
+            <button key={a} onClick={() => setAreaPick(a)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={pick === a ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{a.replace('Green ', '#')}</button>
+          ))}
+        </div>
+      )}
+
       {sectionAvg ? (
         <>
-          {/* One combined reading for the whole section (holes averaged together) */}
-          <SoilRecCard test={sectionAvg} area={resolveArea(areas, latest[0]?.area)} titleOverride={`${activeSection} — average of ${sectionAvg.count} sample${sectionAvg.count !== 1 ? 's' : ''}`} />
+          {/* One combined reading — the whole section averaged, or a single hole */}
+          <SoilRecCard test={sectionAvg} area={resolveArea(areas, latest[0]?.area)} titleOverride={pick === 'all' ? `${activeSection} — average of ${sectionAvg.count} sample${sectionAvg.count !== 1 ? 's' : ''}` : pick} />
 
           {/* Section trend — one point per test date, averaged across the section */}
           {trendSeries.length >= 2 && (
             <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
               <div className="flex items-center justify-between mb-1">
-                <p className="font-body text-sm font-semibold text-slate-900">{activeSection} trend</p>
-                <p className="font-body text-[10px] text-slate-400">avg across {activeSection.toLowerCase()} each test</p>
+                <p className="font-body text-sm font-semibold text-slate-900">{pick === 'all' ? activeSection : pick} trend</p>
+                <p className="font-body text-[10px] text-slate-400">{pick === 'all' ? `avg across ${activeSection.toLowerCase()} each test` : 'this location over time'}</p>
               </div>
               <div className="flex flex-wrap gap-1.5 mb-3">
                 {TREND_KEYS.map((t) => (
                   <button key={t.k} onClick={() => setTrendKey(t.k)} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full transition" style={t.k === trendKey ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: '#F0F6F2', color: FERN }}>{t.label}</button>
                 ))}
               </div>
-              <TrendChart points={trendSeries} unit={trendDef.k === 'om' ? '%' : 'ppm'} refLine={trendDef.floor ? { value: trendDef.floor, label: `MLSN ${trendDef.floor}` } : null} />
+              <TrendChart points={trendSeries} unit={trendDef.unit || 'ppm'} refLine={trendDef.floor ? { value: trendDef.floor, label: `MLSN ${trendDef.floor}` } : null} />
             </div>
           )}
 
