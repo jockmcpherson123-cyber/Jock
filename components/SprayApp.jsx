@@ -124,6 +124,21 @@ function resolveArea(areas, name) {
   return k ? areas[k] : null
 }
 
+// Classify an area / hole name into a course section, for grouping soil tests.
+function soilSection(name) {
+  const n = String(name || '').toLowerCase()
+  if (/green/.test(n)) return 'Greens'
+  if (/tee/.test(n)) return 'Tees'
+  if (/fairway/.test(n)) return 'Fairways'
+  if (/approach/.test(n)) return 'Approaches'
+  if (/collar|surround/.test(n)) return 'Collars'
+  if (/intermediate|inter\b/.test(n)) return 'Intermediate'
+  if (/rough/.test(n)) return 'Rough'
+  if (/native/.test(n)) return 'Natives'
+  return 'Other'
+}
+const SECTION_ORDER = ['Greens', 'Tees', 'Fairways', 'Approaches', 'Collars', 'Intermediate', 'Rough', 'Natives', 'Other']
+
 // Which grasses on this area a product warns against — the overlap of the
 // product's "avoid" list and the grasses present on the area. Empty = safe.
 function grassConflicts(prodInfo, area) {
@@ -4159,14 +4174,16 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
 // Reusable mini line chart (pure SVG, no libraries). Feed it points in time order
 // and it draws a filled trend line with a dashed average and an emphasized latest
 // point — used for clipping yields and available for any other metric.
-function TrendChart({ points = [], color = FERN, height = 120, unit = '', showAvg = true }) {
+function TrendChart({ points = [], color = FERN, height = 120, unit = '', showAvg = true, refLine = null }) {
   const data = points
     .filter((p) => p.value != null && p.value !== '' && !isNaN(Number(p.value)))
     .map((p) => ({ date: p.date, value: Number(p.value) }))
   if (data.length === 0) return <p className="font-body text-[11px] text-slate-400">No data yet.</p>
   const W = 320, padL = 6, padR = 6, padT = 14, padB = 4
   const vals = data.map((d) => d.value)
-  const min = Math.min(...vals), max = Math.max(...vals)
+  const ref = refLine && refLine.value != null && !isNaN(Number(refLine.value)) ? Number(refLine.value) : null
+  const scaleVals = ref != null ? [...vals, ref] : vals // keep the reference line in view
+  const min = Math.min(...scaleVals), max = Math.max(...scaleVals)
   const range = max - min || Math.abs(max) || 1
   const n = data.length
   const X = (i) => padL + (n === 1 ? (W - padL - padR) / 2 : (i / (n - 1)) * (W - padL - padR))
@@ -4178,6 +4195,12 @@ function TrendChart({ points = [], color = FERN, height = 120, unit = '', showAv
   return (
     <div>
       <svg viewBox={`0 0 ${W} ${height}`} width="100%" style={{ display: 'block', overflow: 'visible' }}>
+        {ref != null && (
+          <>
+            <line x1={padL} x2={W - padR} y1={Y(ref)} y2={Y(ref)} stroke={refLine.color || '#DC2626'} strokeWidth="1" strokeDasharray="2 2" />
+            <text x={padL} y={Y(ref) - 3} fontSize="8" fill={refLine.color || '#DC2626'} style={{ fontVariantNumeric: 'tabular-nums' }}>{refLine.label || ref}</text>
+          </>
+        )}
         {showAvg && n > 1 && <line x1={padL} x2={W - padR} y1={Y(mean)} y2={Y(mean)} stroke="#CBD5E1" strokeWidth="1" strokeDasharray="3 3" />}
         <path d={areaPath} fill={color} opacity="0.12" />
         <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
@@ -4504,10 +4527,34 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
     setBusy(false)
   }
 
-  // Latest test per area drives the recommendation cards (tests come newest-first).
+  // Group everything by course section (Greens / Tees / Fairways / …) for tabs.
+  const sections = SECTION_ORDER.filter((sec) => soilTests.some((t) => soilSection(t.area) === sec))
+  const [section, setSection] = useState(null)
+  const [trendKey, setTrendKey] = useState('k')
+  const activeSection = section && sections.includes(section) ? section : (sections[0] || null)
+  const sectionTests = soilTests.filter((t) => soilSection(t.area) === activeSection)
+
+  // Latest test per area within the section drives the recommendation cards.
   const latestByArea = {}
-  soilTests.forEach((t) => { if (!latestByArea[t.area]) latestByArea[t.area] = t })
+  sectionTests.forEach((t) => { if (!latestByArea[t.area]) latestByArea[t.area] = t })
   const latest = Object.values(latestByArea)
+
+  // Section trend: one point per test date = average across every green/area
+  // sampled that round (we treat the whole section the same, so it reads as one).
+  const byDate = {}
+  sectionTests.forEach((t) => { (byDate[t.date] ||= []).push(t) })
+  const trendDates = Object.keys(byDate).sort()
+  const avgSeries = (key) => trendDates.map((d) => {
+    const nums = byDate[d].map((r) => r[key]).filter((v) => v != null && v !== '' && !isNaN(Number(v))).map(Number)
+    return { date: d, value: nums.length ? Math.round((nums.reduce((s, v) => s + v, 0) / nums.length) * 100) / 100 : null }
+  }).filter((p) => p.value != null)
+  const TREND_KEYS = [
+    { k: 'ph', label: 'pH' }, { k: 'p', label: 'P', floor: MLSN.P }, { k: 'k', label: 'K', floor: MLSN.K },
+    { k: 'ca', label: 'Ca', floor: MLSN.Ca }, { k: 'mg', label: 'Mg', floor: MLSN.Mg }, { k: 's', label: 'S', floor: MLSN.S },
+    { k: 'om', label: 'OM%' }, { k: 'na', label: 'Na' },
+  ]
+  const trendDef = TREND_KEYS.find((x) => x.k === trendKey) || TREND_KEYS[2]
+  const trendSeries = avgSeries(trendDef.k)
 
   // Render a numeric field bound to a form key. Called as a function (not <Num/>)
   // so it renders the stable module-level SoilNum directly and keeps focus.
@@ -4656,11 +4703,40 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
         </div>
       )}
 
-      {/* Recommendation cards — latest test per area */}
-      {latest.length === 0 ? (
+      {soilTests.length === 0 ? (
         !showForm && <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No soil tests yet. Add one to get an MLSN fertility plan.</div>
       ) : (
-        latest.map((t) => <SoilRecCard key={t.id} test={t} area={areas[t.area]} onDelete={onDelete} />)
+        <>
+          {/* Section tabs — Greens / Tees / Fairways / … */}
+          {sections.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {sections.map((sec) => (
+                <button key={sec} onClick={() => setSection(sec)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap transition" style={sec === activeSection ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+                  {sec}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Section trend — course average per test date */}
+          {trendSeries.length >= 2 && (
+            <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <p className="font-body text-sm font-semibold text-slate-900">{activeSection} trend</p>
+                <p className="font-body text-[10px] text-slate-400">avg across {activeSection.toLowerCase()} each test</p>
+              </div>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {TREND_KEYS.map((t) => (
+                  <button key={t.k} onClick={() => setTrendKey(t.k)} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full transition" style={t.k === trendKey ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: '#F0F6F2', color: FERN }}>{t.label}</button>
+                ))}
+              </div>
+              <TrendChart points={trendSeries} unit={trendDef.k === 'om' ? '%' : 'ppm'} refLine={trendDef.floor ? { value: trendDef.floor, label: `MLSN ${trendDef.floor}` } : null} />
+            </div>
+          )}
+
+          {/* Recommendation cards — latest test per area in this section */}
+          {latest.map((t) => <SoilRecCard key={t.id} test={t} area={resolveArea(areas, t.area)} onDelete={onDelete} />)}
+        </>
       )}
     </div>
   )
