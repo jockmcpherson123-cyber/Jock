@@ -14,7 +14,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin, Sparkles, Wind, Thermometer,
+  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -2361,9 +2361,17 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
   const [filter, setFilter] = useState('All')
+  const [search, setSearch] = useState('')
   const [importPreview, setImportPreview] = useState(null) // { products, columns, count, error, fileName }
   const [importing, setImporting] = useState(false)
   const fileRef = useRef(null)
+  const editRef = useRef(null)
+
+  // When the editor opens, scroll it into view — it renders above the list, so
+  // editing a product far down would otherwise leave the form off-screen.
+  useEffect(() => {
+    if (editing && editRef.current) editRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [editing])
 
   const pickFile = () => fileRef.current?.click()
   const onFile = async (e) => {
@@ -2439,7 +2447,16 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
     cancelEdit()
   }
 
-  const filtered = filter === 'All' ? products : products.filter((p) => p.type === filter)
+  const q = search.trim().toLowerCase()
+  const filtered = products.filter((p) => {
+    if (filter !== 'All' && p.type !== filter) return false
+    if (!q) return true
+    return (
+      String(p.name || '').toLowerCase().includes(q) ||
+      String(p.activeIngredient || '').toLowerCase().includes(q) ||
+      String(p.moaGroup || '').toLowerCase().includes(q)
+    )
+  })
 
   return (
     <div className="pt-6 pb-10">
@@ -2491,7 +2508,22 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
         </div>
       )}
 
-      <div className="flex gap-2 mt-4 mb-4 overflow-x-auto pb-1">
+      <div className="relative mt-4 mb-3">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search products by name, active ingredient, or FRAC group…"
+          className="w-full border border-slate-200 rounded-full pl-9 pr-9 py-2.5 text-sm font-body bg-white"
+        />
+        {search && (
+          <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="Clear search">
+            <X size={15} />
+          </button>
+        )}
+      </div>
+
+      <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
         {['All', ...PRODUCT_TYPES].map((t) => (
           <button key={t} onClick={() => setFilter(t)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={filter === t ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {t}
@@ -2500,7 +2532,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       </div>
 
       {editing && draft && (
-        <div className="bg-white rounded-2xl border-2 p-4 mb-4 shadow-sm" style={{ borderColor: GOLD }}>
+        <div ref={editRef} className="bg-white rounded-2xl border-2 p-4 mb-4 shadow-sm scroll-mt-4" style={{ borderColor: GOLD }}>
           <p className="font-display text-base font-semibold text-slate-900 mb-3">{editing === 'new' ? 'Add New Chemical' : `Edit ${editing}`}</p>
           <div className="space-y-3">
             <div>
@@ -2781,7 +2813,9 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
           </div>
         ))}
         {filtered.length === 0 && (
-          <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">No products in this category yet.</div>
+          <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
+            {q ? `No products match “${search.trim()}”.` : 'No products in this category yet.'}
+          </div>
         )}
       </div>
     </div>
