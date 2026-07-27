@@ -22,7 +22,7 @@ import {
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { logout } from '@/app/actions/auth'
@@ -753,7 +753,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   // ── Live weather for the spray-window strip + season GDD for PGR timing.
   // Best-effort: the dashboard still renders everything else if this fails.
   const hasLocation = location?.lat != null
-  const [wx, setWx] = useState({ current: null, todayWindow: null, season: [] })
+  const [wx, setWx] = useState({ current: null, todayWindow: null, season: [], breakdownTemps: [] })
   useEffect(() => {
     if (!hasLocation) return
     let cancelled = false
@@ -766,12 +766,14 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       } catch { /* ignore */ }
       try { const c = await fetchCurrent(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ }
       try { const s = await fetchSeasonDaily(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, season: s })) } catch { /* ignore */ }
+      try { const bt = await fetchBreakdownTemps(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, breakdownTemps: bt })) } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
   }, [hasLocation, location?.lat, location?.lng, today])
 
-  // ── Disease protection (fungicide cover remaining, per area).
-  const diseaseRows = manage ? protectionByArea(sheets, products, areas) : []
+  // ── Disease protection (fungicide cover remaining, per area). When soil temps
+  // are loaded, protection burns down by heat (temperature-driven breakdown).
+  const diseaseRows = manage ? protectionByArea(sheets, products, areas, undefined, wx.breakdownTemps) : []
   const diseaseAlerts = protectionAlertCount(diseaseRows)
 
   // ── PGR reapply timing (GDD base-32 since each area's last growth-reg spray).
@@ -1001,33 +1003,37 @@ const PROT_STYLE = {
 }
 function DiseaseProtectionCard({ rows }) {
   const shown = rows.filter((r) => r.last)
+  const heatAdjusted = shown.some((r) => r.mode === 'temp')
   return (
     <section>
       <SectionHeader title="Disease Protection" subtitle="Fungicide cover left per area since the last spray" />
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm space-y-3">
         {shown.map((r) => {
           const st = PROT_STYLE[r.status] || PROT_STYLE.ok
+          const badge = r.status === 'expired'
+            ? (r.mode === 'temp' ? st.label : `${st.label} · ${Math.abs(r.remaining)}d over`)
+            : `${st.label} · ${r.remaining}d left`
           return (
             <div key={r.area}>
               <div className="flex items-center justify-between mb-1 gap-2">
                 <span className="font-body text-sm font-semibold text-slate-800 truncate">{r.area}</span>
-                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>
-                  {r.status === 'expired'
-                    ? `${st.label} · ${Math.abs(r.remaining)}d over`
-                    : `${st.label} · ${r.remaining}d left`}
-                </span>
+                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>{badge}</span>
               </div>
               <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
                 <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(4, r.pct)}%`, backgroundColor: st.bar }} />
               </div>
               <p className="font-body text-[10px] text-slate-400 mt-0.5 truncate">
-                Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)} · {r.window}-day window
+                Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)} · {r.mode === 'temp' ? `${r.window}-day label, heat-adjusted` : `${r.window}-day window`}
               </p>
             </div>
           )
         })}
       </div>
-      <p className="font-body text-[10px] text-slate-400 mt-1.5">Window comes from each fungicide's spray interval (set in Chemical Library). Contact products protect ~7–14 days; systemics longer.</p>
+      <p className="font-body text-[10px] text-slate-400 mt-1.5">
+        {heatAdjusted
+          ? 'Countdown speeds up in heat — it burns down by soil temperature (warm days use up cover faster), not just calendar days. Guidance, not a lab test.'
+          : "Window comes from each fungicide's spray interval (set in Chemical Library). Contact products protect ~7–14 days; systemics longer."}
+      </p>
     </section>
   )
 }
