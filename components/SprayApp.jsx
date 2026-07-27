@@ -1542,22 +1542,57 @@ function printRecordHTML(bodyHtml) {
   }
 }
 
-// Export one record to PDF from a detached, off-screen element.
+// Wait for any <img> in an element to finish loading (signatures are data URLs
+// but still need a tick), capped so it never hangs.
+function waitForImages(el, cap = 2000) {
+  const imgs = Array.from(el.querySelectorAll('img'))
+  const pending = imgs.filter((im) => !im.complete)
+  if (pending.length === 0) return Promise.resolve()
+  return Promise.race([
+    Promise.all(pending.map((im) => new Promise((res) => { im.onload = res; im.onerror = res }))),
+    new Promise((res) => setTimeout(res, cap)),
+  ])
+}
+
+// Export one record to PDF from a detached, off-screen element. Builds the PDF as
+// a real file: on iPad/iPhone it goes to the native Share sheet (→ "Save to
+// Files"), because iOS Safari ignores the classic download that .save() uses.
+// Returns 'shared' | 'downloaded' | 'printed' so the caller can guide the user.
 async function pdfRecordHTML(bodyHtml, filename) {
   const holder = document.createElement('div')
   Object.assign(holder.style, { position: 'absolute', left: '-10000px', top: '0', width: '760px', background: '#ffffff' })
   holder.innerHTML = bodyHtml
   document.body.appendChild(holder)
-  await new Promise((r) => setTimeout(r, 60))
+  await waitForImages(holder)
   try {
     const html2pdf = (await import('html2pdf.js')).default
-    await html2pdf().set({
+    const worker = html2pdf().set({
       margin: 8,
-      filename,
       image: { type: 'jpeg', quality: 0.95 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 820 },
       jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
-    }).from(holder).save()
+    }).from(holder)
+    const pdf = await worker.toPdf().get('pdf')
+    const blob = pdf.output('blob')
+    const file = new File([blob], filename, { type: 'application/pdf' })
+
+    // iPad/iPhone: hand the file to the OS share sheet so it can be saved to Files.
+    if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: filename }); return 'shared' }
+      catch (e) { if (e && e.name === 'AbortError') return 'shared' } // user closed the sheet
+    }
+    // Desktop and everything else: normal download.
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 4000)
+    return 'downloaded'
+  } catch (e) {
+    console.error('PDF export failed, falling back to print', e)
+    // Last resort: the native print dialog (→ Save as PDF / Save to Files).
+    printRecordHTML(bodyHtml)
+    return 'printed'
   } finally {
     holder.remove()
   }
