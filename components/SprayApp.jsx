@@ -4204,6 +4204,26 @@ const SOIL_STATUS = {
   adequate: { bg: '#E8F3EC', fg: FERN, bar: FERN, label: 'Plenty in reserve' },
   notest: { bg: '#F1F5F9', fg: '#64748B', bar: '#CBD5E1', label: 'Not tested' },
 }
+// MLSN works in Mehlich-3 ppm (elemental). Some labs (e.g. Logan Labs) report in
+// lb/acre, with phosphorus as P₂O₅. Convert entered values to ppm so the engine
+// stays consistent no matter which report the user is reading from.
+//   ppm = lb/acre ÷ 2  ·  elemental P = P₂O₅ × 0.4364
+const LBAC_TO_PPM = 0.5
+const P2O5_TO_P = 0.4364
+function convertSoilToPpm(form) {
+  const n = (v) => (v === '' || v == null || isNaN(Number(v)) ? '' : Number(v))
+  const r1 = (v) => (v === '' ? '' : Math.round(v * 10) / 10)
+  if (form.units !== 'logan') return { p: form.p, k: form.k, ca: form.ca, mg: form.mg, s: form.s }
+  const p = n(form.p), k = n(form.k), ca = n(form.ca), mg = n(form.mg)
+  return {
+    p: r1(p === '' ? '' : p * P2O5_TO_P * LBAC_TO_PPM),
+    k: r1(k === '' ? '' : k * LBAC_TO_PPM),
+    ca: r1(ca === '' ? '' : ca * LBAC_TO_PPM),
+    mg: r1(mg === '' ? '' : mg * LBAC_TO_PPM),
+    s: form.s, // Logan reports sulfur in ppm already
+  }
+}
+
 function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd, onDelete }) {
   const areaNames = Object.keys(areas || {})
   // The location can be a settings area (Blue Greens) OR an individual green /
@@ -4220,7 +4240,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
   const contextFor = (name) => (areas[name] ? { grasses: areas[name].grasses || [], soilType: areas[name].soilType || '' } : greensSeed())
 
   const seed0 = contextFor(areaOptions[0] || '')
-  const blank = { area: areaOptions[0] || '', date: new Date().toISOString().slice(0, 10), annualN: String(suggestedAnnualN(seed0.grasses).n), ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', lab: '', notes: '', grasses: seed0.grasses, soilType: seed0.soilType }
+  const blank = { area: areaOptions[0] || '', date: new Date().toISOString().slice(0, 10), annualN: String(suggestedAnnualN(seed0.grasses).n), units: 'ppm', ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', lab: '', notes: '', grasses: seed0.grasses, soilType: seed0.soilType }
   const [form, setForm] = useState(blank)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
@@ -4242,8 +4262,9 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
     if (!form.area || !form.date) { setMsg({ type: 'err', text: 'Pick a location and a date first.' }); return }
     setBusy(true); setMsg(null)
     try {
-      await onAdd(form)
-      setForm((f) => ({ ...blank, area: f.area, grasses: f.grasses, soilType: f.soilType, annualN: f.annualN }))
+      // Store nutrients as ppm so the recommendation engine is unit-agnostic.
+      await onAdd({ ...form, ...convertSoilToPpm(form) })
+      setForm((f) => ({ ...blank, area: f.area, grasses: f.grasses, soilType: f.soilType, annualN: f.annualN, units: f.units }))
       setShowForm(false)
       setMsg({ type: 'ok', text: `Soil test saved for ${form.area}.` })
     } catch (e) {
@@ -4310,14 +4331,24 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
           </div>
 
           <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F0F6F2' }}>
-            <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: FERN }}>Nutrients (ppm)</p>
+            <div className="flex items-center justify-between mb-2 gap-2">
+              <p className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: FERN }}>Nutrients</p>
+              <div className="flex rounded-full overflow-hidden border" style={{ borderColor: '#CFE0D5' }}>
+                {[['ppm', 'ppm (Mehlich-3)'], ['logan', 'lb/ac (Logan)']].map(([k, l]) => (
+                  <button key={k} type="button" onClick={() => set('units', k)} className="font-body text-[10px] font-bold px-2.5 py-1 transition" style={form.units === k ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: FERN }}>{l}</button>
+                ))}
+              </div>
+            </div>
             <div className="grid grid-cols-3 gap-2.5">
-              <Num k="p" label="P" ph="ppm" />
-              <Num k="k" label="K" ph="ppm" />
-              <Num k="ca" label="Ca" ph="ppm" />
-              <Num k="mg" label="Mg" ph="ppm" />
+              <Num k="p" label={form.units === 'logan' ? 'P₂O₅' : 'P'} ph={form.units === 'logan' ? 'lb/ac' : 'ppm'} />
+              <Num k="k" label="K" ph={form.units === 'logan' ? 'lb/ac' : 'ppm'} />
+              <Num k="ca" label="Ca" ph={form.units === 'logan' ? 'lb/ac' : 'ppm'} />
+              <Num k="mg" label="Mg" ph={form.units === 'logan' ? 'lb/ac' : 'ppm'} />
               <Num k="s" label="S" ph="ppm" />
             </div>
+            {form.units === 'logan' && (
+              <p className="font-body text-[10px] text-slate-400 mt-2">Logan reports P as P₂O₅ and K/Ca/Mg in lb/acre — the app converts them to ppm on save (sulfur is already ppm). Use the “Value Found” numbers.</p>
+            )}
           </div>
 
           <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F8FAFC' }}>
