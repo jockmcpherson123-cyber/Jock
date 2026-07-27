@@ -107,6 +107,23 @@ function partialDelta(sheet, area, oldGal, newGal) {
   return Object.values(map).filter((d) => Math.abs(d.total) > 1e-6)
 }
 
+// Find the settings area for a sheet's area name, tolerating short/variant names
+// (e.g. a sheet's "Blue Greens" matching the settings key "Blue Greens SprayBug
+// 1.67gpm"). Returns the area object or null. Exact match wins first.
+function resolveArea(areas, name) {
+  if (!areas) return null
+  if (name && areas[name]) return areas[name]
+  const keys = Object.keys(areas)
+  if (!keys.length || !name) return null
+  const n = String(name).toLowerCase()
+  const k =
+    keys.find((x) => x.toLowerCase() === n) ||
+    keys.find((x) => x.toLowerCase().startsWith(n)) ||
+    keys.find((x) => x.toLowerCase().includes(n)) ||
+    keys.find((x) => n.includes(x.toLowerCase()))
+  return k ? areas[k] : null
+}
+
 // Which grasses on this area a product warns against — the overlap of the
 // product's "avoid" list and the grasses present on the area. Empty = safe.
 function grassConflicts(prodInfo, area) {
@@ -420,7 +437,7 @@ function SprayOpsModule({ user }) {
     if (!saved) return
 
     // Auto-deduct stock for the main tanks + any partial fill on this sheet.
-    const area = areas[saved.area] || {}
+    const area = resolveArea(areas, saved.area) || {}
     await deductStock(sheetDeductions(saved, area))
     setActiveSheet(saved)
     showToast('Approved — stock deducted, now live on all iPads')
@@ -607,7 +624,7 @@ function SprayOpsModule({ user }) {
                 // keep the partial-fill deduction in sync — pulling or restoring
                 // only the difference, so editing the partial never double-counts.
                 if (saved.status === 'approved' || saved.completed) {
-                  const area = areas[saved.area] || {}
+                  const area = resolveArea(areas, saved.area) || {}
                   const already = Number(saved.partialStockDeducted) || 0
                   const now = Number(saved.partialGallons) || 0
                   if (already !== now && Number(area.galTank) > 0) {
@@ -1245,7 +1262,7 @@ function InfoChip({ label, value }) {
 function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes, location, sheets = [] }) {
   const [s, setS] = useState({ ...sheet, targets: sheet.targets || (sheet.target ? [sheet.target] : []) })
   const [nTargets, setNTargets] = useState({}) // per-line "feed by N" target (lb N/M)
-  const area = areas[s.area] || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
+  const area = resolveArea(areas, s.area) || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
   const rotationAlerts = rotationWarnings(s, sheets, products)
 
   const update = (patch) => setS((prev) => ({ ...prev, ...patch }))
@@ -1684,7 +1701,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
   const [partialGal, setPartialGal] = useState(sheet.partialGallons ?? '')
   const [showPartial, setShowPartial] = useState(sheet.partialGallons != null)
   const [wxLoading, setWxLoading] = useState(false)
-  const area = areas[sheet.area] || {}
+  const area = resolveArea(areas, sheet.area) || {}
   const productIds = sheet.products.filter((p) => p.product).map((p) => p.id)
   const tankCount = sheet.tanks || 1
 
