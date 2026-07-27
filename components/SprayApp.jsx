@@ -4097,6 +4097,7 @@ function TurfPerformanceModule() {
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <SoilTestsTab soilTests={soilTests} areas={turf.areas} grassTypes={turf.grassTypes || []} soilTypes={turf.soilTypes || []}
               onAdd={async (t) => { await db.addSoilTest(t); await reloadSoilTests() }}
+              onUpdate={async (t) => { await db.updateSoilTest(t); await reloadSoilTests() }}
               onDelete={async (id) => { await db.deleteSoilTest(id); await reloadSoilTests() }} />
         )}
         {route === 'practices' && (
@@ -4492,7 +4493,7 @@ function SoilNum({ label, ph, value, onChange, tip }) {
   )
 }
 
-function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd, onDelete }) {
+function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd, onUpdate, onDelete }) {
   const areaNames = Object.keys(areas || {})
   // The location can be a settings area (Blue Greens) OR an individual green /
   // hole (Green 5), just like clipping yields — so soil can be tracked per hole.
@@ -4515,7 +4516,26 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
   const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState(null) // soil test being edited, or null for a new one
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
+
+  // Load an existing test into the form for editing. Stored values are already
+  // ppm, so edit in ppm mode (no re-conversion).
+  const editTest = (t) => {
+    setForm({
+      area: t.area, date: t.date || new Date().toISOString().slice(0, 10), units: 'ppm',
+      annualN: t.annualN != null ? String(t.annualN) : '',
+      ph: t.ph ?? '', bufferPh: t.bufferPh ?? '', om: t.om ?? '', cec: t.cec ?? '',
+      p: t.p ?? '', k: t.k ?? '', ca: t.ca ?? '', mg: t.mg ?? '', s: t.s ?? '', na: t.na ?? '',
+      fe: t.micros?.fe ?? '', mn: t.micros?.mn ?? '', cu: t.micros?.cu ?? '', zn: t.micros?.zn ?? '', b: t.micros?.b ?? '',
+      bsCa: t.baseSat?.ca ?? '', bsMg: t.baseSat?.mg ?? '', bsK: t.baseSat?.k ?? '', bsNa: t.baseSat?.na ?? '', bsH: t.baseSat?.h ?? '',
+      lab: t.lab ?? '', notes: t.notes ?? '', grasses: t.grasses ?? [], soilType: t.soilType ?? '',
+    })
+    setEditingId(t.id)
+    setShowForm(true)
+    setMsg(null)
+  }
+  const openNew = () => { setForm(blank); setEditingId(null); setShowForm(true); setMsg(null) }
   const toggleGrass = (g) => setForm((f) => ({ ...f, grasses: (f.grasses || []).includes(g) ? f.grasses.filter((x) => x !== g) : [...(f.grasses || []), g] }))
 
   const nSuggest = suggestedAnnualN(form.grasses || [])
@@ -4535,13 +4555,16 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
       // Store macronutrients as ppm so the engine is unit-agnostic; sodium and
       // micros ride in `extras` for the record (they don't drive the MLSN plan).
       const conv = convertSoilToPpm(form)
-      await onAdd({ ...form, ...conv, extras: {
+      const payload = { ...form, ...conv, extras: {
         na: conv.na, fe: form.fe, mn: form.mn, cu: form.cu, zn: form.zn, b: form.b,
         baseSat: { ca: form.bsCa, mg: form.bsMg, k: form.bsK, na: form.bsNa, h: form.bsH },
-      } })
+      } }
+      if (editingId) await onUpdate({ ...payload, id: editingId })
+      else await onAdd(payload)
       setForm((f) => ({ ...blank, area: f.area, grasses: f.grasses, soilType: f.soilType, annualN: f.annualN, units: f.units }))
       setShowForm(false)
-      setMsg({ type: 'ok', text: `Soil test saved for ${form.area}.` })
+      setMsg({ type: 'ok', text: editingId ? `Soil test updated for ${form.area}.` : `Soil test saved for ${form.area}.` })
+      setEditingId(null)
     } catch (e) {
       console.error(e)
       setMsg({ type: 'err', text: saveErrorText(e, 'supabase/phase12.sql') })
@@ -4593,7 +4616,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
           <p className="font-display text-lg font-semibold text-slate-900">Soil Tests</p>
           <p className="font-body text-[11px] text-slate-400">Enter lab results in ppm (Mehlich-3) — the app builds an MLSN fertility plan.</p>
         </div>
-        <button onClick={() => { setShowForm((v) => !v); setMsg(null) }} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
+        <button onClick={() => { if (showForm) { setShowForm(false); setEditingId(null) } else openNew() }} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
           <Plus size={14} /> {showForm ? 'Close' : 'Add test'}
         </button>
       </div>
@@ -4604,6 +4627,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
 
       {showForm && (
         <div className="bg-white rounded-2xl border-2 p-4 shadow-sm" style={{ borderColor: GOLD }}>
+          {editingId && <p className="font-display text-base font-semibold text-slate-900 mb-2">Edit soil test — {form.area}</p>}
           <div className="mb-3">
             <FieldLabel>Where was this sampled?</FieldLabel>
             {areaNames.length > 0 && (
@@ -4725,7 +4749,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
             <input value={form.notes} onChange={(e) => set('notes', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. sampled greens 0–4 inch" />
           </div>
           <p className="font-body text-[10px] text-slate-400 mb-3">Annual N drives how much nutrient the plant will use over the year. The recommendation keeps each nutrient at or above its MLSN floor (P {MLSN.P}, K {MLSN.K}, Ca {MLSN.Ca}, Mg {MLSN.Mg}, S {MLSN.S} ppm) while covering that use.</p>
-          <button onClick={save} disabled={busy} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save soil test'}</button>
+          <button onClick={save} disabled={busy} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : editingId ? 'Update soil test' : 'Save soil test'}</button>
         </div>
       )}
 
@@ -4768,8 +4792,9 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
             <div className="space-y-1.5">
               {latest.map((t) => (
                 <div key={t.id} className="flex items-center justify-between gap-2">
-                  <span className="font-body text-sm text-slate-700 truncate">{t.area}</span>
+                  <span className="font-body text-sm text-slate-700 truncate flex-1">{t.area}</span>
                   <span className="font-body text-[11px] text-slate-400 shrink-0">{fmtDate(t.date)}</span>
+                  <button onClick={() => editTest(t)} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0" style={{ backgroundColor: '#F0F6F2', color: FERN }}>Edit</button>
                   <button onClick={() => onDelete(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={14} /></button>
                 </div>
               ))}
