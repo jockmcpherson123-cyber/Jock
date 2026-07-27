@@ -14,7 +14,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin, Sparkles,
+  Package, Truck, MapPin, Sparkles, Wind, Thermometer,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -22,7 +22,8 @@ import {
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow } from '@/lib/weather'
+import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import SprayCalendar from '@/components/SprayCalendar'
@@ -506,11 +507,12 @@ function SprayOpsModule({ user }) {
         {route === 'dashboard' && (
           <Dashboard
             sheets={sheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
-            manage={manage} programApps={programApps}
+            manage={manage} programApps={programApps} location={location}
             onOpen={(s) => { setActiveSheet(s); setRoute('view') }}
             onNew={newSheet}
             onSeeAll={() => setRoute('list')}
             onCreateFromProgram={createSheetFromProgram}
+            onGoWeather={() => setRoute('weather')}
           />
         )}
         {route === 'list' && (
@@ -633,9 +635,58 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
-function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram }) {
+function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, onGoWeather }) {
   const lowStock = (products || []).filter((p) => p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold)
   const today = new Date().toISOString().slice(0, 10)
+
+  // ── Live weather for the spray-window strip + season GDD for PGR timing.
+  // Best-effort: the dashboard still renders everything else if this fails.
+  const hasLocation = location?.lat != null
+  const [wx, setWx] = useState({ current: null, todayWindow: null, season: [] })
+  useEffect(() => {
+    if (!hasLocation) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await fetchWeather(location.lat, location.lng)
+        const daily = dailyFromHourly(data)
+        const todayRow = daily.find((d) => d.date === today) || daily[0] || null
+        if (!cancelled) setWx((w) => ({ ...w, todayWindow: todayRow ? { ...todayRow, spray: sprayWindow(todayRow) } : null }))
+      } catch { /* ignore */ }
+      try { const c = await fetchCurrent(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ }
+      try { const s = await fetchSeasonDaily(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, season: s })) } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [hasLocation, location?.lat, location?.lng, today])
+
+  // ── Disease protection (fungicide cover remaining, per area).
+  const diseaseRows = manage ? protectionByArea(sheets, products, areas) : []
+  const diseaseAlerts = protectionAlertCount(diseaseRows)
+
+  // ── PGR reapply timing (GDD base-32 since each area's last growth-reg spray).
+  const PGR_TARGET = 200
+  const pgrRows = (() => {
+    if (!manage || !wx.season.length) return []
+    const pgrNames = new Set((products || []).filter((p) => p.type === 'Growth Reg').map((p) => p.name))
+    if (pgrNames.size === 0) return []
+    const lastByArea = {}
+    ;(sheets || [])
+      .filter((s) => (s.status === 'approved' || s.completed) && s.date)
+      .forEach((s) => {
+        const pgr = (s.products || []).filter((p) => pgrNames.has(p.product)).map((p) => p.product)
+        if (pgr.length === 0) return
+        if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: pgr }
+      })
+    return Object.keys(areas).map((area) => {
+      const last = lastByArea[area]
+      if (!last) return { area, last: null, gdd: null, pct: 0, status: 'none' }
+      const gdd = gddSince(wx.season, last.date, 32)
+      const pct = gdd != null && PGR_TARGET > 0 ? Math.min(100, Math.round((gdd / PGR_TARGET) * 100)) : 0
+      const status = gdd == null ? 'none' : gdd >= PGR_TARGET ? 'due' : gdd >= PGR_TARGET * 0.8 ? 'soon' : 'ok'
+      return { area, last, gdd, pct, status }
+    }).filter((r) => r.last).sort((a, b) => (b.gdd ?? -1) - (a.gdd ?? -1))
+  })()
+  const pgrAlerts = pgrRows.filter((r) => r.status === 'due' || r.status === 'soon').length
 
   // Planned applications coming up in the next 7 days that haven't been turned
   // into a spray sheet yet, grouped into one card per area + day.
@@ -651,8 +702,19 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
     return Object.values(map).sort((x, y) => x.date.localeCompare(y.date))
   })()
 
+  const attention = []
+  if (pending.length > 0) attention.push({ label: `${pending.length} awaiting approval`, tone: 'warn' })
+  if (diseaseAlerts > 0) attention.push({ label: `${diseaseAlerts} area${diseaseAlerts > 1 ? 's' : ''} low on fungicide cover`, tone: 'bad' })
+  if (pgrAlerts > 0) attention.push({ label: `${pgrAlerts} PGR reapply due`, tone: 'warn' })
+  if (lowStock.length > 0) attention.push({ label: `${lowStock.length} product${lowStock.length > 1 ? 's' : ''} low on stock`, tone: 'bad' })
+
   return (
     <div className="pt-6 space-y-6">
+      {/* Morning briefing — spray window + needs-attention at a glance */}
+      {manage && (
+        <SprayWindowStrip current={wx.current} today={wx.todayWindow} hasLocation={hasLocation} attention={attention} onGoWeather={onGoWeather} />
+      )}
+
       {/* Calendar — upcoming (planned) and past (actual) sprays at a glance */}
       <SprayCalendar
         sheets={sheets}
@@ -668,6 +730,16 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
         <StatCard icon={<Droplet size={16} />} label="Today" value={todaySheets.length} accent={GOLD} />
         <StatCard icon={<AlertTriangle size={16} />} label="Low Stock" value={lowStock.length} accent={lowStock.length > 0 ? '#DC2626' : FERN} />
       </div>
+
+      {/* Disease protection — how much fungicide cover is left, per area */}
+      {manage && diseaseRows.some((r) => r.last) && (
+        <DiseaseProtectionCard rows={diseaseRows} />
+      )}
+
+      {/* PGR reapply timing — GDD since each area's last growth-reg spray */}
+      {manage && pgrRows.length > 0 && (
+        <PgrTimingCard rows={pgrRows} target={PGR_TARGET} />
+      )}
 
       {/* From the Program — turn the plan into spray sheets */}
       {manage && upcomingGroups.length > 0 && (
@@ -768,6 +840,136 @@ function StatCard({ icon, label, value, accent }) {
       <p className="font-display text-3xl font-semibold text-slate-900">{value}</p>
       <p className="font-body text-[11px] text-slate-400 mt-0.5 leading-tight">{label}</p>
     </div>
+  )
+}
+
+// Morning briefing strip: live conditions + today's 6am–noon spray window, plus
+// a row of "needs attention" chips so the day's priorities read at a glance.
+const WINDOW_STYLE = {
+  good: { bg: '#E8F3EC', fg: FERN, dot: FERN, label: 'Good window' },
+  caution: { bg: '#FEF3DD', fg: '#92660D', dot: '#D97706', label: 'Caution' },
+  poor: { bg: '#FEE2E2', fg: '#B91C1C', dot: '#DC2626', label: 'Poor window' },
+}
+function SprayWindowStrip({ current, today, hasLocation, attention = [], onGoWeather }) {
+  const win = today?.spray?.level ? WINDOW_STYLE[today.spray.level] : null
+  const toneColor = { bad: '#DC2626', warn: '#92660D', ok: FERN }
+  return (
+    <div className="rounded-2xl overflow-hidden shadow-sm border border-black/5">
+      <button onClick={onGoWeather} className="w-full text-left" style={{ backgroundColor: FOREST }}>
+        <div className="px-4 py-3.5 flex items-center justify-between gap-3 text-white">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Thermometer size={16} style={{ color: GOLD }} />
+              <span className="font-display text-xl font-semibold">
+                {current?.temp ? `${current.temp}°` : hasLocation ? '—' : 'Set location'}
+              </span>
+            </div>
+            {current && (current.wind || current.humidity) && (
+              <span className="font-body text-[11px] opacity-70 flex items-center gap-2 min-w-0 truncate">
+                {current.wind && <span className="flex items-center gap-1"><Wind size={11} />{current.wind} mph</span>}
+                {current.humidity && <span>{current.humidity}% RH</span>}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {win ? (
+              <span className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ backgroundColor: win.bg, color: win.fg }}>
+                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: win.dot }} />
+                {win.label}
+              </span>
+            ) : (
+              <span className="font-body text-[11px] opacity-60">Spray window</span>
+            )}
+            <ChevronRight size={15} className="opacity-50" />
+          </div>
+        </div>
+      </button>
+      {win && today?.spray?.reasons?.length > 0 && (
+        <div className="px-4 py-2 bg-white font-body text-[11px] text-slate-500 border-b border-black/5">
+          6am–noon: {today.spray.reasons.join(' · ')}
+        </div>
+      )}
+      {attention.length > 0 && (
+        <div className="px-4 py-2.5 bg-white flex flex-wrap gap-1.5">
+          {attention.map((a, i) => (
+            <span key={i} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ backgroundColor: '#F8FAFC', color: toneColor[a.tone] || FERN, border: '1px solid #EEF2F6' }}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: toneColor[a.tone] || FERN }} />
+              {a.label}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Disease protection — a shrinking bar per area showing how much fungicide cover
+// remains from the last spray. Leads with whatever is exposed or nearly so.
+const PROT_STYLE = {
+  expired: { bg: '#FEE2E2', fg: '#B91C1C', bar: '#DC2626', label: 'Exposed' },
+  soon: { bg: '#FEF3DD', fg: '#92660D', bar: '#D97706', label: 'Running out' },
+  ok: { bg: '#E8F3EC', fg: FERN, bar: FERN, label: 'Protected' },
+}
+function DiseaseProtectionCard({ rows }) {
+  const shown = rows.filter((r) => r.last)
+  return (
+    <section>
+      <SectionHeader title="Disease Protection" subtitle="Fungicide cover left per area since the last spray" />
+      <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm space-y-3">
+        {shown.map((r) => {
+          const st = PROT_STYLE[r.status] || PROT_STYLE.ok
+          return (
+            <div key={r.area}>
+              <div className="flex items-center justify-between mb-1 gap-2">
+                <span className="font-body text-sm font-semibold text-slate-800 truncate">{r.area}</span>
+                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>
+                  {r.status === 'expired'
+                    ? `${st.label} · ${Math.abs(r.remaining)}d over`
+                    : `${st.label} · ${r.remaining}d left`}
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(4, r.pct)}%`, backgroundColor: st.bar }} />
+              </div>
+              <p className="font-body text-[10px] text-slate-400 mt-0.5 truncate">
+                Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)} · {r.window}-day window
+              </p>
+            </div>
+          )
+        })}
+      </div>
+      <p className="font-body text-[10px] text-slate-400 mt-1.5">Window comes from each fungicide's spray interval (set in Chemical Library). Contact products protect ~7–14 days; systemics longer.</p>
+    </section>
+  )
+}
+
+// PGR reapply timing — compact version of the Turf module's growth-reg tracker,
+// surfaced on the dashboard so timing lives next to the day's other priorities.
+function PgrTimingCard({ rows, target }) {
+  const st = { due: { bg: '#FEE2E2', fg: '#B91C1C', bar: '#DC2626', label: 'Reapply now' }, soon: { bg: '#FEF3DD', fg: '#92660D', bar: '#D97706', label: 'Soon' }, ok: { bg: '#E8F3EC', fg: FERN, bar: FERN, label: 'On track' } }
+  return (
+    <section>
+      <SectionHeader title="Growth-Reg Timing" subtitle={`GDD since each area's last PGR (base 32°F) · target ~${target}`} />
+      <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm space-y-3">
+        {rows.map((r) => {
+          const s = st[r.status] || st.ok
+          return (
+            <div key={r.area}>
+              <div className="flex items-center justify-between mb-1 gap-2">
+                <span className="font-body text-sm font-semibold text-slate-800 truncate">{r.area}</span>
+                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: s.bg, color: s.fg }}>
+                  {r.gdd} / {target} · {s.label}
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(4, r.pct)}%`, backgroundColor: s.bar }} />
+              </div>
+              <p className="font-body text-[10px] text-slate-400 mt-0.5 truncate">Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)}</p>
+            </div>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -2226,7 +2428,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   }
   const startNew = () => {
     setEditing('new')
-    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '', caseSize: '', ozPerCase: '', costPerCase: '', moaGroup: '', rotationDays: '' })
+    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '', caseSize: '', ozPerCase: '', costPerCase: '', moaGroup: '', rotationDays: '', sprayInterval: '' })
   }
   const cancelEdit = () => { setEditing(null); setDraft(null) }
 
@@ -2253,6 +2455,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       costPerCase: draft.costPerCase === '' || draft.costPerCase == null ? null : parseFloat(draft.costPerCase),
       moaGroup: (draft.moaGroup || '').trim(),
       rotationDays: draft.rotationDays === '' || draft.rotationDays == null ? null : parseInt(draft.rotationDays, 10),
+      sprayInterval: draft.sprayInterval === '' || draft.sprayInterval == null ? null : parseInt(draft.sprayInterval, 10),
     }
     onSaveProduct(cleaned)
     cancelEdit()
@@ -2519,6 +2722,18 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 </div>
               </div>
             </div>
+            {draft.type === 'Fungicide' && (
+              <div className="rounded-xl p-3" style={{ backgroundColor: '#EAF3EE' }}>
+                <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: FERN }}>Disease Protection</p>
+                <p className="font-body text-[10px] text-slate-500 mb-2">How many days this fungicide holds off disease. The Dashboard shows a shrinking bar per area and flags you before protection runs out. Leave blank to use the rotation days or a 14-day default.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <FieldLabel>Spray Interval (days)</FieldLabel>
+                    <input type="number" step="1" value={draft.sprayInterval ?? ''} onChange={(e) => setDraft({ ...draft, sprayInterval: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="14" />
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="rounded-xl p-3" style={{ backgroundColor: '#FEF2F2' }}>
               <p className="font-body text-[11px] font-bold text-red-500 uppercase tracking-wide mb-1">Grass Safety — Avoid On</p>
               <p className="font-body text-[10px] text-slate-500 mb-2">Select grasses this product can damage (from the label). A spray sheet warns if the area has one of these.</p>
