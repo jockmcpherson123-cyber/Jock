@@ -3877,7 +3877,7 @@ function TurfPerformanceModule() {
       setLoadingTurf(true)
       try {
         const [settings, sheets, products, clips, pracs, soils] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts(), db.fetchClippings().catch(() => []), db.fetchCulturalPractices().catch(() => []), db.fetchSoilTests().catch(() => [])])
-        setTurf({ location: settings.location, sheets, products, areas: settings.areas })
+        setTurf({ location: settings.location, sheets, products, areas: settings.areas, grassTypes: settings.grassTypes || [], soilTypes: settings.soilTypes || [] })
         setClippings(clips)
         setPractices(pracs)
         setSoilTests(soils)
@@ -3931,7 +3931,7 @@ function TurfPerformanceModule() {
         )}
         {route === 'soil' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <SoilTestsTab soilTests={soilTests} areas={turf.areas}
+          : <SoilTestsTab soilTests={soilTests} areas={turf.areas} grassTypes={turf.grassTypes || []} soilTypes={turf.soilTypes || []}
               onAdd={async (t) => { await db.addSoilTest(t); await reloadSoilTests() }}
               onDelete={async (id) => { await db.deleteSoilTest(id); await reloadSoilTests() }} />
         )}
@@ -4204,33 +4204,46 @@ const SOIL_STATUS = {
   adequate: { bg: '#E8F3EC', fg: FERN, bar: FERN, label: 'Plenty in reserve' },
   notest: { bg: '#F1F5F9', fg: '#64748B', bar: '#CBD5E1', label: 'Not tested' },
 }
-function SoilTestsTab({ soilTests, areas, onAdd, onDelete }) {
+function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd, onDelete }) {
   const areaNames = Object.keys(areas || {})
-  const blank = { area: areaNames[0] || '', date: new Date().toISOString().slice(0, 10), annualN: '4', ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', lab: '', notes: '' }
+  // The location can be a settings area (Blue Greens) OR an individual green /
+  // hole (Green 5), just like clipping yields — so soil can be tracked per hole.
+  const areaOptions = [...areaNames, ...GREEN_OPTIONS.filter((g) => !areaNames.includes(g))]
+
+  // Grass + soil context for a chosen location. Settings areas carry it directly;
+  // an individual green inherits from the course's greens settings-area so its
+  // plan is still variety/soil-aware.
+  const greensSeed = () => {
+    const key = areaNames.find((a) => /green/i.test(a))
+    return key ? { grasses: areas[key]?.grasses || [], soilType: areas[key]?.soilType || '' } : { grasses: [], soilType: '' }
+  }
+  const contextFor = (name) => (areas[name] ? { grasses: areas[name].grasses || [], soilType: areas[name].soilType || '' } : greensSeed())
+
+  const seed0 = contextFor(areaOptions[0] || '')
+  const blank = { area: areaOptions[0] || '', date: new Date().toISOString().slice(0, 10), annualN: String(suggestedAnnualN(seed0.grasses).n), ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', lab: '', notes: '', grasses: seed0.grasses, soilType: seed0.soilType }
   const [form, setForm] = useState(blank)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
+  const toggleGrass = (g) => setForm((f) => ({ ...f, grasses: (f.grasses || []).includes(g) ? f.grasses.filter((x) => x !== g) : [...(f.grasses || []), g] }))
 
-  // When the area changes, prefill the N target from its grass variety (the user
-  // can still type over it). Track the last suggestion so we only auto-fill when
-  // the field hasn't been hand-edited.
-  const areaGrasses = areas[form.area]?.grasses || []
-  const nSuggest = suggestedAnnualN(areaGrasses)
+  const nSuggest = suggestedAnnualN(form.grasses || [])
+
+  // When the location changes, pull in its grass + soil context and re-suggest N
+  // (unless the user hand-typed an N value).
   const pickArea = (v) => setForm((f) => {
-    const g = areas[v]?.grasses || []
-    const s = suggestedAnnualN(g)
-    const untouched = f.annualN === '' || f.annualN === String(suggestedAnnualN(areas[f.area]?.grasses || []).n)
-    return { ...f, area: v, annualN: untouched ? String(s.n) : f.annualN }
+    const ctx = contextFor(v)
+    const wasSuggested = f.annualN === '' || f.annualN === String(suggestedAnnualN(f.grasses || []).n)
+    return { ...f, area: v, grasses: ctx.grasses, soilType: ctx.soilType, annualN: wasSuggested ? String(suggestedAnnualN(ctx.grasses).n) : f.annualN }
   })
 
   const save = async () => {
-    if (!form.area || !form.date) { setMsg({ type: 'err', text: 'Pick an area and a date first.' }); return }
+    if (!form.area || !form.date) { setMsg({ type: 'err', text: 'Pick a location and a date first.' }); return }
     setBusy(true); setMsg(null)
     try {
       await onAdd(form)
-      setForm({ ...blank, area: form.area, annualN: form.annualN })
+      setForm((f) => ({ ...blank, area: f.area, grasses: f.grasses, soilType: f.soilType, annualN: f.annualN }))
       setShowForm(false)
       setMsg({ type: 'ok', text: `Soil test saved for ${form.area}.` })
     } catch (e) {
@@ -4272,14 +4285,28 @@ function SoilTestsTab({ soilTests, areas, onAdd, onDelete }) {
         <div className="bg-white rounded-2xl border-2 p-4 shadow-sm" style={{ borderColor: GOLD }}>
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div>
-              <FieldLabel>Area</FieldLabel>
-              <Select value={form.area} onChange={pickArea} options={areaNames.length ? areaNames : ['—']} />
-              {areaGrasses.length > 0 && <p className="font-body text-[10px] text-slate-400 mt-1 truncate">{areaGrasses.join(', ')}{areas[form.area]?.soilType ? ` · ${areas[form.area].soilType}` : ''}</p>}
+              <FieldLabel>Area or hole</FieldLabel>
+              <Select value={form.area} onChange={pickArea} options={areaOptions.length ? areaOptions : ['—']} />
             </div>
             <div>
               <FieldLabel>Test date</FieldLabel>
               <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
             </div>
+          </div>
+
+          <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F5FAF6' }}>
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: FERN }}>Grass &amp; soil (drives the plan)</p>
+            <p className="font-body text-[10px] text-slate-400 mb-2">Prefilled from the area — adjust for an individual hole. Grass sets the N target; sandy soil bumps K &amp; S.</p>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {grassTypes.map((g) => {
+                const on = (form.grasses || []).includes(g)
+                return (
+                  <button key={g} type="button" onClick={() => toggleGrass(g)} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full transition border" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{g}</button>
+                )
+              })}
+              {grassTypes.length === 0 && <span className="font-body text-[11px] text-slate-400">Add grass types in Settings → Lists.</span>}
+            </div>
+            <Select value={form.soilType || ''} onChange={(v) => set('soilType', v)} options={soilTypes} placeholder="Soil type (optional)" />
           </div>
 
           <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F0F6F2' }}>
@@ -4307,7 +4334,7 @@ function SoilTestsTab({ soilTests, areas, onAdd, onDelete }) {
             <div>
               <FieldLabel>Annual N target (lb / M / yr)</FieldLabel>
               <input type="number" step="any" value={form.annualN ?? ''} onChange={(e) => set('annualN', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 4" />
-              <p className="font-body text-[10px] text-slate-400 mt-1">{nSuggest.matched ? `Typical for ${areaGrasses.join(', ')}: ${nSuggest.n} — adjust as needed.` : 'Set your season N goal for this area.'}</p>
+              <p className="font-body text-[10px] text-slate-400 mt-1">{nSuggest.matched ? `Typical for ${(form.grasses || []).join(', ')}: ${nSuggest.n} — adjust as needed.` : 'Set your season N goal for this area.'}</p>
             </div>
             <div>
               <FieldLabel>Lab (optional)</FieldLabel>
@@ -4334,8 +4361,10 @@ function SoilTestsTab({ soilTests, areas, onAdd, onDelete }) {
 }
 
 function SoilRecCard({ test, area = {}, onDelete }) {
-  const grasses = area.grasses || []
-  const soilType = area.soilType || ''
+  // Prefer the grass/soil captured on the test (works for per-hole tests); fall
+  // back to the settings area if an older test didn't store it.
+  const grasses = (test.grasses && test.grasses.length ? test.grasses : area.grasses) || []
+  const soilType = test.soilType || area.soilType || ''
   const rec = recommend(test, test.annualN, { grasses, soilType })
   const tested = rec.rows.filter((r) => r.status !== 'notest')
   const context = [grasses.join(', '), soilType].filter(Boolean).join(' · ')
