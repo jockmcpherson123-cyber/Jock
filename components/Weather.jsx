@@ -7,6 +7,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind } from 'lucide-react'
 import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps } from '@/lib/weather'
 import { applicationTimings, soilTrend, currentSoilTemp } from '@/lib/soiltiming'
+import { diseaseRisks, pestStages } from '@/lib/pests'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -108,13 +109,17 @@ export default function Weather({ location, onGoToSettings }) {
   const todayRow = daily.find((d) => d.date === today) || daily[daily.length - 1]
   const forecast = daily.filter((d) => d.date >= today).slice(0, 7)
   const recentDays = daily.filter((d) => d.date < today).slice(-7).reverse()
-  const ds = RISK_STYLES[summary.dollarSpot.level]
-  const bp = RISK_STYLES[summary.brownPatch.level]
 
   // Soil temperature (2" / 0–7cm) + trend, and the application-timing windows.
   const soilNow = currentSoilTemp(soilSeries)
   const trend = soilTrend(soilSeries)
   const timings = soilNow != null ? applicationTimings(soilNow, trend) : []
+
+  // Full disease-risk model list + GDD (base 50°F) + GDD-based pest stages.
+  const risks = diseaseRisks(daily, soilNow, trend, today)
+  const gddToDate = Math.round(summary.gddNow || 0)
+  const gddForecast7 = Math.round(daily.filter((d) => d.date > today).slice(0, 7).reduce((s, d) => s + (d.tMax != null && d.tMin != null ? Math.max(0, (d.tMax + d.tMin) / 2 - 50) : 0), 0))
+  const stages = pestStages(gddToDate)
 
   return (
     <div className="pt-6 pb-10 space-y-5">
@@ -171,28 +176,53 @@ export default function Weather({ location, onGoToSettings }) {
         </div>
       )}
 
-      {/* Disease risk */}
+      {/* Disease risk models */}
       <div>
-        <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Disease Pressure</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <RiskCard
-            title="Dollar Spot"
-            model="Smith-Kerns model"
-            style={ds}
-            detail={
-              summary.dollarSpot.dsi != null
-                ? `Index ${summary.dollarSpot.dsi.toFixed(1)} · ${summary.dollarSpot.streak} day${summary.dollarSpot.streak !== 1 ? 's' : ''} favourable`
-                : 'Not enough data yet'
-            }
-            note={summary.dollarSpot.level === 'high' ? 'Elevated — index positive 3+ days running. Consider tightening your fungicide interval.' : summary.dollarSpot.level === 'moderate' ? 'Conditions starting to favour dollar spot — keep an eye on it.' : 'Low pressure right now.'}
-          />
-          <RiskCard
-            title="Brown Patch"
-            model="Temp + humidity hours"
-            style={bp}
-            detail={`${summary.brownPatch.hours} favourable hour${summary.brownPatch.hours !== 1 ? 's' : ''} recently`}
-            note={summary.brownPatch.level === 'high' ? 'Warm, very humid conditions — brown patch favourable.' : summary.brownPatch.level === 'moderate' ? 'Some favourable hours — monitor.' : 'Low pressure right now.'}
-          />
+        <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Disease Risk Models</p>
+        <div className="space-y-2">
+          {risks.map((r) => {
+            const c = r.score >= 70 ? '#DC2626' : r.score >= 40 ? '#EA580C' : r.score >= 15 ? '#CA8A04' : '#16A34A'
+            return (
+              <div key={r.id} className="bg-white rounded-2xl border border-black/5 shadow-sm flex items-center gap-3 p-3" style={{ borderLeft: `5px solid ${c}` }}>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-sm font-bold text-slate-900">{r.label}</p>
+                  <p className="font-body text-[11px] text-slate-500 mt-0.5">{r.desc}</p>
+                </div>
+                <div className="w-11 h-11 rounded-full flex items-center justify-center shrink-0 text-white font-display font-bold text-sm" style={{ backgroundColor: c }}>{r.score}</div>
+              </div>
+            )
+          })}
+          {risks.length === 0 && <div className="bg-white rounded-2xl border border-black/5 p-6 text-center text-slate-400 font-body text-sm">Not enough weather yet to score disease risk.</div>}
+        </div>
+        <p className="font-body text-[10px] text-slate-400 mt-2">General 0–100 models from Open-Meteo weather + 2&quot; soil temp — directional, calibrate thresholds to your region.</p>
+      </div>
+
+      {/* Growing degree days */}
+      <div>
+        <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Growing Degree Days</p>
+        <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4">
+          <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Base 50°F · accumulated from Jan 1</p>
+          <p className="font-display text-3xl font-bold text-slate-900 mt-0.5">{gddToDate.toLocaleString()} <span className="font-body text-sm font-medium text-slate-400">GDD to date</span></p>
+          {gddForecast7 > 0 && <p className="font-body text-[12px] text-slate-500 mt-1">+{gddForecast7} forecast over the next 7 days → {(gddToDate + gddForecast7).toLocaleString()} GDD</p>}
+        </div>
+      </div>
+
+      {/* Pest stages at this GDD */}
+      <div>
+        <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Pest Stages at this GDD</p>
+        <div className="space-y-2">
+          {stages.map((s) => {
+            const dot = s.tone === 'now' ? '#CA8A04' : s.tone === 'soon' ? '#16A34A' : '#94A3B8'
+            return (
+              <div key={s.id} className="bg-white rounded-2xl border border-black/5 shadow-sm flex items-center gap-3 p-3">
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: dot }} />
+                <div className="min-w-0">
+                  <p className="font-body text-sm font-bold text-slate-900">{s.label}</p>
+                  <p className="font-body text-[11px] text-slate-500">{s.status}</p>
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
 
