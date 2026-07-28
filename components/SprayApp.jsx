@@ -22,7 +22,7 @@ import {
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { logout } from '@/app/actions/auth'
@@ -753,7 +753,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   // ── Live weather for the spray-window strip + season GDD for PGR timing.
   // Best-effort: the dashboard still renders everything else if this fails.
   const hasLocation = location?.lat != null
-  const [wx, setWx] = useState({ current: null, todayWindow: null, season: [] })
+  const [wx, setWx] = useState({ current: null, todayWindow: null, season: [], breakdownTemps: [] })
   useEffect(() => {
     if (!hasLocation) return
     let cancelled = false
@@ -766,13 +766,23 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       } catch { /* ignore */ }
       try { const c = await fetchCurrent(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ }
       try { const s = await fetchSeasonDaily(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, season: s })) } catch { /* ignore */ }
+      try { const bt = await fetchBreakdownTemps(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, breakdownTemps: bt })) } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
   }, [hasLocation, location?.lat, location?.lng, today])
 
-  // ── Disease protection (fungicide cover remaining, per area). Day-based; the
-  // temperature-driven model is available in lib/disease but not wired in yet.
-  const diseaseRows = manage ? protectionByArea(sheets, products, areas) : []
+  // ── Disease protection (fungicide cover remaining, per area). A per-device
+  // toggle (default on) switches between heat-adjusted breakdown and plain days.
+  const [heatOn, setHeatOn] = useState(() => {
+    if (typeof window === 'undefined') return true
+    try { const v = window.localStorage.getItem('heatAdjustProtection'); return v === null ? true : v === '1' } catch { return true }
+  })
+  const toggleHeat = () => setHeatOn((v) => {
+    const nv = !v
+    try { window.localStorage.setItem('heatAdjustProtection', nv ? '1' : '0') } catch { /* ignore */ }
+    return nv
+  })
+  const diseaseRows = manage ? protectionByArea(sheets, products, areas, undefined, heatOn ? wx.breakdownTemps : null) : []
   const diseaseAlerts = protectionAlertCount(diseaseRows)
 
   // ── PGR reapply timing (GDD base-32 since each area's last growth-reg spray).
@@ -847,7 +857,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
       {/* Disease protection — how much fungicide cover is left, per area */}
       {manage && diseaseRows.some((r) => r.last) && (
-        <DiseaseProtectionCard rows={diseaseRows} />
+        <DiseaseProtectionCard rows={diseaseRows} heatOn={heatOn} onToggleHeat={toggleHeat} heatAvailable={wx.breakdownTemps.length > 0} />
       )}
 
       {/* PGR reapply timing — GDD since each area's last growth-reg spray */}
@@ -1001,12 +1011,19 @@ const PROT_STYLE = {
   soon: { bg: '#FEF3DD', fg: '#92660D', bar: '#D97706', label: 'Running out' },
   ok: { bg: '#E8F3EC', fg: FERN, bar: FERN, label: 'Protected' },
 }
-function DiseaseProtectionCard({ rows }) {
+function DiseaseProtectionCard({ rows, heatOn, onToggleHeat, heatAvailable }) {
   const shown = rows.filter((r) => r.last)
   const heatAdjusted = shown.some((r) => r.mode === 'temp')
   return (
     <section>
-      <SectionHeader title="Disease Protection" subtitle="Fungicide cover left per area since the last spray" />
+      <div className="flex items-end justify-between gap-2 mb-3">
+        <SectionHeader title="Disease Protection" subtitle="Fungicide cover left per area since the last spray" noMargin />
+        {onToggleHeat && (
+          <button onClick={onToggleHeat} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5 shrink-0 transition" style={heatOn ? { backgroundColor: '#FEF3DD', color: '#92660D' } : { backgroundColor: 'white', color: '#94A3B8', border: '1px solid #E2E8F0' }} title="Speed the countdown up in heat">
+            <Thermometer size={12} /> Heat {heatOn ? 'on' : 'off'}
+          </button>
+        )}
+      </div>
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm space-y-3">
         {shown.map((r) => {
           const st = PROT_STYLE[r.status] || PROT_STYLE.ok
