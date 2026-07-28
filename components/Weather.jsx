@@ -5,7 +5,8 @@
 // All from Open-Meteo using the club's saved location — no API key required.
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind } from 'lucide-react'
-import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress } from '@/lib/weather'
+import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps } from '@/lib/weather'
+import { applicationTimings, soilTrend, currentSoilTemp } from '@/lib/soiltiming'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -29,6 +30,7 @@ function fmtDay(d) {
 export default function Weather({ location, onGoToSettings }) {
   const [state, setState] = useState({ loading: true, error: null, daily: null, summary: null })
   const [current, setCurrent] = useState(null)
+  const [soilSeries, setSoilSeries] = useState([]) // recent daily soil temps
   const [etPct, setEtPct] = useState(80) // % of ET to replace with irrigation
 
   const hasLocation = location && location.lat != null && location.lng != null
@@ -47,6 +49,8 @@ export default function Weather({ location, onGoToSettings }) {
 
         // Live current conditions (best-effort — doesn't block the page).
         try { const c = await fetchCurrent(location.lat, location.lng); if (!cancelled) setCurrent(c) } catch { /* ignore */ }
+        // Recent soil temperatures (drive the soil-temp readout + timing windows).
+        try { const bt = await fetchBreakdownTemps(location.lat, location.lng); if (!cancelled) setSoilSeries(bt) } catch { /* ignore */ }
 
         let season = []
         try { season = await fetchSeasonDaily(location.lat, location.lng) } catch { season = [] }
@@ -107,6 +111,11 @@ export default function Weather({ location, onGoToSettings }) {
   const ds = RISK_STYLES[summary.dollarSpot.level]
   const bp = RISK_STYLES[summary.brownPatch.level]
 
+  // Soil temperature (2" / 0–7cm) + trend, and the application-timing windows.
+  const soilNow = currentSoilTemp(soilSeries)
+  const trend = soilTrend(soilSeries)
+  const timings = soilNow != null ? applicationTimings(soilNow, trend) : []
+
   return (
     <div className="pt-6 pb-10 space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -143,6 +152,24 @@ export default function Weather({ location, onGoToSettings }) {
         <Stat icon={<CloudRain size={15} />} label="Rain today" value={todayRow ? `${todayRow.precip}"` : '—'} accent="#2563EB" />
         <Stat icon={<TrendingUp size={15} />} label={fullSeason ? 'GDD since Jan 1' : 'GDD (last ~90d)'} value={Math.round(summary.gddNow).toLocaleString()} accent={FOREST} />
       </div>
+
+      {/* Soil temperature + application timing */}
+      {soilNow != null && (
+        <div>
+          <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Soil Temperature &amp; Application Timing</p>
+          <div className="rounded-2xl p-4 text-white shadow-sm mb-3 flex items-center justify-between flex-wrap gap-3" style={{ backgroundColor: FOREST }}>
+            <div>
+              <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Soil temp · 2&quot;</p>
+              <p className="font-display text-3xl font-bold mt-0.5">{soilNow}°F</p>
+            </div>
+            <span className="font-body text-xs font-bold px-3 py-1.5 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.15)' }}>
+              {trend === 'rising' ? '↑ Warming' : trend === 'falling' ? '↓ Cooling' : '→ Holding'}
+            </span>
+          </div>
+          <TimingList timings={timings} />
+          <p className="font-body text-[10px] text-slate-400 mt-2">Soil temp is a 2-inch estimate from your location. Windows are published transition-zone starting points — pair with your own read and local extension guidance.</p>
+        </div>
+      )}
 
       {/* Disease risk */}
       <div>
@@ -400,6 +427,38 @@ function RiskCard({ title, model, style, detail, note }) {
       </div>
       <p className="font-body text-[11px] text-slate-400 mb-1">{model} · {detail}</p>
       <p className="font-body text-xs text-slate-600 leading-snug">{note}</p>
+    </div>
+  )
+}
+
+// Application-timing windows: each shows its status against the current soil temp.
+const TIMING_STATUS = {
+  now: { bg: '#E8F3EC', fg: '#2C5238', dot: '#3A6B4A', label: 'Apply now' },
+  soon: { bg: '#FEF3DD', fg: '#7A5E12', dot: '#C9A84C', label: 'Getting close' },
+  later: { bg: '#F1F5F9', fg: '#64748B', dot: '#CBD5E1', label: 'Not yet' },
+  passed: { bg: '#F3E0D9', fg: '#8A3520', dot: '#B4553D', label: 'Window passed' },
+  unknown: { bg: '#F1F5F9', fg: '#64748B', dot: '#CBD5E1', label: '—' },
+}
+function TimingList({ timings }) {
+  if (!timings || timings.length === 0) {
+    return <div className="bg-white rounded-2xl border border-black/5 p-6 text-center text-slate-400 font-body text-sm shadow-sm">No timing windows in season right now.</div>
+  }
+  return (
+    <div className="space-y-2">
+      {timings.map((t) => {
+        const st = TIMING_STATUS[t.status] || TIMING_STATUS.unknown
+        return (
+          <div key={t.id} className="bg-white rounded-2xl border border-black/5 p-3.5 shadow-sm">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <span className="font-body text-sm font-semibold text-slate-800 truncate">{t.label}</span>
+              <span className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>
+                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: st.dot }} />{st.label}
+              </span>
+            </div>
+            <p className="font-body text-[11px] text-slate-400">Trigger ~{t.threshold}°F ({t.direction === 'falling' ? 'cooling' : 'warming'}) · {t.note}</p>
+          </div>
+        )
+      })}
     </div>
   )
 }

@@ -25,6 +25,7 @@ import * as db from '@/lib/db'
 import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
+import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import SprayCalendar from '@/components/SprayCalendar'
@@ -785,6 +786,20 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   const diseaseRows = manage ? protectionByArea(sheets, products, areas, undefined, heatOn ? wx.breakdownTemps : null) : []
   const diseaseAlerts = protectionAlertCount(diseaseRows)
 
+  // ── Soil-temp application timing — nudge when a window opens (toggle, per device).
+  const soilNow = currentSoilTemp(wx.breakdownTemps)
+  const soilTrendDir = soilTrend(wx.breakdownTemps)
+  const openWins = manage && soilNow != null ? openWindows(soilNow, soilTrendDir) : []
+  const [timingNudge, setTimingNudge] = useState(() => {
+    if (typeof window === 'undefined') return true
+    try { const v = window.localStorage.getItem('soilTimingNudge'); return v === null ? true : v === '1' } catch { return true }
+  })
+  const toggleTimingNudge = () => setTimingNudge((v) => {
+    const nv = !v
+    try { window.localStorage.setItem('soilTimingNudge', nv ? '1' : '0') } catch { /* ignore */ }
+    return nv
+  })
+
   // ── PGR reapply timing (GDD base-32 since each area's last growth-reg spray).
   const PGR_TARGET = 200
   const pgrRows = (() => {
@@ -836,6 +851,24 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       {/* Morning briefing — spray window + needs-attention at a glance */}
       {manage && (
         <SprayWindowStrip current={wx.current} today={wx.todayWindow} hasLocation={hasLocation} attention={attention} onGoWeather={onGoWeather} />
+      )}
+
+      {/* Soil-temp timing nudge — a window is open based on current soil temp */}
+      {manage && timingNudge && openWins.length > 0 && (
+        <div className="rounded-2xl border shadow-sm p-4" style={{ backgroundColor: '#F0F6F2', borderColor: '#CFE0D5' }}>
+          <div className="flex items-start justify-between gap-2 mb-1.5">
+            <p className="font-body text-sm font-bold flex items-center gap-1.5" style={{ color: FERN }}>
+              <Sprout size={15} /> Soil temp {soilNow}°F — good timing now
+            </p>
+            <button onClick={toggleTimingNudge} className="font-body text-[10px] font-bold text-slate-400 shrink-0" title="Turn off this nudge">Hide</button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {openWins.map((w) => (
+              <span key={w.id} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: 'white', color: FERN, border: '1px solid #DCE8E0' }}>{w.label}</span>
+            ))}
+          </div>
+          <p className="font-body text-[10px] text-slate-400 mt-2">Based on your current 2&quot; soil temperature. See Turf → Timing for the full list.</p>
+        </div>
       )}
 
       {/* Calendar — upcoming (planned) and past (actual) sprays at a glance */}
@@ -4059,6 +4092,7 @@ function TurfPerformanceModule() {
   const [clippings, setClippings] = useState([])
   const [practices, setPractices] = useState([])
   const [soilTests, setSoilTests] = useState([])
+  const [soilSeries, setSoilSeries] = useState([])
   const [loadingTurf, setLoadingTurf] = useState(true)
 
   useEffect(() => {
@@ -4072,6 +4106,7 @@ function TurfPerformanceModule() {
         setSoilTests(soils)
         if (settings.location?.lat != null) {
           try { setDaily(await fetchSeasonDaily(settings.location.lat, settings.location.lng)) } catch (e) { console.error(e) }
+          try { setSoilSeries(await fetchBreakdownTemps(settings.location.lat, settings.location.lng)) } catch (e) { console.error(e) }
         }
       } catch (e) { console.error(e) }
       setLoadingTurf(false)
@@ -4097,7 +4132,7 @@ function TurfPerformanceModule() {
             <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
           </div>
           <div className="flex gap-1 font-body text-sm overflow-x-auto">
-            {[['dashboard', 'Dashboard'], ['gdd', 'Growing Degree Days'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed']].map(([key, label]) => (
+            {[['dashboard', 'Dashboard'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed']].map(([key, label]) => (
               <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
                 {label}
               </button>
@@ -4117,6 +4152,10 @@ function TurfPerformanceModule() {
           : <ClippingsTab clippings={clippings} areas={turf.areas}
               onAddMany={async (list) => { await db.addClippings(list); await reloadClippings() }}
               onDelete={async (id) => { await db.deleteClipping(id); await reloadClippings() }} />
+        )}
+        {route === 'timing' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <TimingTab soilSeries={soilSeries} hasLocation={turf.location?.lat != null} />
         )}
         {route === 'soil' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
@@ -5112,6 +5151,65 @@ function PracticesTab({ practices, areas, onAddMany, onDelete }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ── SOIL-TEMP APPLICATION TIMING ────────────────────────────────────────────
+const TIMING_STATUS_STYLE = {
+  now: { bg: '#E8F3EC', fg: '#2C5238', dot: '#3A6B4A', label: 'Apply now' },
+  soon: { bg: '#FEF3DD', fg: '#7A5E12', dot: '#C9A84C', label: 'Getting close' },
+  later: { bg: '#F1F5F9', fg: '#64748B', dot: '#CBD5E1', label: 'Not yet' },
+  passed: { bg: '#F3E0D9', fg: '#8A3520', dot: '#B4553D', label: 'Window passed' },
+  unknown: { bg: '#F1F5F9', fg: '#64748B', dot: '#CBD5E1', label: '—' },
+}
+function TimingTab({ soilSeries, hasLocation }) {
+  if (!hasLocation) return <ComingSoonCard title="Set your location first" desc="Soil temperature comes from your course location. Add it in Spray Ops → Settings → Location, then come back." />
+  const soilNow = currentSoilTemp(soilSeries)
+  const trend = soilTrend(soilSeries)
+  const timings = soilNow != null ? applicationTimings(soilNow, trend) : []
+  const recent = (soilSeries || []).slice(-30).map((d) => ({ date: d.date, value: d.soil != null ? d.soil : d.temp }))
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl p-4 text-white shadow-sm flex items-center justify-between flex-wrap gap-3" style={{ backgroundColor: FOREST }}>
+        <div>
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Soil temperature · 2&quot;</p>
+          <p className="font-display text-3xl font-bold mt-0.5">{soilNow != null ? `${soilNow}°F` : '—'}</p>
+        </div>
+        <span className="font-body text-xs font-bold px-3 py-1.5 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.15)' }}>
+          {trend === 'rising' ? '↑ Warming' : trend === 'falling' ? '↓ Cooling' : '→ Holding'}
+        </span>
+      </div>
+
+      {recent.length >= 2 && (
+        <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+          <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Soil temp · last {recent.length} days</p>
+          <TrendChart points={recent} unit="°F" />
+        </div>
+      )}
+
+      {timings.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No application windows in season right now.</div>
+      ) : (
+        <div className="space-y-2">
+          {timings.map((t) => {
+            const st = TIMING_STATUS_STYLE[t.status] || TIMING_STATUS_STYLE.unknown
+            return (
+              <div key={t.id} className="bg-white rounded-2xl border border-black/5 p-3.5 shadow-sm">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-body text-sm font-semibold text-slate-800 truncate">{t.label}</span>
+                  <span className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: st.dot }} />{st.label}
+                  </span>
+                </div>
+                <p className="font-body text-[11px] text-slate-400">Trigger ~{t.threshold}°F ({t.direction === 'falling' ? 'cooling' : 'warming'}) · {t.note}</p>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <p className="font-body text-[10px] text-slate-400">Soil temp is a 2-inch estimate from your location. Windows are published transition-zone starting points — pair with your own read and local extension guidance.</p>
     </div>
   )
 }
