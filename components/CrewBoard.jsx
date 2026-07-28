@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import * as db from '@/lib/db'
 import { loadTranslations, txGet } from '@/lib/translate'
+import { fetchCurrent } from '@/lib/weather'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -23,6 +24,8 @@ export default function CrewBoard() {
   const [club, setClub] = useState('')
   const [crew, setCrew] = useState({})
   const [tx, setTx] = useState({})
+  const [location, setLocation] = useState(null)
+  const [weather, setWeather] = useState(null)
   const [clock, setClock] = useState('')
   const [status, setStatus] = useState('loading') // loading | ok | error
   const [live, setLive] = useState(false)
@@ -40,8 +43,18 @@ export default function CrewBoard() {
     }
   }, [])
 
-  // Club name + crew languages once.
-  useEffect(() => { (async () => { try { const s = await db.fetchSettings(); setClub(s.courseInfo?.clubName || ''); setCrew(s.courseInfo?.crew || {}) } catch (e) { console.error(e) } })() }, [])
+  // Club name + crew languages + location once.
+  useEffect(() => { (async () => { try { const s = await db.fetchSettings(); setClub(s.courseInfo?.clubName || ''); setCrew(s.courseInfo?.crew || {}); setLocation(s.location || null) } catch (e) { console.error(e) } })() }, [])
+
+  // Live weather for the header, refreshed every 10 minutes.
+  useEffect(() => {
+    if (location?.lat == null) return
+    let cancelled = false
+    const pull = async () => { try { const w = await fetchCurrent(location.lat, location.lng); if (!cancelled) setWeather(w) } catch (e) { console.error(e) } }
+    pull()
+    const id = setInterval(pull, 600000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [location])
 
   // Translate each person's jobs into their language (AI, cached).
   const crewSig = JSON.stringify(crew || {})
@@ -100,6 +113,12 @@ export default function CrewBoard() {
             <div style={{ fontFamily: 'ui-serif, Georgia, serif', fontSize: 'clamp(30px,3.6vw,64px)', fontWeight: 700, lineHeight: 1.05 }}>{course ? `${course} · Crew Board` : 'Crew Board'}</div>
             <div style={{ fontSize: 'clamp(14px,1.4vw,26px)', color: '#C7CFC2', marginTop: 4 }}>{prettyDay(date)}</div>
           </div>
+          {weather && weather.temp && (
+            <div style={{ textAlign: 'center', color: '#C7CFC2' }}>
+              <div style={{ fontFamily: 'ui-serif, Georgia, serif', fontSize: 'clamp(24px,2.6vw,46px)', fontWeight: 700, color: '#F3F0E6', lineHeight: 1 }}>{weather.temp}°<span style={{ fontSize: '0.5em', color: GOLD }}>F</span></div>
+              <div style={{ fontSize: 'clamp(10px,0.95vw,17px)', marginTop: 4 }}>{weather.humidity && `${weather.humidity}% hum`}{weather.wind && ` · ${weather.wind} mph ${weather.windDir || ''}`}</div>
+            </div>
+          )}
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontFamily: 'ui-serif, Georgia, serif', fontSize: 'clamp(26px,3vw,52px)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{clock}</div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 'clamp(11px,1vw,18px)', color: live ? '#9FE3B0' : '#C7CFC2' }}>
@@ -154,6 +173,17 @@ export default function CrewBoard() {
                     </div>
                     <span style={{ fontSize: 'clamp(11px,1vw,17px)', fontWeight: 700, color: allDone ? FERN : '#8A9A8E', fontVariantNumeric: 'tabular-nums' }}>{gdone}/{list.length}</span>
                   </div>
+                  {(() => {
+                    const nt = (list.find((t) => t.notes) || {}).notes
+                    if (!nt) return null
+                    const noteVariants = langs.map((l) => txGet(tx, l, nt)).filter((v) => v && v !== nt)
+                    return (
+                      <div style={{ padding: '0.35vw 0.8vw', background: '#FFF7E6', borderBottom: '1px solid #F0E4C8' }}>
+                        <div style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#8A5A12', fontWeight: 600 }}>{nt}</div>
+                        {noteVariants.map((v, i) => <div key={i} style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#A98547', fontStyle: 'italic' }}>{v}</div>)}
+                      </div>
+                    )
+                  })()}
                   <div>
                     {list.map((t) => {
                       const lang = crew[t.assignee]?.lang

@@ -4788,6 +4788,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [area, setArea] = useState('')
   const [equip, setEquip] = useState('')
   const [equipList, setEquipList] = useState([])
+  const [note, setNote] = useState('')
   const [course, setCourse] = useState('all')
   const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
   const [openJobs, setOpenJobs] = useState({}) // collapsed by default; jobKey -> open?
@@ -4831,13 +4832,13 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
       const tools = [...equipList]
       const leftover = equip.trim()
       if (leftover && !tools.includes(leftover)) tools.push(leftover)
-      const base = { date, job: job.trim(), area, equipment: tools.join(', '), course: activeCourse, status: 'todo' }
+      const base = { date, job: job.trim(), area, equipment: tools.join(', '), notes: note.trim(), course: activeCourse, status: 'todo' }
       const startSort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
       // One row per assigned person (or a single unassigned job) — so each person
       // keeps their own status, and they group together by job on the board.
       const people = assignees.length ? assignees : ['']
       await db.addCrewTasks(people.map((name, i) => ({ ...base, assignee: name, sort: startSort + i })))
-      setJob(''); setEquip(''); setEquipList([]); setAssignees([])
+      setJob(''); setEquip(''); setEquipList([]); setAssignees([]); setNote('')
       await reload()
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
     setBusy(false)
@@ -4950,6 +4951,10 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
               <button type="button" onClick={addEquip} disabled={!equip.trim()} className="font-body text-sm font-bold px-3.5 rounded-xl text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FERN }}>+</button>
             </div>
           </div>
+          <div className="mb-3">
+            <FieldLabel>Note (optional)</FieldLabel>
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Pond overflow on #6 — call Ryan, need gloves" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+          </div>
           <button onClick={addTask} disabled={busy || !job.trim()} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Adding…' : 'Add to board'}</button>
         </div>
       )}
@@ -5040,6 +5045,20 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                 {open && (
                 <div className="px-3 pt-2 pb-3">
                   {langs.map((l) => <p key={l} className="font-body text-[11px] text-slate-400 italic mb-0.5 px-1">{txGet(tx, l, jk) || jk} <span className="not-italic">· {(CREW_LANGS.find(([c]) => c === l) || [])[1] || l}</span></p>)}
+                  {(() => {
+                    const nt = (list.find((t) => t.notes) || {}).notes
+                    if (!nt) return null
+                    const noteVariants = langs.map((l) => txGet(tx, l, nt)).filter((v) => v && v !== nt)
+                    return (
+                      <div className="flex items-start gap-1.5 mb-2 rounded-lg" style={{ backgroundColor: '#FFFBEB', border: '1px solid #FDE9C8', padding: '6px 8px' }}>
+                        <Info size={13} style={{ color: '#B07A16' }} className="shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <p className="font-body text-[11px]" style={{ color: '#8A5A12' }}>{nt}</p>
+                          {noteVariants.map((v, i) => <p key={i} className="font-body text-[11px] italic" style={{ color: '#A98547' }}>{v}</p>)}
+                        </div>
+                      </div>
+                    )
+                  })()}
                   {manage && addingJob === jk && (
                     <div className="mb-2">
                       <PeoplePicker options={orderedOps.filter((n) => !alreadyOn.includes(n))} selected={[]} onToggle={(name) => addPersonToJob(jk, name)} placeholder={`Add crew to ${jk}…`} />
