@@ -4615,6 +4615,11 @@ function WhiteboardModule({ user }) {
   const equipment = courseInfo.equipment || []
   const courses = (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0)
   const crew = courseInfo.crew || {} // { 'Name': { course, lang } }
+  // The board's own crew roster: Spray Ops names are pulled in automatically, plus
+  // any grounds crew added here (stored separately so it doesn't touch Spray Ops).
+  const operators = settings.operators || []
+  const crewMembers = courseInfo.crewMembers || []
+  const roster = [...new Set([...operators, ...crewMembers])]
   const saveCourse = async (patch) => {
     const next = { ...courseInfo, ...patch }
     setSettings((s) => ({ ...s, courseInfo: next }))
@@ -4681,9 +4686,9 @@ function WhiteboardModule({ user }) {
           <div className="bg-white rounded-2xl border border-black/5 p-2 shadow-sm sticky top-4"><Nav /></div>
         </aside>
         <div className="flex-1 min-w-0">
-          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} jobTypes={jobTypes} equipment={equipment} courses={courses} crew={crew} />}
+          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} roster={roster} jobTypes={jobTypes} equipment={equipment} courses={courses} crew={crew} />}
           {section === 'insights' && <WhiteboardInsights />}
-          {section === 'crew' && <WhiteboardCrew operators={settings.operators || []} courses={courses} crew={crew} manage={manage} onSave={(next) => saveCourse({ crew: next })} />}
+          {section === 'crew' && <WhiteboardCrew roster={roster} operators={operators} crewMembers={crewMembers} courses={courses} crew={crew} manage={manage} onSaveCrew={(next) => saveCourse({ crew: next })} onSaveMembers={(list) => saveCourse({ crewMembers: list })} />}
           {section === 'equipment' && <WhiteboardListSection title="Equipment" hint="The mowers, rollers, blowers and carts your crew runs. These become quick-pick chips when you add a job." items={equipment} manage={manage} accent={FERN} onSave={(list) => saveCourse({ equipment: list })} />}
           {section === 'jobtypes' && <WhiteboardListSection title="Job Types" hint="The everyday jobs that show as one-tap chips on the Workboard. Add the ones your crew runs each morning." items={jobTypes} manage={manage} accent={FOREST} onSave={(list) => saveCourse({ jobTypes: list })} />}
         </div>
@@ -4693,7 +4698,7 @@ function WhiteboardModule({ user }) {
 }
 
 // The daily job board — who's doing what today. Fetches its own tasks by date.
-function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], crew = {} }) {
+function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, courses = [], crew = {} }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
@@ -4705,8 +4710,10 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
   const [equipList, setEquipList] = useState([])
   const [course, setCourse] = useState('all')
   const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
+  const [openJobs, setOpenJobs] = useState({}) // collapsed by default; jobKey -> open?
   const [busy, setBusy] = useState(false)
   const [tx, setTx] = useState({})
+  const toggleJob = (jk) => setOpenJobs((p) => ({ ...p, [jk]: !p[jk] }))
 
   const courseNames = courses.map((c) => c.name)
   const hasCourses = courseNames.length >= 2
@@ -4773,7 +4780,7 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
   // (no-course) jobs; "All" shows everything.
   const view = activeCourse ? tasks.filter((t) => t.course === activeCourse || !t.course) : tasks
   const doneCount = view.filter((t) => t.status === 'done').length
-  const operators = settings.operators || []
+  const operators = roster
   // Staff for the assignee picker: everyone's available on both courses, but the
   // selected course's home crew is listed first.
   const orderedOps = activeCourse
@@ -4922,14 +4929,19 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
             const list = jobGroups[jk]
             const gdone = list.filter((t) => t.status === 'done').length
             const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
+            const open = !!openJobs[jk]
+            const allDone = gdone === list.length
             return (
-              <div key={jk} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8F3EC' }}><ClipboardList size={14} style={{ color: FERN }} /></div>
-                  <p className="font-body font-semibold text-sm text-slate-900">{jk}</p>
-                  {list.length > 1 && <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>}
-                  <span className="font-body text-[10px] text-slate-400 ml-auto">{gdone}/{list.length} done</span>
-                </div>
+              <div key={jk} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+                <button onClick={() => toggleJob(jk)} className="w-full flex items-center gap-2 px-3.5 py-3 text-left">
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: allDone ? '#E8F3EC' : '#EEF2F0' }}><ClipboardList size={14} style={{ color: allDone ? FERN : '#94A3B8' }} /></div>
+                  <p className="font-body font-semibold text-sm text-slate-900 truncate">{jk}</p>
+                  <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>
+                  <span className="font-body text-[10px] shrink-0 ml-auto" style={{ color: allDone ? FERN : '#94A3B8' }}>{gdone}/{list.length} done</span>
+                  <ChevronRight size={16} className="text-slate-400 shrink-0 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} />
+                </button>
+                {open && (
+                <div className="px-3.5 pb-3.5">
                 {langs.map((l) => <p key={l} className="font-body text-[11px] text-slate-400 italic mb-0.5">{txGet(tx, l, jk) || jk} <span className="not-italic">· {(CREW_LANGS.find(([c]) => c === l) || [])[1] || l}</span></p>)}
                 <div className="space-y-1.5 mt-1.5">
                   {list.map((t) => {
@@ -4959,54 +4971,69 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
                     )
                   })}
                 </div>
+                </div>
+                )}
               </div>
             )
           })}
         </div>
       )}
 
-      <p className="font-body text-[10px] text-slate-400 mt-4 text-center">Tap the status chip to move a job To&nbsp;do → Doing → Done. Add minutes as jobs finish — that's what powers the Time &amp; Efficiency view.</p>
+      <p className="font-body text-[10px] text-slate-400 mt-4 text-center">Tap a job to open it. Move each person To&nbsp;do → Doing → Done and add minutes as they finish — that's what powers the Time &amp; Efficiency view.</p>
     </div>
   )
 }
 
-// Crew section — assign each staff member a home course (so they sort first on
-// that course's board) and their native language (for the upcoming translation).
-function WhiteboardCrew({ operators = [], courses = [], crew = {}, manage, onSave }) {
+// Crew section — the board's own roster. Add anyone on the grounds crew here
+// (Spray Ops names come in automatically), and give each a home course (so they
+// sort first on that course's board) and their native language (for translation).
+function WhiteboardCrew({ roster = [], operators = [], crewMembers = [], courses = [], crew = {}, manage, onSaveCrew, onSaveMembers }) {
+  const [name, setName] = useState('')
   const courseNames = courses.map((c) => c.name)
   const langLabel = (code) => (CREW_LANGS.find(([c]) => c === code) || [])[1] || ''
-  const setField = (name, key, value) => onSave({ ...crew, [name]: { ...(crew[name] || {}), [key]: value } })
+  const setField = (person, key, value) => onSaveCrew({ ...crew, [person]: { ...(crew[person] || {}), [key]: value } })
+  const addMember = () => { const v = name.trim(); if (!v) { return } if (!roster.includes(v)) onSaveMembers([...crewMembers, v]); setName('') }
+  const removeMember = (v) => onSaveMembers(crewMembers.filter((x) => x !== v))
 
-  if (operators.length === 0) {
-    return <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">Add crew members in Spray Ops → Settings → People first.</div>
-  }
   return (
     <div className="space-y-2">
-      <p className="font-body text-[12px] text-slate-500 mb-1">Give each person a home course and their native language. On a course's board its home crew sorts to the top — everyone's still available on both.</p>
-      {operators.map((name) => (
-        <div key={name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8F3EC' }}><User size={15} style={{ color: FERN }} /></div>
-          <p className="font-body text-sm font-semibold text-slate-800 flex-1 min-w-0 truncate">{name}</p>
-          {manage ? (
-            <div className="flex items-center gap-2 shrink-0">
-              {courseNames.length >= 2 && (
-                <select value={crew[name]?.course || ''} onChange={(e) => setField(name, 'course', e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-body bg-white">
-                  <option value="">No home course</option>
-                  {courseNames.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-              )}
-              <select value={crew[name]?.lang || 'en'} onChange={(e) => setField(name, 'lang', e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-body bg-white">
-                {CREW_LANGS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
-              </select>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 shrink-0">
-              {crew[name]?.course && <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{crew[name].course}</span>}
-              <span className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{langLabel(crew[name]?.lang || 'en')}</span>
-            </div>
-          )}
+      <p className="font-body text-[12px] text-slate-500 mb-1">Your grounds crew. Spray Ops people are pulled in automatically; add everyone else here. Set each person's home course (they sort first on it) and native language.</p>
+      {manage && (
+        <div className="flex gap-2 mb-2">
+          <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addMember() } }} placeholder="Add a crew member…" className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+          <button type="button" onClick={addMember} disabled={!name.trim()} className="font-body text-xs font-bold px-4 rounded-xl text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FOREST }}>Add</button>
         </div>
-      ))}
+      )}
+      {roster.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No crew yet. Add your first crew member above.</div>
+      ) : roster.map((person) => {
+        const isOwn = !operators.includes(person) // added here, not from Spray Ops
+        return (
+          <div key={person} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8F3EC' }}><User size={15} style={{ color: FERN }} /></div>
+            <p className="font-body text-sm font-semibold text-slate-800 flex-1 min-w-0 truncate">{person}</p>
+            {manage ? (
+              <div className="flex items-center gap-2 shrink-0">
+                {courseNames.length >= 2 && (
+                  <select value={crew[person]?.course || ''} onChange={(e) => setField(person, 'course', e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-body bg-white">
+                    <option value="">No home course</option>
+                    {courseNames.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                )}
+                <select value={crew[person]?.lang || 'en'} onChange={(e) => setField(person, 'lang', e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-body bg-white">
+                  {CREW_LANGS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+                </select>
+                {isOwn && <button type="button" onClick={() => removeMember(person)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={15} /></button>}
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 shrink-0">
+                {crew[person]?.course && <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{crew[person].course}</span>}
+                <span className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{langLabel(crew[person]?.lang || 'en')}</span>
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

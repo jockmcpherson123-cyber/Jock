@@ -35,27 +35,6 @@ export async function POST(request) {
 
   if (items.length === 0) return Response.json({ translations: [] })
 
-  const schema = {
-    type: 'object',
-    properties: {
-      translations: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            text: { type: 'string', description: 'The original phrase, echoed back exactly.' },
-            lang: { type: 'string', description: 'The target language code, echoed back exactly.' },
-            translation: { type: 'string', description: 'The phrase translated into the target language.' },
-          },
-          required: ['text', 'lang', 'translation'],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ['translations'],
-    additionalProperties: false,
-  }
-
   const client = new Anthropic({ apiKey })
   let response
   try {
@@ -64,24 +43,32 @@ export async function POST(request) {
       max_tokens: 2048,
       system:
         'You translate short golf-course grounds-crew job and equipment phrases for the daily work board. ' +
-        'Translate each item\'s `text` into the language named by its `lang` code. Use natural, concise wording a ' +
+        'Translate each item\'s "text" into the language named by its "lang" code. Use natural, concise wording a ' +
         'maintenance crew member would use in the field. Keep brand names, equipment model names/numbers, and hole ' +
-        'numbers unchanged. Echo back the original text and lang exactly so the client can match them.',
-      output_config: { format: { type: 'json_schema', schema } },
+        'numbers unchanged. ' +
+        'Reply with ONLY a JSON array (no prose, no code fences) of objects like ' +
+        '{"text":"<original>","lang":"<code>","translation":"<translated>"} — one per input item, echoing text and lang exactly.',
       messages: [{
         role: 'user',
-        content: `Language codes: ${Object.entries(LANG_NAMES).map(([c, n]) => `${c}=${n}`).join(', ')}.\n\nTranslate these items:\n${JSON.stringify(items)}`,
+        content: `Language codes: ${Object.entries(LANG_NAMES).map(([c, n]) => `${c}=${n}`).join(', ')}.\n\nTranslate these items and return the JSON array:\n${JSON.stringify(items)}`,
       }],
     })
   } catch (err) {
     const msg = err?.status === 401 ? 'The AI key was rejected.' : 'The AI service could not be reached.'
-    return Response.json({ error: msg }, { status: 502 })
+    return Response.json({ error: msg, translations: [] }, { status: 502 })
   }
 
   const textBlock = (response.content || []).find((b) => b.type === 'text')
-  if (!textBlock) return Response.json({ translations: [] })
-  let data
-  try { data = JSON.parse(textBlock.text) } catch { return Response.json({ translations: [] }) }
-  const out = (data.translations || []).filter((r) => r && r.text && r.lang && r.translation && LANG_NAMES[r.lang])
+  const raw = textBlock?.text || ''
+  // Be forgiving: strip any ```json fences and pull out the JSON array.
+  let parsed = null
+  try {
+    const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim()
+    const start = cleaned.indexOf('[')
+    const end = cleaned.lastIndexOf(']')
+    parsed = JSON.parse(start >= 0 && end >= 0 ? cleaned.slice(start, end + 1) : cleaned)
+  } catch { parsed = null }
+  const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.translations) ? parsed.translations : [])
+  const out = list.filter((r) => r && r.text && r.lang && r.translation && LANG_NAMES[r.lang])
   return Response.json({ translations: out })
 }
