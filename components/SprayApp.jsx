@@ -26,6 +26,7 @@ import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, d
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
+import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import SprayCalendar from '@/components/SprayCalendar'
@@ -4692,6 +4693,7 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
   const [equipList, setEquipList] = useState([])
   const [course, setCourse] = useState('all')
   const [busy, setBusy] = useState(false)
+  const [tx, setTx] = useState({})
 
   const courseNames = courses.map((c) => c.name)
   const hasCourses = courseNames.length >= 2
@@ -4709,6 +4711,15 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
   }, [date])
 
   const reload = async () => { try { setTasks(await db.fetchCrewTasks(date, date)) } catch (e) { console.error(e) } }
+
+  // Translate each person's jobs into their native language (AI, cached).
+  const crewSig = JSON.stringify(crew || {})
+  useEffect(() => {
+    let cancelled = false
+    loadTranslations(tasks, crew).then((m) => { if (!cancelled) setTx(m) }).catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, crewSig])
 
   const addEquip = () => { const v = equip.trim(); if (!v) return; if (!equipList.includes(v)) setEquipList([...equipList, v]); setEquip('') }
   const addTask = async () => {
@@ -4830,24 +4841,28 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
                 </div>
                 <p className="font-body font-semibold text-sm text-slate-900">{k === '__none' ? 'Unassigned' : k}</p>
                 {hasCourses && crew[k]?.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{crew[k].course}</span>}
+                {crew[k]?.lang && crew[k].lang !== 'en' && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{(CREW_LANGS.find(([c]) => c === crew[k].lang) || [])[1] || crew[k].lang}</span>}
                 <span className="font-body text-[10px] text-slate-400 ml-auto">{groups[k].filter((t) => t.status === 'done').length}/{groups[k].length} done</span>
               </div>
               <div className="space-y-1.5">
                 {groups[k].map((t) => {
                   const st = TASK_STATUS[t.status] || TASK_STATUS.todo
                   const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
+                  const lang = crew[k]?.lang
+                  const jobText = txGet(tx, lang, t.job) || t.job
                   return (
                     <div key={t.id} className="flex items-start gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: '#EEF2F0', backgroundColor: t.status === 'done' ? '#F7FBF8' : 'white' }}>
                       <button onClick={() => cycle(t)} className="font-body text-[10px] font-bold px-2 py-1 rounded-full border shrink-0 w-16 text-center mt-0.5" style={{ backgroundColor: st.bg, color: st.fg, borderColor: st.bd }}>{st.label}</button>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
-                          <p className="font-body text-[13px] font-semibold text-slate-800 truncate" style={t.status === 'done' ? { textDecoration: 'line-through', color: '#94A3B8' } : {}}>{t.job}</p>
+                          <p className="font-body text-[13px] font-semibold text-slate-800 truncate" style={t.status === 'done' ? { textDecoration: 'line-through', color: '#94A3B8' } : {}}>{jobText}</p>
                           {course === 'all' && hasCourses && t.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{t.course}</span>}
                         </div>
+                        {jobText !== t.job && <p className="font-body text-[10px] text-slate-400 italic truncate">{t.job}</p>}
                         {t.area && <p className="font-body text-[10px] text-slate-400 truncate">{t.area}</p>}
                         {tools.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
-                            {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{tool}</span>)}
+                            {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}
                           </div>
                         )}
                       </div>

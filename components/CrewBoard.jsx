@@ -6,6 +6,7 @@
 // type, high contrast, and it rolls over to the new day on its own overnight.
 import { useState, useEffect, useCallback, useRef } from 'react'
 import * as db from '@/lib/db'
+import { loadTranslations, txGet } from '@/lib/translate'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -24,6 +25,8 @@ export default function CrewBoard() {
   const [date, setDate] = useState(todayStr())
   const [tasks, setTasks] = useState([])
   const [club, setClub] = useState('')
+  const [crew, setCrew] = useState({})
+  const [tx, setTx] = useState({})
   const [clock, setClock] = useState('')
   const [status, setStatus] = useState('loading') // loading | ok | error
   const [live, setLive] = useState(false)
@@ -41,8 +44,17 @@ export default function CrewBoard() {
     }
   }, [])
 
-  // Club name once.
-  useEffect(() => { (async () => { try { const s = await db.fetchSettings(); setClub(s.courseInfo?.clubName || '') } catch (e) { console.error(e) } })() }, [])
+  // Club name + crew languages once.
+  useEffect(() => { (async () => { try { const s = await db.fetchSettings(); setClub(s.courseInfo?.clubName || ''); setCrew(s.courseInfo?.crew || {}) } catch (e) { console.error(e) } })() }, [])
+
+  // Translate each person's jobs into their language (AI, cached).
+  const crewSig = JSON.stringify(crew || {})
+  useEffect(() => {
+    let cancelled = false
+    loadTranslations(tasks, crew).then((m) => { if (!cancelled) setTx(m) }).catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, crewSig])
 
   // Load the day, and reload whenever the date rolls over.
   useEffect(() => { load(date) }, [date, load])
@@ -135,12 +147,16 @@ export default function CrewBoard() {
                   <div style={{ padding: '0.7vw 0.8vw', display: 'flex', flexDirection: 'column', gap: '0.6vw' }}>
                     {list.map((t) => {
                       const st = STATUS[t.status] || STATUS.todo
+                      const lang = crew[k]?.lang
+                      const jobText = txGet(tx, lang, t.job) || t.job
+                      const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => txGet(tx, lang, tool) || tool)
+                      const sub = [t.area, tools.join(', ')].filter(Boolean).join(' · ')
                       return (
                         <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.55vw 0.7vw', borderRadius: 12, background: t.status === 'done' ? 'rgba(58,107,74,0.14)' : 'rgba(0,0,0,0.14)' }}>
                           <span style={{ fontSize: 'clamp(10px,0.85vw,15px)', fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', padding: '4px 10px', borderRadius: 999, background: st.bg, color: st.fg, border: `1px solid ${st.bd}`, whiteSpace: 'nowrap' }}>{st.label}</span>
                           <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ fontSize: 'clamp(15px,1.35vw,24px)', fontWeight: 600, color: t.status === 'done' ? '#8AA394' : '#F3F0E6', textDecoration: t.status === 'done' ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.job}</div>
-                            {(t.area || t.equipment) && <div style={{ fontSize: 'clamp(11px,1vw,17px)', color: '#8AA394', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[t.area, t.equipment].filter(Boolean).join(' · ')}</div>}
+                            <div style={{ fontSize: 'clamp(15px,1.35vw,24px)', fontWeight: 600, color: t.status === 'done' ? '#8AA394' : '#F3F0E6', textDecoration: t.status === 'done' ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{jobText}</div>
+                            {sub && <div style={{ fontSize: 'clamp(11px,1vw,17px)', color: '#8AA394', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
                           </div>
                         </div>
                       )
