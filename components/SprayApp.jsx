@@ -232,6 +232,13 @@ export default function SprayApp({ user }) {
           >
             <Sprout size={12} /> Turf Performance
           </button>
+          <button
+            onClick={() => setModule('board')}
+            className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
+            style={module === 'board' ? { backgroundColor: GOLD, color: FOREST } : { color: 'rgba(255,255,255,0.5)' }}
+          >
+            <ClipboardList size={12} /> Whiteboard
+          </button>
 
           <div className="ml-auto flex items-center gap-3">
             <span className="font-body text-[11px] text-white/50 hidden sm:inline">
@@ -246,7 +253,7 @@ export default function SprayApp({ user }) {
         </div>
       </div>
 
-      {module === 'spray' ? <SprayOpsModule user={user} /> : <TurfPerformanceModule />}
+      {module === 'spray' ? <SprayOpsModule user={user} /> : module === 'turf' ? <TurfPerformanceModule /> : <WhiteboardModule user={user} />}
     </ErrorBoundary>
   )
 }
@@ -4523,6 +4530,186 @@ function AreasSettings({ areas, grassTypes = [], soilTypes = [], onSave }) {
       </div>
     </div>
   )
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  CREW WHITEBOARD MODULE — the morning job board (who's doing what today).
+//  Every row is one job for one day; it's the raw daily-jobs log the efficiency
+//  and trend views will be built from once there's history to mine.
+// ════════════════════════════════════════════════════════════════════════
+const DEFAULT_JOBS = [
+  'Mow Greens', 'Mow Tees', 'Mow Fairways', 'Mow Approaches', 'Mow Rough',
+  'Roll Greens', 'Change Cups', 'Rake Bunkers', 'Fill Divots', 'Move Tee Markers',
+  'Course Setup', 'Blow / Clean', 'Hand Water', 'Irrigation Check', 'Topdress',
+  'Verticut', 'Spray Support', 'Detail / Trim',
+]
+const TASK_STATUS = { todo: { label: 'To do', bg: '#FFFFFF', fg: '#64748B', bd: '#E2E8F0' }, doing: { label: 'Doing', bg: '#FBF1D3', fg: '#92660D', bd: '#F0DFA6' }, done: { label: 'Done ✓', bg: FERN, fg: '#FFFFFF', bd: FERN } }
+const nextStatus = (s) => (s === 'todo' ? 'doing' : s === 'doing' ? 'done' : 'todo')
+const shiftDate = (d, days) => { const dt = new Date(`${d}T00:00:00`); dt.setDate(dt.getDate() + days); return dt.toISOString().slice(0, 10) }
+const prettyDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+
+function WhiteboardModule({ user }) {
+  const manage = canManage(user.role)
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [settings, setSettings] = useState({ operators: [], areas: {}, courseInfo: {} })
+  const [tasks, setTasks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [msg, setMsg] = useState(null)
+  // Add-task draft
+  const [job, setJob] = useState('')
+  const [assignee, setAssignee] = useState('')
+  const [area, setArea] = useState('')
+  const [equipment, setEquipment] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => { (async () => { try { setSettings(await db.fetchSettings()) } catch (e) { console.error(e) } })() }, [])
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      try { const t = await db.fetchCrewTasks(date, date); if (!cancelled) setTasks(t) }
+      catch (e) { console.error(e); if (!cancelled) setMsg({ type: 'err', text: taskErrorText(e) }) }
+      if (!cancelled) setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [date])
+
+  const reload = async () => { try { setTasks(await db.fetchCrewTasks(date, date)) } catch (e) { console.error(e) } }
+
+  const addTask = async () => {
+    if (!job.trim()) return
+    setBusy(true); setMsg(null)
+    try {
+      const sort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
+      await db.addCrewTask({ date, job: job.trim(), assignee, area, equipment: equipment.trim(), status: 'todo', sort })
+      setJob(''); setEquipment('')
+      await reload()
+    } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
+    setBusy(false)
+  }
+  const cycle = async (t) => {
+    const updated = { ...t, status: nextStatus(t.status) }
+    setTasks((prev) => prev.map((x) => (x.id === t.id ? updated : x)))
+    try { await db.updateCrewTask(updated) } catch (e) { console.error(e); reload() }
+  }
+  const setMinutes = async (t, minutes) => {
+    const updated = { ...t, minutes }
+    setTasks((prev) => prev.map((x) => (x.id === t.id ? updated : x)))
+    try { await db.updateCrewTask(updated) } catch (e) { console.error(e) }
+  }
+  const remove = async (id) => {
+    setTasks((prev) => prev.filter((x) => x.id !== id))
+    try { await db.deleteCrewTask(id) } catch (e) { console.error(e); reload() }
+  }
+
+  const doneCount = tasks.filter((t) => t.status === 'done').length
+  const operators = settings.operators || []
+  const areaOptions = ['', ...Object.keys(settings.areas || {}), ...greenOptionsFor(settings.courseInfo).filter((g) => !Object.keys(settings.areas || {}).includes(g))]
+
+  // Group the day's jobs by who's on them (Unassigned first, then each person).
+  const groups = {}
+  tasks.forEach((t) => { const k = t.assignee || '__none'; (groups[k] = groups[k] || []).push(t) })
+  const groupKeys = Object.keys(groups).sort((a, b) => (a === '__none' ? -1 : b === '__none' ? 1 : a.localeCompare(b)))
+  const isToday = date === new Date().toISOString().slice(0, 10)
+
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
+      <div style={{ backgroundColor: FOREST }} className="text-white">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-4">
+          <div className="mb-3">
+            <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{settings.courseInfo?.clubName || 'Golf Club'}</p>
+            <h1 className="font-display text-2xl font-semibold mt-0.5">Crew Whiteboard</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setDate(shiftDate(date, -1))} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }} aria-label="Previous day"><ChevronRight size={16} style={{ transform: 'rotate(180deg)' }} /></button>
+            <div className="flex-1 text-center">
+              <p className="font-body text-sm font-bold">{prettyDay(date)}</p>
+              <p className="font-body text-[10px] text-white/50">{tasks.length} job{tasks.length !== 1 ? 's' : ''}{tasks.length > 0 ? ` · ${doneCount} done` : ''}</p>
+            </div>
+            <button onClick={() => setDate(shiftDate(date, 1))} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }} aria-label="Next day"><ChevronRight size={16} /></button>
+            {!isToday && <button onClick={() => setDate(new Date().toISOString().slice(0, 10))} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full" style={{ backgroundColor: GOLD, color: FOREST }}>Today</button>}
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-24 pt-5">
+        {msg && <div className="rounded-xl px-3 py-2 mb-3 font-body text-[12px] font-semibold" style={msg.type === 'ok' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}>{msg.text}</div>}
+
+        {manage && (
+          <div className="bg-white rounded-2xl border-2 p-4 shadow-sm mb-4" style={{ borderColor: GOLD }}>
+            <p className="font-display text-base font-semibold text-slate-900 mb-2">Add a job</p>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {DEFAULT_JOBS.map((j) => (
+                <button key={j} type="button" onClick={() => setJob(j)} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full border transition" style={job === j ? { backgroundColor: FOREST, color: 'white', borderColor: FOREST } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{j}</button>
+              ))}
+            </div>
+            <input value={job} onChange={(e) => setJob(e.target.value)} placeholder="Job (tap a chip above or type your own)" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body mb-2" />
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div>
+                <FieldLabel>Assign to</FieldLabel>
+                <Select value={assignee} onChange={setAssignee} options={operators} placeholder="Unassigned" />
+              </div>
+              <div>
+                <FieldLabel>Where</FieldLabel>
+                <Select value={area} onChange={setArea} options={areaOptions} placeholder="Anywhere" />
+              </div>
+            </div>
+            <div className="mb-3">
+              <FieldLabel>Equipment (optional)</FieldLabel>
+              <input value={equipment} onChange={(e) => setEquipment(e.target.value)} placeholder="e.g. Triplex 3250, blower" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+            </div>
+            <button onClick={addTask} disabled={busy || !job.trim()} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Adding…' : 'Add to board'}</button>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+        ) : tasks.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
+            {manage ? 'No jobs on the board for this day yet. Add one above.' : 'No jobs posted for this day yet.'}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {groupKeys.map((k) => (
+              <div key={k} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: k === '__none' ? '#EEF2F0' : '#E8F3EC' }}>
+                    <User size={14} style={{ color: k === '__none' ? '#94A3B8' : FERN }} />
+                  </div>
+                  <p className="font-body font-semibold text-sm text-slate-900">{k === '__none' ? 'Unassigned' : k}</p>
+                  <span className="font-body text-[10px] text-slate-400">{groups[k].filter((t) => t.status === 'done').length}/{groups[k].length} done</span>
+                </div>
+                <div className="space-y-1.5">
+                  {groups[k].map((t) => {
+                    const st = TASK_STATUS[t.status] || TASK_STATUS.todo
+                    return (
+                      <div key={t.id} className="flex items-center gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: '#EEF2F0', backgroundColor: t.status === 'done' ? '#F7FBF8' : 'white' }}>
+                        <button onClick={() => cycle(t)} className="font-body text-[10px] font-bold px-2 py-1 rounded-full border shrink-0 w-16 text-center" style={{ backgroundColor: st.bg, color: st.fg, borderColor: st.bd }}>{st.label}</button>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-body text-[13px] font-semibold text-slate-800 truncate" style={t.status === 'done' ? { textDecoration: 'line-through', color: '#94A3B8' } : {}}>{t.job}</p>
+                          {(t.area || t.equipment) && <p className="font-body text-[10px] text-slate-400 truncate">{[t.area, t.equipment].filter(Boolean).join(' · ')}</p>}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input type="number" inputMode="numeric" value={t.minutes ?? ''} onChange={(e) => setMinutes(t, e.target.value === '' ? null : Number(e.target.value))} placeholder="min" className="w-12 border border-slate-200 rounded-lg px-1.5 py-1 text-[11px] font-body text-center" title="Minutes taken" />
+                          {manage && <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition" aria-label="Remove"><Trash2 size={14} /></button>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p className="font-body text-[10px] text-slate-400 mt-4 text-center">Tap the status chip to move a job To&nbsp;do → Doing → Done. Add minutes as jobs finish — that's what powers the efficiency trends later.</p>
+      </div>
+    </div>
+  )
+}
+
+function taskErrorText(e) {
+  return saveErrorText(e, 'supabase/phase13.sql')
 }
 
 // ════════════════════════════════════════════════════════════════════════
