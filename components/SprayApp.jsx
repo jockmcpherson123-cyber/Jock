@@ -1600,24 +1600,24 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
   const tbl = 'width:100%;border-collapse:collapse;font-size:11px;margin-bottom:12px'
   const blank = '_______________________'
 
+  // Partial fill is folded straight into each product's TOTAL so the sheet stays
+  // one connected list (no separate extra-spray table).
+  const partialGal = sheet.partialGallons
+  const hasPartial = partialGal && area.galTank
   const rows = (sheet.products || []).filter((p) => p.product).map((p) => {
     const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
-    const total = amt !== null ? Math.round(amt * (sheet.tanks || 1) * 10) / 10 : null
+    let partialAmt = 0
+    if (hasPartial && amt !== null) {
+      const { value: pAmt } = calcAmount(parseFloat(p.rate), p.basis, effectiveSqft(partialGal, area), p.forceGal)
+      partialAmt = pAmt || 0
+    }
+    const total = amt !== null ? Math.round((amt * (sheet.tanks || 1) + partialAmt) * 10) / 10 : null
     return { ...p, amt, total, unit }
   })
   const productRows = rows.map((p, i) => `<tr style="background:${i % 2 === 0 ? '#fff' : '#F5F5F0'}">
     <td style="${R}">${esc(p.product)}</td><td style="${R}">${esc(p.rate)}</td><td style="${R}">${esc(p.basis)}</td>
     <td style="${R}">${p.amt ?? '—'} ${esc(p.unit || '')}</td><td style="${R};font-weight:700">${p.total ?? '—'} ${esc(p.unit || '')}</td></tr>`).join('')
-
-  const partialGal = sheet.partialGallons
-  let partialTable = ''
-  if (partialGal && area.galTank) {
-    const pr = rows.map((p, i) => {
-      const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, effectiveSqft(partialGal, area), p.forceGal)
-      return `<tr style="background:${i % 2 === 0 ? '#fff' : '#F5F5F0'}"><td style="${R}">${esc(p.product)}</td><td style="${R};font-weight:700">${amt ?? '—'} ${esc(unit || '')}</td></tr>`
-    }).join('')
-    partialTable = `<table style="${tbl}"><thead><tr style="background:#92660D;color:#fff"><th style="${TH}" colspan="2">Partial Fill — Extra Spray (${esc(partialGal)} gal)</th></tr></thead><tbody>${pr}</tbody></table>`
-  }
+  const partialNote = hasPartial ? `<div style="font-size:10px;color:#555;margin:-6px 0 12px">Totals include the ${esc(partialGal)} gal partial fill (${sheet.tanks || 1} full tank${(sheet.tanks || 1) !== 1 ? 's' : ''} + ${esc(partialGal)} gal).</div>` : ''
   const sig = (v) => v ? `<img src="${v}" style="height:48px;max-width:100%" />` : blank
   const w = sheet.weather || {}
 
@@ -1628,13 +1628,13 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
     </div>
     <table style="${tbl}"><tbody>
       <tr><td style="${L}">Area</td><td style="${V}">${esc(sheet.area)}</td><td style="${L}">Date</td><td style="${V}">${esc(sheet.date)}</td></tr>
-      <tr><td style="${L}">Operator</td><td style="${V}">${esc(sheet.operator || '—')}</td><td style="${L}">Tanks</td><td style="${V}">${esc(sheet.tanks)}${area.galTank ? ` × ${esc(area.galTank)} gal` : ''}</td></tr>
+      <tr><td style="${L}">Operator</td><td style="${V}">${esc(sheet.operator || '—')}</td><td style="${L}">Tanks</td><td style="${V}">${esc(sheet.tanks)}${area.galTank ? ` × ${esc(area.galTank)} gal` : ''}${hasPartial ? ` + ${esc(partialGal)} gal partial` : ''}</td></tr>
       <tr><td style="${L}">Nozzle</td><td style="${V}">${esc(area.nozzle || '—')}</td><td style="${L}">PSI</td><td style="${V}">${esc(area.psi || '—')}</td></tr>
       <tr><td style="${L}">Target</td><td style="${V}" colspan="3">${esc(sheetTargets.join(', ') || '—')}</td></tr>
       <tr><td style="${L}">Weather</td><td style="${V}" colspan="3">${w.temp ? `${esc(w.temp)}°F` : '—'} · ${w.wind ? `${esc(w.wind)} mph wind` : '—'} · ${w.humidity ? `${esc(w.humidity)}% humidity` : '—'} · ${esc(w.windDir || '—')}</td></tr>
     </tbody></table>
     <table style="${tbl}"><thead><tr style="background:#16291F"><th style="${TH}">Product</th><th style="${TH}">Rate</th><th style="${TH}">Basis</th><th style="${TH}">Amt/Tank</th><th style="${TH}">Total</th></tr></thead><tbody>${productRows}</tbody></table>
-    ${partialTable}
+    ${partialNote}
     <table style="${tbl}"><tbody>
       <tr><td style="${L}">PPE</td><td style="${V}" colspan="3">${esc((sheet.ppe || []).join(', ') || '—')}</td></tr>
       <tr><td style="${L}">Instructions</td><td style="${V}" colspan="3">${esc(sheet.instructions || '—')}</td></tr>
@@ -1770,22 +1770,41 @@ function waitForImages(el, cap = 2000) {
 // a real file: on iPad/iPhone it goes to the native Share sheet (→ "Save to
 // Files"), because iOS Safari ignores the classic download that .save() uses.
 // Returns 'shared' | 'downloaded' | 'printed' so the caller can guide the user.
-async function pdfRecordHTML(bodyHtml, filename) {
+async function pdfRecordHTML(bodyHtml, filename, opts = {}) {
+  const singlePage = !!opts.singlePage
   const holder = document.createElement('div')
   Object.assign(holder.style, { position: 'absolute', left: '-10000px', top: '0', width: '760px', background: '#ffffff' })
   holder.innerHTML = bodyHtml
   document.body.appendChild(holder)
   await waitForImages(holder)
   try {
-    const html2pdf = (await import('html2pdf.js')).default
-    const worker = html2pdf().set({
-      margin: 8,
-      image: { type: 'jpeg', quality: 0.95 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 820 },
-      jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
-    }).from(holder)
-    const pdf = await worker.toPdf().get('pdf')
-    const blob = pdf.output('blob')
+    let blob
+    if (singlePage) {
+      // Force everything onto ONE A4 page — capture the whole sheet as one image
+      // and scale it down to fit if it's tall (spray sheets should never spill).
+      const html2canvas = (await import('html2canvas')).default
+      const { jsPDF } = await import('jspdf')
+      const canvas = await html2canvas(holder, { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 820 })
+      const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' })
+      const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight()
+      const m = 16
+      let w = pw - m * 2
+      let h = canvas.height * (w / canvas.width)
+      const availH = ph - m * 2
+      if (h > availH) { h = availH; w = canvas.width * (h / canvas.height) }
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', (pw - w) / 2, m, w, h)
+      blob = pdf.output('blob')
+    } else {
+      const html2pdf = (await import('html2pdf.js')).default
+      const worker = html2pdf().set({
+        margin: 8,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 820 },
+        jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
+      }).from(holder)
+      const pdf = await worker.toPdf().get('pdf')
+      blob = pdf.output('blob')
+    }
     const file = new File([blob], filename, { type: 'application/pdf' })
 
     // iPad/iPhone: hand the file to the OS share sheet so it can be saved to Files.
@@ -1990,7 +2009,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
     setPdfBusy(true)
     try {
       const safe = `${sheet.area || 'Spray'}-${sheet.date || ''}`.replace(/[^\w-]+/g, '_')
-      await pdfRecordHTML(buildRecordHtml(), `Spray-Sheet_${safe}.pdf`)
+      await pdfRecordHTML(buildRecordHtml(), `Spray-Sheet_${safe}.pdf`, { singlePage: true })
     } catch (e) { console.error(e) }
     setPdfBusy(false)
   }
