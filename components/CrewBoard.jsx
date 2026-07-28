@@ -26,6 +26,7 @@ export default function CrewBoard() {
   const [tx, setTx] = useState({})
   const [location, setLocation] = useState(null)
   const [weather, setWeather] = useState(null)
+  const [boardMessage, setBoardMessage] = useState('')
   const [clock, setClock] = useState('')
   const [status, setStatus] = useState('loading') // loading | ok | error
   const [live, setLive] = useState(false)
@@ -43,8 +44,24 @@ export default function CrewBoard() {
     }
   }, [])
 
-  // Club name + crew languages + location once.
-  useEffect(() => { (async () => { try { const s = await db.fetchSettings(); setClub(s.courseInfo?.clubName || ''); setCrew(s.courseInfo?.crew || {}); setLocation(s.location || null) } catch (e) { console.error(e) } })() }, [])
+  // Club name, crew languages, location + shop message — refreshed every 30s so
+  // the TV picks up setting changes (e.g. a new shop message) without a reload.
+  useEffect(() => {
+    let cancelled = false
+    const pull = async () => {
+      try {
+        const s = await db.fetchSettings()
+        if (cancelled) return
+        setClub(s.courseInfo?.clubName || '')
+        setCrew(s.courseInfo?.crew || {})
+        setLocation(s.location || null)
+        setBoardMessage(s.courseInfo?.boardMessage || '')
+      } catch (e) { console.error(e) }
+    }
+    pull()
+    const id = setInterval(pull, 30000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
 
   // Live weather for the header, refreshed every 10 minutes.
   useEffect(() => {
@@ -185,6 +202,12 @@ export default function CrewBoard() {
           </div>
         )}
       </div>
+      {boardMessage && (
+        <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, background: '#B4232A', color: '#FFF', padding: '0.7vw 2.5vw', fontSize: 'clamp(15px,1.6vw,30px)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 -4px 20px rgba(0,0,0,0.3)' }}>
+          <span style={{ fontSize: '1.1em' }}>🔔</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boardMessage}</span>
+        </div>
+      )}
       <style>{`@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(87,208,122,0.7) } 70% { box-shadow: 0 0 0 12px rgba(87,208,122,0) } 100% { box-shadow: 0 0 0 0 rgba(87,208,122,0) } }`}</style>
     </div>
   )

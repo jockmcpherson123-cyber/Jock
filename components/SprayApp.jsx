@@ -4767,7 +4767,7 @@ function WhiteboardModule({ user }) {
           <div className="bg-white rounded-2xl border border-black/5 p-2 shadow-sm sticky top-4"><Nav /></div>
         </aside>
         <div className="flex-1 min-w-0">
-          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} roster={roster} jobTypes={jobTypes} equipment={equipment} courses={courses} crew={crew} />}
+          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} roster={roster} jobTypes={jobTypes} equipment={equipment} courses={courses} crew={crew} boardMessage={courseInfo.boardMessage || ''} onSaveMessage={(m) => saveCourse({ boardMessage: m })} />}
           {section === 'insights' && <WhiteboardInsights />}
           {section === 'crew' && <WhiteboardCrew roster={roster} operators={operators} crewMembers={crewMembers} courses={courses} crew={crew} manage={manage} onSaveCrew={(next) => saveCourse({ crew: next })} onSaveMembers={(list) => saveCourse({ crewMembers: list })} />}
           {section === 'equipment' && <WhiteboardListSection title="Equipment" hint="The mowers, rollers, blowers and carts your crew runs. These become quick-pick chips when you add a job." items={equipment} manage={manage} accent={FERN} onSave={(list) => saveCourse({ equipment: list })} />}
@@ -4779,8 +4779,10 @@ function WhiteboardModule({ user }) {
 }
 
 // The daily job board — who's doing what today. Fetches its own tasks by date.
-function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, courses = [], crew = {} }) {
+function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, courses = [], crew = {}, boardMessage = '', onSaveMessage }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [msgDraft, setMsgDraft] = useState(boardMessage)
+  useEffect(() => { setMsgDraft(boardMessage) }, [boardMessage])
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState(null)
@@ -4793,6 +4795,8 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
   const [openJobs, setOpenJobs] = useState({}) // collapsed by default; jobKey -> open?
   const [addingJob, setAddingJob] = useState(null) // jobKey whose add-person picker is open
+  const [editingNoteJob, setEditingNoteJob] = useState(null) // jobKey whose note is being edited
+  const [noteDraft, setNoteDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [tx, setTx] = useState({})
   const toggleJob = (jk) => setOpenJobs((p) => ({ ...p, [jk]: !p[jk] }))
@@ -4857,6 +4861,13 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
       await reload()
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
   }
+  // Edit the note on a whole job group (the note is shared across its people).
+  const saveJobNote = async (jk, text) => {
+    const inGroup = view.filter((t) => (t.job || '—') === jk)
+    setTasks((prev) => prev.map((t) => (inGroup.some((g) => g.id === t.id) ? { ...t, notes: text } : t)))
+    setEditingNoteJob(null)
+    try { await Promise.all(inGroup.map((t) => db.updateCrewTask({ ...t, notes: text }))) } catch (e) { console.error(e); reload() }
+  }
   // Remove a whole job group for the day (only the rows currently in view).
   const removeJobGroup = async (jk) => {
     const ids = tasks.filter((t) => (t.job || '—') === jk && (!activeCourse || t.course === activeCourse || !t.course)).map((t) => t.id)
@@ -4895,6 +4906,15 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
         <button onClick={() => setDate(shiftDate(date, 1))} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Next day"><ChevronRight size={16} className="text-slate-500" /></button>
         {!isToday && <button onClick={() => setDate(new Date().toISOString().slice(0, 10))} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FERN }}>Today</button>}
       </div>
+
+      {manage && (
+        <div className="bg-white rounded-2xl border border-black/5 p-2.5 shadow-sm mb-4 flex items-center gap-2">
+          <BarChart3 size={14} className="shrink-0 text-slate-400" />
+          <input value={msgDraft} onChange={(e) => setMsgDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && onSaveMessage) onSaveMessage(msgDraft.trim()) }} placeholder="Shop message shown on the TV board (e.g. Please clean out carts)…" className="flex-1 min-w-0 border-0 text-sm font-body focus:outline-none" />
+          {msgDraft.trim() !== boardMessage && <button onClick={() => onSaveMessage && onSaveMessage(msgDraft.trim())} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-lg text-white shrink-0" style={{ backgroundColor: FOREST }}>Save</button>}
+          {boardMessage && msgDraft.trim() === boardMessage && <button onClick={() => onSaveMessage && onSaveMessage('')} className="font-body text-[11px] font-bold px-2 py-1.5 rounded-lg shrink-0 text-slate-400">Clear</button>}
+        </div>
+      )}
 
       {hasCourses && (
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
@@ -5019,16 +5039,26 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                 <div className="px-3 pt-2 pb-3">
                   {langs.map((l) => <p key={l} className="font-body text-[11px] text-slate-400 italic mb-0.5 px-1">{txGet(tx, l, jk) || jk} <span className="not-italic">· {(CREW_LANGS.find(([c]) => c === l) || [])[1] || l}</span></p>)}
                   {(() => {
-                    const nt = (list.find((t) => t.notes) || {}).notes
-                    if (!nt) return null
+                    const nt = (list.find((t) => t.notes) || {}).notes || ''
+                    if (editingNoteJob === jk) {
+                      return (
+                        <div className="flex items-center gap-2 mb-2">
+                          <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveJobNote(jk, noteDraft.trim()) }} autoFocus placeholder="Note for this job…" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] font-body" />
+                          <button type="button" onClick={() => saveJobNote(jk, noteDraft.trim())} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-lg text-white shrink-0" style={{ backgroundColor: FOREST }}>Save</button>
+                          <button type="button" onClick={() => setEditingNoteJob(null)} className="text-slate-400 shrink-0" aria-label="Cancel"><X size={15} /></button>
+                        </div>
+                      )
+                    }
+                    if (!nt) return manage ? <button type="button" onClick={() => { setEditingNoteJob(jk); setNoteDraft('') }} className="font-body text-[11px] font-bold mb-2 flex items-center gap-1" style={{ color: '#B07A16' }}><Plus size={12} /> Add note</button> : null
                     const noteVariants = langs.map((l) => txGet(tx, l, nt)).filter((v) => v && v !== nt)
                     return (
                       <div className="flex items-start gap-1.5 mb-2 rounded-lg" style={{ backgroundColor: '#FFFBEB', border: '1px solid #FDE9C8', padding: '6px 8px' }}>
                         <Info size={13} style={{ color: '#B07A16' }} className="shrink-0 mt-0.5" />
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="font-body text-[11px]" style={{ color: '#8A5A12' }}>{nt}</p>
                           {noteVariants.map((v, i) => <p key={i} className="font-body text-[11px] italic" style={{ color: '#A98547' }}>{v}</p>)}
                         </div>
+                        {manage && <button type="button" onClick={() => { setEditingNoteJob(jk); setNoteDraft(nt) }} className="font-body text-[10px] font-bold shrink-0" style={{ color: '#B07A16' }}>Edit</button>}
                       </div>
                     )
                   })()}
