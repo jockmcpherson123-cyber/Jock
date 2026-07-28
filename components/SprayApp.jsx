@@ -703,12 +703,15 @@ function SprayOpsModule({ user }) {
           />
         )}
         {route === 'chemicals' && manage && (
-          <ChemicalLibrary products={products} grassTypes={grassTypes} onSaveProduct={saveProduct} onDeleteProduct={removeProduct} onImport={importProductsFromSheet} />
+          <ChemicalHub
+            products={products} grassTypes={grassTypes} deliveries={deliveries} manage={manage}
+            onSaveProduct={saveProduct} onDeleteProduct={removeProduct} onImport={importProductsFromSheet} onAddDelivery={addDelivery}
+          />
         )}
-        {route === 'inventory' && (
+        {route === 'inventory' && !manage && (
           <Inventory products={products} deliveries={deliveries} onAddDelivery={addDelivery} />
         )}
-        {route === 'documents' && (
+        {route === 'documents' && !manage && (
           <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? saveProduct : undefined} />
         )}
         {route === 'weather' && <Weather location={location} onGoToSettings={() => manage && setRoute('settings')} />}
@@ -730,7 +733,7 @@ function SprayOpsModule({ user }) {
 // ── TOP NAV ───────────────────────────────────────────────────────────────
 function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
   const items = manage
-    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['weather', 'Weather'], ['inventory', 'Inventory'], ['documents', 'Labels & SDS'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
+    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['weather', 'Weather'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
     : [['tospray', 'To Spray'], ['records', 'Records'], ['inventory', 'Inventory'], ['documents', 'Labels & SDS'], ['weather', 'Weather']]
 
   return (
@@ -2677,6 +2680,47 @@ function DocumentsLibrary({ products, manage, onSaveProduct }) {
 }
 
 // ── CHEMICAL LIBRARY ──────────────────────────────────────────────────────
+// Chemical hub — the products library, their Labels & SDS, and inventory all in
+// one place, switched by a side menu (vertical rail on wide screens, a scrolling
+// tab row on iPad/phone) so they're not three separate top-nav items.
+const CHEM_SECTIONS = [
+  { key: 'library', label: 'Chemical Library', icon: Droplet },
+  { key: 'documents', label: 'Labels & SDS', icon: Info },
+  { key: 'inventory', label: 'Inventory', icon: Package },
+]
+function ChemicalHub({ products, grassTypes, deliveries, manage, onSaveProduct, onDeleteProduct, onImport, onAddDelivery }) {
+  const [section, setSection] = useState('library')
+  return (
+    <div className="md:flex md:gap-6">
+      <div className="md:hidden flex gap-2 pt-6 overflow-x-auto pb-1">
+        {CHEM_SECTIONS.map((s) => (
+          <button key={s.key} onClick={() => setSection(s.key)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap transition" style={section === s.key ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{s.label}</button>
+        ))}
+      </div>
+      <aside className="hidden md:block w-52 shrink-0 pt-6">
+        <div className="bg-white rounded-2xl border border-black/5 p-2 shadow-sm sticky top-4">
+          <nav className="space-y-1">
+            {CHEM_SECTIONS.map((s) => {
+              const on = s.key === section
+              const Icon = s.icon
+              return (
+                <button key={s.key} onClick={() => setSection(s.key)} className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl font-body text-sm font-semibold transition text-left" style={on ? { backgroundColor: FOREST, color: 'white' } : { color: '#4B5563' }}>
+                  <Icon size={16} style={{ color: on ? GOLD : '#94A3B8' }} /> {s.label}
+                </button>
+              )
+            })}
+          </nav>
+        </div>
+      </aside>
+      <div className="flex-1 min-w-0">
+        {section === 'library' && <ChemicalLibrary products={products} grassTypes={grassTypes} onSaveProduct={onSaveProduct} onDeleteProduct={onDeleteProduct} onImport={onImport} />}
+        {section === 'documents' && <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? onSaveProduct : undefined} />}
+        {section === 'inventory' && <Inventory products={products} deliveries={deliveries} onAddDelivery={onAddDelivery} />}
+      </div>
+    </div>
+  )
+}
+
 function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeleteProduct, onImport }) {
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
