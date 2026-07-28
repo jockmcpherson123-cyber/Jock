@@ -4790,7 +4790,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [equip, setEquip] = useState('')
   const [equipList, setEquipList] = useState([])
   const [note, setNote] = useState('')
-  const [course, setCourse] = useState('all')
+  const [course, setCourse] = useState('')
   const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
   const [openJobs, setOpenJobs] = useState({}) // collapsed by default; jobKey -> open?
   const [addingJob, setAddingJob] = useState(null) // jobKey whose add-person picker is open
@@ -4800,7 +4800,9 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
 
   const courseNames = courses.map((c) => c.name)
   const hasCourses = courseNames.length >= 2
-  const activeCourse = hasCourses && course !== 'all' ? course : ''
+  // Just the real courses (no "All") — and it stays data-driven, so adding a
+  // course in Settings makes a new tab appear here on the next load.
+  const activeCourse = hasCourses ? (courseNames.includes(course) ? course : courseNames[0]) : ''
 
   useEffect(() => {
     let cancelled = false
@@ -4910,8 +4912,8 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
 
       {hasCourses && (
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-          {['all', ...courseNames].map((c) => (
-            <button key={c} onClick={() => setCourse(c)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={course === c ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{c === 'all' ? 'All courses' : c}</button>
+          {courseNames.map((c) => (
+            <button key={c} onClick={() => setCourse(c)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={activeCourse === c ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{c}</button>
           ))}
         </div>
       )}
