@@ -14,7 +14,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3,
+  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -4791,6 +4791,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [course, setCourse] = useState('all')
   const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
   const [openJobs, setOpenJobs] = useState({}) // collapsed by default; jobKey -> open?
+  const [addingJob, setAddingJob] = useState(null) // jobKey whose add-person picker is open
   const [busy, setBusy] = useState(false)
   const [tx, setTx] = useState({})
   const toggleJob = (jk) => setOpenJobs((p) => ({ ...p, [jk]: !p[jk] }))
@@ -4855,11 +4856,26 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
     setTasks((prev) => prev.filter((x) => x.id !== id))
     try { await db.deleteCrewTask(id) } catch (e) { console.error(e); reload() }
   }
+  // Add one more person straight onto an existing job group (labor-board style).
+  const addPersonToJob = async (jk, name) => {
+    try {
+      const sort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
+      await db.addCrewTask({ date, job: jk, assignee: name, course: activeCourse, status: 'todo', sort })
+      await reload()
+    } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
+  }
+  // Remove a whole job group for the day (only the rows currently in view).
+  const removeJobGroup = async (jk) => {
+    const ids = tasks.filter((t) => (t.job || '—') === jk && (!activeCourse || t.course === activeCourse || !t.course)).map((t) => t.id)
+    setTasks((prev) => prev.filter((t) => !ids.includes(t.id)))
+    try { await Promise.all(ids.map((id) => db.deleteCrewTask(id))) } catch (e) { console.error(e); reload() }
+  }
 
   // Course-scoped view: a course tab shows that course's jobs plus property-wide
   // (no-course) jobs; "All" shows everything.
   const view = activeCourse ? tasks.filter((t) => t.course === activeCourse || !t.course) : tasks
   const doneCount = view.filter((t) => t.status === 'done').length
+  const totalHours = Math.round((view.reduce((s, t) => s + (Number(t.minutes) || 0), 0) / 60) * 10) / 10
   const operators = roster
   // Staff for the assignee picker: everyone's available on both courses, but the
   // selected course's home crew is listed first.
@@ -4884,7 +4900,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
         <button onClick={() => setDate(shiftDate(date, -1))} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Previous day"><ChevronRight size={16} className="text-slate-500" style={{ transform: 'rotate(180deg)' }} /></button>
         <div className="flex-1 text-center">
           <p className="font-body text-sm font-bold text-slate-800">{prettyDay(date)}</p>
-          <p className="font-body text-[10px] text-slate-400">{view.length} job{view.length !== 1 ? 's' : ''}{view.length > 0 ? ` · ${doneCount} done` : ''}</p>
+          <p className="font-body text-[10px] text-slate-400 flex items-center justify-center gap-1.5">{view.length} job{view.length !== 1 ? 's' : ''}{view.length > 0 ? ` · ${doneCount} done` : ''}{totalHours > 0 && <span className="inline-flex items-center gap-0.5" style={{ color: FERN }}><Clock size={10} /> {totalHours}h</span>}</p>
         </div>
         <button onClick={() => setDate(shiftDate(date, 1))} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Next day"><ChevronRight size={16} className="text-slate-500" /></button>
         {!isToday && <button onClick={() => setDate(new Date().toISOString().slice(0, 10))} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FERN }}>Today</button>}
@@ -5006,46 +5022,56 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
             const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
             const open = !!openJobs[jk]
             const allDone = gdone === list.length
+            const alreadyOn = list.map((t) => t.assignee).filter(Boolean)
             return (
               <div key={jk} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-                <button onClick={() => toggleJob(jk)} className="w-full flex items-center gap-2 px-3.5 py-3 text-left">
-                  <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: allDone ? '#E8F3EC' : '#EEF2F0' }}><ClipboardList size={14} style={{ color: allDone ? FERN : '#94A3B8' }} /></div>
-                  <p className="font-body font-semibold text-sm text-slate-900 truncate">{jk}</p>
-                  <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>
-                  <span className="font-body text-[10px] shrink-0 ml-auto" style={{ color: allDone ? FERN : '#94A3B8' }}>{gdone}/{list.length} done</span>
-                  <ChevronRight size={16} className="text-slate-400 shrink-0 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} />
-                </button>
-                {open && (
-                <div className="px-3.5 pb-3.5">
-                {langs.map((l) => <p key={l} className="font-body text-[11px] text-slate-400 italic mb-0.5">{txGet(tx, l, jk) || jk} <span className="not-italic">· {(CREW_LANGS.find(([c]) => c === l) || [])[1] || l}</span></p>)}
-                <div className="space-y-1.5 mt-1.5">
-                  {list.map((t) => {
-                    const st = TASK_STATUS[t.status] || TASK_STATUS.todo
-                    const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
-                    const lang = crew[t.assignee]?.lang
-                    return (
-                      <div key={t.id} className="flex items-center gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: '#EEF2F0', backgroundColor: t.status === 'done' ? '#F7FBF8' : 'white' }}>
-                        <button onClick={() => cycle(t)} className="font-body text-[10px] font-bold px-2 py-1 rounded-full border shrink-0 w-16 text-center" style={{ backgroundColor: st.bg, color: st.fg, borderColor: st.bd }}>{st.label}</button>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <p className="font-body text-[13px] font-semibold text-slate-800 truncate" style={t.status === 'done' ? { textDecoration: 'line-through', color: '#94A3B8' } : {}}>{t.assignee || 'Unassigned'}</p>
-                            {course === 'all' && hasCourses && t.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{t.course}</span>}
-                          </div>
-                          {(t.area || tools.length > 0) && (
-                            <div className="flex flex-wrap gap-1 mt-0.5 items-center">
-                              {t.area && <span className="font-body text-[10px] text-slate-400">{t.area}</span>}
-                              {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <input type="number" inputMode="numeric" value={t.minutes ?? ''} onChange={(e) => setMinutes(t, e.target.value === '' ? null : Number(e.target.value))} placeholder="min" className="w-12 border border-slate-200 rounded-lg px-1.5 py-1 text-[11px] font-body text-center" title="Minutes taken" />
-                          {manage && <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition" aria-label="Remove"><Trash2 size={14} /></button>}
-                        </div>
-                      </div>
-                    )
-                  })}
+                {/* Job header bar */}
+                <div className="flex items-center gap-1 pl-3.5 pr-1.5 py-2.5" style={{ backgroundColor: '#F1F7F2' }}>
+                  <button onClick={() => toggleJob(jk)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
+                    <ClipboardList size={15} className="shrink-0" style={{ color: allDone ? FERN : '#94A3B8' }} />
+                    <p className="font-body font-bold text-sm text-slate-900 truncate">{jk}</p>
+                    <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>
+                  </button>
+                  <span className="font-body text-[10px] font-semibold shrink-0 mr-1" style={{ color: allDone ? FERN : '#94A3B8' }}>{gdone}/{list.length}</span>
+                  {manage && <button onClick={() => { setAddingJob(addingJob === jk ? null : jk); setOpenJobs((p) => ({ ...p, [jk]: true })) }} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition" style={{ backgroundColor: addingJob === jk ? FERN : 'transparent', color: addingJob === jk ? 'white' : '#64748B' }} aria-label="Add person to this job"><UserPlus size={15} /></button>}
+                  {manage && <button onClick={() => removeJobGroup(jk)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-500 transition" aria-label="Remove job"><Trash2 size={14} /></button>}
+                  <button onClick={() => toggleJob(jk)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" aria-label={open ? 'Collapse' : 'Expand'}><ChevronRight size={16} className="text-slate-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></button>
                 </div>
+                {open && (
+                <div className="px-3 pt-2 pb-3">
+                  {langs.map((l) => <p key={l} className="font-body text-[11px] text-slate-400 italic mb-0.5 px-1">{txGet(tx, l, jk) || jk} <span className="not-italic">· {(CREW_LANGS.find(([c]) => c === l) || [])[1] || l}</span></p>)}
+                  {manage && addingJob === jk && (
+                    <div className="mb-2">
+                      <PeoplePicker options={orderedOps.filter((n) => !alreadyOn.includes(n))} selected={[]} onToggle={(name) => addPersonToJob(jk, name)} placeholder={`Add crew to ${jk}…`} />
+                    </div>
+                  )}
+                  <div className="space-y-1.5">
+                    {list.map((t) => {
+                      const st = TASK_STATUS[t.status] || TASK_STATUS.todo
+                      const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
+                      const lang = crew[t.assignee]?.lang
+                      const stripe = t.status === 'done' ? FERN : t.status === 'doing' ? GOLD : '#CBD5E1'
+                      return (
+                        <div key={t.id} className="flex items-center gap-2 rounded-lg" style={{ borderLeft: `4px solid ${stripe}`, backgroundColor: t.status === 'done' ? '#F7FBF8' : '#FAFAF7' }}>
+                          <div className="min-w-0 flex-1 py-2 pl-2.5">
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-body text-[13px] font-semibold text-slate-800 truncate" style={t.status === 'done' ? { color: '#94A3B8' } : {}}>{t.assignee || 'Unassigned'}</p>
+                              {course === 'all' && hasCourses && t.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{t.course}</span>}
+                            </div>
+                            {(t.area || tools.length > 0) && (
+                              <div className="flex flex-wrap gap-1 mt-0.5 items-center">
+                                {t.area && <span className="font-body text-[10px] text-slate-400">{t.area}</span>}
+                                {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}
+                              </div>
+                            )}
+                          </div>
+                          <button onClick={() => cycle(t)} className="font-body text-[10px] font-bold px-2 py-1 rounded-full border shrink-0 w-16 text-center" style={{ backgroundColor: st.bg, color: st.fg, borderColor: st.bd }}>{st.label}</button>
+                          <input type="number" inputMode="numeric" value={t.minutes ?? ''} onChange={(e) => setMinutes(t, e.target.value === '' ? null : Number(e.target.value))} placeholder="min" className="w-12 border border-slate-200 rounded-lg px-1.5 py-1 text-[11px] font-body text-center shrink-0" title="Minutes taken" />
+                          {manage && <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0 pr-2" aria-label="Remove"><Trash2 size={14} /></button>}
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
                 )}
               </div>
