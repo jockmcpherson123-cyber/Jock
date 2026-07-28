@@ -4599,6 +4599,9 @@ function WhiteboardModule({ user }) {
             <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo.clubName || 'Golf Club'}</p>
             <h1 className="font-display text-2xl font-semibold mt-0.5 truncate">{active.label}</h1>
           </div>
+          <a href="/board" target="_blank" rel="noopener noreferrer" className="ml-auto font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Open the live board for the shop TV">
+            <BarChart3 size={13} /> TV board
+          </a>
         </div>
       </div>
 

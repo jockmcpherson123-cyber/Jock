@@ -49,3 +49,15 @@ create policy "crew_tasks updatable"
 drop policy if exists "crew_tasks deletable" on public.crew_tasks;
 create policy "crew_tasks deletable"
   on public.crew_tasks for delete to authenticated using (true);
+
+-- Broadcast row changes over Realtime so the live TV board updates instantly.
+-- (Idempotent: only add the table to the publication if it isn't already there.)
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'crew_tasks'
+  ) then
+    alter publication supabase_realtime add table public.crew_tasks;
+  end if;
+end $$;
