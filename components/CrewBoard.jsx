@@ -95,8 +95,6 @@ export default function CrewBoard() {
   // Scope to this TV's course (its own jobs plus property-wide ones); no course
   // param = whole property.
   const shown = course ? tasks.filter((t) => t.course === course || !t.course) : tasks
-  const doneCount = shown.filter((t) => t.status === 'done').length
-  const pct = shown.length ? Math.round((doneCount / shown.length) * 100) : 0
 
   // Group by job — everyone on the same job shares one bubble.
   const jobGroups = {}
@@ -128,21 +126,14 @@ export default function CrewBoard() {
           </div>
         </div>
 
-        {/* Progress strip */}
+        {/* Color legend for the status accent bars */}
         {status === 'ok' && shown.length > 0 && (
-          <div style={{ marginBottom: '1.8vw' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, fontSize: 'clamp(13px,1.2vw,22px)', color: '#C7CFC2', marginBottom: 8, flexWrap: 'wrap' }}>
-              <span><b style={{ color: '#F3F0E6' }}>{shown.length}</b> jobs · <b style={{ color: '#F3F0E6' }}>{doneCount}</b> done</span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 14, fontSize: 'clamp(11px,1vw,17px)' }}>
-                {[['#BFC9C1', 'To do'], [GOLD, 'Doing'], [FERN, 'Done']].map(([c, l]) => (
-                  <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 14, height: 6, borderRadius: 3, background: c, display: 'inline-block' }} />{l}</span>
-                ))}
-                <span style={{ color: '#F3F0E6', fontWeight: 700 }}>{pct}%</span>
-              </span>
-            </div>
-            <div style={{ height: 14, borderRadius: 999, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${pct}%`, background: GOLD, borderRadius: 999, transition: 'width 0.6s ease' }} />
-            </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.4vw' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 16, fontSize: 'clamp(11px,1vw,17px)', color: '#C7CFC2' }}>
+              {[['#BFC9C1', 'To do'], [GOLD, 'Doing'], [FERN, 'Done']].map(([c, l]) => (
+                <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 14, height: 6, borderRadius: 3, background: c, display: 'inline-block' }} />{l}</span>
+              ))}
+            </span>
           </div>
         )}
 
