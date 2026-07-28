@@ -27,6 +27,10 @@ create table if not exists public.crew_tasks (
   created_at timestamptz not null default now()
 );
 
+-- Which course the job is on (multi-course clubs); '' = whole property / single
+-- course. Added separately so re-running on an existing table picks it up.
+alter table public.crew_tasks add column if not exists course text not null default '';
+
 create index if not exists crew_tasks_date_idx on public.crew_tasks (task_date);
 create index if not exists crew_tasks_assignee_date_idx on public.crew_tasks (assignee, task_date);
 

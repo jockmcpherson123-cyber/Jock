@@ -4591,9 +4591,12 @@ function Combobox({ value, onChange, options = [], placeholder, accent = FOREST,
 const WB_SECTIONS = [
   { key: 'workboard', label: 'Workboard', icon: ClipboardList },
   { key: 'insights', label: 'Time & Efficiency', icon: BarChart3 },
+  { key: 'crew', label: 'Crew', icon: User },
   { key: 'equipment', label: 'Equipment', icon: Truck },
   { key: 'jobtypes', label: 'Job Types', icon: Check },
 ]
+// Common crew languages (label + code) for the per-staff native-language pick.
+const CREW_LANGS = [['en', 'English'], ['es', 'Spanish'], ['pt', 'Portuguese'], ['ht', 'Haitian Creole'], ['vi', 'Vietnamese'], ['zh', 'Chinese'], ['fr', 'French'], ['ko', 'Korean']]
 
 // Shell for the Whiteboard: a side menu (persistent rail on wide screens, a
 // slide-out drawer on iPad/phone) that switches between the daily board, the
@@ -4609,6 +4612,8 @@ function WhiteboardModule({ user }) {
   const courseInfo = settings.courseInfo || {}
   const jobTypes = courseInfo.jobTypes && courseInfo.jobTypes.length ? courseInfo.jobTypes : DEFAULT_JOBS
   const equipment = courseInfo.equipment || []
+  const courses = (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0)
+  const crew = courseInfo.crew || {} // { 'Name': { course, lang } }
   const saveCourse = async (patch) => {
     const next = { ...courseInfo, ...patch }
     setSettings((s) => ({ ...s, courseInfo: next }))
@@ -4663,8 +4668,9 @@ function WhiteboardModule({ user }) {
           <div className="bg-white rounded-2xl border border-black/5 p-2 shadow-sm sticky top-4"><Nav /></div>
         </aside>
         <div className="flex-1 min-w-0">
-          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} jobTypes={jobTypes} equipment={equipment} />}
+          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} jobTypes={jobTypes} equipment={equipment} courses={courses} crew={crew} />}
           {section === 'insights' && <WhiteboardInsights />}
+          {section === 'crew' && <WhiteboardCrew operators={settings.operators || []} courses={courses} crew={crew} manage={manage} onSave={(next) => saveCourse({ crew: next })} />}
           {section === 'equipment' && <WhiteboardListSection title="Equipment" hint="The mowers, rollers, blowers and carts your crew runs. These become quick-pick chips when you add a job." items={equipment} manage={manage} accent={FERN} onSave={(list) => saveCourse({ equipment: list })} />}
           {section === 'jobtypes' && <WhiteboardListSection title="Job Types" hint="The everyday jobs that show as one-tap chips on the Workboard. Add the ones your crew runs each morning." items={jobTypes} manage={manage} accent={FOREST} onSave={(list) => saveCourse({ jobTypes: list })} />}
         </div>
@@ -4674,7 +4680,7 @@ function WhiteboardModule({ user }) {
 }
 
 // The daily job board — who's doing what today. Fetches its own tasks by date.
-function WorkboardView({ manage, settings, jobTypes, equipment }) {
+function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], crew = {} }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
@@ -4683,7 +4689,13 @@ function WorkboardView({ manage, settings, jobTypes, equipment }) {
   const [assignee, setAssignee] = useState('')
   const [area, setArea] = useState('')
   const [equip, setEquip] = useState('')
+  const [equipList, setEquipList] = useState([])
+  const [course, setCourse] = useState('all')
   const [busy, setBusy] = useState(false)
+
+  const courseNames = courses.map((c) => c.name)
+  const hasCourses = courseNames.length >= 2
+  const activeCourse = hasCourses && course !== 'all' ? course : ''
 
   useEffect(() => {
     let cancelled = false
@@ -4698,13 +4710,17 @@ function WorkboardView({ manage, settings, jobTypes, equipment }) {
 
   const reload = async () => { try { setTasks(await db.fetchCrewTasks(date, date)) } catch (e) { console.error(e) } }
 
+  const addEquip = () => { const v = equip.trim(); if (!v) return; if (!equipList.includes(v)) setEquipList([...equipList, v]); setEquip('') }
   const addTask = async () => {
     if (!job.trim()) return
     setBusy(true); setMsg(null)
     try {
+      const tools = [...equipList]
+      const leftover = equip.trim()
+      if (leftover && !tools.includes(leftover)) tools.push(leftover)
       const sort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
-      await db.addCrewTask({ date, job: job.trim(), assignee, area, equipment: equip.trim(), status: 'todo', sort })
-      setJob(''); setEquip('')
+      await db.addCrewTask({ date, job: job.trim(), assignee, area, equipment: tools.join(', '), course: activeCourse, status: 'todo', sort })
+      setJob(''); setEquip(''); setEquipList([])
       await reload()
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
     setBusy(false)
@@ -4724,13 +4740,21 @@ function WorkboardView({ manage, settings, jobTypes, equipment }) {
     try { await db.deleteCrewTask(id) } catch (e) { console.error(e); reload() }
   }
 
-  const doneCount = tasks.filter((t) => t.status === 'done').length
+  // Course-scoped view: a course tab shows that course's jobs plus property-wide
+  // (no-course) jobs; "All" shows everything.
+  const view = activeCourse ? tasks.filter((t) => t.course === activeCourse || !t.course) : tasks
+  const doneCount = view.filter((t) => t.status === 'done').length
   const operators = settings.operators || []
+  // Staff for the assignee picker: everyone's available on both courses, but the
+  // selected course's home crew is listed first.
+  const orderedOps = activeCourse
+    ? [...operators].sort((a, b) => (((crew[a]?.course === activeCourse) ? 0 : 1) - ((crew[b]?.course === activeCourse) ? 0 : 1)) || operators.indexOf(a) - operators.indexOf(b))
+    : operators
   const areaOptions = ['', ...Object.keys(settings.areas || {}), ...greenOptionsFor(settings.courseInfo).filter((g) => !Object.keys(settings.areas || {}).includes(g))]
   const isToday = date === new Date().toISOString().slice(0, 10)
 
   const groups = {}
-  tasks.forEach((t) => { const k = t.assignee || '__none'; (groups[k] = groups[k] || []).push(t) })
+  view.forEach((t) => { const k = t.assignee || '__none'; (groups[k] = groups[k] || []).push(t) })
   const groupKeys = Object.keys(groups).sort((a, b) => (a === '__none' ? -1 : b === '__none' ? 1 : a.localeCompare(b)))
 
   return (
@@ -4739,17 +4763,25 @@ function WorkboardView({ manage, settings, jobTypes, equipment }) {
         <button onClick={() => setDate(shiftDate(date, -1))} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Previous day"><ChevronRight size={16} className="text-slate-500" style={{ transform: 'rotate(180deg)' }} /></button>
         <div className="flex-1 text-center">
           <p className="font-body text-sm font-bold text-slate-800">{prettyDay(date)}</p>
-          <p className="font-body text-[10px] text-slate-400">{tasks.length} job{tasks.length !== 1 ? 's' : ''}{tasks.length > 0 ? ` · ${doneCount} done` : ''}</p>
+          <p className="font-body text-[10px] text-slate-400">{view.length} job{view.length !== 1 ? 's' : ''}{view.length > 0 ? ` · ${doneCount} done` : ''}</p>
         </div>
         <button onClick={() => setDate(shiftDate(date, 1))} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Next day"><ChevronRight size={16} className="text-slate-500" /></button>
         {!isToday && <button onClick={() => setDate(new Date().toISOString().slice(0, 10))} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FERN }}>Today</button>}
       </div>
 
+      {hasCourses && (
+        <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+          {['all', ...courseNames].map((c) => (
+            <button key={c} onClick={() => setCourse(c)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={course === c ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{c === 'all' ? 'All courses' : c}</button>
+          ))}
+        </div>
+      )}
+
       {msg && <div className="rounded-xl px-3 py-2 mb-3 font-body text-[12px] font-semibold" style={msg.type === 'ok' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}>{msg.text}</div>}
 
       {manage && (
         <div className="bg-white rounded-2xl border-2 p-4 shadow-sm mb-4" style={{ borderColor: GOLD }}>
-          <p className="font-display text-base font-semibold text-slate-900 mb-2">Add a job</p>
+          <p className="font-display text-base font-semibold text-slate-900 mb-2">Add a job{activeCourse ? ` — ${activeCourse}` : ''}</p>
           <div className="mb-2">
             <FieldLabel>Job</FieldLabel>
             <Combobox value={job} onChange={setJob} options={jobTypes} placeholder="Type to search jobs, or enter your own…" />
@@ -4757,7 +4789,7 @@ function WorkboardView({ manage, settings, jobTypes, equipment }) {
           <div className="grid grid-cols-2 gap-2 mb-2">
             <div>
               <FieldLabel>Assign to</FieldLabel>
-              <Select value={assignee} onChange={setAssignee} options={operators} placeholder="Unassigned" />
+              <Select value={assignee} onChange={setAssignee} options={orderedOps} placeholder="Unassigned" />
             </div>
             <div>
               <FieldLabel>Where</FieldLabel>
@@ -4765,8 +4797,18 @@ function WorkboardView({ manage, settings, jobTypes, equipment }) {
             </div>
           </div>
           <div className="mb-3">
-            <FieldLabel>Equipment (optional)</FieldLabel>
-            <Combobox value={equip} onChange={setEquip} options={equipment} accent={FERN} placeholder="Type to search equipment, or enter your own…" />
+            <FieldLabel>Tools / equipment for this job (optional)</FieldLabel>
+            {equipList.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {equipList.map((eq) => (
+                  <span key={eq} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ backgroundColor: '#E8F3EC', color: FERN }}>{eq}<button type="button" onClick={() => setEquipList(equipList.filter((x) => x !== eq))} className="opacity-60 hover:opacity-100">×</button></span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <div className="flex-1 min-w-0"><Combobox value={equip} onChange={setEquip} options={equipment} accent={FERN} placeholder="Add a tool, then +" /></div>
+              <button type="button" onClick={addEquip} disabled={!equip.trim()} className="font-body text-sm font-bold px-3.5 rounded-xl text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FERN }}>+</button>
+            </div>
           </div>
           <button onClick={addTask} disabled={busy || !job.trim()} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Adding…' : 'Add to board'}</button>
         </div>
@@ -4774,7 +4816,7 @@ function WorkboardView({ manage, settings, jobTypes, equipment }) {
 
       {loading ? (
         <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-      ) : tasks.length === 0 ? (
+      ) : view.length === 0 ? (
         <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
           {manage ? 'No jobs on the board for this day yet. Add one above.' : 'No jobs posted for this day yet.'}
         </div>
@@ -4787,17 +4829,27 @@ function WorkboardView({ manage, settings, jobTypes, equipment }) {
                   <User size={14} style={{ color: k === '__none' ? '#94A3B8' : FERN }} />
                 </div>
                 <p className="font-body font-semibold text-sm text-slate-900">{k === '__none' ? 'Unassigned' : k}</p>
-                <span className="font-body text-[10px] text-slate-400">{groups[k].filter((t) => t.status === 'done').length}/{groups[k].length} done</span>
+                {hasCourses && crew[k]?.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{crew[k].course}</span>}
+                <span className="font-body text-[10px] text-slate-400 ml-auto">{groups[k].filter((t) => t.status === 'done').length}/{groups[k].length} done</span>
               </div>
               <div className="space-y-1.5">
                 {groups[k].map((t) => {
                   const st = TASK_STATUS[t.status] || TASK_STATUS.todo
+                  const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
                   return (
-                    <div key={t.id} className="flex items-center gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: '#EEF2F0', backgroundColor: t.status === 'done' ? '#F7FBF8' : 'white' }}>
-                      <button onClick={() => cycle(t)} className="font-body text-[10px] font-bold px-2 py-1 rounded-full border shrink-0 w-16 text-center" style={{ backgroundColor: st.bg, color: st.fg, borderColor: st.bd }}>{st.label}</button>
+                    <div key={t.id} className="flex items-start gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: '#EEF2F0', backgroundColor: t.status === 'done' ? '#F7FBF8' : 'white' }}>
+                      <button onClick={() => cycle(t)} className="font-body text-[10px] font-bold px-2 py-1 rounded-full border shrink-0 w-16 text-center mt-0.5" style={{ backgroundColor: st.bg, color: st.fg, borderColor: st.bd }}>{st.label}</button>
                       <div className="min-w-0 flex-1">
-                        <p className="font-body text-[13px] font-semibold text-slate-800 truncate" style={t.status === 'done' ? { textDecoration: 'line-through', color: '#94A3B8' } : {}}>{t.job}</p>
-                        {(t.area || t.equipment) && <p className="font-body text-[10px] text-slate-400 truncate">{[t.area, t.equipment].filter(Boolean).join(' · ')}</p>}
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-body text-[13px] font-semibold text-slate-800 truncate" style={t.status === 'done' ? { textDecoration: 'line-through', color: '#94A3B8' } : {}}>{t.job}</p>
+                          {course === 'all' && hasCourses && t.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{t.course}</span>}
+                        </div>
+                        {t.area && <p className="font-body text-[10px] text-slate-400 truncate">{t.area}</p>}
+                        {tools.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{tool}</span>)}
+                          </div>
+                        )}
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <input type="number" inputMode="numeric" value={t.minutes ?? ''} onChange={(e) => setMinutes(t, e.target.value === '' ? null : Number(e.target.value))} placeholder="min" className="w-12 border border-slate-200 rounded-lg px-1.5 py-1 text-[11px] font-body text-center" title="Minutes taken" />
@@ -4813,6 +4865,47 @@ function WorkboardView({ manage, settings, jobTypes, equipment }) {
       )}
 
       <p className="font-body text-[10px] text-slate-400 mt-4 text-center">Tap the status chip to move a job To&nbsp;do → Doing → Done. Add minutes as jobs finish — that's what powers the Time &amp; Efficiency view.</p>
+    </div>
+  )
+}
+
+// Crew section — assign each staff member a home course (so they sort first on
+// that course's board) and their native language (for the upcoming translation).
+function WhiteboardCrew({ operators = [], courses = [], crew = {}, manage, onSave }) {
+  const courseNames = courses.map((c) => c.name)
+  const langLabel = (code) => (CREW_LANGS.find(([c]) => c === code) || [])[1] || ''
+  const setField = (name, key, value) => onSave({ ...crew, [name]: { ...(crew[name] || {}), [key]: value } })
+
+  if (operators.length === 0) {
+    return <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">Add crew members in Spray Ops → Settings → People first.</div>
+  }
+  return (
+    <div className="space-y-2">
+      <p className="font-body text-[12px] text-slate-500 mb-1">Give each person a home course and their native language. On a course's board its home crew sorts to the top — everyone's still available on both.</p>
+      {operators.map((name) => (
+        <div key={name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8F3EC' }}><User size={15} style={{ color: FERN }} /></div>
+          <p className="font-body text-sm font-semibold text-slate-800 flex-1 min-w-0 truncate">{name}</p>
+          {manage ? (
+            <div className="flex items-center gap-2 shrink-0">
+              {courseNames.length >= 2 && (
+                <select value={crew[name]?.course || ''} onChange={(e) => setField(name, 'course', e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-body bg-white">
+                  <option value="">No home course</option>
+                  {courseNames.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              )}
+              <select value={crew[name]?.lang || 'en'} onChange={(e) => setField(name, 'lang', e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-body bg-white">
+                {CREW_LANGS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+              </select>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 shrink-0">
+              {crew[name]?.course && <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{crew[name].course}</span>}
+              <span className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{langLabel(crew[name]?.lang || 'en')}</span>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }
