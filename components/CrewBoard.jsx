@@ -126,16 +126,6 @@ export default function CrewBoard() {
           </div>
         </div>
 
-        {/* Color legend for the status accent bars */}
-        {status === 'ok' && shown.length > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.4vw' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 16, fontSize: 'clamp(11px,1vw,17px)', color: '#C7CFC2' }}>
-              {[['#BFC9C1', 'To do'], [GOLD, 'Doing'], [FERN, 'Done']].map(([c, l]) => (
-                <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 14, height: 6, borderRadius: 3, background: c, display: 'inline-block' }} />{l}</span>
-              ))}
-            </span>
-          </div>
-        )}
 
         {/* Board */}
         {status === 'loading' ? (
