@@ -4786,7 +4786,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [msg, setMsg] = useState(null)
   const [job, setJob] = useState('')
   const [assignees, setAssignees] = useState([])
-  const [area, setArea] = useState('')
   const [equip, setEquip] = useState('')
   const [equipList, setEquipList] = useState([])
   const [note, setNote] = useState('')
@@ -4835,7 +4834,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
       const tools = [...equipList]
       const leftover = equip.trim()
       if (leftover && !tools.includes(leftover)) tools.push(leftover)
-      const base = { date, job: job.trim(), area, equipment: tools.join(', '), notes: note.trim(), course: activeCourse, status: 'todo' }
+      const base = { date, job: job.trim(), area: '', equipment: tools.join(', '), notes: note.trim(), course: activeCourse, status: 'todo' }
       const startSort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
       // One row per assigned person (or a single unassigned job) — so each person
       // keeps their own status, and they group together by job on the board.
@@ -4845,16 +4844,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
       await reload()
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
     setBusy(false)
-  }
-  const cycle = async (t) => {
-    const updated = { ...t, status: nextStatus(t.status) }
-    setTasks((prev) => prev.map((x) => (x.id === t.id ? updated : x)))
-    try { await db.updateCrewTask(updated) } catch (e) { console.error(e); reload() }
-  }
-  const setMinutes = async (t, minutes) => {
-    const updated = { ...t, minutes }
-    setTasks((prev) => prev.map((x) => (x.id === t.id ? updated : x)))
-    try { await db.updateCrewTask(updated) } catch (e) { console.error(e) }
   }
   const remove = async (id) => {
     setTasks((prev) => prev.filter((x) => x.id !== id))
@@ -4878,15 +4867,12 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   // Course-scoped view: a course tab shows that course's jobs plus property-wide
   // (no-course) jobs; "All" shows everything.
   const view = activeCourse ? tasks.filter((t) => t.course === activeCourse || !t.course) : tasks
-  const doneCount = view.filter((t) => t.status === 'done').length
-  const totalHours = Math.round((view.reduce((s, t) => s + (Number(t.minutes) || 0), 0) / 60) * 10) / 10
   const operators = roster
   // Staff for the assignee picker: everyone's available on both courses, but the
   // selected course's home crew is listed first.
   const orderedOps = activeCourse
     ? [...operators].sort((a, b) => (((crew[a]?.course === activeCourse) ? 0 : 1) - ((crew[b]?.course === activeCourse) ? 0 : 1)) || operators.indexOf(a) - operators.indexOf(b))
     : operators
-  const areaOptions = ['', ...Object.keys(settings.areas || {}), ...greenOptionsFor(settings.courseInfo).filter((g) => !Object.keys(settings.areas || {}).includes(g))]
   const isToday = date === new Date().toISOString().slice(0, 10)
 
   const groups = {}
@@ -4904,7 +4890,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
         <button onClick={() => setDate(shiftDate(date, -1))} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Previous day"><ChevronRight size={16} className="text-slate-500" style={{ transform: 'rotate(180deg)' }} /></button>
         <div className="flex-1 text-center">
           <p className="font-body text-sm font-bold text-slate-800">{prettyDay(date)}</p>
-          <p className="font-body text-[10px] text-slate-400 flex items-center justify-center gap-1.5">{view.length} job{view.length !== 1 ? 's' : ''}{view.length > 0 ? ` · ${doneCount} done` : ''}{totalHours > 0 && <span className="inline-flex items-center gap-0.5" style={{ color: FERN }}><Clock size={10} /> {totalHours}h</span>}</p>
+          <p className="font-body text-[10px] text-slate-400">{view.length} job{view.length !== 1 ? 's' : ''}</p>
         </div>
         <button onClick={() => setDate(shiftDate(date, 1))} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Next day"><ChevronRight size={16} className="text-slate-500" /></button>
         {!isToday && <button onClick={() => setDate(new Date().toISOString().slice(0, 10))} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FERN }}>Today</button>}
@@ -4935,10 +4921,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
               <PeoplePicker options={orderedOps} selected={assignees} onToggle={toggleAssignee} placeholder="Search crew to assign…" />
             )}
             <p className="font-body text-[10px] text-slate-400 mt-1">Add everyone on this job — they'll share one bubble on the board.</p>
-          </div>
-          <div className="mb-2">
-            <FieldLabel>Where</FieldLabel>
-            <Select value={area} onChange={setArea} options={areaOptions} placeholder="Anywhere" />
           </div>
           <div className="mb-3">
             <FieldLabel>Tools / equipment for this job (optional)</FieldLabel>
@@ -4987,34 +4969,25 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                 <p className="font-body font-semibold text-sm text-slate-900">{k === '__none' ? 'Unassigned' : k}</p>
                 {hasCourses && crew[k]?.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{crew[k].course}</span>}
                 {crew[k]?.lang && crew[k].lang !== 'en' && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{(CREW_LANGS.find(([c]) => c === crew[k].lang) || [])[1] || crew[k].lang}</span>}
-                <span className="font-body text-[10px] text-slate-400 ml-auto">{groups[k].filter((t) => t.status === 'done').length}/{groups[k].length} done</span>
+                <span className="font-body text-[10px] text-slate-400 ml-auto">{groups[k].length} job{groups[k].length !== 1 ? 's' : ''}</span>
               </div>
               <div className="space-y-1.5">
                 {groups[k].map((t) => {
-                  const st = TASK_STATUS[t.status] || TASK_STATUS.todo
                   const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
                   const lang = crew[k]?.lang
                   const jobText = txGet(tx, lang, t.job) || t.job
                   return (
-                    <div key={t.id} className="flex items-start gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: '#EEF2F0', backgroundColor: t.status === 'done' ? '#F7FBF8' : 'white' }}>
-                      <button onClick={() => cycle(t)} className="font-body text-[10px] font-bold px-2 py-1 rounded-full border shrink-0 w-16 text-center mt-0.5" style={{ backgroundColor: st.bg, color: st.fg, borderColor: st.bd }}>{st.label}</button>
+                    <div key={t.id} className="flex items-start gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: '#EEF2F0', backgroundColor: 'white' }}>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <p className="font-body text-[13px] font-semibold text-slate-800 truncate" style={t.status === 'done' ? { textDecoration: 'line-through', color: '#94A3B8' } : {}}>{jobText}</p>
-                          {course === 'all' && hasCourses && t.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{t.course}</span>}
-                        </div>
+                        <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{jobText}</p>
                         {jobText !== t.job && <p className="font-body text-[10px] text-slate-400 italic truncate">{t.job}</p>}
-                        {t.area && <p className="font-body text-[10px] text-slate-400 truncate">{t.area}</p>}
                         {tools.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
                             {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}
                           </div>
                         )}
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <input type="number" inputMode="numeric" value={t.minutes ?? ''} onChange={(e) => setMinutes(t, e.target.value === '' ? null : Number(e.target.value))} placeholder="min" className="w-12 border border-slate-200 rounded-lg px-1.5 py-1 text-[11px] font-body text-center" title="Minutes taken" />
-                        {manage && <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition" aria-label="Remove"><Trash2 size={14} /></button>}
-                      </div>
+                      {manage && <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0 mt-0.5" aria-label="Remove"><Trash2 size={14} /></button>}
                     </div>
                   )
                 })}
@@ -5026,21 +4999,18 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
         <div className="space-y-3">
           {jobKeys.map((jk) => {
             const list = jobGroups[jk]
-            const gdone = list.filter((t) => t.status === 'done').length
             const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
             const open = !!openJobs[jk]
-            const allDone = gdone === list.length
             const alreadyOn = list.map((t) => t.assignee).filter(Boolean)
             return (
               <div key={jk} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
                 {/* Job header bar */}
                 <div className="flex items-center gap-1 pl-3.5 pr-1.5 py-2.5" style={{ backgroundColor: '#F1F7F2' }}>
                   <button onClick={() => toggleJob(jk)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
-                    <ClipboardList size={15} className="shrink-0" style={{ color: allDone ? FERN : '#94A3B8' }} />
+                    <ClipboardList size={15} className="shrink-0" style={{ color: FERN }} />
                     <p className="font-body font-bold text-sm text-slate-900 truncate">{jk}</p>
                     <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>
                   </button>
-                  <span className="font-body text-[10px] font-semibold shrink-0 mr-1" style={{ color: allDone ? FERN : '#94A3B8' }}>{gdone}/{list.length}</span>
                   {manage && <button onClick={() => { setAddingJob(addingJob === jk ? null : jk); setOpenJobs((p) => ({ ...p, [jk]: true })) }} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition" style={{ backgroundColor: addingJob === jk ? FERN : 'transparent', color: addingJob === jk ? 'white' : '#64748B' }} aria-label="Add person to this job"><UserPlus size={15} /></button>}
                   {manage && <button onClick={() => removeJobGroup(jk)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-500 transition" aria-label="Remove job"><Trash2 size={14} /></button>}
                   <button onClick={() => toggleJob(jk)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" aria-label={open ? 'Collapse' : 'Expand'}><ChevronRight size={16} className="text-slate-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></button>
@@ -5069,26 +5039,18 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                   )}
                   <div className="space-y-1.5">
                     {list.map((t) => {
-                      const st = TASK_STATUS[t.status] || TASK_STATUS.todo
                       const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
                       const lang = crew[t.assignee]?.lang
-                      const stripe = t.status === 'done' ? FERN : t.status === 'doing' ? GOLD : '#CBD5E1'
                       return (
-                        <div key={t.id} className="flex items-center gap-2 rounded-lg" style={{ borderLeft: `4px solid ${stripe}`, backgroundColor: t.status === 'done' ? '#F7FBF8' : '#FAFAF7' }}>
+                        <div key={t.id} className="flex items-center gap-2 rounded-lg" style={{ borderLeft: `4px solid ${FERN}`, backgroundColor: '#FAFAF7' }}>
                           <div className="min-w-0 flex-1 py-2 pl-2.5">
-                            <div className="flex items-center gap-1.5">
-                              <p className="font-body text-[13px] font-semibold text-slate-800 truncate" style={t.status === 'done' ? { color: '#94A3B8' } : {}}>{t.assignee || 'Unassigned'}</p>
-                              {course === 'all' && hasCourses && t.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{t.course}</span>}
-                            </div>
-                            {(t.area || tools.length > 0) && (
+                            <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee || 'Unassigned'}</p>
+                            {tools.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-0.5 items-center">
-                                {t.area && <span className="font-body text-[10px] text-slate-400">{t.area}</span>}
                                 {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}
                               </div>
                             )}
                           </div>
-                          <button onClick={() => cycle(t)} className="font-body text-[10px] font-bold px-2 py-1 rounded-full border shrink-0 w-16 text-center" style={{ backgroundColor: st.bg, color: st.fg, borderColor: st.bd }}>{st.label}</button>
-                          <input type="number" inputMode="numeric" value={t.minutes ?? ''} onChange={(e) => setMinutes(t, e.target.value === '' ? null : Number(e.target.value))} placeholder="min" className="w-12 border border-slate-200 rounded-lg px-1.5 py-1 text-[11px] font-body text-center shrink-0" title="Minutes taken" />
                           {manage && <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0 pr-2" aria-label="Remove"><Trash2 size={14} /></button>}
                         </div>
                       )
@@ -5102,7 +5064,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
         </div>
       )}
 
-      <p className="font-body text-[10px] text-slate-400 mt-4 text-center">Tap a job to open it. Move each person To&nbsp;do → Doing → Done and add minutes as they finish — that's what powers the Time &amp; Efficiency view.</p>
+      <p className="font-body text-[10px] text-slate-400 mt-4 text-center">Tap a job to open it and see who's on it. Add people with the + on each job.</p>
     </div>
   )
 }

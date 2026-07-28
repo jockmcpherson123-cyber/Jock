@@ -141,10 +141,8 @@ export default function CrewBoard() {
           <div style={{ columnWidth: 360, columnGap: '1.1vw' }}>
             {jobKeys.map((jk) => {
               const list = jobGroups[jk]
-              const gdone = list.filter((t) => t.status === 'done').length
               const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
               const variants = langs.map((l) => txGet(tx, l, jk)).filter(Boolean)
-              const allDone = gdone === list.length
               return (
                 <div key={jk} style={{ breakInside: 'avoid', WebkitColumnBreakInside: 'avoid', marginBottom: '1.1vw', background: '#FBFAF6', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.28)' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '0.55vw 0.8vw', background: '#E6EDE4', borderBottom: '1px solid #D3DCD2' }}>
@@ -152,7 +150,7 @@ export default function CrewBoard() {
                       <span style={{ fontSize: 'clamp(15px,1.4vw,26px)', fontWeight: 800, color: '#1A2A1F' }}>{jk}</span>
                       {variants.length > 0 && <span style={{ fontSize: 'clamp(12px,1.15vw,21px)', fontWeight: 600, color: '#5E7A67' }}> · {variants.join(' · ')}</span>}
                     </div>
-                    <span style={{ fontSize: 'clamp(11px,1vw,17px)', fontWeight: 700, color: allDone ? FERN : '#8A9A8E', fontVariantNumeric: 'tabular-nums' }}>{gdone}/{list.length}</span>
+                    <span style={{ fontSize: 'clamp(11px,1vw,17px)', fontWeight: 700, color: '#8A9A8E', fontVariantNumeric: 'tabular-nums' }}>{list.length}</span>
                   </div>
                   {(() => {
                     const nt = (list.find((t) => t.notes) || {}).notes
@@ -169,12 +167,11 @@ export default function CrewBoard() {
                     {list.map((t) => {
                       const lang = crew[t.assignee]?.lang
                       const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => txGet(tx, lang, tool) || tool)
-                      const detail = [t.area, tools.join(' · ')].filter(Boolean).join(' · ')
-                      const stripe = t.status === 'done' ? FERN : t.status === 'doing' ? GOLD : '#BFC9C1'
+                      const detail = tools.join(' · ')
                       return (
-                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.4vw 0.7vw', borderLeft: `5px solid ${stripe}`, borderBottom: '1px solid #EFEEE6', background: t.status === 'done' ? '#F3F7F2' : 'transparent' }}>
+                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.4vw 0.7vw', borderLeft: `5px solid ${FERN}`, borderBottom: '1px solid #EFEEE6' }}>
                           <div style={{ minWidth: 0, flex: 1 }}>
-                            <span style={{ fontSize: 'clamp(13px,1.2vw,22px)', fontWeight: 600, color: t.status === 'done' ? '#9AA79E' : '#23241E', textDecoration: t.status === 'done' ? 'line-through' : 'none' }}>{t.assignee || 'Unassigned'}</span>
+                            <span style={{ fontSize: 'clamp(13px,1.2vw,22px)', fontWeight: 600, color: '#23241E' }}>{t.assignee || 'Unassigned'}</span>
                             {detail && <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#7C8A80' }}>{'  ·  ' + detail}</span>}
                           </div>
                           {!course && t.course && <span style={{ fontSize: 'clamp(9px,0.8vw,14px)', fontWeight: 700, color: '#3B5BA5', background: '#E7ECF8', padding: '1px 7px', borderRadius: 999, whiteSpace: 'nowrap' }}>{t.course}</span>}
