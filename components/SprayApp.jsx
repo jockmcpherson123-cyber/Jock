@@ -5539,8 +5539,16 @@ const practiceErrorText = (e) => saveErrorText(e, 'supabase/phase11.sql')
 
 function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
   const greenOptions = greenOptionsFor(courseInfo)
+  const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
+  const hasCourses = courseNames.length >= 2
+  const [courseTab, setCourseTab] = useState(courseNames[0] || 'all')
+  // Greens shown in the picker for the active course tab (kept fully separate so
+  // Blue and Gold never mix). "Other" holds the practice/putting greens.
+  const pickerGreens = !hasCourses ? greenOptions
+    : courseTab === 'other' ? greenOptions.filter((g) => !courseNames.some((n) => g.startsWith(n)))
+    : greenOptions.filter((g) => g.startsWith(courseTab))
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [unit, setUnit] = useState('L')
+  const [unit] = useState('L') // we log clippings in litres
   const [notes, setNotes] = useState('')
   const [selected, setSelected] = useState([]) // green names being logged
   const [vols, setVols] = useState({}) // green -> volume
@@ -5580,8 +5588,15 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
         <p className="font-body text-[11px] text-slate-400 mb-3">Pick every green you collected today, then enter each one's volume — logs them all at once.</p>
 
         <FieldLabel>Greens</FieldLabel>
+        {hasCourses && (
+          <div className="flex gap-2 mt-1 mb-2 overflow-x-auto pb-1">
+            {[...courseNames, 'other'].map((c) => (
+              <button key={c} type="button" onClick={() => setCourseTab(c)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={courseTab === c ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{c === 'other' ? 'Practice / Other' : c}</button>
+            ))}
+          </div>
+        )}
         <div className="mt-1 mb-3">
-          <PeoplePicker options={greenOptions} selected={selected} onToggle={toggleGreen} placeholder="Search greens — e.g. Blue 3, Gold, Putting…" max={40} />
+          <PeoplePicker options={pickerGreens} selected={selected} onToggle={toggleGreen} placeholder={hasCourses ? `Search ${courseTab === 'other' ? 'practice' : courseTab} greens…` : 'Search greens — e.g. Blue 3, Gold, Putting…'} max={40} />
         </div>
 
         {selected.length > 0 && (
@@ -5605,7 +5620,7 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
           </div>
           <div>
             <FieldLabel>Unit</FieldLabel>
-            <Select value={unit} onChange={setUnit} options={['L', 'baskets', 'gal', 'ft³']} />
+            <div className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-slate-50 text-slate-600">L (litres)</div>
           </div>
         </div>
         <div className="mb-3">
