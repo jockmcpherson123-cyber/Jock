@@ -18,7 +18,7 @@ import {
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
-  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, productRateForN,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, productRateForN, eiqLoad,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -2647,7 +2647,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   }
   const startNew = () => {
     setEditing('new')
-    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '', caseSize: '', ozPerCase: '', costPerCase: '', moaGroup: '', rotationDays: '', sprayInterval: '' })
+    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '', eiq: '', caseSize: '', ozPerCase: '', costPerCase: '', moaGroup: '', rotationDays: '', sprayInterval: '' })
   }
   const cancelEdit = () => { setEditing(null); setDraft(null) }
 
@@ -2670,6 +2670,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       pPerGal: draft.pPerGal === '' || draft.pPerGal == null ? 0 : parseFloat(draft.pPerGal),
       kPerGal: draft.kPerGal === '' || draft.kPerGal == null ? 0 : parseFloat(draft.kPerGal),
       activePct: draft.activePct === '' || draft.activePct == null ? null : parseFloat(draft.activePct),
+      eiq: draft.eiq === '' || draft.eiq == null ? null : parseFloat(draft.eiq),
       ozPerCase: draft.ozPerCase === '' || draft.ozPerCase == null ? null : parseFloat(draft.ozPerCase),
       costPerCase: draft.costPerCase === '' || draft.costPerCase == null ? null : parseFloat(draft.costPerCase),
       moaGroup: (draft.moaGroup || '').trim(),
@@ -2938,6 +2939,11 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                     <FieldLabel>Active %</FieldLabel>
                     <input type="number" step="any" value={draft.activePct ?? ''} onChange={(e) => setDraft({ ...draft, activePct: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 20.3" />
                   </div>
+                </div>
+                <div>
+                  <FieldLabel>EIQ value (environmental impact)</FieldLabel>
+                  <input type="number" step="any" value={draft.eiq ?? ''} onChange={(e) => setDraft({ ...draft, eiq: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="Cornell EIQ for the active ingredient" />
+                  <p className="font-body text-[10px] text-slate-500 mt-1">Look up the active ingredient's EIQ at <span className="font-semibold">eiq.cornell-ipm.org</span>. With this + Active %, the Reports → Impact view scores your program's environmental load. Lower is better.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -3261,7 +3267,7 @@ function Reports({ sheets, products, areas }) {
       </div>
 
       <div className="flex gap-2 mt-4 mb-1 overflow-x-auto pb-1">
-        {[['npk', 'Nutrients'], ['cost', 'Cost'], ['rotation', 'Rotation'], ['usage', 'Product Usage'], ['history', 'Spray History'], ['since', 'Days Since']].map(([k, l]) => (
+        {[['npk', 'Nutrients'], ['cost', 'Cost'], ['impact', 'Impact (EIQ)'], ['rotation', 'Rotation'], ['usage', 'Product Usage'], ['history', 'Spray History'], ['since', 'Days Since']].map(([k, l]) => (
           <button key={k} onClick={() => setReport(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap transition" style={report === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
@@ -3269,6 +3275,7 @@ function Reports({ sheets, products, areas }) {
       </div>
 
       {report === 'cost' && <CostReport sheets={sheets} products={products} areas={areas} />}
+      {report === 'impact' && <ImpactReport sheets={sheets} products={products} areas={areas} />}
       {report === 'rotation' && <RotationReport sheets={sheets} products={products} />}
       {report === 'usage' && <ProductUsageReport sheets={sheets} products={products} areas={areas} />}
       {report === 'history' && <SprayHistoryReport sheets={sheets} />}
@@ -3497,6 +3504,103 @@ function CostReport({ sheets, products, areas }) {
                 </div>
                 <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
                   <div className="h-full rounded-full" style={{ width: `${Math.max(3, Math.round((r.cost / max) * 100))}%`, backgroundColor: FERN }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── IMPACT (EIQ) REPORT ──────────────────────────────────────────────────────
+// A relative environmental-load score for the pesticide program (Cornell EIQ
+// Field Use Rating), rolled up by product / area / month. Lower is better.
+function ImpactReport({ sheets, products, areas }) {
+  const [view, setView] = useState('product') // 'product' | 'area' | 'month'
+  const data = eiqLoad(sheets, products, areas)
+  const num = (n) => (n || 0).toLocaleString('en-US')
+  const monthLabel = (m) => { const [y, mm] = m.split('-'); return new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) }
+
+  const lists = {
+    product: data.rows.map((r) => ({ key: r.name, label: r.name, sub: `${r.apps} application${r.apps !== 1 ? 's' : ''}${r.type ? ` · ${r.type}` : ''}`, load: r.load })),
+    area: data.byArea.map((r) => ({ key: r.area, label: r.area, sub: '', load: r.load })),
+    month: data.byMonth.map((r) => ({ key: r.month, label: monthLabel(r.month), sub: '', load: r.load })),
+  }
+  const rows = lists[view]
+  const max = Math.max(1, ...rows.map((r) => r.load))
+
+  const exportCSV = () => {
+    const out = [['Product', 'Type', 'Applications', 'EIQ load']]
+    data.rows.forEach((r) => out.push([r.name, r.type, r.apps, r.load]))
+    out.push([]); out.push(['Area', 'EIQ load'])
+    data.byArea.forEach((r) => out.push([r.area, r.load]))
+    out.push([]); out.push(['Month', 'EIQ load'])
+    data.byMonth.forEach((r) => out.push([r.month, r.load]))
+    out.push([]); out.push(['Total', data.total])
+    downloadCSV(out, `EIQ_Impact_${new Date().toISOString().slice(0, 10)}.csv`)
+  }
+
+  const hasData = data.rows.length > 0
+  return (
+    <div className="mt-4">
+      <div className="rounded-2xl p-4 text-white shadow-sm mb-4 flex items-end justify-between" style={{ backgroundColor: FERN }}>
+        <div>
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-80">Season environmental load (EIQ)</p>
+          <p className="font-display text-3xl font-bold mt-0.5">{num(data.total)}</p>
+          <p className="font-body text-[10px] opacity-80 mt-0.5">Relative score — lower is better. Compare month to month and year to year.</p>
+        </div>
+        {hasData && (
+          <button onClick={exportCSV} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: GOLD, color: FOREST }}>
+            <Package size={14} /> Export
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-start gap-2 rounded-xl bg-slate-50 border border-slate-100 p-3 mb-3">
+        <Info size={15} className="text-slate-400 shrink-0 mt-0.5" />
+        <p className="font-body text-[11px] text-slate-500">EIQ = Cornell's Environmental Impact Quotient — a public measure of a pesticide's risk to applicators, consumers, and wildlife. The score here is <b>EIQ × active % × amount applied</b>, summed across your sprays. It's for comparison over time, not an absolute safety limit. Fertilizers and wetting agents aren't scored.</p>
+      </div>
+
+      {data.missing.length > 0 && (
+        <div className="bg-amber-50 rounded-2xl border border-amber-200 p-4 mb-4">
+          <div className="flex items-start gap-2 mb-1.5">
+            <AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={16} />
+            <p className="font-body text-sm font-bold text-amber-800">Some products aren't scored yet</p>
+          </div>
+          <p className="font-body text-[11px] text-amber-700 mb-2">Add an EIQ value and Active % in Chemical Library (look the active ingredient up at eiq.cornell-ipm.org) so these count.</p>
+          <div className="flex flex-wrap gap-1.5">
+            {data.missing.map((m) => <span key={m} className="font-body text-[11px] font-semibold px-2 py-0.5 rounded-full bg-white text-amber-700 border border-amber-200">{m}</span>)}
+          </div>
+        </div>
+      )}
+
+      {!hasData ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
+          No scored sprays yet. Add EIQ values in Chemical Library and approve a pesticide spray to see impact here.
+        </div>
+      ) : (
+        <>
+          <div className="flex gap-2 mb-3">
+            {[['product', 'By Product'], ['area', 'By Area'], ['month', 'By Month']].map(([k, l]) => (
+              <button key={k} onClick={() => setView(k)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition" style={view === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+                {l}
+              </button>
+            ))}
+          </div>
+          <div className="space-y-2">
+            {rows.map((r) => (
+              <div key={r.key} className="bg-white rounded-2xl border border-black/5 p-3.5 shadow-sm">
+                <div className="flex items-center justify-between gap-3 mb-1.5">
+                  <div className="min-w-0">
+                    <p className="font-body text-sm font-semibold text-slate-800 truncate">{r.label}</p>
+                    {r.sub && <p className="font-body text-[11px] text-slate-400">{r.sub}</p>}
+                  </div>
+                  <p className="font-display text-base font-bold text-slate-900 shrink-0">{num(r.load)}</p>
+                </div>
+                <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${Math.max(3, Math.round((r.load / max) * 100))}%`, backgroundColor: GOLD }} />
                 </div>
               </div>
             ))}
