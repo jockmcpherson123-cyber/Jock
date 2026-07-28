@@ -789,14 +789,15 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
         if (pgr.length === 0) return
         if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: pgr }
       })
-    return Object.keys(areas).map((area) => {
+    // Iterate the areas that actually have a PGR spray (by the sheet's own area
+    // name), so a name mismatch with Settings can't hide the bars.
+    return Object.keys(lastByArea).map((area) => {
       const last = lastByArea[area]
-      if (!last) return { area, last: null, gdd: null, pct: 0, status: 'none' }
       const gdd = gddSince(wx.season, last.date, 32)
       const pct = gdd != null && PGR_TARGET > 0 ? Math.min(100, Math.round((gdd / PGR_TARGET) * 100)) : 0
       const status = gdd == null ? 'none' : gdd >= PGR_TARGET ? 'due' : gdd >= PGR_TARGET * 0.8 ? 'soon' : 'ok'
       return { area, last, gdd, pct, status }
-    }).filter((r) => r.last).sort((a, b) => (b.gdd ?? -1) - (a.gdd ?? -1))
+    }).sort((a, b) => (b.gdd ?? -1) - (a.gdd ?? -1))
   })()
   const pgrAlerts = pgrRows.filter((r) => r.status === 'due' || r.status === 'soon').length
 
