@@ -15,12 +15,6 @@ const GOLD = '#C9A84C'
 const todayStr = () => new Date().toISOString().slice(0, 10)
 const prettyDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 
-const STATUS = {
-  todo: { label: 'To do', bg: 'rgba(255,255,255,0.08)', fg: '#CBD5E1', bd: 'rgba(255,255,255,0.18)' },
-  doing: { label: 'Doing', bg: GOLD, fg: FOREST, bd: GOLD },
-  done: { label: 'Done', bg: FERN, fg: '#FFFFFF', bd: FERN },
-}
-
 export default function CrewBoard() {
   const [date, setDate] = useState(todayStr())
   // Optional ?course=Blue in the URL gives this TV its own course board.
@@ -118,9 +112,14 @@ export default function CrewBoard() {
         {/* Progress strip */}
         {status === 'ok' && shown.length > 0 && (
           <div style={{ marginBottom: '1.8vw' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'clamp(13px,1.2vw,22px)', color: '#C7CFC2', marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, fontSize: 'clamp(13px,1.2vw,22px)', color: '#C7CFC2', marginBottom: 8, flexWrap: 'wrap' }}>
               <span><b style={{ color: '#F3F0E6' }}>{shown.length}</b> jobs · <b style={{ color: '#F3F0E6' }}>{doneCount}</b> done</span>
-              <span>{pct}% complete</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 14, fontSize: 'clamp(11px,1vw,17px)' }}>
+                {[['#BFC9C1', 'To do'], [GOLD, 'Doing'], [FERN, 'Done']].map(([c, l]) => (
+                  <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 14, height: 6, borderRadius: 3, background: c, display: 'inline-block' }} />{l}</span>
+                ))}
+                <span style={{ color: '#F3F0E6', fontWeight: 700 }}>{pct}%</span>
+              </span>
             </div>
             <div style={{ height: 14, borderRadius: 999, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
               <div style={{ height: '100%', width: `${pct}%`, background: GOLD, borderRadius: 999, transition: 'width 0.6s ease' }} />
@@ -139,33 +138,35 @@ export default function CrewBoard() {
         ) : shown.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '12vh 0', color: '#8AA394', fontSize: 'clamp(18px,2vw,34px)', fontFamily: 'ui-serif, Georgia, serif' }}>No jobs posted yet today.</div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.4vw', alignItems: 'start' }}>
+          <div style={{ columnWidth: 360, columnGap: '1.1vw' }}>
             {jobKeys.map((jk) => {
               const list = jobGroups[jk]
               const gdone = list.filter((t) => t.status === 'done').length
               const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
+              const variants = langs.map((l) => txGet(tx, l, jk)).filter(Boolean)
+              const allDone = gdone === list.length
               return (
-                <div key={jk} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 18, overflow: 'hidden' }}>
-                  <div style={{ padding: '0.9vw 1.1vw', background: 'rgba(58,107,74,0.35)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                      <span style={{ fontSize: 'clamp(16px,1.5vw,28px)', fontWeight: 700 }}>{jk}{list.length > 1 ? ` · ${list.length}` : ''}</span>
-                      <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#B8C2B0', fontVariantNumeric: 'tabular-nums' }}>{gdone}/{list.length}</span>
+                <div key={jk} style={{ breakInside: 'avoid', WebkitColumnBreakInside: 'avoid', marginBottom: '1.1vw', background: '#FBFAF6', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.28)' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '0.55vw 0.8vw', background: '#E6EDE4', borderBottom: '1px solid #D3DCD2' }}>
+                    <div style={{ flex: 1, minWidth: 0, lineHeight: 1.15 }}>
+                      <span style={{ fontSize: 'clamp(15px,1.4vw,26px)', fontWeight: 800, color: '#1A2A1F' }}>{jk}</span>
+                      {variants.length > 0 && <span style={{ fontSize: 'clamp(12px,1.15vw,21px)', fontWeight: 600, color: '#5E7A67' }}> · {variants.join(' · ')}</span>}
                     </div>
-                    {langs.map((l) => <div key={l} style={{ fontSize: 'clamp(11px,1vw,17px)', color: GOLD, fontStyle: 'italic', marginTop: 2 }}>{txGet(tx, l, jk) || jk}</div>)}
+                    <span style={{ fontSize: 'clamp(11px,1vw,17px)', fontWeight: 700, color: allDone ? FERN : '#8A9A8E', fontVariantNumeric: 'tabular-nums' }}>{gdone}/{list.length}</span>
                   </div>
-                  <div style={{ padding: '0.7vw 0.8vw', display: 'flex', flexDirection: 'column', gap: '0.6vw' }}>
+                  <div>
                     {list.map((t) => {
-                      const st = STATUS[t.status] || STATUS.todo
                       const lang = crew[t.assignee]?.lang
                       const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => txGet(tx, lang, tool) || tool)
-                      const sub = [t.area, tools.join(', ')].filter(Boolean).join(' · ')
+                      const detail = [t.area, tools.join(' · ')].filter(Boolean).join(' · ')
+                      const stripe = t.status === 'done' ? FERN : t.status === 'doing' ? GOLD : '#BFC9C1'
                       return (
-                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.55vw 0.7vw', borderRadius: 12, background: t.status === 'done' ? 'rgba(58,107,74,0.14)' : 'rgba(0,0,0,0.14)' }}>
-                          <span style={{ fontSize: 'clamp(10px,0.85vw,15px)', fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', padding: '4px 10px', borderRadius: 999, background: st.bg, color: st.fg, border: `1px solid ${st.bd}`, whiteSpace: 'nowrap' }}>{st.label}</span>
+                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.4vw 0.7vw', borderLeft: `5px solid ${stripe}`, borderBottom: '1px solid #EFEEE6', background: t.status === 'done' ? '#F3F7F2' : 'transparent' }}>
                           <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ fontSize: 'clamp(15px,1.35vw,24px)', fontWeight: 600, color: t.status === 'done' ? '#8AA394' : '#F3F0E6', textDecoration: t.status === 'done' ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.assignee || 'Unassigned'}</div>
-                            {sub && <div style={{ fontSize: 'clamp(11px,1vw,17px)', color: '#8AA394', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
+                            <span style={{ fontSize: 'clamp(13px,1.2vw,22px)', fontWeight: 600, color: t.status === 'done' ? '#9AA79E' : '#23241E', textDecoration: t.status === 'done' ? 'line-through' : 'none' }}>{t.assignee || 'Unassigned'}</span>
+                            {detail && <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#7C8A80' }}>{'  ·  ' + detail}</span>}
                           </div>
+                          {!course && t.course && <span style={{ fontSize: 'clamp(9px,0.8vw,14px)', fontWeight: 700, color: '#3B5BA5', background: '#E7ECF8', padding: '1px 7px', borderRadius: 999, whiteSpace: 'nowrap' }}>{t.course}</span>}
                         </div>
                       )
                     })}
