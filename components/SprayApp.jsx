@@ -4635,7 +4635,7 @@ function Combobox({ value, onChange, options = [], placeholder, accent = FOREST,
 
 // Multi-select searchable picker — type to filter a list (crew), tap to add each
 // as a chip. For "Assign to," where a job can go to several people at once.
-function PeoplePicker({ options = [], selected = [], onToggle, placeholder }) {
+function PeoplePicker({ options = [], selected = [], onToggle, placeholder, max = 8 }) {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
   const wrapRef = useRef(null)
@@ -4644,8 +4644,9 @@ function PeoplePicker({ options = [], selected = [], onToggle, placeholder }) {
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
-  const query = q.trim().toLowerCase()
-  const matches = options.filter((o) => !selected.includes(o) && String(o).toLowerCase().includes(query)).slice(0, 8)
+  // Match on all typed words in any order — so "blue 3" finds "Blue Course Green 3".
+  const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const matches = options.filter((o) => { const s = String(o).toLowerCase(); return !selected.includes(o) && terms.every((t) => s.includes(t)) }).slice(0, max)
   return (
     <div ref={wrapRef}>
       {selected.length > 0 && (
@@ -5539,7 +5540,7 @@ const practiceErrorText = (e) => saveErrorText(e, 'supabase/phase11.sql')
 function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
   const greenOptions = greenOptionsFor(courseInfo)
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [unit, setUnit] = useState('baskets')
+  const [unit, setUnit] = useState('L')
   const [notes, setNotes] = useState('')
   const [selected, setSelected] = useState([]) // green names being logged
   const [vols, setVols] = useState({}) // green -> volume
@@ -5579,15 +5580,8 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
         <p className="font-body text-[11px] text-slate-400 mb-3">Pick every green you collected today, then enter each one's volume — logs them all at once.</p>
 
         <FieldLabel>Greens</FieldLabel>
-        <div className="flex flex-wrap gap-1.5 mt-1 mb-3">
-          {greenOptions.map((g) => {
-            const on = selected.includes(g)
-            return (
-              <button key={g} type="button" onClick={() => toggleGreen(g)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>
-                {g.replace('Green ', '')}
-              </button>
-            )
-          })}
+        <div className="mt-1 mb-3">
+          <PeoplePicker options={greenOptions} selected={selected} onToggle={toggleGreen} placeholder="Search greens — e.g. Blue 3, Gold, Putting…" max={40} />
         </div>
 
         {selected.length > 0 && (
@@ -5596,7 +5590,7 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
             <div className="grid grid-cols-2 gap-2 mt-1">
               {[...selected].sort(sortGreens).map((g) => (
                 <div key={g} className="flex items-center gap-2">
-                  <span className="font-body text-xs font-semibold text-slate-600 w-20 shrink-0 truncate">{g}</span>
+                  <span className="font-body text-xs font-semibold text-slate-600 w-28 shrink-0 truncate" title={g}>{g.replace('Green ', '')}</span>
                   <input type="number" step="any" value={vols[g] ?? ''} onChange={(e) => setVol(g, e.target.value)} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="0" />
                 </div>
               ))}
@@ -5611,7 +5605,7 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
           </div>
           <div>
             <FieldLabel>Unit</FieldLabel>
-            <Select value={unit} onChange={setUnit} options={['baskets', 'L', 'gal', 'ft³']} />
+            <Select value={unit} onChange={setUnit} options={['L', 'baskets', 'gal', 'ft³']} />
           </div>
         </div>
         <div className="mb-3">
