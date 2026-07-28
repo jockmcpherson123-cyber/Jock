@@ -705,7 +705,7 @@ function SprayOpsModule({ user }) {
         )}
         {route === 'weather' && <Weather location={location} onGoToSettings={() => manage && setRoute('settings')} />}
         {route === 'program' && manage && <AnnualProgram areas={areas} products={products} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
-        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} />}
+        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
           <SettingsPage
             areas={areas} operators={operators} directors={directors} targets={targets}
@@ -1639,6 +1639,85 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
       <tr><td style="${L}">Status</td><td style="${V}" colspan="3">${sheet.status === 'approved' ? 'APPROVED' : 'PENDING APPROVAL'}</td></tr>
     </tbody></table>
     <p style="font-size:9px;color:#888;margin-top:20px;text-align:center">Printed ${esc(new Date().toLocaleString())} — Sheet ID: ${esc(sheet.id)}</p>
+  </div>`
+}
+
+// Build a one-tap board report for a whole season: spend, environmental impact
+// (EIQ), resistance rotation, nutrients, and the full application log — all from
+// the sprays already on record. Returns an HTML body for the shared PDF pipeline.
+function seasonReportHTML(allSheets, products, areas, courseInfo = {}, year) {
+  const sheets = (allSheets || []).filter((s) => String(s.date || '').slice(0, 4) === String(year))
+  const cost = productCosts(sheets, products, areas)
+  const eiq = eiqLoad(sheets, products, areas)
+  const npk = aggregateNPK(sheets, products, areas)
+  const rot = rotationByArea(sheets, products)
+  const done = sheets.filter((s) => s.status === 'approved' || s.completed)
+
+  const money = (n) => `$${(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const num = (n) => (n || 0).toLocaleString('en-US')
+  const monthLabel = (m) => { const [y, mm] = m.split('-'); return new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) }
+  const TH = 'border:1px solid #16291F;padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;color:#fff'
+  const R = 'border:1px solid #ccc;padding:5px 8px;font-size:11px'
+  const RB = R + ';font-weight:700'
+  const tbl = 'width:100%;border-collapse:collapse;margin-bottom:14px'
+  const h2 = 'font-size:13px;font-weight:700;color:#16291F;margin:18px 0 6px;border-bottom:1px solid #C9A84C;padding-bottom:3px'
+
+  const totalN = Math.round(npk.reduce((s, r) => s + r.n, 0) * 10) / 10
+  const totalP = Math.round(npk.reduce((s, r) => s + r.p, 0) * 10) / 10
+  const totalK = Math.round(npk.reduce((s, r) => s + r.k, 0) * 10) / 10
+
+  const kpi = (label, value) => `<td style="border:1px solid #16291F;padding:8px;text-align:center;width:25%">
+    <div style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:#555">${label}</div>
+    <div style="font-size:17px;font-weight:700;color:#16291F;margin-top:2px">${value}</div></td>`
+
+  const costMonth = cost.byMonth.map((r) => `<tr><td style="${R}">${monthLabel(r.month)}</td><td style="${RB};text-align:right">${money(r.cost)}</td></tr>`).join('') || `<tr><td style="${R}" colspan="2">No priced sprays.</td></tr>`
+  const costArea = cost.byArea.map((r) => `<tr><td style="${R}">${esc(r.area)}</td><td style="${RB};text-align:right">${money(r.cost)}</td></tr>`).join('') || `<tr><td style="${R}" colspan="2">No priced sprays.</td></tr>`
+  const eiqRows = eiq.rows.slice(0, 12).map((r) => `<tr><td style="${R}">${esc(r.name)}</td><td style="${R}">${esc(r.type)}</td><td style="${R};text-align:right">${r.apps}</td><td style="${RB};text-align:right">${num(r.load)}</td></tr>`).join('') || `<tr><td style="${R}" colspan="4">No scored pesticide sprays. Add EIQ values in the Chemical Library.</td></tr>`
+
+  // Resistance flags — any same-group repeat inside its window.
+  const flags = []
+  Object.entries(rot).forEach(([area, list]) => list.forEach((e) => { if (e.tooSoon) flags.push({ area, ...e }) }))
+  const flagRows = flags.length
+    ? flags.map((f) => `<tr><td style="${R}">${esc(f.area)}</td><td style="${R}">Group ${esc(f.group)}</td><td style="${R}">${esc(f.product)}</td><td style="${R}">${f.prev?.days}d after ${esc(f.prev?.product || '')}</td></tr>`).join('')
+    : `<tr><td style="${R};color:#2E7D32" colspan="4">No resistance-window violations — modes of action were rotated well.</td></tr>`
+
+  const npkArea = {}
+  npk.forEach((r) => { const a = (npkArea[r.area] ||= { area: r.area, n: 0, p: 0, k: 0 }); a.n += r.n; a.p += r.p; a.k += r.k })
+  const npkRows = Object.values(npkArea).map((a) => `<tr><td style="${R}">${esc(a.area)}</td><td style="${R};text-align:right">${Math.round(a.n * 10) / 10}</td><td style="${R};text-align:right">${Math.round(a.p * 10) / 10}</td><td style="${R};text-align:right">${Math.round(a.k * 10) / 10}</td></tr>`).join('') || `<tr><td style="${R}" colspan="4">No fertilizer recorded.</td></tr>`
+
+  const log = [...done].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+    .map((s) => `<tr><td style="${R}">${esc(s.date || '')}</td><td style="${R}">${esc(s.area || '')}</td><td style="${R}">${esc((s.products || []).filter((p) => p.product).map((p) => p.product).join(', '))}</td><td style="${R}">${s.completed ? 'Sprayed' : 'Approved'}</td></tr>`).join('') || `<tr><td style="${R}" colspan="4">No applications recorded.</td></tr>`
+
+  return `<div style="font-family:Arial,sans-serif;color:#111">
+    <div style="text-align:center;border-bottom:2px solid #16291F;padding-bottom:10px;margin-bottom:6px">
+      <div style="font-size:19px;font-weight:700">${esc(courseInfo.clubName || 'Golf Club')}</div>
+      <div style="font-size:12px;color:#555">${esc(courseInfo.deptName || 'Grounds Operations')} — ${esc(year)} Season Report</div>
+    </div>
+    <table style="${tbl}"><tbody><tr>
+      ${kpi('Applications', num(done.length))}
+      ${kpi('Total Spend', money(cost.totalCost))}
+      ${kpi('EIQ Load', num(eiq.total))}
+      ${kpi('Fertilizer N (lbs)', num(totalN))}
+    </tr></tbody></table>
+
+    <div style="${h2}">Program Cost</div>
+    <table style="${tbl}"><thead><tr style="background:#16291F"><th style="${TH}">Month</th><th style="${TH};text-align:right">Spend</th></tr></thead><tbody>${costMonth}</tbody></table>
+    <table style="${tbl}"><thead><tr style="background:#16291F"><th style="${TH}">Area</th><th style="${TH};text-align:right">Spend</th></tr></thead><tbody>${costArea}</tbody></table>
+
+    <div style="${h2}">Environmental Impact (EIQ)</div>
+    <p style="font-size:10px;color:#555;margin:0 0 6px">Cornell EIQ Field Use Rating summed across pesticide sprays (EIQ × active % × amount applied). Relative score — lower is better. Season total: <b>${num(eiq.total)}</b>.</p>
+    <table style="${tbl}"><thead><tr style="background:#3A6B4A"><th style="${TH}">Product</th><th style="${TH}">Type</th><th style="${TH};text-align:right">Apps</th><th style="${TH};text-align:right">EIQ load</th></tr></thead><tbody>${eiqRows}</tbody></table>
+
+    <div style="${h2}">Resistance &amp; Rotation</div>
+    <table style="${tbl}"><thead><tr style="background:#7C3AED"><th style="${TH}">Area</th><th style="${TH}">Group</th><th style="${TH}">Product</th><th style="${TH}">Repeat</th></tr></thead><tbody>${flagRows}</tbody></table>
+
+    <div style="${h2}">Nutrients Applied (lbs)</div>
+    <table style="${tbl}"><thead><tr style="background:#16291F"><th style="${TH}">Area</th><th style="${TH};text-align:right">N</th><th style="${TH};text-align:right">P</th><th style="${TH};text-align:right">K</th></tr></thead><tbody>${npkRows}<tr><td style="${RB}">Total</td><td style="${RB};text-align:right">${totalN}</td><td style="${RB};text-align:right">${totalP}</td><td style="${RB};text-align:right">${totalK}</td></tr></tbody></table>
+
+    <div style="${h2}">Application Log</div>
+    <table style="${tbl}"><thead><tr style="background:#16291F"><th style="${TH}">Date</th><th style="${TH}">Area</th><th style="${TH}">Products</th><th style="${TH}">Status</th></tr></thead><tbody>${log}</tbody></table>
+
+    <p style="font-size:9px;color:#888;margin-top:16px;text-align:center">Generated ${esc(new Date().toLocaleString())} · ${esc(courseInfo.clubName || '')} ${esc(year)} Season Report</p>
   </div>`
 }
 
@@ -3206,10 +3285,25 @@ function Inventory({ products, deliveries, onAddDelivery }) {
 }
 
 // ── REPORTS ───────────────────────────────────────────────────────────────
-function Reports({ sheets, products, areas }) {
+function Reports({ sheets, products, areas, courseInfo = {} }) {
   const [view, setView] = useState('byArea')
   const [report, setReport] = useState('npk') // 'npk' | 'rotation'
   const npkData = aggregateNPK(sheets, products, areas)
+
+  // Season Report: years that actually have sprays, newest first (default to this
+  // year if it has any, else the most recent year with data).
+  const years = [...new Set((sheets || []).map((s) => String(s.date || '').slice(0, 4)).filter((y) => y.length === 4))].sort().reverse()
+  const thisYear = String(new Date().getFullYear())
+  const [reportYear, setReportYear] = useState(years.includes(thisYear) ? thisYear : (years[0] || thisYear))
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const makeSeasonReport = async () => {
+    setPdfBusy(true)
+    try {
+      const safeClub = (courseInfo.clubName || 'Club').replace(/[^a-z0-9]+/gi, '-')
+      await pdfRecordHTML(seasonReportHTML(sheets, products, areas, courseInfo, reportYear), `Season-Report_${safeClub}_${reportYear}.pdf`)
+    } catch (e) { console.error(e) }
+    setPdfBusy(false)
+  }
 
   const totalN = Math.round(npkData.reduce((s, r) => s + r.n, 0) * 100) / 100
   const totalP = Math.round(npkData.reduce((s, r) => s + r.p, 0) * 100) / 100
@@ -3272,6 +3366,23 @@ function Reports({ sheets, products, areas }) {
             {l}
           </button>
         ))}
+      </div>
+
+      <div className="rounded-2xl border p-3.5 mt-4 mb-1 flex items-center justify-between gap-3 flex-wrap" style={{ backgroundColor: '#F5FAF6', borderColor: '#D8E6DC' }}>
+        <div className="min-w-0">
+          <p className="font-body text-sm font-bold text-slate-800">Season Report</p>
+          <p className="font-body text-[11px] text-slate-500">One PDF for the board — spend, environmental impact, rotation, nutrients &amp; the full spray log.</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {years.length > 0 && (
+            <select value={reportYear} onChange={(e) => setReportYear(e.target.value)} className="border border-slate-200 rounded-full px-3 py-2 text-xs font-body font-semibold bg-white">
+              {years.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          )}
+          <button onClick={makeSeasonReport} disabled={pdfBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 disabled:opacity-50" style={{ backgroundColor: FOREST }}>
+            <Package size={14} /> {pdfBusy ? 'Building…' : 'Season PDF'}
+          </button>
+        </div>
       </div>
 
       {report === 'cost' && <CostReport sheets={sheets} products={products} areas={areas} />}
