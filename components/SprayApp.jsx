@@ -4645,9 +4645,21 @@ function WhiteboardModule({ user }) {
             <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo.clubName || 'Golf Club'}</p>
             <h1 className="font-display text-2xl font-semibold mt-0.5 truncate">{active.label}</h1>
           </div>
-          <a href="/board" target="_blank" rel="noopener noreferrer" className="ml-auto font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Open the live board for the shop TV">
-            <BarChart3 size={13} /> TV board
-          </a>
+          <div className="ml-auto flex items-center gap-1.5 shrink-0">
+            {courses.length >= 2 ? (
+              <>
+                <span className="font-body text-[10px] font-bold uppercase tracking-wide hidden sm:inline" style={{ color: 'rgba(255,255,255,0.5)' }}>TV</span>
+                {courses.map((c) => (
+                  <a key={c.name} href={`/board?course=${encodeURIComponent(c.name)}`} target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-2.5 py-2 rounded-full shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title={`Open the ${c.name} board for a shop TV`}>{c.name}</a>
+                ))}
+                <a href="/board" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-2.5 py-2 rounded-full shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Open the whole-property board">All</a>
+              </>
+            ) : (
+              <a href="/board" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Open the live board for the shop TV">
+                <BarChart3 size={13} /> TV board
+              </a>
+            )}
+          </div>
         </div>
       </div>
 
@@ -4687,11 +4699,12 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState(null)
   const [job, setJob] = useState('')
-  const [assignee, setAssignee] = useState('')
+  const [assignees, setAssignees] = useState([])
   const [area, setArea] = useState('')
   const [equip, setEquip] = useState('')
   const [equipList, setEquipList] = useState([])
   const [course, setCourse] = useState('all')
+  const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
   const [busy, setBusy] = useState(false)
   const [tx, setTx] = useState({})
 
@@ -4722,6 +4735,7 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
   }, [tasks, crewSig])
 
   const addEquip = () => { const v = equip.trim(); if (!v) return; if (!equipList.includes(v)) setEquipList([...equipList, v]); setEquip('') }
+  const toggleAssignee = (name) => setAssignees((prev) => (prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name]))
   const addTask = async () => {
     if (!job.trim()) return
     setBusy(true); setMsg(null)
@@ -4729,9 +4743,13 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
       const tools = [...equipList]
       const leftover = equip.trim()
       if (leftover && !tools.includes(leftover)) tools.push(leftover)
-      const sort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
-      await db.addCrewTask({ date, job: job.trim(), assignee, area, equipment: tools.join(', '), course: activeCourse, status: 'todo', sort })
-      setJob(''); setEquip(''); setEquipList([])
+      const base = { date, job: job.trim(), area, equipment: tools.join(', '), course: activeCourse, status: 'todo' }
+      const startSort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
+      // One row per assigned person (or a single unassigned job) — so each person
+      // keeps their own status, and they group together by job on the board.
+      const people = assignees.length ? assignees : ['']
+      await db.addCrewTasks(people.map((name, i) => ({ ...base, assignee: name, sort: startSort + i })))
+      setJob(''); setEquip(''); setEquipList([]); setAssignees([])
       await reload()
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
     setBusy(false)
@@ -4768,6 +4786,11 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
   view.forEach((t) => { const k = t.assignee || '__none'; (groups[k] = groups[k] || []).push(t) })
   const groupKeys = Object.keys(groups).sort((a, b) => (a === '__none' ? -1 : b === '__none' ? 1 : a.localeCompare(b)))
 
+  // Group by job (default): everyone on the same job shares one bubble.
+  const jobGroups = {}
+  view.forEach((t) => { const k = t.job || '—'; (jobGroups[k] = jobGroups[k] || []).push(t) })
+  const jobKeys = Object.keys(jobGroups).sort((a, b) => jobGroups[b].length - jobGroups[a].length || a.localeCompare(b))
+
   return (
     <div>
       <div className="bg-white rounded-2xl border border-black/5 p-2.5 shadow-sm mb-4 flex items-center gap-2">
@@ -4797,15 +4820,23 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
             <FieldLabel>Job</FieldLabel>
             <Combobox value={job} onChange={setJob} options={jobTypes} placeholder="Type to search jobs, or enter your own…" />
           </div>
-          <div className="grid grid-cols-2 gap-2 mb-2">
-            <div>
-              <FieldLabel>Assign to</FieldLabel>
-              <Select value={assignee} onChange={setAssignee} options={orderedOps} placeholder="Unassigned" />
-            </div>
-            <div>
-              <FieldLabel>Where</FieldLabel>
-              <Select value={area} onChange={setArea} options={areaOptions} placeholder="Anywhere" />
-            </div>
+          <div className="mb-2">
+            <FieldLabel>Assign to{assignees.length ? ` (${assignees.length})` : ''}</FieldLabel>
+            {orderedOps.length === 0 ? (
+              <p className="font-body text-[11px] text-slate-400">Add crew in Spray Ops → Settings → People first.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {orderedOps.map((name) => {
+                  const on = assignees.includes(name)
+                  return <button key={name} type="button" onClick={() => toggleAssignee(name)} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full border transition" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{name}</button>
+                })}
+              </div>
+            )}
+            <p className="font-body text-[10px] text-slate-400 mt-1">Pick everyone on this job — they'll share one bubble on the board.</p>
+          </div>
+          <div className="mb-2">
+            <FieldLabel>Where</FieldLabel>
+            <Select value={area} onChange={setArea} options={areaOptions} placeholder="Anywhere" />
           </div>
           <div className="mb-3">
             <FieldLabel>Tools / equipment for this job (optional)</FieldLabel>
@@ -4825,13 +4856,21 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
         </div>
       )}
 
+      {!loading && view.length > 0 && (
+        <div className="flex gap-1.5 mb-3">
+          {[['job', 'By job'], ['person', 'By person']].map(([k, l]) => (
+            <button key={k} onClick={() => setGroupBy(k)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full transition" style={groupBy === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{l}</button>
+          ))}
+        </div>
+      )}
+
       {loading ? (
         <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
       ) : view.length === 0 ? (
         <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
           {manage ? 'No jobs on the board for this day yet. Add one above.' : 'No jobs posted for this day yet.'}
         </div>
-      ) : (
+      ) : groupBy === 'person' ? (
         <div className="space-y-3">
           {groupKeys.map((k) => (
             <div key={k} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
@@ -4876,6 +4915,53 @@ function WorkboardView({ manage, settings, jobTypes, equipment, courses = [], cr
               </div>
             </div>
           ))}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {jobKeys.map((jk) => {
+            const list = jobGroups[jk]
+            const gdone = list.filter((t) => t.status === 'done').length
+            const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
+            return (
+              <div key={jk} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8F3EC' }}><ClipboardList size={14} style={{ color: FERN }} /></div>
+                  <p className="font-body font-semibold text-sm text-slate-900">{jk}</p>
+                  {list.length > 1 && <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>}
+                  <span className="font-body text-[10px] text-slate-400 ml-auto">{gdone}/{list.length} done</span>
+                </div>
+                {langs.map((l) => <p key={l} className="font-body text-[11px] text-slate-400 italic mb-0.5">{txGet(tx, l, jk) || jk} <span className="not-italic">· {(CREW_LANGS.find(([c]) => c === l) || [])[1] || l}</span></p>)}
+                <div className="space-y-1.5 mt-1.5">
+                  {list.map((t) => {
+                    const st = TASK_STATUS[t.status] || TASK_STATUS.todo
+                    const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
+                    const lang = crew[t.assignee]?.lang
+                    return (
+                      <div key={t.id} className="flex items-center gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: '#EEF2F0', backgroundColor: t.status === 'done' ? '#F7FBF8' : 'white' }}>
+                        <button onClick={() => cycle(t)} className="font-body text-[10px] font-bold px-2 py-1 rounded-full border shrink-0 w-16 text-center" style={{ backgroundColor: st.bg, color: st.fg, borderColor: st.bd }}>{st.label}</button>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <p className="font-body text-[13px] font-semibold text-slate-800 truncate" style={t.status === 'done' ? { textDecoration: 'line-through', color: '#94A3B8' } : {}}>{t.assignee || 'Unassigned'}</p>
+                            {course === 'all' && hasCourses && t.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{t.course}</span>}
+                          </div>
+                          {(t.area || tools.length > 0) && (
+                            <div className="flex flex-wrap gap-1 mt-0.5 items-center">
+                              {t.area && <span className="font-body text-[10px] text-slate-400">{t.area}</span>}
+                              {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input type="number" inputMode="numeric" value={t.minutes ?? ''} onChange={(e) => setMinutes(t, e.target.value === '' ? null : Number(e.target.value))} placeholder="min" className="w-12 border border-slate-200 rounded-lg px-1.5 py-1 text-[11px] font-body text-center" title="Minutes taken" />
+                          {manage && <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition" aria-label="Remove"><Trash2 size={14} /></button>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 

@@ -23,6 +23,8 @@ const STATUS = {
 
 export default function CrewBoard() {
   const [date, setDate] = useState(todayStr())
+  // Optional ?course=Blue in the URL gives this TV its own course board.
+  const [course] = useState(() => (typeof window !== 'undefined' ? (new URLSearchParams(window.location.search).get('course') || '') : ''))
   const [tasks, setTasks] = useState([])
   const [club, setClub] = useState('')
   const [crew, setCrew] = useState({})
@@ -83,13 +85,16 @@ export default function CrewBoard() {
     return () => clearInterval(id)
   }, [])
 
-  const doneCount = tasks.filter((t) => t.status === 'done').length
-  const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0
+  // Scope to this TV's course (its own jobs plus property-wide ones); no course
+  // param = whole property.
+  const shown = course ? tasks.filter((t) => t.course === course || !t.course) : tasks
+  const doneCount = shown.filter((t) => t.status === 'done').length
+  const pct = shown.length ? Math.round((doneCount / shown.length) * 100) : 0
 
-  // Group by assignee — one column per person, Unassigned last.
-  const groups = {}
-  tasks.forEach((t) => { const k = t.assignee || '__none'; (groups[k] = groups[k] || []).push(t) })
-  const groupKeys = Object.keys(groups).sort((a, b) => (a === '__none' ? 1 : b === '__none' ? -1 : a.localeCompare(b)))
+  // Group by job — everyone on the same job shares one bubble.
+  const jobGroups = {}
+  shown.forEach((t) => { const k = t.job || '—'; (jobGroups[k] = jobGroups[k] || []).push(t) })
+  const jobKeys = Object.keys(jobGroups).sort((a, b) => jobGroups[b].length - jobGroups[a].length || a.localeCompare(b))
 
   return (
     <div style={{ minHeight: '100vh', background: `radial-gradient(1200px 600px at 50% -10%, #1d3527 0%, ${FOREST} 60%)`, color: '#F3F0E6', fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' }}>
@@ -98,7 +103,7 @@ export default function CrewBoard() {
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, borderBottom: `2px solid ${GOLD}`, paddingBottom: '1.4vw', marginBottom: '1.8vw' }}>
           <div>
             {club && <div style={{ fontSize: 'clamp(12px,1.1vw,20px)', letterSpacing: '0.28em', textTransform: 'uppercase', color: GOLD, fontWeight: 600 }}>{club}</div>}
-            <div style={{ fontFamily: 'ui-serif, Georgia, serif', fontSize: 'clamp(30px,3.6vw,64px)', fontWeight: 700, lineHeight: 1.05 }}>Crew Board</div>
+            <div style={{ fontFamily: 'ui-serif, Georgia, serif', fontSize: 'clamp(30px,3.6vw,64px)', fontWeight: 700, lineHeight: 1.05 }}>{course ? `${course} · Crew Board` : 'Crew Board'}</div>
             <div style={{ fontSize: 'clamp(14px,1.4vw,26px)', color: '#C7CFC2', marginTop: 4 }}>{prettyDay(date)}</div>
           </div>
           <div style={{ textAlign: 'right' }}>
@@ -111,10 +116,10 @@ export default function CrewBoard() {
         </div>
 
         {/* Progress strip */}
-        {status === 'ok' && tasks.length > 0 && (
+        {status === 'ok' && shown.length > 0 && (
           <div style={{ marginBottom: '1.8vw' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'clamp(13px,1.2vw,22px)', color: '#C7CFC2', marginBottom: 8 }}>
-              <span><b style={{ color: '#F3F0E6' }}>{tasks.length}</b> jobs · <b style={{ color: '#F3F0E6' }}>{doneCount}</b> done</span>
+              <span><b style={{ color: '#F3F0E6' }}>{shown.length}</b> jobs · <b style={{ color: '#F3F0E6' }}>{doneCount}</b> done</span>
               <span>{pct}% complete</span>
             </div>
             <div style={{ height: 14, borderRadius: 999, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
@@ -131,31 +136,34 @@ export default function CrewBoard() {
             Couldn't load the board.<br />
             <span style={{ fontSize: 'clamp(12px,1.1vw,18px)', color: '#B8C2B0' }}>If this is the first run, a manager needs to sign in on this screen and set up the Whiteboard (run phase13.sql in Supabase).</span>
           </div>
-        ) : tasks.length === 0 ? (
+        ) : shown.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '12vh 0', color: '#8AA394', fontSize: 'clamp(18px,2vw,34px)', fontFamily: 'ui-serif, Georgia, serif' }}>No jobs posted yet today.</div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.4vw', alignItems: 'start' }}>
-            {groupKeys.map((k) => {
-              const list = groups[k]
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.4vw', alignItems: 'start' }}>
+            {jobKeys.map((jk) => {
+              const list = jobGroups[jk]
               const gdone = list.filter((t) => t.status === 'done').length
+              const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
               return (
-                <div key={k} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 18, overflow: 'hidden' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.9vw 1.1vw', background: k === '__none' ? 'rgba(255,255,255,0.05)' : 'rgba(58,107,74,0.35)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                    <span style={{ fontSize: 'clamp(16px,1.5vw,28px)', fontWeight: 700 }}>{k === '__none' ? 'Unassigned' : k}</span>
-                    <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#B8C2B0', fontVariantNumeric: 'tabular-nums' }}>{gdone}/{list.length}</span>
+                <div key={jk} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 18, overflow: 'hidden' }}>
+                  <div style={{ padding: '0.9vw 1.1vw', background: 'rgba(58,107,74,0.35)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      <span style={{ fontSize: 'clamp(16px,1.5vw,28px)', fontWeight: 700 }}>{jk}{list.length > 1 ? ` · ${list.length}` : ''}</span>
+                      <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#B8C2B0', fontVariantNumeric: 'tabular-nums' }}>{gdone}/{list.length}</span>
+                    </div>
+                    {langs.map((l) => <div key={l} style={{ fontSize: 'clamp(11px,1vw,17px)', color: GOLD, fontStyle: 'italic', marginTop: 2 }}>{txGet(tx, l, jk) || jk}</div>)}
                   </div>
                   <div style={{ padding: '0.7vw 0.8vw', display: 'flex', flexDirection: 'column', gap: '0.6vw' }}>
                     {list.map((t) => {
                       const st = STATUS[t.status] || STATUS.todo
-                      const lang = crew[k]?.lang
-                      const jobText = txGet(tx, lang, t.job) || t.job
+                      const lang = crew[t.assignee]?.lang
                       const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => txGet(tx, lang, tool) || tool)
                       const sub = [t.area, tools.join(', ')].filter(Boolean).join(' · ')
                       return (
                         <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.55vw 0.7vw', borderRadius: 12, background: t.status === 'done' ? 'rgba(58,107,74,0.14)' : 'rgba(0,0,0,0.14)' }}>
                           <span style={{ fontSize: 'clamp(10px,0.85vw,15px)', fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase', padding: '4px 10px', borderRadius: 999, background: st.bg, color: st.fg, border: `1px solid ${st.bd}`, whiteSpace: 'nowrap' }}>{st.label}</span>
                           <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ fontSize: 'clamp(15px,1.35vw,24px)', fontWeight: 600, color: t.status === 'done' ? '#8AA394' : '#F3F0E6', textDecoration: t.status === 'done' ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{jobText}</div>
+                            <div style={{ fontSize: 'clamp(15px,1.35vw,24px)', fontWeight: 600, color: t.status === 'done' ? '#8AA394' : '#F3F0E6', textDecoration: t.status === 'done' ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.assignee || 'Unassigned'}</div>
                             {sub && <div style={{ fontSize: 'clamp(11px,1vw,17px)', color: '#8AA394', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
                           </div>
                         </div>
