@@ -22,7 +22,7 @@ import {
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { logout } from '@/app/actions/auth'
@@ -753,7 +753,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   // ── Live weather for the spray-window strip + season GDD for PGR timing.
   // Best-effort: the dashboard still renders everything else if this fails.
   const hasLocation = location?.lat != null
-  const [wx, setWx] = useState({ current: null, todayWindow: null, season: [], breakdownTemps: [] })
+  const [wx, setWx] = useState({ current: null, todayWindow: null, season: [] })
   useEffect(() => {
     if (!hasLocation) return
     let cancelled = false
@@ -766,14 +766,13 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       } catch { /* ignore */ }
       try { const c = await fetchCurrent(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ }
       try { const s = await fetchSeasonDaily(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, season: s })) } catch { /* ignore */ }
-      try { const bt = await fetchBreakdownTemps(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, breakdownTemps: bt })) } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
   }, [hasLocation, location?.lat, location?.lng, today])
 
-  // ── Disease protection (fungicide cover remaining, per area). When soil temps
-  // are loaded, protection burns down by heat (temperature-driven breakdown).
-  const diseaseRows = manage ? protectionByArea(sheets, products, areas, undefined, wx.breakdownTemps) : []
+  // ── Disease protection (fungicide cover remaining, per area). Day-based; the
+  // temperature-driven model is available in lib/disease but not wired in yet.
+  const diseaseRows = manage ? protectionByArea(sheets, products, areas) : []
   const diseaseAlerts = protectionAlertCount(diseaseRows)
 
   // ── PGR reapply timing (GDD base-32 since each area's last growth-reg spray).
