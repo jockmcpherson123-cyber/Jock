@@ -5156,18 +5156,22 @@ function PracticesTab({ practices, areas, onAddMany, onDelete }) {
 }
 
 // ── SOIL-TEMP APPLICATION TIMING ────────────────────────────────────────────
+const MONTH_ABBR = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const monthRange = (months = []) => (months.length ? `${MONTH_ABBR[months[0]]}–${MONTH_ABBR[months[months.length - 1]]}` : '')
 const TIMING_STATUS_STYLE = {
   now: { bg: '#E8F3EC', fg: '#2C5238', dot: '#3A6B4A', label: 'Apply now' },
   soon: { bg: '#FEF3DD', fg: '#7A5E12', dot: '#C9A84C', label: 'Getting close' },
   later: { bg: '#F1F5F9', fg: '#64748B', dot: '#CBD5E1', label: 'Not yet' },
   passed: { bg: '#F3E0D9', fg: '#8A3520', dot: '#B4553D', label: 'Window passed' },
+  offseason: { bg: '#F8FAFC', fg: '#94A3B8', dot: '#E2E8F0', label: 'Out of season' },
   unknown: { bg: '#F1F5F9', fg: '#64748B', dot: '#CBD5E1', label: '—' },
 }
 function TimingTab({ soilSeries, hasLocation }) {
   if (!hasLocation) return <ComingSoonCard title="Set your location first" desc="Soil temperature comes from your course location. Add it in Spray Ops → Settings → Location, then come back." />
   const soilNow = currentSoilTemp(soilSeries)
   const trend = soilTrend(soilSeries)
-  const timings = soilNow != null ? applicationTimings(soilNow, trend) : []
+  // Show every window here (including out-of-season), so the whole list is visible.
+  const timings = applicationTimings(soilNow, trend, new Date(), {}, true)
   const recent = (soilSeries || []).slice(-30).map((d) => ({ date: d.date, value: d.soil != null ? d.soil : d.temp }))
 
   return (
@@ -5203,7 +5207,7 @@ function TimingTab({ soilSeries, hasLocation }) {
                     <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: st.dot }} />{st.label}
                   </span>
                 </div>
-                <p className="font-body text-[11px] text-slate-400">Trigger ~{t.threshold}°F ({t.direction === 'falling' ? 'cooling' : 'warming'}) · {t.note}</p>
+                <p className="font-body text-[11px] text-slate-400">Trigger ~{t.threshold}°F ({t.direction === 'falling' ? 'cooling' : 'warming'}){t.months ? ` · ${monthRange(t.months)}` : ''} · {t.note}</p>
               </div>
             )
           })}
