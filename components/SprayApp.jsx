@@ -279,6 +279,7 @@ function SprayOpsModule({ user }) {
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
   const [dismissLic, setDismissLic] = useState(false)
+  const [onboardDismissed, setOnboardDismissed] = useState(false)
 
   const showToast = (msg) => {
     setToast(msg)
@@ -568,6 +569,15 @@ function SprayOpsModule({ user }) {
         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body font-medium" style={{ backgroundColor: INK }}>
           {toast}
         </div>
+      )}
+
+      {manage && !onboardDismissed && !courseInfo?.onboarded && (
+        <OnboardingWizard
+          courseInfo={courseInfo}
+          grassTypes={grassTypes}
+          onSkip={() => setOnboardDismissed(true)}
+          onFinish={async (patch) => { await saveSettings(patch); setOnboardDismissed(true); showToast('Course set up — you can change this in Settings') }}
+        />
       )}
 
       <TopNav route={route} setRoute={setRoute} onNew={newSheet} courseInfo={courseInfo} manage={manage} />
@@ -3632,9 +3642,166 @@ function NPKMini({ label, value, color }) {
   )
 }
 
+// ── ONBOARDING WIZARD ─────────────────────────────────────────────────────
+// Shown the first time a manager signs in (before courseInfo.onboarded is set).
+// Captures the two things every club needs before the app is useful: how the
+// course is laid out (name + holes, one row per course) and which grasses are
+// actually on site. Both are stored in the courseInfo blob (no new migration).
+// Prefilled from whatever's already there so an existing club just confirms.
+function OnboardingWizard({ courseInfo = {}, grassTypes = [], onFinish, onSkip }) {
+  const [step, setStep] = useState(0)
+  const [clubName, setClubName] = useState(courseInfo.clubName || '')
+  const [deptName, setDeptName] = useState(courseInfo.deptName || 'Golf Maintenance')
+  const [courses, setCourses] = useState(
+    Array.isArray(courseInfo.courses) && courseInfo.courses.length
+      ? courseInfo.courses.map((c) => ({ name: c.name || '', holes: Number(c.holes) || 18 }))
+      : [{ name: '', holes: 18 }]
+  )
+  const [siteGrasses, setSiteGrasses] = useState(courseInfo.siteGrasses || [])
+  const [custom, setCustom] = useState('')
+  const [customGrasses, setCustomGrasses] = useState([])
+  const [saving, setSaving] = useState(false)
+
+  const allGrasses = [...grassTypes, ...customGrasses.filter((g) => !grassTypes.includes(g))]
+  const totalHoles = courses.reduce((s, c) => s + (Number(c.holes) || 0), 0)
+  const cleanCourses = courses
+    .map((c) => ({ name: String(c.name || '').trim(), holes: Number(c.holes) || 0 }))
+    .filter((c) => c.holes > 0)
+
+  const setCourse = (i, patch) => setCourses((prev) => prev.map((c, j) => (j === i ? { ...c, ...patch } : c)))
+  const addCourse = () => setCourses((prev) => [...prev, { name: '', holes: 18 }])
+  const removeCourse = (i) => setCourses((prev) => (prev.length > 1 ? prev.filter((_, j) => j !== i) : prev))
+  const toggleGrass = (g) => setSiteGrasses((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]))
+  const addCustom = () => {
+    const g = custom.trim()
+    if (!g || allGrasses.includes(g)) { setCustom(''); return }
+    setCustomGrasses((prev) => [...prev, g])
+    setSiteGrasses((prev) => [...prev, g])
+    setCustom('')
+  }
+
+  const canNext = step === 0 ? clubName.trim().length > 0 : step === 1 ? cleanCourses.length > 0 : true
+
+  const finish = async () => {
+    setSaving(true)
+    try {
+      // Fold any newly-typed grasses into the club's library so they're pickable
+      // everywhere, then record the site selection + course layout on courseInfo.
+      const mergedLibrary = [...grassTypes, ...customGrasses.filter((g) => !grassTypes.includes(g))]
+      await onFinish({
+        courseInfo: {
+          ...courseInfo,
+          clubName: clubName.trim(),
+          deptName: deptName.trim() || 'Golf Maintenance',
+          courses: cleanCourses,
+          holes: cleanCourses.reduce((s, c) => s + c.holes, 0),
+          siteGrasses,
+          onboarded: true,
+        },
+        grassTypes: mergedLibrary,
+      })
+    } catch (e) { console.error(e) }
+    setSaving(false)
+  }
+
+  const STEPS = ['Club', 'Course layout', 'Grasses']
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(22,41,31,0.55)' }}>
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg my-6 overflow-hidden">
+        <div className="px-6 pt-6 pb-4" style={{ backgroundColor: FOREST }}>
+          <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>Welcome</p>
+          <h2 className="font-display text-xl font-semibold text-white mt-0.5">Let's set up your course</h2>
+          <div className="flex gap-1.5 mt-3">
+            {STEPS.map((s, i) => (
+              <div key={s} className="flex-1 h-1.5 rounded-full transition" style={{ backgroundColor: i <= step ? GOLD : 'rgba(255,255,255,0.2)' }} />
+            ))}
+          </div>
+          <p className="font-body text-[11px] mt-2" style={{ color: 'rgba(255,255,255,0.7)' }}>Step {step + 1} of 3 · {STEPS[step]}</p>
+        </div>
+
+        <div className="px-6 py-5">
+          {step === 0 && (
+            <div className="space-y-4">
+              <p className="font-body text-sm text-slate-500">What should we call your club? This shows up across the app and on printed spray records.</p>
+              <div>
+                <FieldLabel>Club name</FieldLabel>
+                <input value={clubName} onChange={(e) => setClubName(e.target.value)} placeholder="e.g. Congressional Country Club" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+              </div>
+              <div>
+                <FieldLabel>Department</FieldLabel>
+                <input value={deptName} onChange={(e) => setDeptName(e.target.value)} placeholder="Golf Maintenance" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+              </div>
+            </div>
+          )}
+
+          {step === 1 && (
+            <div className="space-y-4">
+              <p className="font-body text-sm text-slate-500">How many holes do you manage? Add a row for each course — the app builds your greens lists from this, so 36 or 54 holes stays organized.</p>
+              <div className="space-y-2">
+                {courses.map((c, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input value={c.name} onChange={(e) => setCourse(i, { name: e.target.value })} placeholder={courses.length > 1 ? `Course ${i + 1} name` : 'Course name (optional)'} className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+                    <select value={c.holes} onChange={(e) => setCourse(i, { holes: Number(e.target.value) })} className="border border-slate-200 rounded-xl px-2.5 py-2.5 text-sm font-body bg-white shrink-0">
+                      {[9, 18, 27].map((h) => <option key={h} value={h}>{h} holes</option>)}
+                    </select>
+                    {courses.length > 1 && (
+                      <button type="button" onClick={() => removeCourse(i)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove course"><Trash2 size={16} /></button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={addCourse} className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FERN }}>
+                <Plus size={14} /> Add another course
+              </button>
+              <div className="rounded-xl px-3 py-2 font-body text-[12px] font-semibold" style={{ backgroundColor: '#F0F6F2', color: FERN }}>
+                {totalHoles} holes total{cleanCourses.length > 1 ? ` across ${cleanCourses.length} courses` : ''}
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4">
+              <p className="font-body text-sm text-slate-500">Which grasses do you have on site? The app uses these to suggest nitrogen targets and flag products that can damage them — you'll only see these grasses in the pickers.</p>
+              <div className="flex flex-wrap gap-1.5">
+                {allGrasses.map((g) => {
+                  const on = siteGrasses.includes(g)
+                  return (
+                    <button key={g} type="button" onClick={() => toggleGrass(g)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{g}</button>
+                  )
+                })}
+              </div>
+              <div className="flex items-center gap-2">
+                <input value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustom() } }} placeholder="Add another grass…" className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+                <button type="button" onClick={addCustom} disabled={!custom.trim()} className="font-body text-xs font-bold px-3 py-2.5 rounded-xl text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FERN }}>Add</button>
+              </div>
+              {siteGrasses.length === 0 && <p className="font-body text-[11px] text-slate-400">Pick at least one so the plan knows what you're growing (you can change this later in Settings).</p>}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
+          <button type="button" onClick={step === 0 ? onSkip : () => setStep((s) => s - 1)} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-slate-500">
+            {step === 0 ? 'Skip for now' : 'Back'}
+          </button>
+          {step < 2 ? (
+            <button type="button" onClick={() => setStep((s) => s + 1)} disabled={!canNext} className="font-body text-xs font-bold px-6 py-2.5 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Next</button>
+          ) : (
+            <button type="button" onClick={finish} disabled={saving} className="font-body text-xs font-bold px-6 py-2.5 rounded-full text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{saving ? 'Saving…' : 'Finish setup'}</button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── SETTINGS ──────────────────────────────────────────────────────────────
 function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, soilTypes, applicatorLicenses, directorPins, onSave }) {
   const [section, setSection] = useState('course')
+  // Grasses actually on site (from onboarding) drive the area/turf pickers; the
+  // full library is still edited in Lists and offered when nothing's selected.
+  const siteGrasses = courseInfo?.siteGrasses || []
+  const grassChoices = siteGrasses.length ? siteGrasses : grassTypes
 
   return (
     <div className="pt-6 pb-10">
@@ -3648,10 +3815,10 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
         ))}
       </div>
 
-      {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} onSave={onSave} />}
+      {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} grassTypes={grassTypes} onSave={onSave} />}
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
       {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} onSave={onSave} />}
-      {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassTypes} soilTypes={soilTypes} onSave={onSave} />}
+      {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassChoices} soilTypes={soilTypes} onSave={onSave} />}
       {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} soilTypes={soilTypes} onSave={onSave} />}
     </div>
   )
@@ -3711,20 +3878,81 @@ function LocationSettings({ location, onSave }) {
   )
 }
 
-function CourseInfoSettings({ courseInfo, onSave }) {
-  const [draft, setDraft] = useState(courseInfo)
+function CourseInfoSettings({ courseInfo, grassTypes = [], onSave }) {
+  const [draft, setDraft] = useState({
+    ...courseInfo,
+    courses: Array.isArray(courseInfo.courses) && courseInfo.courses.length ? courseInfo.courses : [{ name: '', holes: 18 }],
+    siteGrasses: courseInfo.siteGrasses || [],
+  })
+  const [custom, setCustom] = useState('')
   const dirty = JSON.stringify(draft) !== JSON.stringify(courseInfo)
 
+  const courses = draft.courses
+  const setCourse = (i, patch) => setDraft((d) => ({ ...d, courses: d.courses.map((c, j) => (j === i ? { ...c, ...patch } : c)) }))
+  const addCourse = () => setDraft((d) => ({ ...d, courses: [...d.courses, { name: '', holes: 18 }] }))
+  const removeCourse = (i) => setDraft((d) => ({ ...d, courses: d.courses.length > 1 ? d.courses.filter((_, j) => j !== i) : d.courses }))
+  const toggleGrass = (g) => setDraft((d) => ({ ...d, siteGrasses: d.siteGrasses.includes(g) ? d.siteGrasses.filter((x) => x !== g) : [...d.siteGrasses, g] }))
+  const totalHoles = courses.reduce((s, c) => s + (Number(c.holes) || 0), 0)
+  const grassChoices = [...grassTypes, ...(draft.siteGrasses || []).filter((g) => !grassTypes.includes(g))]
+  const addCustom = () => {
+    const g = custom.trim()
+    if (!g) return
+    if (!(draft.siteGrasses || []).includes(g)) toggleGrass(g)
+    setCustom('')
+  }
+
+  const save = () => {
+    const cleanCourses = courses.map((c) => ({ name: String(c.name || '').trim(), holes: Number(c.holes) || 0 })).filter((c) => c.holes > 0)
+    onSave({ courseInfo: { ...draft, courses: cleanCourses, holes: cleanCourses.reduce((s, c) => s + c.holes, 0), onboarded: true } })
+  }
+
   return (
-    <Card>
-      <FieldLabel>Club Name</FieldLabel>
-      <input value={draft.clubName} onChange={(e) => setDraft({ ...draft, clubName: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body mb-3" />
-      <FieldLabel>Department Name</FieldLabel>
-      <input value={draft.deptName} onChange={(e) => setDraft({ ...draft, deptName: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body mb-3" />
-      <button onClick={() => onSave({ courseInfo: draft })} disabled={!dirty} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>
+    <div className="space-y-4">
+      <Card>
+        <FieldLabel>Club Name</FieldLabel>
+        <input value={draft.clubName || ''} onChange={(e) => setDraft({ ...draft, clubName: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body mb-3" />
+        <FieldLabel>Department Name</FieldLabel>
+        <input value={draft.deptName || ''} onChange={(e) => setDraft({ ...draft, deptName: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+      </Card>
+
+      <Card>
+        <FieldLabel>Courses &amp; Holes</FieldLabel>
+        <p className="font-body text-[11px] text-slate-400 mt-1 mb-2">One row per course. This builds your greens lists — add a course to grow from 18 to 36, 54 holes and beyond.</p>
+        <div className="space-y-2 mb-2">
+          {courses.map((c, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input value={c.name || ''} onChange={(e) => setCourse(i, { name: e.target.value })} placeholder={courses.length > 1 ? `Course ${i + 1} name` : 'Course name (optional)'} className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+              <select value={Number(c.holes) || 18} onChange={(e) => setCourse(i, { holes: Number(e.target.value) })} className="border border-slate-200 rounded-xl px-2.5 py-2.5 text-sm font-body bg-white shrink-0">
+                {[9, 18, 27].map((h) => <option key={h} value={h}>{h} holes</option>)}
+              </select>
+              {courses.length > 1 && <button type="button" onClick={() => removeCourse(i)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove course"><Trash2 size={16} /></button>}
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={addCourse} className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FERN }}><Plus size={14} /> Add another course</button>
+        <p className="font-body text-[11px] font-semibold mt-2" style={{ color: FERN }}>{totalHoles} holes total{courses.filter((c) => Number(c.holes) > 0).length > 1 ? ` · ${courses.filter((c) => Number(c.holes) > 0).length} courses` : ''}</p>
+      </Card>
+
+      <Card>
+        <FieldLabel>Grasses on site</FieldLabel>
+        <p className="font-body text-[11px] text-slate-400 mt-1 mb-2">These drive nitrogen targets and product safety warnings. Only these grasses show in the pickers. (The full library lives in Lists.)</p>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {grassChoices.map((g) => {
+            const on = (draft.siteGrasses || []).includes(g)
+            return <button key={g} type="button" onClick={() => toggleGrass(g)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{g}</button>
+          })}
+          {grassChoices.length === 0 && <span className="font-body text-[11px] text-slate-400">Add grass types in Lists first.</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          <input value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustom() } }} placeholder="Add another grass…" className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+          <button type="button" onClick={addCustom} disabled={!custom.trim()} className="font-body text-xs font-bold px-3 py-2.5 rounded-xl text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FERN }}>Add</button>
+        </div>
+      </Card>
+
+      <button onClick={save} disabled={!dirty} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>
         Save Changes
       </button>
-    </Card>
+    </div>
   )
 }
 
@@ -4100,7 +4328,11 @@ function TurfPerformanceModule() {
       setLoadingTurf(true)
       try {
         const [settings, sheets, products, clips, pracs, soils] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts(), db.fetchClippings().catch(() => []), db.fetchCulturalPractices().catch(() => []), db.fetchSoilTests().catch(() => [])])
-        setTurf({ location: settings.location, sheets, products, areas: settings.areas, grassTypes: settings.grassTypes || [], soilTypes: settings.soilTypes || [] })
+        // Prefer the grasses actually on site (from onboarding) for the pickers;
+        // fall back to the full library when the club hasn't selected any yet.
+        const siteGrasses = settings.courseInfo?.siteGrasses || []
+        const grassChoices = siteGrasses.length ? siteGrasses : (settings.grassTypes || [])
+        setTurf({ location: settings.location, sheets, products, areas: settings.areas, grassTypes: grassChoices, soilTypes: settings.soilTypes || [], courseInfo: settings.courseInfo || {} })
         setClippings(clips)
         setPractices(pracs)
         setSoilTests(soils)
@@ -4128,7 +4360,7 @@ function TurfPerformanceModule() {
       <div style={{ backgroundColor: FOREST }} className="text-white">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-4">
           <div className="mb-4">
-            <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>Congressional Country Club</p>
+            <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{turf.courseInfo?.clubName || 'Golf Club'}</p>
             <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
           </div>
           <div className="flex gap-1 font-body text-sm overflow-x-auto">
@@ -4149,7 +4381,7 @@ function TurfPerformanceModule() {
         )}
         {route === 'clippings' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <ClippingsTab clippings={clippings} areas={turf.areas}
+          : <ClippingsTab clippings={clippings} areas={turf.areas} courseInfo={turf.courseInfo}
               onAddMany={async (list) => { await db.addClippings(list); await reloadClippings() }}
               onDelete={async (id) => { await db.deleteClipping(id); await reloadClippings() }} />
         )}
@@ -4159,7 +4391,7 @@ function TurfPerformanceModule() {
         )}
         {route === 'soil' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <SoilTestsTab soilTests={soilTests} areas={turf.areas} grassTypes={turf.grassTypes || []} soilTypes={turf.soilTypes || []}
+          : <SoilTestsTab soilTests={soilTests} areas={turf.areas} grassTypes={turf.grassTypes || []} soilTypes={turf.soilTypes || []} courseInfo={turf.courseInfo}
               onAdd={async (t) => { await db.addSoilTest(t); await reloadSoilTests() }}
               onUpdate={async (t) => { await db.updateSoilTest(t); await reloadSoilTests() }}
               onDelete={async (id) => { await db.deleteSoilTest(id); await reloadSoilTests() }} />
@@ -4303,10 +4535,27 @@ function TrendChart({ points = [], color = FERN, height = 120, unit = '', showAv
   )
 }
 
-const GREEN_OPTIONS = [
-  ...Array.from({ length: 18 }, (_, i) => `Green ${i + 1}`),
-  'Practice Green', 'Putting Green', 'Chipping Green', 'Short Game Green', 'Nursery Green',
-]
+const GREEN_EXTRAS = ['Practice Green', 'Putting Green', 'Chipping Green', 'Short Game Green', 'Nursery Green']
+// Course/hole-aware greens list for the pickers. Zero or one course → plain
+// "Green 1..N" from the configured hole count; several courses → course-prefixed
+// holes ("Blue Green 1", "Gold Green 1", …) so a 36- or 54-hole club stays clear.
+function greenOptionsFor(courseInfo) {
+  const courses = Array.isArray(courseInfo?.courses)
+    ? courseInfo.courses.filter((c) => c && Number(c.holes) > 0)
+    : []
+  if (courses.length > 1) {
+    const list = []
+    courses.forEach((c) => {
+      const n = Math.min(Number(c.holes) || 0, 99)
+      const name = String(c.name || 'Course').trim()
+      for (let i = 1; i <= n; i++) list.push(`${name} Green ${i}`)
+    })
+    return [...list, ...GREEN_EXTRAS]
+  }
+  const holes = courses.length === 1 ? Number(courses[0].holes) : (Number(courseInfo?.holes) || 18)
+  const n = Math.min(Math.max(holes || 18, 1), 99)
+  return [...Array.from({ length: n }, (_, i) => `Green ${i + 1}`), ...GREEN_EXTRAS]
+}
 const greenNum = (s) => { const m = String(s).match(/\d+/); return m ? Number(m[0]) : 999 }
 const sortGreens = (a, b) => greenNum(a) - greenNum(b) || String(a).localeCompare(String(b))
 
@@ -4322,7 +4571,8 @@ function saveErrorText(e, migration) {
 const clipErrorText = (e) => saveErrorText(e, 'supabase/phase10.sql')
 const practiceErrorText = (e) => saveErrorText(e, 'supabase/phase11.sql')
 
-function ClippingsTab({ clippings, areas, onAddMany, onDelete }) {
+function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
+  const greenOptions = greenOptionsFor(courseInfo)
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [unit, setUnit] = useState('baskets')
   const [notes, setNotes] = useState('')
@@ -4365,7 +4615,7 @@ function ClippingsTab({ clippings, areas, onAddMany, onDelete }) {
 
         <FieldLabel>Greens</FieldLabel>
         <div className="flex flex-wrap gap-1.5 mt-1 mb-3">
-          {GREEN_OPTIONS.map((g) => {
+          {greenOptions.map((g) => {
             const on = selected.includes(g)
             return (
               <button key={g} type="button" onClick={() => toggleGreen(g)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>
@@ -4557,11 +4807,12 @@ function SoilNum({ label, ph, value, onChange, tip }) {
   )
 }
 
-function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd, onUpdate, onDelete }) {
+function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], courseInfo, onAdd, onUpdate, onDelete }) {
+  const greenOptions = greenOptionsFor(courseInfo)
   const areaNames = Object.keys(areas || {})
   // The location can be a settings area (Blue Greens) OR an individual green /
   // hole (Green 5), just like clipping yields — so soil can be tracked per hole.
-  const areaOptions = [...areaNames, ...GREEN_OPTIONS.filter((g) => !areaNames.includes(g))]
+  const areaOptions = [...areaNames, ...greenOptions.filter((g) => !areaNames.includes(g))]
 
   // Grass + soil context for a chosen location. Settings areas carry it directly;
   // an individual green inherits from the course's greens settings-area so its
@@ -4720,7 +4971,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], onAdd
             )}
             <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Greens / holes</p>
             <div className="flex flex-wrap gap-1.5">
-              {GREEN_OPTIONS.map((g) => {
+              {greenOptions.map((g) => {
                 const on = form.area === g
                 return <button key={g} type="button" onClick={() => pickArea(g)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{g.replace('Green ', '#')}</button>
               })}
