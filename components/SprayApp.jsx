@@ -4633,6 +4633,42 @@ function Combobox({ value, onChange, options = [], placeholder, accent = FOREST,
   )
 }
 
+// Multi-select searchable picker — type to filter a list (crew), tap to add each
+// as a chip. For "Assign to," where a job can go to several people at once.
+function PeoplePicker({ options = [], selected = [], onToggle, placeholder }) {
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+  useEffect(() => {
+    const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+  const query = q.trim().toLowerCase()
+  const matches = options.filter((o) => !selected.includes(o) && String(o).toLowerCase().includes(query)).slice(0, 8)
+  return (
+    <div ref={wrapRef}>
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {selected.map((name) => (
+            <span key={name} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ backgroundColor: FERN, color: 'white' }}>{name}<button type="button" onClick={() => onToggle(name)} className="opacity-70 hover:opacity-100">×</button></span>
+          ))}
+        </div>
+      )}
+      <div className="relative">
+        <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)} placeholder={placeholder} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+        {open && matches.length > 0 && (
+          <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+            {matches.map((o) => (
+              <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); onToggle(o); setQ('') }} className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50">{o}</button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const WB_SECTIONS = [
   { key: 'workboard', label: 'Workboard', icon: ClipboardList },
   { key: 'insights', label: 'Time & Efficiency', icon: BarChart3 },
@@ -4874,16 +4910,11 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
           <div className="mb-2">
             <FieldLabel>Assign to{assignees.length ? ` (${assignees.length})` : ''}</FieldLabel>
             {orderedOps.length === 0 ? (
-              <p className="font-body text-[11px] text-slate-400">Add crew in Spray Ops → Settings → People first.</p>
+              <p className="font-body text-[11px] text-slate-400">Add crew in the Crew tab first.</p>
             ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {orderedOps.map((name) => {
-                  const on = assignees.includes(name)
-                  return <button key={name} type="button" onClick={() => toggleAssignee(name)} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full border transition" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{name}</button>
-                })}
-              </div>
+              <PeoplePicker options={orderedOps} selected={assignees} onToggle={toggleAssignee} placeholder="Search crew to assign…" />
             )}
-            <p className="font-body text-[10px] text-slate-400 mt-1">Pick everyone on this job — they'll share one bubble on the board.</p>
+            <p className="font-body text-[10px] text-slate-400 mt-1">Add everyone on this job — they'll share one bubble on the board.</p>
           </div>
           <div className="mb-2">
             <FieldLabel>Where</FieldLabel>
