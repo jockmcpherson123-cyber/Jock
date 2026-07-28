@@ -5787,6 +5787,11 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
   // The location can be a settings area (Blue Greens) OR an individual green /
   // hole (Green 5), just like clipping yields — so soil can be tracked per hole.
   const areaOptions = [...areaNames, ...greenOptions.filter((g) => !areaNames.includes(g))]
+  // Multi-course isolation: which course an area belongs to (by course name /
+  // first word), so Blue and Gold tests never average together.
+  const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
+  const hasCourses = courseNames.length >= 2
+  const courseOf = (name) => courseNames.find((n) => String(name || '').toLowerCase().includes(String(n).split(' ')[0].toLowerCase())) || ''
 
   // Grass + soil context for a chosen location. Settings areas carry it directly;
   // an individual green inherits from the course's greens settings-area so its
@@ -5861,15 +5866,21 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
     setBusy(false)
   }
 
+  const [courseTab, setCourseTab] = useState(courseNames[0] || 'all')
+  // Only this course's tests feed the sections/averages/trends — full isolation.
+  const courseTests = hasCourses && courseTab !== 'all'
+    ? soilTests.filter((t) => (courseTab === 'other' ? !courseOf(t.area) : courseOf(t.area) === courseTab))
+    : soilTests
+
   // Group everything by course section (Greens / Tees / Fairways / …) for tabs.
   // Always show the common sections, plus any others that have data.
-  const presentSections = SECTION_ORDER.filter((sec) => soilTests.some((t) => soilSection(t.area) === sec))
+  const presentSections = SECTION_ORDER.filter((sec) => courseTests.some((t) => soilSection(t.area) === sec))
   const sections = SECTION_ORDER.filter((sec) => DEFAULT_SECTIONS.includes(sec) || presentSections.includes(sec))
   const [section, setSection] = useState(null)
   const [trendKey, setTrendKey] = useState('k')
   const [areaPick, setAreaPick] = useState('all') // 'all' = whole section, else one hole
   const activeSection = section && sections.includes(section) ? section : (presentSections[0] || 'Greens')
-  const sectionTests = soilTests.filter((t) => soilSection(t.area) === activeSection)
+  const sectionTests = courseTests.filter((t) => soilSection(t.area) === activeSection)
 
   // Holes/areas that have tests in this section, for the individual-area picker.
   const sectionAreas = [...new Set(sectionTests.map((t) => t.area))].sort(sortGreens)
@@ -5944,12 +5955,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
               </>
             )}
             <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Greens / holes</p>
-            <div className="flex flex-wrap gap-1.5">
-              {greenOptions.map((g) => {
-                const on = form.area === g
-                return <button key={g} type="button" onClick={() => pickArea(g)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{g.replace('Green ', '#')}</button>
-              })}
-            </div>
+            <Combobox value={greenOptions.includes(form.area) ? form.area : ''} onChange={(v) => pickArea(v)} options={greenOptions} accent={FERN} placeholder="Search a green — Blue 3, Gold 12, Putting…" />
           </div>
 
           <div className="mb-3">
@@ -6052,6 +6058,15 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
           </div>
           <p className="font-body text-[10px] text-slate-400 mb-3">Annual N drives how much nutrient the plant will use over the year. The recommendation keeps each nutrient at or above its MLSN floor (P {MLSN.P}, K {MLSN.K}, Ca {MLSN.Ca}, Mg {MLSN.Mg}, S {MLSN.S} ppm) while covering that use.</p>
           <button onClick={save} disabled={busy} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : editingId ? 'Update soil test' : 'Save soil test'}</button>
+        </div>
+      )}
+
+      {/* Course tabs — keep each course's tests fully separate */}
+      {hasCourses && (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {[...courseNames, 'other'].map((c) => (
+            <button key={c} onClick={() => { setCourseTab(c); setSection(null); setAreaPick('all') }} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap transition" style={courseTab === c ? { backgroundColor: GOLD, color: FOREST } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{c === 'other' ? 'Practice / Other' : c}</button>
+          ))}
         </div>
       )}
 
