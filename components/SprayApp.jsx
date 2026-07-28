@@ -4548,6 +4548,46 @@ const nextStatus = (s) => (s === 'todo' ? 'doing' : s === 'doing' ? 'done' : 'to
 const shiftDate = (d, days) => { const dt = new Date(`${d}T00:00:00`); dt.setDate(dt.getDate() + days); return dt.toISOString().slice(0, 10) }
 const prettyDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
 
+// A type-to-filter dropdown that also accepts free text — for lists that can grow
+// to hundreds of entries (jobs, equipment) where a chip row would overwhelm. Type
+// to narrow the list, tap a match, or keep your own words.
+function Combobox({ value, onChange, options = [], placeholder, accent = FOREST, max = 8 }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState(value || '')
+  const wrapRef = useRef(null)
+  useEffect(() => { setQ(value || '') }, [value])
+  useEffect(() => {
+    const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+  const query = q.trim().toLowerCase()
+  const matches = options.filter((o) => o && String(o).toLowerCase().includes(query)).slice(0, max)
+  const exact = options.some((o) => String(o).toLowerCase() === query)
+  const pick = (v) => { onChange(v); setQ(v); setOpen(false) }
+  return (
+    <div ref={wrapRef} className="relative">
+      <input
+        value={q}
+        onChange={(e) => { setQ(e.target.value); onChange(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body"
+      />
+      {open && (matches.length > 0 || (query && !exact)) && (
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+          {matches.map((o) => (
+            <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); pick(o) }} className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50">{o}</button>
+          ))}
+          {query && !exact && (
+            <button type="button" onMouseDown={(e) => { e.preventDefault(); pick(q.trim()) }} className="w-full text-left px-3 py-2 text-sm font-body font-semibold hover:bg-slate-50" style={{ color: accent }}>Use “{q.trim()}”</button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const WB_SECTIONS = [
   { key: 'workboard', label: 'Workboard', icon: ClipboardList },
   { key: 'insights', label: 'Time & Efficiency', icon: BarChart3 },
@@ -4710,12 +4750,10 @@ function WorkboardView({ manage, settings, jobTypes, equipment }) {
       {manage && (
         <div className="bg-white rounded-2xl border-2 p-4 shadow-sm mb-4" style={{ borderColor: GOLD }}>
           <p className="font-display text-base font-semibold text-slate-900 mb-2">Add a job</p>
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {jobTypes.map((j) => (
-              <button key={j} type="button" onClick={() => setJob(j)} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full border transition" style={job === j ? { backgroundColor: FOREST, color: 'white', borderColor: FOREST } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{j}</button>
-            ))}
+          <div className="mb-2">
+            <FieldLabel>Job</FieldLabel>
+            <Combobox value={job} onChange={setJob} options={jobTypes} placeholder="Type to search jobs, or enter your own…" />
           </div>
-          <input value={job} onChange={(e) => setJob(e.target.value)} placeholder="Job (tap a chip above or type your own)" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body mb-2" />
           <div className="grid grid-cols-2 gap-2 mb-2">
             <div>
               <FieldLabel>Assign to</FieldLabel>
@@ -4728,14 +4766,7 @@ function WorkboardView({ manage, settings, jobTypes, equipment }) {
           </div>
           <div className="mb-3">
             <FieldLabel>Equipment (optional)</FieldLabel>
-            {equipment.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {equipment.map((eq) => (
-                  <button key={eq} type="button" onClick={() => setEquip(equip === eq ? '' : eq)} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full border transition" style={equip === eq ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{eq}</button>
-                ))}
-              </div>
-            )}
-            <input value={equip} onChange={(e) => setEquip(e.target.value)} placeholder="e.g. Triplex 3250, blower" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+            <Combobox value={equip} onChange={setEquip} options={equipment} accent={FERN} placeholder="Type to search equipment, or enter your own…" />
           </div>
           <button onClick={addTask} disabled={busy || !job.trim()} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Adding…' : 'Add to board'}</button>
         </div>
