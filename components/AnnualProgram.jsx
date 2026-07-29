@@ -5,12 +5,50 @@
 // then browse it by area. (Editing individual applications, the early-order
 // calculator and auto-populating spray sheets come in the next phase.)
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge } from 'lucide-react'
+import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
 import { downloadCSV } from '@/lib/calc'
 import { fetchSeasonDaily, fetchBreakdownTemps } from '@/lib/weather'
-import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGGER_MODES, GDD_BASES, statusRank } from '@/lib/triggers'
+import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGGER_MODES, GDD_BASES, statusRank, coverageDays, isoAddDays } from '@/lib/triggers'
+
+// ── Coverage grid helpers ────────────────────────────────────────────────────
+// Every application protects its area for a stretch (coverageDays). We paint each
+// month by how much of it is covered, and flag an *interior* uncovered month —
+// one that sits between covered months — as a gap worth closing.
+function monthKeysBetween(startMk, endMk) {
+  const out = []
+  let [y, m] = startMk.split('-').map(Number)
+  const [ey, em] = endMk.split('-').map(Number)
+  while (y < ey || (y === ey && m <= em)) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`)
+    m++; if (m > 12) { m = 1; y++ }
+  }
+  return out
+}
+function coverageRow(areaApps, months) {
+  const spans = areaApps
+    .map((a) => { const start = a.plannedDate || a.templateDate; return start ? { start, end: isoAddDays(start, coverageDays(a)) } : null })
+    .filter(Boolean)
+  const covered = (iso) => spans.some((s) => iso >= s.start && iso < s.end)
+  const cells = months.map((mk) => {
+    const [y, m] = mk.split('-').map(Number)
+    const dim = new Date(y, m, 0).getDate()
+    let c = 0
+    for (let d = 1; d <= dim; d++) { if (covered(`${mk}-${String(d).padStart(2, '0')}`)) c++ }
+    return { mk, frac: c / dim }
+  })
+  const firstOn = cells.findIndex((c) => c.frac > 0)
+  const lastOn = cells.length - 1 - [...cells].reverse().findIndex((c) => c.frac > 0)
+  return cells.map((c, i) => {
+    let state = ''
+    if (c.frac >= 0.6) state = 'on'
+    else if (c.frac > 0) state = 'light'
+    else if (firstOn !== -1 && i > firstOn && i < lastOn) state = 'gap'
+    return { ...c, state }
+  })
+}
+const COVER = '#6FA57C', COVER_LIGHT = '#BCD6C2', GAPCLR = '#E9D9D5'
 
 // Status → chip colors for the Living Calendar. Semantic, separate from the
 // program's green/gold accents.
@@ -1128,7 +1166,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 
           {/* View toggle */}
           <div className="flex items-center gap-2 mb-3">
-            {[['now', 'This Week', Gauge], ['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
+            {[['now', 'This Week', Gauge], ['coverage', 'Coverage', LayoutGrid], ['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setViewMode(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 transition" style={viewMode === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
                 <Icon size={13} /> {label}
               </button>
@@ -1195,6 +1233,61 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                       )}
                     </div>
                   )}
+                </div>
+              )
+            })()
+          ) : viewMode === 'coverage' ? (
+            (() => {
+              const dated = visibleApps.filter((a) => a.plannedDate || a.templateDate)
+              if (dated.length === 0) return <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">Add planned sprays with dates to see season coverage.</div>
+              const mks = dated.map((a) => (a.plannedDate || a.templateDate).slice(0, 7)).sort()
+              const months = monthKeysBetween(mks[0], mks[mks.length - 1])
+              const rows = areaGroups
+              return (
+                <div>
+                  <p className="font-body text-xs text-slate-400 mb-3">How long each area stays protected, month by month. A <b style={{ color: '#B23A2E' }}>gap</b> is an uncovered stretch between sprays — tap it to slot one in.</p>
+                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-3 overflow-x-auto">
+                    <table className="border-separate w-full" style={{ borderSpacing: 3, minWidth: Math.max(360, 120 + months.length * 46) }}>
+                      <thead>
+                        <tr>
+                          <th></th>
+                          {months.map((mk) => <th key={mk} className="font-body text-[10px] font-bold uppercase text-slate-400 text-center px-1" style={{ letterSpacing: '.04em' }}>{fmtMonthShort(mk)}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((ag) => {
+                          const cells = coverageRow(ag.items, months)
+                          return (
+                            <tr key={ag.area}>
+                              <td className="font-body text-[12px] font-semibold text-slate-700 pr-2 whitespace-nowrap">{ag.area}</td>
+                              {cells.map((c) => {
+                                const bg = c.state === 'on' ? COVER : c.state === 'light' ? COVER_LIGHT : c.state === 'gap' ? GAPCLR : '#F1F3EF'
+                                const isGap = c.state === 'gap'
+                                return (
+                                  <td key={c.mk} className="p-0">
+                                    <button
+                                      type="button"
+                                      onClick={isGap ? () => setEditApp({ originalIds: [], area: ag.area, plannedDate: `${c.mk}-15`, trigger: { mode: 'date' }, products: [blankRow()] }) : undefined}
+                                      title={isGap ? `Coverage gap in ${fmtMonthShort(c.mk)} — tap to add a spray` : ''}
+                                      className="w-full rounded-md border transition"
+                                      style={{ height: 28, backgroundColor: bg, borderColor: isGap ? '#D9B3AC' : 'transparent', cursor: isGap ? 'pointer' : 'default' }}
+                                    >
+                                      {isGap && <span style={{ color: '#B23A2E', fontWeight: 800, fontSize: 13 }}>!</span>}
+                                    </button>
+                                  </td>
+                                )
+                              })}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex flex-wrap gap-4 mt-3 font-body text-[12px] text-slate-500">
+                    <span className="flex items-center gap-1.5"><i style={{ width: 16, height: 12, borderRadius: 3, background: COVER, display: 'inline-block' }} /> Protected</span>
+                    <span className="flex items-center gap-1.5"><i style={{ width: 16, height: 12, borderRadius: 3, background: COVER_LIGHT, display: 'inline-block' }} /> Partial</span>
+                    <span className="flex items-center gap-1.5"><i style={{ width: 16, height: 12, borderRadius: 3, background: GAPCLR, display: 'inline-block' }} /> <b style={{ color: '#B23A2E' }}>Gap</b></span>
+                  </div>
                 </div>
               )
             })()
