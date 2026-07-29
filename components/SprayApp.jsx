@@ -27,7 +27,7 @@ import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
-import { fungicidesFor, ratingsSourceFor } from '@/lib/fungicides'
+import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget } from '@/lib/fungicides'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
@@ -1622,6 +1622,51 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             })}
           </div>
         </Card>
+
+        {(() => {
+          const dids = [...new Set((s.targets || []).map(diseaseIdForTarget).filter(Boolean))]
+          if (dids.length === 0) return null
+          const tankProducts = (s.products || []).filter((p) => p.product).map((p) => ({ name: p.product }))
+          const nameOf = (id) => PROFILES.find((p) => p.id === id)?.name || id
+          return (
+            <Card>
+              <FieldLabel>Rated fungicides for your targets</FieldLabel>
+              <div className="space-y-3 mt-2">
+                {dids.map((did) => {
+                  const src = ratingsSourceFor(did)
+                  if (!src) return null
+                  const list = fungicidesFor(did, src)
+                    .map((f) => ({ ...f, owned: !!ownedMatch(f, products), inTank: !!ownedMatch(f, tankProducts) }))
+                    .sort((a, b) => (b.owned ? 1 : 0) - (a.owned ? 1 : 0) || b.score - a.score)
+                    .slice(0, 6)
+                  return (
+                    <div key={did}>
+                      <p className="font-body text-[11px] font-bold text-slate-500 mb-1.5">{nameOf(did)} <span className="font-normal text-slate-400">· {src === 'Rutgers' ? 'Rutgers 1–4' : 'NC State ++'}</span></p>
+                      <div className="space-y-1.5">
+                        {list.map((f, i) => {
+                          const sc = f.score >= 3.5 ? { bg: '#DDEEDF', fg: '#2E7D46' } : f.score >= 2.5 ? { bg: '#FBF0D5', fg: '#9A6B12' } : { bg: '#EEF1F4', fg: '#64748B' }
+                          return (
+                            <div key={i} className="flex items-center gap-2" style={{ opacity: f.owned || f.inTank ? 1 : 0.7 }}>
+                              <span className="font-body text-[11px] font-bold rounded px-1.5 py-0.5 shrink-0 w-9 text-center" style={{ backgroundColor: sc.bg, color: sc.fg }}>{f.rating}</span>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-body text-[12px] font-semibold text-slate-800 truncate">{f.trade || f.ai}
+                                  {f.inTank && <span className="font-body text-[10px] font-bold ml-1.5" style={{ color: '#2563EB' }}>• in tank</span>}
+                                  {!f.inTank && f.owned && <span className="font-body text-[10px] font-bold ml-1.5" style={{ color: '#2E7D46' }}>✓ in library</span>}
+                                </p>
+                                <p className="font-body text-[10px] text-slate-400 truncate">{f.ai}{f.frac ? ` · FRAC ${f.frac}` : ''}{f.interval ? ` · every ${f.interval} d` : ''}</p>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="font-body text-[10px] text-slate-400 mt-2.5">Best-rated first, the ones you own on top. Rotate FRAC codes between sprays to prevent resistance; always follow the label.</p>
+            </Card>
+          )
+        })()}
 
         <Card>
           <FieldLabel>Instructions</FieldLabel>
@@ -5466,7 +5511,7 @@ function TurfPerformanceModule() {
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-24 pt-6">
         {route === 'dashboard' && <TurfDashboardPlaceholder />}
-        {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} />}
+        {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} products={turf.products} />}
         {route === 'gdd' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <GddPgrTab daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} hasLocation={turf.location?.lat != null} />
@@ -5514,13 +5559,14 @@ const TIER_STYLE = {
   Secondary: { bg: '#EAF1F6', fg: '#2B6C8F' },
   Micro: { bg: '#F1EEE6', fg: '#8A7A4C' },
 }
-function KnowledgeTab({ courseInfo }) {
+function KnowledgeTab({ courseInfo, products = [] }) {
   const [sub, setSub] = useState('pests') // 'pests' | 'nutrients'
   const [q, setQ] = useState('')
   const [kind, setKind] = useState('All')
   const [openId, setOpenId] = useState(null)
   const [fungAll, setFungAll] = useState(false)
-  const openProfile = (id) => { setFungAll(false); setOpenId(id) }
+  const [ownedOnly, setOwnedOnly] = useState(false)
+  const openProfile = (id) => { setFungAll(false); setOwnedOnly(false); setOpenId(id) }
   const club = (courseInfo?.siteGrasses || []).map((g) => String(g).toLowerCase())
   const applies = (grasses) => !club.length || grasses.includes('any') || grasses.some((tok) => club.some((g) => g.includes(tok)))
   const term = q.trim().toLowerCase()
@@ -5584,11 +5630,18 @@ function KnowledgeTab({ courseInfo }) {
                       {(() => {
                         const src = ratingsSourceFor(p.id)
                         if (!src) return null
-                        const list = fungicidesFor(p.id, src)
+                        const all = fungicidesFor(p.id, src).map((f) => ({ ...f, owned: ownedMatch(f, products) }))
+                        const ownedCount = all.filter((f) => f.owned).length
+                        const list = ownedOnly ? all.filter((f) => f.owned) : all
                         const shown = fungAll ? list : list.slice(0, 6)
                         return (
                           <div className="rounded-xl p-2.5" style={{ backgroundColor: '#F5F3FB' }}>
-                            <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#6D4AC2' }}>Rated fungicides · {src === 'Rutgers' ? 'Rutgers PPA-1 (pro)' : 'NC State (home lawn)'}</p>
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: '#6D4AC2' }}>Rated fungicides · {src === 'Rutgers' ? 'Rutgers PPA-1 (pro)' : 'NC State (home lawn)'}</p>
+                              {ownedCount > 0 && (
+                                <button onClick={(e) => { e.stopPropagation(); setOwnedOnly((v) => !v) }} className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={ownedOnly ? { backgroundColor: '#2E7D46', color: 'white' } : { backgroundColor: '#DDEEDF', color: '#2E7D46' }}>{ownedOnly ? 'Showing yours' : `You have ${ownedCount}`}</button>
+                              )}
+                            </div>
                             <div className="space-y-1.5">
                               {shown.map((f, i) => {
                                 const sc = f.score >= 3.5 ? { bg: '#DDEEDF', fg: '#2E7D46' } : f.score >= 2.5 ? { bg: '#FBF0D5', fg: '#9A6B12' } : { bg: '#EEF1F4', fg: '#64748B' }
@@ -5596,7 +5649,7 @@ function KnowledgeTab({ courseInfo }) {
                                   <div key={i} className="flex items-center gap-2">
                                     <span className="font-body text-[11px] font-bold rounded px-1.5 py-0.5 shrink-0 w-9 text-center" style={{ backgroundColor: sc.bg, color: sc.fg }}>{f.rating}</span>
                                     <div className="min-w-0 flex-1">
-                                      <p className="font-body text-[12px] font-semibold text-slate-800 truncate">{f.trade || f.ai}</p>
+                                      <p className="font-body text-[12px] font-semibold text-slate-800 truncate">{f.trade || f.ai}{f.owned && <span className="font-body text-[10px] font-bold ml-1.5" style={{ color: '#2E7D46' }}>✓ in library</span>}</p>
                                       <p className="font-body text-[10px] text-slate-400 truncate">{f.ai}{f.frac ? ` · FRAC ${f.frac}` : ''}{f.interval ? ` · every ${f.interval} d` : ''}</p>
                                     </div>
                                   </div>
