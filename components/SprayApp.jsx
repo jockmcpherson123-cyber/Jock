@@ -22,7 +22,7 @@ import {
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
@@ -799,7 +799,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   const hasLocation = location?.lat != null
   const [wx, setWx] = useState(() => {
     const cached = readWxCache(location?.lat, location?.lng, today)
-    return { current: null, todayWindow: null, season: cached?.season || [], breakdownTemps: cached?.breakdownTemps || [] }
+    return { current: null, todayWindow: null, season: cached?.season || [], breakdownTemps: cached?.breakdownTemps || [], forecast: [] }
   })
   useEffect(() => {
     if (!hasLocation) return
@@ -813,7 +813,10 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
         const data = await fetchWeather(location.lat, location.lng)
         const daily = dailyFromHourly(data)
         const todayRow = daily.find((d) => d.date === today) || daily[0] || null
-        if (!cancelled) setWx((w) => ({ ...w, todayWindow: todayRow ? { ...todayRow, spray: sprayWindow(todayRow) } : null }))
+        // The daily block carries the next ~14 days too — kept for projecting the
+        // Growth-Reg reapply date from upcoming weather.
+        const forecast = dailyFromForecastBlock(data)
+        if (!cancelled) setWx((w) => ({ ...w, todayWindow: todayRow ? { ...todayRow, spray: sprayWindow(todayRow) } : null, forecast }))
       } catch { /* ignore */ }
     })()
     ;(async () => { try { const c = await fetchCurrent(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ } })()
@@ -874,7 +877,10 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       const gdd = gddSince(wx.season, last.date, 32)
       const pct = gdd != null && PGR_TARGET > 0 ? Math.min(100, Math.round((gdd / PGR_TARGET) * 100)) : 0
       const status = gdd == null ? 'none' : gdd >= PGR_TARGET ? 'due' : gdd >= PGR_TARGET * 0.8 ? 'soon' : 'ok'
-      return { area, last, gdd, pct, status }
+      // Projected reapply date from the upcoming forecast (when the remaining GDD
+      // will accumulate).
+      const est = gdd == null ? null : projectGddReachDate(PGR_TARGET - gdd, wx.forecast, 32, today)
+      return { area, last, gdd, pct, status, est }
     }).sort((a, b) => (b.gdd ?? -1) - (a.gdd ?? -1))
   })()
   const pgrAlerts = pgrRows.filter((r) => r.status === 'due' || r.status === 'soon').length
@@ -1165,6 +1171,11 @@ function PgrTimingCard({ rows, target }) {
                 <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(4, r.pct)}%`, backgroundColor: s.bar }} />
               </div>
               <p className="font-body text-[10px] text-slate-400 mt-0.5 truncate">Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)}</p>
+              {r.est && (
+                <p className="font-body text-[10px] font-semibold mt-0.5 truncate" style={{ color: r.status === 'due' ? '#B91C1C' : FERN }}>
+                  {r.status === 'due' ? 'Reapply now — target reached' : `Est. reapply ~${fmtDate(r.est.date)} (${r.est.days}d, forecast)`}
+                </p>
+              )}
             </div>
           )
         })}
@@ -5348,8 +5359,17 @@ function TurfPerformanceModule() {
         setPractices(pracs)
         setSoilTests(soils)
         if (settings.location?.lat != null) {
-          try { setDaily(await fetchSeasonDaily(settings.location.lat, settings.location.lng)) } catch (e) { console.error(e) }
-          try { setSoilSeries(await fetchBreakdownTemps(settings.location.lat, settings.location.lng)) } catch (e) { console.error(e) }
+          const { lat, lng } = settings.location
+          // Season archive + forecast merged: the archive lags a few days and has
+          // no future, so we patch it with the forecast (recent + next ~14 days).
+          // That keeps season GDD current and lets Growth-Reg project a reapply date.
+          try {
+            const wxData = await fetchWeather(lat, lng)
+            let season = []
+            try { season = await fetchSeasonDaily(lat, lng) } catch { /* ignore */ }
+            setDaily(mergeDaily(season, dailyFromForecastBlock(wxData)))
+          } catch { try { setDaily(await fetchSeasonDaily(lat, lng)) } catch (e) { console.error(e) } }
+          try { setSoilSeries(await fetchBreakdownTemps(lat, lng)) } catch (e) { console.error(e) }
         }
       } catch (e) { console.error(e) }
       setLoadingTurf(false)
@@ -5443,13 +5463,16 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
       if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: pgr }
     })
 
+  const todayIso = new Date().toISOString().slice(0, 10)
   const areaRows = Object.keys(areas).map((area) => {
     const last = lastByArea[area]
     const gdd = last ? gddSince(daily, last.date, 32) : null
     const pct = gdd != null && target > 0 ? Math.min(100, Math.round((gdd / target) * 100)) : 0
     let status = 'none'
     if (gdd != null) status = gdd >= target ? 'due' : gdd >= target * 0.8 ? 'soon' : 'ok'
-    return { area, last, gdd, pct, status }
+    // Projected reapply date, walking the forecast forward from today.
+    const est = gdd == null ? null : projectGddReachDate(target - gdd, daily, 32, todayIso)
+    return { area, last, gdd, pct, status, est }
   }).sort((a, b) => (b.gdd ?? -1) - (a.gdd ?? -1))
 
   const statusStyle = { due: { bg: '#FEE2E2', fg: '#B91C1C', label: 'Reapply now' }, soon: { bg: '#FEF3DD', fg: '#92660D', label: 'Soon' }, ok: { bg: '#E8F3EC', fg: FERN, label: 'On track' } }
@@ -5489,6 +5512,11 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
                 <div className="h-full rounded-full transition-all" style={{ width: `${r.pct}%`, backgroundColor: r.gdd == null ? '#E2E8F0' : statusStyle[r.status].fg }} />
               </div>
               {r.last && <p className="font-body text-[10px] text-slate-400 mt-0.5">Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)}</p>}
+              {r.est && (
+                <p className="font-body text-[10px] font-semibold mt-0.5" style={{ color: r.status === 'due' ? '#B91C1C' : FERN }}>
+                  {r.status === 'due' ? 'Reapply now — target reached' : `Est. reapply ~${fmtDate(r.est.date)} · ${r.est.days} days out (from forecast)`}
+                </p>
+              )}
             </div>
           ))}
           {areaRows.length === 0 && <p className="font-body text-sm text-slate-400">No areas set up yet.</p>}
