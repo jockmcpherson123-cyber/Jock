@@ -5848,7 +5848,7 @@ function TrendChart({ points = [], color = FERN, height = 120, unit = '', showAv
         <path d={areaPath} fill={color} opacity="0.12" />
         <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
         {data.map((d, i) => <circle key={i} cx={X(i)} cy={Y(d.value)} r={i === n - 1 ? 3.5 : 2} fill={color} />)}
-        <text x={X(n - 1)} y={Y(last.value) - 7} textAnchor="end" fontSize="11" fontWeight="700" fill={color} style={{ fontVariantNumeric: 'tabular-nums' }}>{last.value}</text>
+        <text x={X(n - 1)} y={Y(last.value) - 7} textAnchor="end" fontSize="11" fontWeight="700" fill={color} style={{ fontVariantNumeric: 'tabular-nums' }}>{Math.round(last.value * 10) / 10}</text>
       </svg>
       <div className="flex justify-between font-body text-[9px] text-slate-400 mt-1.5" style={{ fontVariantNumeric: 'tabular-nums' }}>
         <span>{fmtDate(data[0].date)}</span>
