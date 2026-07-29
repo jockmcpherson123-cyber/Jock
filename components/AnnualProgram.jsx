@@ -5,14 +5,40 @@
 // then browse it by area. (Editing individual applications, the early-order
 // calculator and auto-populating spray sheets come in the next phase.)
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList } from 'lucide-react'
+import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
 import { downloadCSV } from '@/lib/calc'
+import { fetchSeasonDaily, fetchBreakdownTemps } from '@/lib/weather'
+import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGGER_MODES, GDD_BASES, statusRank } from '@/lib/triggers'
+
+// Status → chip colors for the Living Calendar. Semantic, separate from the
+// program's green/gold accents.
+const STATUS_STYLE = {
+  overdue: { bg: '#F6E0DC', fg: '#B23A2E', label: 'Overdue' },
+  due:     { bg: '#F6E0DC', fg: '#B23A2E', label: 'Due' },
+  soon:    { bg: '#F6ECD4', fg: '#9A6B12', label: 'Coming up' },
+  ok:      { bg: '#E4EFE5', fg: '#3A6B4A', label: 'On track' },
+  none:    { bg: '#EEF1F4', fg: '#6B7280', label: 'No data' },
+  done:    { bg: '#E8EAE6', fg: '#6B7280', label: 'Done' },
+}
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
 const GOLD = '#C9A84C'
+
+// A live-status pill for an application/event in the Living Calendar.
+function StatusChip({ status, size = 'sm' }) {
+  if (!status) return null
+  const s = STATUS_STYLE[status.state] || STATUS_STYLE.none
+  const pad = size === 'lg' ? '4px 11px' : '3px 9px'
+  const fs = size === 'lg' ? 12.5 : 11
+  return (
+    <span className="font-body font-bold rounded-full whitespace-nowrap" style={{ backgroundColor: s.bg, color: s.fg, padding: pad, fontSize: fs }}>
+      {status.headline}
+    </span>
+  )
+}
 
 function fmtDate(d) {
   if (!d) return '—'
@@ -181,8 +207,32 @@ function typeColor(type) {
   }[type] || '#94A3B8'
 }
 
-export default function AnnualProgram({ areas, products = [], onProductsChanged, onCreateSheet }) {
+export default function AnnualProgram({ areas, products = [], sheets = [], location, onProductsChanged, onCreateSheet }) {
   const [programs, setPrograms] = useState([])
+  // Weather that feeds the Living Calendar's live status. Best-effort — the plan
+  // still shows without it (growth triggers just read "waiting on data").
+  const [season, setSeason] = useState([])
+  const [soilSeries, setSoilSeries] = useState([])
+  const nowIso = new Date().toISOString().slice(0, 10)
+  useEffect(() => {
+    if (location?.lat == null) return
+    let off = false
+    ;(async () => { try { const s = await fetchSeasonDaily(location.lat, location.lng); if (!off) setSeason(s) } catch { /* ignore */ } })()
+    ;(async () => { try { const bt = await fetchBreakdownTemps(location.lat, location.lng); if (!off) setSoilSeries(bt) } catch { /* ignore */ } })()
+    return () => { off = true }
+  }, [location?.lat, location?.lng])
+  // Live status for one event (a mix shares one trigger). Anchor GDD/interval on
+  // the growth-reg product when there is one, else the first product.
+  const statusCtx = { season, soilSeries, sheets, today: todayIso }
+  const eventStatus = (ev) => {
+    const items = ev.items || []
+    const lead = items.find((i) => String(i.type || '').toLowerCase().includes('growth')) || items[0] || {}
+    return triggerStatus({
+      area: ev.area, product: lead.product, type: lead.type,
+      trigger: items[0]?.trigger, plannedDate: ev.date, templateDate: lead.templateDate,
+      linkedSheetId: items.find((i) => i.linkedSheetId)?.linkedSheetId || null,
+    }, statusCtx)
+  }
   const [activeProgram, setActiveProgram] = useState(null)
   const [apps, setApps] = useState([])
   const [loading, setLoading] = useState(true)
@@ -195,7 +245,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
   const [newForm, setNewForm] = useState(null) // blank-season form state
   const [editProgForm, setEditProgForm] = useState(null) // rename/edit-season form
   const [orderEdit, setOrderEdit] = useState(null) // { name, caseSize, ozPerCase } for early-order inline edit
-  const [viewMode, setViewMode] = useState('timeline') // 'timeline' | 'area'
+  const [viewMode, setViewMode] = useState('now') // 'now' | 'timeline' | 'area' | 'order'
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
   const fileRef = useRef(null)
@@ -350,6 +400,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
       originalIds: [],
       area: areaFilter !== 'all' ? areaFilter : '',
       plannedDate: new Date().toISOString().slice(0, 10),
+      trigger: { mode: 'date' },
       products: [blankRow()],
     })
   }
@@ -360,6 +411,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
       originalIds: items.map((i) => i.id),
       area: items[0].area,
       plannedDate: items[0].plannedDate || '',
+      trigger: normalizeTrigger(items[0].trigger, items[0].type),
       products: items.map((i) => ({
         key: i.id, id: i.id, product: i.product,
         rateOzM: i.rateOzM ?? '', rateOzA: i.rateOzA ?? '',
@@ -402,6 +454,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
           basis: r.basis || 'oz / M',
           type: r.type || null,
           target: r.target || null,
+          trigger: editApp.trigger || { mode: 'date' },
         })
       }
       // Delete any products that were removed from the mix.
@@ -601,17 +654,28 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
   // A whole planned spray: date + area + the tank mix. Tapping the card opens it
   // to edit; a separate button sits underneath (in the gap before the next spray)
   // to turn it straight into a spray sheet.
-  const EventCard = (ev, opts = {}) => (
+  const EventCard = (ev, opts = {}) => {
+    const status = eventStatus(ev)
+    const trig = normalizeTrigger(ev.items[0]?.trigger, ev.items[0]?.type)
+    return (
     <div key={ev.key}>
       <div onClick={() => openEvent(ev.items)} className="cursor-pointer bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm hover:border-slate-200 transition">
-        <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#F0F6F2' }}>
-          <p className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
-            <Calendar size={12} />{fmtDateHeading(ev.date)}
+        <div className="flex items-center justify-between px-4 py-2.5 gap-2" style={{ backgroundColor: '#F0F6F2' }}>
+          <p className="font-body text-xs font-bold flex items-center gap-1.5 min-w-0" style={{ color: FOREST }}>
+            <Calendar size={12} className="shrink-0" /><span className="truncate">{trig.mode === 'date' ? fmtDateHeading(ev.date) : describeTrigger(trig, ev.items[0]?.type)}</span>
           </p>
-          <span className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'white', color: FERN }}>
-            {opts.badge != null ? opts.badge : ev.area}
-          </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <StatusChip status={status} />
+            <span className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'white', color: FERN }}>
+              {opts.badge != null ? opts.badge : ev.area}
+            </span>
+          </div>
         </div>
+        {status.detail && status.state !== 'done' && (
+          <div className="px-4 pt-2 pb-0">
+            <p className="font-body text-[11px] text-slate-400">{status.detail}{status.projectedDate && status.state !== 'due' && status.state !== 'overdue' ? ` · ~${fmtDate(status.projectedDate)}` : ''}</p>
+          </div>
+        )}
         <div className="divide-y divide-black/5">
           {ev.items.map((a) => (
             <div key={a.id} className="flex items-center gap-2.5 px-4 py-2.5">
@@ -635,7 +699,8 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
         </button>
       )}
     </div>
-  )
+    )
+  }
 
   return (
     <div className="pt-6 pb-10">
@@ -777,10 +842,72 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
                 </datalist>
               </div>
               <div>
-                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Planned date</label>
+                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Baseline date</label>
                 <input type="date" value={editApp.plannedDate || ''} onChange={(e) => setEditApp({ ...editApp, plannedDate: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
               </div>
             </div>
+
+            {/* ── Trigger: when this spray should fire ─────────────── */}
+            {(() => {
+              const trig = normalizeTrigger(editApp.trigger, editApp.products?.[0]?.type)
+              const setTrig = (patch) => setEditApp((prev) => ({ ...prev, trigger: { ...normalizeTrigger(prev.trigger, prev.products?.[0]?.type), ...patch } }))
+              const pickMode = (mode) => setEditApp((prev) => ({ ...prev, trigger: normalizeTrigger({ mode }, prev.products?.[0]?.type) }))
+              return (
+                <div className="rounded-xl border p-3" style={{ borderColor: '#EFE6C9', backgroundColor: '#FFFDF6' }}>
+                  <label className="font-body text-[11px] font-bold uppercase tracking-wide block mb-2" style={{ color: FERN }}>When should this fire?</label>
+                  <div className="grid grid-cols-2 gap-1.5 mb-2.5">
+                    {TRIGGER_MODES.map((m) => {
+                      const on = trig.mode === m.key
+                      return (
+                        <button key={m.key} type="button" onClick={() => pickMode(m.key)} className="font-body text-xs font-bold px-2.5 py-2 rounded-lg text-left transition" style={on ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+                          {m.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {trig.mode === 'date' && (
+                    <p className="font-body text-[11px] text-slate-400">Runs on the baseline date above.</p>
+                  )}
+                  {trig.mode === 'gdd' && (
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1">
+                        <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">GDD target</label>
+                        <input type="number" step="any" value={trig.target} onChange={(e) => setTrig({ target: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+                      </div>
+                      <div className="flex-1">
+                        <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Base °F</label>
+                        <select value={trig.base} onChange={(e) => setTrig({ base: Number(e.target.value) })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white">
+                          {GDD_BASES.map((b) => <option key={b} value={b}>{b}°F</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                  {trig.mode === 'interval' && (
+                    <div>
+                      <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Days between sprays</label>
+                      <input type="number" value={trig.days} onChange={(e) => setTrig({ days: e.target.value })} className="w-28 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+                    </div>
+                  )}
+                  {trig.mode === 'soil' && (
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1">
+                        <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Soil temp °F</label>
+                        <input type="number" step="any" value={trig.temp} onChange={(e) => setTrig({ temp: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+                      </div>
+                      <div className="flex-1">
+                        <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Direction</label>
+                        <select value={trig.dir} onChange={(e) => setTrig({ dir: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white">
+                          <option value="rising">at or above &amp; rising</option>
+                          <option value="falling">at or below &amp; falling</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                  <p className="font-body text-[11px] mt-2" style={{ color: FERN }}>{describeTrigger(trig, editApp.products?.[0]?.type)}</p>
+                </div>
+              )
+            })()}
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -1001,7 +1128,7 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
 
           {/* View toggle */}
           <div className="flex items-center gap-2 mb-3">
-            {[['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
+            {[['now', 'This Week', Gauge], ['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setViewMode(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 transition" style={viewMode === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
                 <Icon size={13} /> {label}
               </button>
@@ -1022,6 +1149,55 @@ export default function AnnualProgram({ areas, products = [], onProductsChanged,
 
           {visibleApps.length === 0 ? (
             <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No applications in this program.</div>
+          ) : viewMode === 'now' ? (
+            (() => {
+              const events = groupByEvent(visibleApps).map((ev) => ({ ev, st: eventStatus(ev) }))
+              const rankThen = (a, b) => statusRank(a.st.state) - statusRank(b.st.state) || String(a.st.projectedDate || '9999').localeCompare(String(b.st.projectedDate || '9999'))
+              const actionable = events.filter((e) => ['overdue', 'due', 'soon'].includes(e.st.state)).sort(rankThen)
+              const onTrack = events.filter((e) => e.st.state === 'ok').sort(rankThen)
+              const counts = { overdue: 0, due: 0, soon: 0 }
+              actionable.forEach((e) => { counts[e.st.state === 'overdue' ? 'overdue' : e.st.state === 'due' ? 'due' : 'soon']++ })
+              return (
+                <div className="space-y-4">
+                  {location?.lat == null && (
+                    <div className="rounded-xl border p-3 font-body text-[12px]" style={{ backgroundColor: '#FEF9E7', borderColor: '#EFE0B0', color: '#7A5B12' }}>
+                      Set your course location in Settings → Location to turn on live growth &amp; soil-temp triggers. Date triggers still work without it.
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-2">
+                    {[['Overdue', counts.overdue, STATUS_STYLE.overdue], ['Due now', counts.due, STATUS_STYLE.due], ['Coming up', counts.soon, STATUS_STYLE.soon]].map(([lbl, n, s]) => (
+                      <div key={lbl} className="rounded-xl border border-black/5 px-3 py-2.5 shadow-sm bg-white text-center">
+                        <p className="font-display font-bold" style={{ fontSize: 22, color: s.fg }}>{n}</p>
+                        <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">{lbl}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {actionable.length === 0 ? (
+                    <div className="bg-white rounded-2xl border border-black/5 p-8 text-center font-body text-sm" style={{ color: FERN }}>
+                      <Check size={22} className="mx-auto mb-2" /> Nothing needs attention this week. {onTrack.length} spray{onTrack.length !== 1 ? 's' : ''} on track.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {actionable.map(({ ev }) => EventCard(ev, { badge: ev.area }))}
+                    </div>
+                  )}
+
+                  {onTrack.length > 0 && actionable.length > 0 && (
+                    <div>
+                      <button onClick={() => toggle('now:ontrack')} className="w-full flex items-center justify-between mb-2 mt-2">
+                        <span className="font-display text-sm font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
+                          {collapsed['now:ontrack'] ? <ChevronRight size={15} /> : <ChevronDown size={15} />}On track ({onTrack.length})
+                        </span>
+                      </button>
+                      {!collapsed['now:ontrack'] && (
+                        <div className="space-y-3">{onTrack.map(({ ev }) => EventCard(ev, { badge: ev.area }))}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()
           ) : viewMode === 'timeline' ? (
             <>
               {/* Month jump bar */}

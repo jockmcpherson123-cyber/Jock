@@ -721,7 +721,7 @@ function SprayOpsModule({ user }) {
           <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? saveProduct : undefined} />
         )}
         {route === 'weather' && <Weather location={location} onGoToSettings={() => manage && setRoute('settings')} />}
-        {route === 'program' && manage && <AnnualProgram areas={areas} products={products} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
+        {route === 'program' && manage && <AnnualProgram areas={areas} products={products} sheets={sheets} location={location} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
           <SettingsPage
