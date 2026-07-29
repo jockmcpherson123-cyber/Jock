@@ -143,7 +143,7 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
   const timings = soilNow != null ? applicationTimings(soilNow, trend) : []
 
   // Full disease-risk model list + GDD (base 50°F) + GDD-based pest stages.
-  const risks = diseaseRisks(daily, soilNow, trend, today)
+  const risks = diseaseRisks(daily, soilNow, trend, today, courseInfo?.siteGrasses || [])
   const gddToDate = Math.round(summary.gddNow || 0)
   const gddForecast7 = Math.round(daily.filter((d) => d.date > today).slice(0, 7).reduce((s, d) => s + (d.tMax != null && d.tMin != null ? Math.max(0, (d.tMax + d.tMin) / 2 - 50) : 0), 0))
   const stages = pestStages(gddToDate)
