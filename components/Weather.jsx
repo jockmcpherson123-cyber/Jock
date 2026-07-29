@@ -40,6 +40,13 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
   const [savingRain, setSavingRain] = useState(false)
   const canEditRain = manage && typeof onSaveRain === 'function'
   const openRainEdit = (date, cur) => setEditRain({ date, draft: cur != null ? String(cur) : '' })
+  // Prefill the box for a chosen date: your saved value if any, else the forecast.
+  const precipForDate = (date) => {
+    if (rainOverrides[date] != null) return rainOverrides[date]
+    const row = (state.daily || []).find((d) => d.date === date)
+    return row ? row.precip : null
+  }
+  const changeRainDate = (date) => setEditRain(() => { const p = precipForDate(date); return { date, draft: p != null ? String(p) : '' } })
   async function commitRain() {
     if (!editRain) return
     setSavingRain(true)
@@ -147,7 +154,10 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditRain(null)}>
           <div className="bg-white rounded-2xl border-2 p-4 shadow-2xl w-full max-w-xs" style={{ borderColor: '#2563EB' }} onClick={(e) => e.stopPropagation()}>
             <p className="font-display text-base font-semibold text-slate-900 mb-1 flex items-center gap-1.5"><CloudRain size={16} className="text-blue-500" /> Rainfall</p>
-            <p className="font-body text-xs text-slate-400 mb-3">{fmtDay(editRain.date)} — enter what your rain gauge actually caught. This drives ET and the disease models.</p>
+            <p className="font-body text-xs text-slate-400 mb-3">Enter what your rain gauge actually caught. This drives ET and the disease models.</p>
+            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Date</label>
+            <input type="date" value={editRain.date} max={today} onChange={(e) => changeRainDate(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body mb-3" />
+            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Rainfall</label>
             <div className="flex items-center gap-2">
               <input type="number" step="0.01" min="0" inputMode="decimal" autoFocus value={editRain.draft} onChange={(e) => setEditRain({ ...editRain, draft: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') commitRain() }} className="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body" placeholder="0.00" />
               <span className="font-body text-sm font-semibold text-slate-500">inches</span>
@@ -364,7 +374,14 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
 
       {/* Recent days — raw numbers you can sanity-check against your own readings */}
       <div>
-        <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Recent Days (verify against your station)</p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide">Recent Days (verify against your station)</p>
+          {canEditRain && (
+            <button onClick={() => changeRainDate(today)} className="font-body text-[11px] font-bold flex items-center gap-1" style={{ color: '#2563EB' }}>
+              <CloudRain size={12} /> Log rainfall
+            </button>
+          )}
+        </div>
         <div className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
           <div className="flex items-center px-4 py-2 border-b border-black/5 font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide">
             <span className="w-28">Day</span>
