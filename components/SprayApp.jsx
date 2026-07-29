@@ -26,6 +26,7 @@ import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, d
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
+import { PROFILES, NUTRIENTS } from '@/lib/knowledge'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
@@ -5417,7 +5418,7 @@ function TurfPerformanceModule() {
             <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
           </div>
           <div className="flex gap-1 font-body text-sm overflow-x-auto">
-            {[['dashboard', 'Dashboard'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed']].map(([key, label]) => (
+            {[['dashboard', 'Dashboard'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['knowledge', 'Reference']].map(([key, label]) => (
               <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
                 {label}
               </button>
@@ -5428,6 +5429,7 @@ function TurfPerformanceModule() {
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-24 pt-6">
         {route === 'dashboard' && <TurfDashboardPlaceholder />}
+        {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} />}
         {route === 'gdd' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <GddPgrTab daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} hasLocation={turf.location?.lat != null} />
@@ -5462,6 +5464,140 @@ function TurfPerformanceModule() {
 }
 
 // ── GDD + GROWTH-REG TRACKER ────────────────────────────────────────────────
+// ── Knowledge Center ─────────────────────────────────────────────────────────
+// Reference library: turf disease/weed/insect profiles + the essential plant
+// nutrients. Profiles share ids with the risk models so they can cross-link.
+const KIND_STYLE = {
+  Disease: { bg: '#FDE7E4', fg: '#B23A2E' },
+  Weed: { bg: '#FCEFD2', fg: '#9A6B12' },
+  Insect: { bg: '#EDE6FA', fg: '#6D4AC2' },
+}
+const TIER_STYLE = {
+  Primary: { bg: '#E4EFE5', fg: FERN },
+  Secondary: { bg: '#EAF1F6', fg: '#2B6C8F' },
+  Micro: { bg: '#F1EEE6', fg: '#8A7A4C' },
+}
+function KnowledgeTab({ courseInfo }) {
+  const [sub, setSub] = useState('pests') // 'pests' | 'nutrients'
+  const [q, setQ] = useState('')
+  const [kind, setKind] = useState('All')
+  const [openId, setOpenId] = useState(null)
+  const club = (courseInfo?.siteGrasses || []).map((g) => String(g).toLowerCase())
+  const applies = (grasses) => !club.length || grasses.includes('any') || grasses.some((tok) => club.some((g) => g.includes(tok)))
+  const term = q.trim().toLowerCase()
+
+  const pests = PROFILES
+    .filter((p) => kind === 'All' || p.kind === kind)
+    .filter((p) => !term || `${p.name} ${p.pathogen} ${p.blurb}`.toLowerCase().includes(term))
+  const nutrients = NUTRIENTS.filter((n) => !term || `${n.name} ${n.sym} ${n.role}`.toLowerCase().includes(term))
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="font-display text-lg font-semibold text-slate-900">Reference</p>
+        <p className="font-body text-[11px] text-slate-400">Disease, weed &amp; insect profiles and the essential plant nutrients — what it is, what favors it, and what to do.</p>
+      </div>
+
+      <div className="flex gap-2">
+        {[['pests', 'Diseases & Pests'], ['nutrients', 'Nutrients']].map(([k, label]) => (
+          <button key={k} onClick={() => { setSub(k); setOpenId(null); setQ('') }} className="font-body text-xs font-bold px-3.5 py-2 rounded-full transition" style={sub === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{label}</button>
+        ))}
+      </div>
+
+      <div className="relative">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={sub === 'pests' ? 'Search diseases, weeds, insects…' : 'Search nutrients…'} className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm font-body" />
+      </div>
+
+      {sub === 'pests' ? (
+        <>
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
+            {['All', 'Disease', 'Weed', 'Insect'].map((k) => (
+              <button key={k} onClick={() => setKind(k)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={kind === k ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{k === 'All' ? 'All' : `${k}s`}</button>
+            ))}
+          </div>
+          <div className="space-y-2.5">
+            {pests.map((p) => {
+              const open = openId === p.id
+              const ks = KIND_STYLE[p.kind] || KIND_STYLE.Disease
+              const relevant = applies(p.grasses)
+              return (
+                <div key={p.id} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden" style={{ opacity: relevant ? 1 : 0.62 }}>
+                  <button onClick={() => setOpenId(open ? null : p.id)} className="w-full text-left p-4">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="font-display text-base font-semibold text-slate-900">{p.name}</span>
+                      <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: ks.bg, color: ks.fg }}>{p.kind}</span>
+                    </div>
+                    <p className="font-body text-[12px] text-slate-500">{p.blurb}</p>
+                    {!relevant && <p className="font-body text-[10px] text-slate-400 mt-1">Not your turf types</p>}
+                  </button>
+                  {open && (
+                    <div className="px-4 pb-4 -mt-1 space-y-2.5">
+                      <p className="font-body text-[11px] italic text-slate-400">{p.pathogen}</p>
+                      <Kv label="Favored by" value={p.favoredBy} />
+                      <Kv label="How to identify" value={p.identify} />
+                      <Kv label="How to manage" value={p.manage} accent />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {pests.length === 0 && <p className="font-body text-sm text-slate-400 text-center py-6">No matches.</p>}
+          </div>
+        </>
+      ) : (
+        <div className="space-y-2.5">
+          {['Primary', 'Secondary', 'Micro'].map((tier) => {
+            const list = nutrients.filter((n) => n.tier === tier)
+            if (list.length === 0) return null
+            return (
+              <div key={tier}>
+                <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5 mt-1">{tier === 'Micro' ? 'Micronutrients' : tier === 'Primary' ? 'Primary macronutrients' : 'Secondary macronutrients'}</p>
+                <div className="space-y-2">
+                  {list.map((n) => {
+                    const open = openId === n.sym
+                    const ts = TIER_STYLE[n.tier]
+                    return (
+                      <div key={n.sym} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+                        <button onClick={() => setOpenId(open ? null : n.sym)} className="w-full text-left p-3.5 flex items-center gap-3">
+                          <span className="w-9 h-9 rounded-xl flex items-center justify-center font-display font-bold shrink-0" style={{ backgroundColor: ts.bg, color: ts.fg }}>{n.sym}</span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-body text-sm font-semibold text-slate-900">{n.name}</span>
+                              <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F9', color: '#64748B' }}>{n.mobile ? 'mobile' : 'immobile'}</span>
+                            </div>
+                            <p className="font-body text-[11px] text-slate-500 truncate">{n.role}</p>
+                          </div>
+                        </button>
+                        {open && (
+                          <div className="px-3.5 pb-3.5 space-y-2.5">
+                            <Kv label="What it does" value={n.role} />
+                            <Kv label="Deficiency signs" value={n.deficiency} />
+                            <Kv label="Common sources" value={n.sources} accent />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <p className="font-body text-[10px] text-slate-400">General agronomic reference — always follow the product label and your local extension recommendations.</p>
+    </div>
+  )
+}
+function Kv({ label, value, accent }) {
+  return (
+    <div className="rounded-xl p-2.5" style={{ backgroundColor: accent ? '#F0F6F2' : '#F8FAFC' }}>
+      <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: accent ? FERN : '#94A3B8' }}>{label}</p>
+      <p className="font-body text-[12px] text-slate-700 leading-relaxed">{value}</p>
+    </div>
+  )
+}
+
 // Season GDD, plus GDD accumulated since each area's last growth-regulator
 // application (base 32°F) against a reapply target — the Primo/Anuew model.
 function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {

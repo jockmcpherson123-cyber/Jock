@@ -4,10 +4,11 @@
 // disease-risk readouts (Dollar Spot, Brown Patch) computed from the weather.
 // All from Open-Meteo using the club's saved location — no API key required.
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind } from 'lucide-react'
+import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind, Info } from 'lucide-react'
 import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps, buildRainYear } from '@/lib/weather'
 import { applicationTimings, soilTrend, currentSoilTemp } from '@/lib/soiltiming'
 import { diseaseRisks, pestStages } from '@/lib/pests'
+import { profileById } from '@/lib/knowledge'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -127,6 +128,7 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
   const rainOverrides = courseInfo?.rainOverrides || {}
   const [editRain, setEditRain] = useState(null) // { date, draft } while editing
   const [savingRain, setSavingRain] = useState(false)
+  const [openRisk, setOpenRisk] = useState(null) // disease id whose profile is expanded
   const canEditRain = manage && typeof onSaveRain === 'function'
   const openRainEdit = (date, cur) => setEditRain({ date, draft: cur != null ? String(cur) : '' })
   // Prefill the box for a chosen date: your saved value if any, else the forecast.
@@ -341,13 +343,31 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
         <div className="space-y-2">
           {risks.map((r) => {
             const c = r.score >= 70 ? '#DC2626' : r.score >= 40 ? '#EA580C' : r.score >= 15 ? '#CA8A04' : '#16A34A'
+            const prof = profileById(r.id)
+            const open = openRisk === r.id
             return (
-              <div key={r.id} className="bg-white rounded-2xl border border-black/5 shadow-sm flex items-center gap-3 p-3" style={{ borderLeft: `5px solid ${c}` }}>
-                <div className="min-w-0 flex-1">
-                  <p className="font-body text-sm font-bold text-slate-900">{r.label}</p>
-                  <p className="font-body text-[11px] text-slate-500 mt-0.5">{r.desc}</p>
-                </div>
-                <div className="w-11 h-11 rounded-full flex items-center justify-center shrink-0 text-white font-display font-bold text-sm" style={{ backgroundColor: c }}>{r.score}</div>
+              <div key={r.id} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden" style={{ borderLeft: `5px solid ${c}` }}>
+                <button onClick={() => prof && setOpenRisk(open ? null : r.id)} className="w-full text-left flex items-center gap-3 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-body text-sm font-bold text-slate-900 flex items-center gap-1.5">{r.label}{prof && <Info size={12} className="text-slate-300 shrink-0" />}</p>
+                    <p className="font-body text-[11px] text-slate-500 mt-0.5">{r.desc}</p>
+                  </div>
+                  <div className="w-11 h-11 rounded-full flex items-center justify-center shrink-0 text-white font-display font-bold text-sm" style={{ backgroundColor: c }}>{r.score}</div>
+                </button>
+                {open && prof && (
+                  <div className="px-3 pb-3 space-y-2">
+                    <p className="font-body text-[12px] text-slate-600 leading-relaxed">{prof.blurb}</p>
+                    <div className="rounded-xl p-2.5" style={{ backgroundColor: '#FBF3EC' }}>
+                      <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: '#B45309' }}>Favored by</p>
+                      <p className="font-body text-[12px] text-slate-700 leading-relaxed">{prof.favoredBy}</p>
+                    </div>
+                    <div className="rounded-xl p-2.5" style={{ backgroundColor: '#F0F6F2' }}>
+                      <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: FERN }}>How to manage</p>
+                      <p className="font-body text-[12px] text-slate-700 leading-relaxed">{prof.manage}</p>
+                    </div>
+                    <p className="font-body text-[10px] text-slate-400">More in Turf Performance → Reference.</p>
+                  </div>
+                )}
               </div>
             )
           })}
