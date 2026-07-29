@@ -262,7 +262,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   }, [location?.lat, location?.lng])
   // Live status for one event (a mix shares one trigger). Anchor GDD/interval on
   // the growth-reg product when there is one, else the first product.
-  const statusCtx = { season, soilSeries, sheets, today: todayIso }
+  const statusCtx = { season, soilSeries, sheets, today: nowIso }
   const eventStatus = (ev) => {
     const items = ev.items || []
     const lead = items.find((i) => String(i.type || '').toLowerCase().includes('growth')) || items[0] || {}
