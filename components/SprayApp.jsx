@@ -118,11 +118,17 @@ function resolveArea(areas, name) {
   const keys = Object.keys(areas)
   if (!keys.length || !name) return null
   const n = String(name).toLowerCase()
-  const k =
-    keys.find((x) => x.toLowerCase() === n) ||
-    keys.find((x) => x.toLowerCase().startsWith(n)) ||
-    keys.find((x) => x.toLowerCase().includes(n)) ||
-    keys.find((x) => n.includes(x.toLowerCase()))
+  // Never let a Greens sheet borrow a Fairway's nozzle/rate: when the name has a
+  // recognizable section, fuzzy matches must stay in that same section. Only if
+  // no same-section area exists at all do we fall back to any match.
+  const wantSec = soilSection(name)
+  const sameSec = (x) => wantSec === 'Other' || soilSection(x) === wantSec
+  const match = (pool) =>
+    pool.find((x) => x.toLowerCase() === n) ||
+    pool.find((x) => x.toLowerCase().startsWith(n)) ||
+    pool.find((x) => x.toLowerCase().includes(n)) ||
+    pool.find((x) => n.includes(x.toLowerCase()))
+  const k = match(keys.filter(sameSec)) || match(keys)
   return k ? areas[k] : null
 }
 
@@ -2023,7 +2029,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
           <button onClick={saveNow} className="font-body text-sm font-medium" style={{ color: FERN }}>Save</button>
           <button onClick={printRecord} className="font-body text-sm font-medium" style={{ color: FOREST }}>Print</button>
           <button onClick={exportPdf} disabled={pdfBusy} className="font-body text-sm font-medium disabled:opacity-50" style={{ color: FOREST }}>{pdfBusy ? 'PDF…' : 'Export PDF'}</button>
-          {manage && sheet.status === 'pending' && (
+          {manage && (
             <button onClick={onEdit} className="font-body text-sm font-medium" style={{ color: FERN }}>Edit</button>
           )}
         </div>
@@ -5804,7 +5810,22 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
   // first word), so Blue and Gold tests never average together.
   const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
   const hasCourses = courseNames.length >= 2
-  const courseOf = (name) => courseNames.find((n) => String(name || '').toLowerCase().includes(String(n).split(' ')[0].toLowerCase())) || ''
+  const [courseTab, setCourseTab] = useState(courseNames[0] || 'all')
+  // Which course an area belongs to (legacy fallback). Greens from the picker are
+  // prefixed with the course name; settings areas / generic names fall back to a
+  // first-word match. Anything unmatched (practice greens, pre-multi-course
+  // "Green 5" entries) is "other".
+  const courseOf = (name) => {
+    const a = String(name || '').toLowerCase()
+    return courseNames.find((n) => a.startsWith(String(n).toLowerCase()))
+      || courseNames.find((n) => a.includes(String(n).toLowerCase()))
+      || courseNames.find((n) => a.includes(String(n).split(' ')[0].toLowerCase()))
+      || ''
+  }
+  // The course a test is filed under. The course chosen when the test was saved
+  // is authoritative (so a test never lands in the wrong tab because its area
+  // name didn't match); older tests without one fall back to name inference.
+  const courseOfTest = (t) => t.course || courseOf(t.area)
 
   // Grass + soil context for a chosen location. Settings areas carry it directly;
   // an individual green inherits from the course's greens settings-area so its
@@ -5816,7 +5837,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
   const contextFor = (name) => (areas[name] ? { grasses: areas[name].grasses || [], soilType: areas[name].soilType || '' } : greensSeed())
 
   const seed0 = contextFor(areaOptions[0] || '')
-  const blank = { area: areaOptions[0] || '', date: new Date().toISOString().slice(0, 10), annualN: String(suggestedAnnualN(seed0.grasses).n), units: 'ppm', ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', na: '', fe: '', mn: '', cu: '', zn: '', b: '', bsCa: '', bsMg: '', bsK: '', bsNa: '', bsH: '', lab: '', notes: '', grasses: seed0.grasses, soilType: seed0.soilType }
+  const blank = { area: areaOptions[0] || '', course: courseNames[0] || '', date: new Date().toISOString().slice(0, 10), annualN: String(suggestedAnnualN(seed0.grasses).n), units: 'ppm', ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', na: '', fe: '', mn: '', cu: '', zn: '', b: '', bsCa: '', bsMg: '', bsK: '', bsNa: '', bsH: '', lab: '', notes: '', grasses: seed0.grasses, soilType: seed0.soilType }
   const [showMicros, setShowMicros] = useState(false)
   const [showBaseSat, setShowBaseSat] = useState(false)
   const [form, setForm] = useState(blank)
@@ -5830,7 +5851,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
   // ppm, so edit in ppm mode (no re-conversion).
   const editTest = (t) => {
     setForm({
-      area: t.area, date: t.date || new Date().toISOString().slice(0, 10), units: 'ppm',
+      area: t.area, course: t.course || courseOf(t.area) || '', date: t.date || new Date().toISOString().slice(0, 10), units: 'ppm',
       annualN: t.annualN != null ? String(t.annualN) : '',
       ph: t.ph ?? '', bufferPh: t.bufferPh ?? '', om: t.om ?? '', cec: t.cec ?? '',
       p: t.p ?? '', k: t.k ?? '', ca: t.ca ?? '', mg: t.mg ?? '', s: t.s ?? '', na: t.na ?? '',
@@ -5842,7 +5863,9 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
     setShowForm(true)
     setMsg(null)
   }
-  const openNew = () => { setForm(blank); setEditingId(null); setShowForm(true); setMsg(null) }
+  // Seed a new test's course from the tab you're viewing (so a test added while
+  // looking at Blue is filed under Blue), defaulting to the first course.
+  const openNew = () => { setForm({ ...blank, course: hasCourses ? (courseTab === 'all' ? courseNames[0] : (courseTab === 'other' ? '' : courseTab)) : '' }); setEditingId(null); setShowForm(true); setMsg(null) }
   const toggleGrass = (g) => setForm((f) => ({ ...f, grasses: (f.grasses || []).includes(g) ? f.grasses.filter((x) => x !== g) : [...(f.grasses || []), g] }))
 
   const nSuggest = suggestedAnnualN(form.grasses || [])
@@ -5854,6 +5877,24 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
     const wasSuggested = f.annualN === '' || f.annualN === String(suggestedAnnualN(f.grasses || []).n)
     return { ...f, area: v, grasses: ctx.grasses, soilType: ctx.soilType, annualN: wasSuggested ? String(suggestedAnnualN(ctx.grasses).n) : f.annualN }
   })
+
+  // Settings areas + greens available for the form's currently-selected course.
+  // Picking a course here is what files the test — the area is just the spot.
+  const belongsToForm = (name, course) => (course ? courseOf(name) === course : !courseOf(name))
+  const formAreaNames = !hasCourses ? areaNames : areaNames.filter((a) => belongsToForm(a, form.course))
+  const formGreens = !hasCourses ? greenOptions
+    : form.course ? greenOptions.filter((g) => g.startsWith(form.course))
+    : greenOptions.filter((g) => !courseNames.some((n) => g.startsWith(n)))
+  // Switch the form to another course and jump to that course's first location.
+  const pickCourse = (c) => {
+    const course = c === 'other' ? '' : c
+    const list = !hasCourses ? areaOptions
+      : course ? [...areaNames.filter((a) => courseOf(a) === course), ...greenOptions.filter((g) => g.startsWith(course))]
+      : [...areaNames.filter((a) => !courseOf(a)), ...greenOptions.filter((g) => !courseNames.some((n) => g.startsWith(n)))]
+    const first = list[0] || ''
+    const ctx = contextFor(first)
+    setForm((f) => ({ ...f, course, area: first, grasses: ctx.grasses, soilType: ctx.soilType, annualN: String(suggestedAnnualN(ctx.grasses).n) }))
+  }
 
   const save = async () => {
     if (!form.area || !form.date) { setMsg({ type: 'err', text: 'Pick a location and a date first.' }); return }
@@ -5868,7 +5909,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
       } }
       if (editingId) await onUpdate({ ...payload, id: editingId })
       else await onAdd(payload)
-      setForm((f) => ({ ...blank, area: f.area, grasses: f.grasses, soilType: f.soilType, annualN: f.annualN, units: f.units }))
+      setForm((f) => ({ ...blank, area: f.area, course: f.course, grasses: f.grasses, soilType: f.soilType, annualN: f.annualN, units: f.units }))
       setShowForm(false)
       setMsg({ type: 'ok', text: editingId ? `Soil test updated for ${form.area}.` : `Soil test saved for ${form.area}.` })
       setEditingId(null)
@@ -5879,10 +5920,9 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
     setBusy(false)
   }
 
-  const [courseTab, setCourseTab] = useState(courseNames[0] || 'all')
   // Only this course's tests feed the sections/averages/trends — full isolation.
   const courseTests = hasCourses && courseTab !== 'all'
-    ? soilTests.filter((t) => (courseTab === 'other' ? !courseOf(t.area) : courseOf(t.area) === courseTab))
+    ? soilTests.filter((t) => (courseTab === 'other' ? !courseOfTest(t) : courseOfTest(t) === courseTab))
     : soilTests
 
   // Group everything by course section (Greens / Tees / Fairways / …) for tabs.
@@ -5956,11 +5996,22 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
           {editingId && <p className="font-display text-base font-semibold text-slate-900 mb-2">Edit soil test — {form.area}</p>}
           <div className="mb-3">
             <FieldLabel>Where was this sampled?</FieldLabel>
-            {areaNames.length > 0 && (
+            {hasCourses && (
+              <>
+                <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mt-1 mb-1">Course</p>
+                <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+                  {[...courseNames, 'other'].map((c) => {
+                    const on = (form.course || 'other') === c
+                    return <button key={c} type="button" onClick={() => pickCourse(c)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={on ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{c === 'other' ? 'Practice / Other' : c}</button>
+                  })}
+                </div>
+              </>
+            )}
+            {formAreaNames.length > 0 && (
               <>
                 <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mt-1 mb-1">Areas</p>
                 <div className="flex flex-wrap gap-1.5 mb-2">
-                  {areaNames.map((a) => {
+                  {formAreaNames.map((a) => {
                     const on = form.area === a
                     return <button key={a} type="button" onClick={() => pickArea(a)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={on ? { backgroundColor: FOREST, color: 'white', borderColor: FOREST } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>{a}</button>
                   })}
@@ -5968,7 +6019,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
               </>
             )}
             <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Greens / holes</p>
-            <Combobox value={greenOptions.includes(form.area) ? form.area : ''} onChange={(v) => pickArea(v)} options={greenOptions} accent={FERN} placeholder="Search a green — Blue 3, Gold 12, Putting…" />
+            <Combobox value={formGreens.includes(form.area) ? form.area : ''} onChange={(v) => pickArea(v)} options={formGreens} accent={FERN} placeholder={hasCourses ? `Search a ${form.course || 'practice'} green…` : 'Search a green — Blue 3, Gold 12, Putting…'} />
           </div>
 
           <div className="mb-3">
