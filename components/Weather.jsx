@@ -8,7 +8,7 @@ import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, M
 import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps, buildRainYear } from '@/lib/weather'
 import { applicationTimings, soilTrend, currentSoilTemp } from '@/lib/soiltiming'
 import { diseaseRisks, pestStages } from '@/lib/pests'
-import { profileById } from '@/lib/knowledge'
+import { profileById, photoSearchUrl } from '@/lib/knowledge'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -356,6 +356,9 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
                 </button>
                 {open && prof && (
                   <div className="px-3 pb-3 space-y-2">
+                    <div className="flex justify-end">
+                      <a href={photoSearchUrl(prof)} target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ backgroundColor: '#EFF6FF', color: '#2563EB' }}>See photos ↗</a>
+                    </div>
                     <p className="font-body text-[12px] text-slate-600 leading-relaxed">{prof.blurb}</p>
                     <div className="rounded-xl p-2.5" style={{ backgroundColor: '#FBF3EC' }}>
                       <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: '#B45309' }}>Favored by</p>

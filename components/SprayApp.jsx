@@ -14,7 +14,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain,
+  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -26,7 +26,7 @@ import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, d
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
-import { PROFILES, NUTRIENTS } from '@/lib/knowledge'
+import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
@@ -5533,7 +5533,12 @@ function KnowledgeTab({ courseInfo }) {
                   </button>
                   {open && (
                     <div className="px-4 pb-4 -mt-1 space-y-2.5">
-                      <p className="font-body text-[11px] italic text-slate-400">{p.pathogen}</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-body text-[11px] italic text-slate-400 min-w-0 truncate">{p.pathogen}</p>
+                        <a href={photoSearchUrl(p)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0 flex items-center gap-1" style={{ backgroundColor: '#EFF6FF', color: '#2563EB' }}>
+                          <ImageIcon size={12} /> See photos ↗
+                        </a>
+                      </div>
                       <Kv label="Favored by" value={p.favoredBy} />
                       <Kv label="How to identify" value={p.identify} />
                       <Kv label="How to manage" value={p.manage} accent />
