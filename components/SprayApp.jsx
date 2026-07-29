@@ -773,6 +773,22 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
   )
 }
 
+// The season/soil weather comes from Open-Meteo's archive (Jan 1 → today), the
+// slowest call on the dashboard. Cache it for the day so a revisit shows the
+// Growth-Reg timing instantly instead of waiting for the network again.
+const wxCacheKey = (lat, lng, day) => `wxSeasonCache:${Math.round(lat * 100)},${Math.round(lng * 100)},${day}`
+function readWxCache(lat, lng, day) {
+  if (typeof window === 'undefined' || lat == null) return null
+  try { const raw = window.sessionStorage.getItem(wxCacheKey(lat, lng, day)); return raw ? JSON.parse(raw) : null } catch { return null }
+}
+function writeWxCache(lat, lng, day, patch) {
+  if (typeof window === 'undefined' || lat == null) return
+  try {
+    const prev = readWxCache(lat, lng, day) || {}
+    window.sessionStorage.setItem(wxCacheKey(lat, lng, day), JSON.stringify({ ...prev, ...patch }))
+  } catch { /* ignore (private mode / quota) */ }
+}
+
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
 function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, onGoWeather }) {
   const lowStock = (products || []).filter((p) => p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold)
@@ -781,10 +797,17 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   // ── Live weather for the spray-window strip + season GDD for PGR timing.
   // Best-effort: the dashboard still renders everything else if this fails.
   const hasLocation = location?.lat != null
-  const [wx, setWx] = useState({ current: null, todayWindow: null, season: [], breakdownTemps: [] })
+  const [wx, setWx] = useState(() => {
+    const cached = readWxCache(location?.lat, location?.lng, today)
+    return { current: null, todayWindow: null, season: cached?.season || [], breakdownTemps: cached?.breakdownTemps || [] }
+  })
   useEffect(() => {
     if (!hasLocation) return
     let cancelled = false
+    // Fire all four independently and in parallel — each updates the dashboard as
+    // soon as it lands. (They used to run one-after-another, so Growth-Reg timing,
+    // which needs the season data, had to wait behind the other calls — the lag
+    // the crew saw before the PGR card filled in.)
     ;(async () => {
       try {
         const data = await fetchWeather(location.lat, location.lng)
@@ -792,10 +815,10 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
         const todayRow = daily.find((d) => d.date === today) || daily[0] || null
         if (!cancelled) setWx((w) => ({ ...w, todayWindow: todayRow ? { ...todayRow, spray: sprayWindow(todayRow) } : null }))
       } catch { /* ignore */ }
-      try { const c = await fetchCurrent(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ }
-      try { const s = await fetchSeasonDaily(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, season: s })) } catch { /* ignore */ }
-      try { const bt = await fetchBreakdownTemps(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, breakdownTemps: bt })) } catch { /* ignore */ }
     })()
+    ;(async () => { try { const c = await fetchCurrent(location.lat, location.lng); if (!cancelled) setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ } })()
+    ;(async () => { try { const s = await fetchSeasonDaily(location.lat, location.lng); if (!cancelled) { setWx((w) => ({ ...w, season: s })); writeWxCache(location.lat, location.lng, today, { season: s }) } } catch { /* ignore */ } })()
+    ;(async () => { try { const bt = await fetchBreakdownTemps(location.lat, location.lng); if (!cancelled) { setWx((w) => ({ ...w, breakdownTemps: bt })); writeWxCache(location.lat, location.lng, today, { breakdownTemps: bt }) } } catch { /* ignore */ } })()
     return () => { cancelled = true }
   }, [hasLocation, location?.lat, location?.lng, today])
 
