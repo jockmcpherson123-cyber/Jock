@@ -5,7 +5,7 @@
 // All from Open-Meteo using the club's saved location — no API key required.
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind } from 'lucide-react'
-import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps } from '@/lib/weather'
+import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps, buildRainYear } from '@/lib/weather'
 import { applicationTimings, soilTrend, currentSoilTemp } from '@/lib/soiltiming'
 import { diseaseRisks, pestStages } from '@/lib/pests'
 
@@ -32,48 +32,25 @@ function fmtMonth(mk) {
   return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short' })
 }
 
-// Build this year's rainfall from every source: the season archive (Jan 1 →
-// ~5 days ago) is authoritative for the past, the forecast daily fills the last
-// few days the archive hasn't published yet, and any manual rain-gauge entries
-// win over both. Returns YTD + last-30-day totals, per-month totals, and the
-// rainy days, up to today.
-function buildRainYear(season, forecast, overrides, today) {
-  const year = today.slice(0, 4)
-  const map = {}
-  // forecast first, archive second → archive wins on the days both cover.
-  ;[...(forecast || []), ...(season || [])].forEach((d) => {
-    if (d?.date && d.precip != null) map[d.date] = Math.round(Number(d.precip) * 100) / 100
-  })
-  Object.entries(overrides || {}).forEach(([date, v]) => { if (v != null) map[date] = Math.round(Number(v) * 100) / 100 })
-  const days = Object.entries(map)
-    .filter(([date]) => date.startsWith(year) && date <= today)
-    .map(([date, precip]) => ({ date, precip, manual: overrides?.[date] != null }))
-    .sort((a, b) => a.date.localeCompare(b.date))
-  const ytd = days.reduce((s, d) => s + d.precip, 0)
-  const byMonth = {}
-  days.forEach((d) => { const m = d.date.slice(0, 7); byMonth[m] = (byMonth[m] || 0) + d.precip })
-  const cut = new Date(today + 'T00:00:00'); cut.setDate(cut.getDate() - 30)
-  const cutIso = cut.toISOString().slice(0, 10)
-  const last30 = days.filter((d) => d.date > cutIso).reduce((s, d) => s + d.precip, 0)
-  const wettest = days.reduce((a, d) => (d.precip > (a?.precip || 0) ? d : a), null)
-  return { ytd: Math.round(ytd * 100) / 100, last30: Math.round(last30 * 100) / 100, byMonth, days, wettest, year }
-}
 
 const RAIN_BLUE = '#2563EB'
 
 // Year-to-date rainfall: a running total, per-month bars you can tap to see the
 // days, and the wettest day. Manual gauge entries are folded in and marked.
-function RainfallYearCard({ rain, canEdit, onEditDay }) {
+function RainfallYearCard({ rain, prev, canEdit, onEditDay }) {
   const [openMonth, setOpenMonth] = useState(null)
   const now = new Date()
   const curMonth = Number(rain.year) === now.getFullYear() ? now.getMonth() + 1 : 12
   const months = Array.from({ length: curMonth }, (_, i) => `${rain.year}-${String(i + 1).padStart(2, '0')}`)
-  const maxM = Math.max(0.01, ...months.map((m) => rain.byMonth[m] || 0))
+  const prevOf = (mk) => (prev ? prev.byMonth[`${Number(rain.year) - 1}-${mk.slice(5)}`] || 0 : 0)
+  const maxM = Math.max(0.01, ...months.map((m) => Math.max(rain.byMonth[m] || 0, prevOf(m))))
+  // Year-over-year: this year vs last year to the same date.
+  const delta = prev ? Math.round((rain.ytd - prev.ytd) * 100) / 100 : null
   return (
     <div>
       <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Rainfall · {rain.year}</p>
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
-        <div className="flex items-end justify-between mb-3 flex-wrap gap-2">
+        <div className="flex items-end justify-between mb-2 flex-wrap gap-2">
           <div>
             <p className="font-display font-bold text-slate-900" style={{ fontSize: 34, lineHeight: 1 }}>{rain.ytd.toFixed(2)}<span className="font-body text-base font-semibold text-slate-400">&nbsp;in</span></p>
             <p className="font-body text-[11px] text-slate-400 mt-0.5">Year to date</p>
@@ -85,9 +62,19 @@ function RainfallYearCard({ rain, canEdit, onEditDay }) {
           </div>
         </div>
 
+        {prev && (
+          <div className="rounded-xl px-3 py-2 mb-3 flex items-center justify-between" style={{ backgroundColor: delta >= 0 ? '#EFF6FF' : '#FEF6EC' }}>
+            <span className="font-body text-[11px] text-slate-500">vs {Number(rain.year) - 1} to date · {prev.ytd.toFixed(2)}"</span>
+            <span className="font-body text-[12px] font-bold" style={{ color: delta >= 0 ? RAIN_BLUE : '#B45309' }}>
+              {delta >= 0 ? '+' : ''}{delta.toFixed(2)}" {Math.abs(delta) < 0.05 ? 'about the same' : delta > 0 ? 'wetter' : 'drier'}
+            </span>
+          </div>
+        )}
+
         <div className="space-y-1">
           {months.map((mk) => {
             const total = rain.byMonth[mk] || 0
+            const pv = prevOf(mk)
             const open = openMonth === mk
             const rainyDays = rain.days.filter((d) => d.date.slice(0, 7) === mk && d.precip > 0)
             return (
@@ -95,7 +82,9 @@ function RainfallYearCard({ rain, canEdit, onEditDay }) {
                 <button onClick={() => setOpenMonth(open ? null : mk)} className="w-full flex items-center gap-2 py-1 group">
                   <span className="font-body text-[11px] font-bold text-slate-500 w-9 text-left shrink-0">{fmtMonth(mk)}</span>
                   <span className="flex-1 h-4 rounded bg-slate-100 overflow-hidden relative">
-                    <span className="block h-full rounded transition-all" style={{ width: `${Math.max(total > 0 ? 4 : 0, (total / maxM) * 100)}%`, backgroundColor: RAIN_BLUE, opacity: open ? 1 : 0.85 }} />
+                    {/* Last year (faint) behind this year (solid). */}
+                    {prev && pv > 0 && <span className="absolute inset-y-0 left-0 rounded" style={{ width: `${(pv / maxM) * 100}%`, backgroundColor: '#94A3B8', opacity: 0.35 }} />}
+                    <span className="absolute inset-y-0 left-0 rounded transition-all" style={{ width: `${Math.max(total > 0 ? 4 : 0, (total / maxM) * 100)}%`, backgroundColor: RAIN_BLUE, opacity: open ? 1 : 0.85 }} />
                   </span>
                   <span className="font-body text-[11px] font-semibold text-slate-600 w-12 text-right shrink-0" style={{ fontVariantNumeric: 'tabular-nums' }}>{total.toFixed(2)}"</span>
                 </button>
@@ -122,7 +111,7 @@ function RainfallYearCard({ rain, canEdit, onEditDay }) {
             )
           })}
         </div>
-        <p className="font-body text-[10px] text-slate-400 mt-3">Tap a month to see its rainy days{canEdit ? ' — tap a day to correct it from your gauge' : ''}. Your manual entries are marked •. Archive data via Open-Meteo; verify against your on-site gauge.</p>
+        <p className="font-body text-[10px] text-slate-400 mt-3">Tap a month to see its rainy days{canEdit ? ' — tap a day to correct it from your gauge' : ''}.{prev ? ' Faint grey bar = same month last year.' : ''} Manual entries are marked •. Archive data via Open-Meteo; verify against your on-site gauge.</p>
       </div>
     </div>
   )
@@ -185,6 +174,12 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
         const fullSeason = merged.length > 0
 
         if (!cancelled) setState({ loading: false, error: null, daily, summary: { ...summary, gddNow }, fullSeason, raw: data, season })
+
+        // Last year's archive, for the rainfall year-over-year comparison (best-effort).
+        try {
+          const prevSeason = await fetchYearDaily(location.lat, location.lng, new Date().getFullYear() - 1)
+          if (!cancelled) setState((s) => ({ ...s, prevSeason }))
+        } catch { /* ignore */ }
       } catch (e) {
         if (!cancelled) setState({ loading: false, error: e.message || 'Could not load weather', daily: null, summary: null })
       }
@@ -244,8 +239,12 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
 
   // Full disease-risk model list + GDD (base 50°F) + GDD-based pest stages.
   const risks = diseaseRisks(daily, soilNow, trend, today, courseInfo?.siteGrasses || [])
-  // Year-to-date rainfall from the season archive + forecast + manual entries.
+  // Year-to-date rainfall from the season archive + forecast + manual entries,
+  // plus last year to the same date for a fair comparison.
   const rain = buildRainYear(state.season, rawDaily, rainOverrides, today)
+  const prevRain = state.prevSeason?.length
+    ? buildRainYear(state.prevSeason, [], {}, `${Number(today.slice(0, 4)) - 1}-${today.slice(5)}`)
+    : null
   const gddToDate = Math.round(summary.gddNow || 0)
   const gddForecast7 = Math.round(daily.filter((d) => d.date > today).slice(0, 7).reduce((s, d) => s + (d.tMax != null && d.tMin != null ? Math.max(0, (d.tMax + d.tMin) / 2 - 50) : 0), 0))
   const stages = pestStages(gddToDate)
@@ -316,7 +315,7 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
       </div>
 
       {/* Year-to-date rainfall tracker */}
-      <RainfallYearCard rain={rain} canEdit={canEditRain} onEditDay={openRainEdit} />
+      <RainfallYearCard rain={rain} prev={prevRain} canEdit={canEditRain} onEditDay={openRainEdit} />
 
       {/* Soil temperature + application timing */}
       {soilNow != null && (

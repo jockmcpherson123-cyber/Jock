@@ -14,7 +14,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock,
+  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -22,7 +22,7 @@ import {
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate, buildRainYear } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
@@ -630,7 +630,7 @@ function SprayOpsModule({ user }) {
         {route === 'dashboard' && (
           <Dashboard
             sheets={sheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
-            manage={manage} programApps={programApps} location={location}
+            manage={manage} programApps={programApps} location={location} courseInfo={courseInfo}
             onOpen={(s) => { setActiveSheet(s); setRoute('view') }}
             onNew={newSheet}
             onSeeAll={() => setRoute('list')}
@@ -790,7 +790,7 @@ function writeWxCache(lat, lng, day, patch) {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
-function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, onGoWeather }) {
+function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, courseInfo, onGoWeather }) {
   const lowStock = (products || []).filter((p) => p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold)
   const today = new Date().toISOString().slice(0, 10)
 
@@ -911,6 +911,28 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       {manage && (
         <SprayWindowStrip current={wx.current} today={wx.todayWindow} hasLocation={hasLocation} attention={attention} onGoWeather={onGoWeather} />
       )}
+
+      {/* Rainfall year-to-date tile — taps through to the full tracker */}
+      {manage && hasLocation && wx.season.length > 0 && (() => {
+        const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today)
+        return (
+          <button onClick={onGoWeather} className="w-full bg-white rounded-2xl border border-black/5 shadow-sm p-4 flex items-center justify-between gap-3 hover:border-slate-200 transition">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: '#EFF6FF' }}>
+                <CloudRain size={18} style={{ color: '#2563EB' }} />
+              </div>
+              <div className="text-left min-w-0">
+                <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">Rain · {rain.year}</p>
+                <p className="font-display text-lg font-bold text-slate-900 leading-tight">{rain.ytd.toFixed(2)}" <span className="font-body text-[11px] font-semibold text-slate-400">year to date</span></p>
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="font-body text-sm font-bold text-slate-700">{rain.last30.toFixed(2)}"</p>
+              <p className="font-body text-[10px] text-slate-400">last 30 days ›</p>
+            </div>
+          </button>
+        )
+      })()}
 
       {/* Soil-temp timing nudge — a window is open based on current soil temp */}
       {manage && timingNudge && openWins.length > 0 && (
