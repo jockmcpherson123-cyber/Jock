@@ -850,8 +850,11 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
     return nv
   })
 
-  // ── PGR reapply timing (GDD base-32 since each area's last growth-reg spray).
-  const PGR_TARGET = 200
+  // ── PGR reapply timing (GDD base-32°F since each area's last growth-reg spray).
+  // The classic Primo/Anuew greens model is "200 GDD, base 0°C" — which equals
+  // 360 GDD at base 32°F (GDD°F = 1.8 × GDD°C). Using 200 here would fire about
+  // twice too often (~4 days in summer instead of ~8).
+  const PGR_TARGET = 360
   const pgrRows = (() => {
     if (!manage || !wx.season.length) return []
     const pgrNames = new Set((products || []).filter((p) => p.type === 'Growth Reg').map((p) => p.name))
@@ -5420,7 +5423,8 @@ function TurfPerformanceModule() {
 // Season GDD, plus GDD accumulated since each area's last growth-regulator
 // application (base 32°F) against a reapply target — the Primo/Anuew model.
 function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
-  const [target, setTarget] = useState(200)
+  // 360 GDD (base 32°F) = the classic 200-GDD Primo model stated at base 0°C.
+  const [target, setTarget] = useState(360)
 
   if (!hasLocation) {
     return <ComingSoonCard title="Set your location first" desc="Growing Degree Days come from your course location. Add your address in Spray Ops → Settings → Location, then come back." />
@@ -5467,7 +5471,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
             <span className="font-body text-[11px] text-slate-400">GDD</span>
           </div>
         </div>
-        <p className="font-body text-[11px] text-slate-400 mb-3">GDD since each area's last growth-reg spray (base 32°F). ~200 is a common greens target; fairways run higher.</p>
+        <p className="font-body text-[11px] text-slate-400 mb-3">GDD since each area's last growth-reg spray (base 32°F). ~360 is the classic greens target (the "200 GDD" Primo model stated at base 0°C); fairways run higher.</p>
         <div className="space-y-3">
           {areaRows.map((r) => (
             <div key={r.area}>
