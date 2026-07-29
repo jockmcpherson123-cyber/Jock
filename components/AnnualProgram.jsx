@@ -5,11 +5,12 @@
 // then browse it by area. (Editing individual applications, the early-order
 // calculator and auto-populating spray sheets come in the next phase.)
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid } from 'lucide-react'
+import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid, Sparkles } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
 import { downloadCSV } from '@/lib/calc'
-import { fetchSeasonDaily, fetchBreakdownTemps } from '@/lib/weather'
+import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
+import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
 import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGGER_MODES, GDD_BASES, statusRank, coverageDays, isoAddDays } from '@/lib/triggers'
 
 // ── Coverage grid helpers ────────────────────────────────────────────────────
@@ -281,6 +282,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [editApp, setEditApp] = useState(null) // application being added/edited
   const [copyForm, setCopyForm] = useState(null) // roll-forward form state
   const [newForm, setNewForm] = useState(null) // blank-season form state
+  const [buildPrev, setBuildPrev] = useState(null) // Build From Last Year preview
   const [editProgForm, setEditProgForm] = useState(null) // rename/edit-season form
   const [orderEdit, setOrderEdit] = useState(null) // { name, caseSize, ozPerCase } for early-order inline edit
   const [viewMode, setViewMode] = useState('now') // 'now' | 'timeline' | 'area' | 'order'
@@ -596,6 +598,52 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     let year = new Date().getFullYear()
     while (years.includes(year)) year += 1
     setNewForm({ year, name: `${year} Pesticide Plan` })
+  }
+
+  // ── Build From Last Year ──────────────────────────────────────────────
+  // Recent GDD/day (base 32), for turning an observed spray interval into a GDD
+  // target on growth-reg triggers. null when the season archive isn't loaded.
+  const gddPerDay = (() => {
+    if (!season.length) return null
+    const g = gddSince(season, isoAddDays(nowIso, -30), 32)
+    return g != null && g > 0 ? g / 30 : null
+  })()
+  const nextFreeYear = () => {
+    const years = programs.map((p) => p.year).filter(Boolean)
+    let y = new Date().getFullYear() + 1
+    while (years.includes(y)) y += 1
+    return y
+  }
+  function openBuild() {
+    const years = recordYears(sheets)
+    if (years.length === 0) { showToast('No completed sprays yet to learn from'); return }
+    const sourceYear = years[0]
+    const targetYear = nextFreeYear()
+    const plan = buildPlanFromRecords(sheets, products, { sourceYear, targetYear, gddPerDay })
+    setBuildPrev({ sourceYear, targetYear, years, plan })
+  }
+  function rebuild(patch) {
+    setBuildPrev((prev) => {
+      const next = { ...prev, ...patch }
+      next.plan = buildPlanFromRecords(sheets, products, { sourceYear: next.sourceYear, targetYear: next.targetYear, gddPerDay })
+      return next
+    })
+  }
+  async function confirmBuild() {
+    if (!buildPrev?.plan?.events?.length) return
+    setBusy(true)
+    try {
+      const prog = await db.createProgram({ year: Number(buildPrev.targetYear), name: `${buildPrev.targetYear} Plan (from ${buildPrev.sourceYear})` })
+      await db.bulkInsertApplications(prog.id, planToApplications(buildPrev.plan))
+      setBuildPrev(null)
+      await loadPrograms()
+      await selectProgram(prog)
+      showToast(`Drafted ${buildPrev.plan.stats.sprays} sprays for ${buildPrev.targetYear}`)
+    } catch (e) {
+      console.error(e)
+      showToast('Could not build the plan')
+    }
+    setBusy(false)
   }
 
   async function runNewProgram() {
@@ -1019,6 +1067,86 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
         </div>
       )}
 
+      {/* Build From Last Year — preview a draft plan from actual records */}
+      {buildPrev && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-3 overflow-y-auto" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setBuildPrev(null)}>
+          <div className="bg-white rounded-2xl border-2 shadow-2xl my-6 w-full max-w-lg" style={{ borderColor: GOLD }} onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-black/5">
+              <p className="font-display text-base font-semibold text-slate-900 mb-1 flex items-center gap-1.5"><Sparkles size={16} style={{ color: GOLD }} /> Build from last year</p>
+              <p className="font-body text-xs text-slate-400">Drafts next season from what you actually sprayed — same products, areas and cadence, with smart triggers. You review here, then edit anything after.</p>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Learn from</label>
+                  <select value={buildPrev.sourceYear} onChange={(e) => rebuild({ sourceYear: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white">
+                    {buildPrev.years.map((y) => <option key={y} value={y}>{y} records</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Draft for</label>
+                  <input type="number" value={buildPrev.targetYear} onChange={(e) => rebuild({ targetYear: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+                </div>
+              </div>
+            </div>
+
+            {buildPrev.plan.events.length === 0 ? (
+              <div className="p-8 text-center font-body text-sm text-slate-400">No completed sprays in {buildPrev.sourceYear} to learn from.</div>
+            ) : (
+              <>
+                <div className="p-4 border-b border-black/5">
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    {[['Sprays', buildPrev.plan.stats.sprays], ['Areas', buildPrev.plan.stats.areas], ['GDD/interval', buildPrev.plan.stats.gddTriggers + buildPrev.plan.stats.intervalTriggers], ['To review', buildPrev.plan.reviews.length]].map(([lbl, n]) => (
+                      <div key={lbl} className="rounded-xl bg-slate-50 px-2 py-2">
+                        <p className="font-display font-bold" style={{ fontSize: 20, color: lbl === 'To review' && n > 0 ? '#B23A2E' : FOREST }}>{n}</p>
+                        <p className="font-body text-[9px] font-bold uppercase tracking-wide text-slate-400">{lbl}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {gddPerDay == null && buildPrev.plan.stats.gddTriggers > 0 && (
+                    <p className="font-body text-[11px] text-slate-400 mt-2">Growth-reg triggers use a 200-GDD default — set your course location in Settings to tune them to your own weather.</p>
+                  )}
+                </div>
+
+                {buildPrev.plan.reviews.length > 0 && (
+                  <div className="px-4 pt-3">
+                    <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#B23A2E' }}>Worth a look — resistance</p>
+                    <div className="space-y-1.5 mb-1">
+                      {buildPrev.plan.reviews.slice(0, 4).map((r, i) => (
+                        <div key={i} className="flex items-start gap-2 rounded-lg p-2" style={{ backgroundColor: '#FBEDEA' }}>
+                          <AlertTriangle size={13} className="shrink-0 mt-0.5" style={{ color: '#B23A2E' }} />
+                          <p className="font-body text-[11px]" style={{ color: '#7A2A22' }}><b>{r.area}</b> · {r.product} — same group ({r.group}) as {r.prevProduct} just before. Consider rotating.</p>
+                        </div>
+                      ))}
+                      {buildPrev.plan.reviews.length > 4 && <p className="font-body text-[11px] text-slate-400">+{buildPrev.plan.reviews.length - 4} more.</p>}
+                    </div>
+                  </div>
+                )}
+
+                <div className="p-4 max-h-72 overflow-y-auto space-y-1.5">
+                  {buildPrev.plan.events.slice(0, 60).map((ev, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded-lg border border-black/5 px-3 py-2">
+                      <span className="font-body text-[11px] font-bold text-slate-400 w-14 shrink-0">{fmtDate(ev.date)}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-body text-[12px] font-semibold text-slate-800 truncate">{ev.area}</p>
+                        <p className="font-body text-[11px] text-slate-400 truncate">{ev.items.map((it) => it.product).join(', ')}</p>
+                      </div>
+                      <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: ev.trigger.mode === 'gdd' ? '#E4EFE5' : ev.trigger.mode === 'interval' ? '#F6ECD4' : '#EEF1F4', color: ev.trigger.mode === 'gdd' ? FERN : ev.trigger.mode === 'interval' ? '#9A6B12' : '#6B7280' }}>
+                        {ev.trigger.mode === 'gdd' ? `${ev.trigger.target} GDD` : ev.trigger.mode === 'interval' ? `${ev.trigger.days}d` : 'date'}
+                      </span>
+                    </div>
+                  ))}
+                  {buildPrev.plan.events.length > 60 && <p className="font-body text-[11px] text-slate-400 text-center pt-1">+{buildPrev.plan.events.length - 60} more sprays.</p>}
+                </div>
+              </>
+            )}
+
+            <div className="p-4 border-t border-black/5 flex gap-2">
+              <button onClick={() => setBuildPrev(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+              <button onClick={confirmBuild} disabled={busy || buildPrev.plan.events.length === 0} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Building…' : `Create ${buildPrev.targetYear} plan`}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Create a blank season */}
       {newForm && (
         <div className="bg-white rounded-2xl border-2 p-4 my-4 shadow-sm" style={{ borderColor: FOREST }}>
@@ -1115,6 +1243,9 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                 <CalendarPlus size={13} /> Roll forward
               </button>
             )}
+            <button onClick={openBuild} className="font-body text-xs font-bold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
+              <Sparkles size={13} /> Build from last year
+            </button>
           </div>
 
           {/* Off-year dates (old template dates pulled in on import) */}
