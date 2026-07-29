@@ -28,11 +28,28 @@ function fmtDay(d) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
-export default function Weather({ location, onGoToSettings }) {
+export default function Weather({ location, courseInfo, manage = false, onSaveRain, onGoToSettings }) {
   const [state, setState] = useState({ loading: true, error: null, daily: null, summary: null })
   const [current, setCurrent] = useState(null)
   const [soilSeries, setSoilSeries] = useState([]) // recent daily soil temps
   const [etPct, setEtPct] = useState(80) // % of ET to replace with irrigation
+  // Manual rainfall corrections { 'YYYY-MM-DD': inches } — for when the modeled
+  // rain is off and you want your rain-gauge reading to drive ET + disease.
+  const rainOverrides = courseInfo?.rainOverrides || {}
+  const [editRain, setEditRain] = useState(null) // { date, draft } while editing
+  const [savingRain, setSavingRain] = useState(false)
+  const canEditRain = manage && typeof onSaveRain === 'function'
+  const openRainEdit = (date, cur) => setEditRain({ date, draft: cur != null ? String(cur) : '' })
+  async function commitRain() {
+    if (!editRain) return
+    setSavingRain(true)
+    const map = { ...rainOverrides }
+    if (editRain.draft === '' || editRain.draft == null) delete map[editRain.date]
+    else map[editRain.date] = Math.max(0, Math.round(Number(editRain.draft) * 100) / 100 || 0)
+    try { await onSaveRain(map) } catch { /* parent shows a toast */ }
+    setSavingRain(false)
+    setEditRain(null)
+  }
 
   const hasLocation = location && location.lat != null && location.lng != null
 
@@ -104,7 +121,10 @@ export default function Weather({ location, onGoToSettings }) {
     )
   }
 
-  const { daily, summary, fullSeason } = state
+  const { daily: rawDaily, summary, fullSeason } = state
+  // Apply any manual rainfall corrections so every readout below — the Rain stat,
+  // the forecast, ET "put back tonight", and the disease models — uses them.
+  const daily = rawDaily.map((d) => (rainOverrides[d.date] != null ? { ...d, precip: rainOverrides[d.date], rainManual: true } : d))
   const today = new Date().toISOString().slice(0, 10)
   const todayRow = daily.find((d) => d.date === today) || daily[daily.length - 1]
   const forecast = daily.filter((d) => d.date >= today).slice(0, 7)
@@ -123,6 +143,25 @@ export default function Weather({ location, onGoToSettings }) {
 
   return (
     <div className="pt-6 pb-10 space-y-5">
+      {editRain && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditRain(null)}>
+          <div className="bg-white rounded-2xl border-2 p-4 shadow-2xl w-full max-w-xs" style={{ borderColor: '#2563EB' }} onClick={(e) => e.stopPropagation()}>
+            <p className="font-display text-base font-semibold text-slate-900 mb-1 flex items-center gap-1.5"><CloudRain size={16} className="text-blue-500" /> Rainfall</p>
+            <p className="font-body text-xs text-slate-400 mb-3">{fmtDay(editRain.date)} — enter what your rain gauge actually caught. This drives ET and the disease models.</p>
+            <div className="flex items-center gap-2">
+              <input type="number" step="0.01" min="0" inputMode="decimal" autoFocus value={editRain.draft} onChange={(e) => setEditRain({ ...editRain, draft: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') commitRain() }} className="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body" placeholder="0.00" />
+              <span className="font-body text-sm font-semibold text-slate-500">inches</span>
+            </div>
+            {rainOverrides[editRain.date] != null && (
+              <p className="font-body text-[11px] text-slate-400 mt-2">Currently your value. Clear the box and save to go back to the forecast.</p>
+            )}
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setEditRain(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+              <button onClick={commitRain} disabled={savingRain} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{savingRain ? 'Saving…' : 'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 className="font-display text-lg font-semibold text-slate-900">Weather &amp; Agronomics</h2>
@@ -154,7 +193,13 @@ export default function Weather({ location, onGoToSettings }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Stat icon={<Thermometer size={15} />} label="High / Low" value={todayRow ? `${Math.round(todayRow.tMax)}° / ${Math.round(todayRow.tMin)}°` : '—'} accent={GOLD} />
         <Stat icon={<Droplets size={15} />} label="Avg Humidity" value={todayRow?.rhMean != null ? `${Math.round(todayRow.rhMean)}%` : '—'} accent={FERN} />
-        <Stat icon={<CloudRain size={15} />} label="Rain today" value={todayRow ? `${todayRow.precip}"` : '—'} accent="#2563EB" />
+        {canEditRain ? (
+          <button type="button" onClick={() => openRainEdit(today, todayRow?.precip)} className="text-left w-full">
+            <Stat icon={<CloudRain size={15} />} label={todayRow?.rainManual ? 'Rain today · yours' : 'Rain today · tap to edit'} value={todayRow ? `${todayRow.precip}"` : '—'} accent="#2563EB" />
+          </button>
+        ) : (
+          <Stat icon={<CloudRain size={15} />} label="Rain today" value={todayRow ? `${todayRow.precip}"` : '—'} accent="#2563EB" />
+        )}
         <Stat icon={<TrendingUp size={15} />} label={fullSeason ? 'GDD since Jan 1' : 'GDD (last ~90d)'} value={Math.round(summary.gddNow).toLocaleString()} accent={FOREST} />
       </div>
 
@@ -332,7 +377,13 @@ export default function Weather({ location, onGoToSettings }) {
               <span className="w-28 font-semibold text-slate-700">{fmtDay(d.date)}</span>
               <span className="flex-1 text-right text-slate-800">{d.tMax != null ? `${Math.round(d.tMax)}° / ${Math.round(d.tMin)}°` : '—'}</span>
               <span className="flex-1 text-right text-slate-500">{d.rhMean != null ? `${Math.round(d.rhMean)}%` : '—'}</span>
-              <span className="flex-1 text-right text-slate-500">{d.precip}"</span>
+              {canEditRain ? (
+                <button type="button" onClick={() => openRainEdit(d.date, d.precip)} className="flex-1 text-right font-semibold" style={{ color: d.rainManual ? '#2563EB' : '#94A3B8' }}>
+                  {d.precip}"{d.rainManual ? ' •' : ''}
+                </button>
+              ) : (
+                <span className="flex-1 text-right text-slate-500">{d.precip}"</span>
+              )}
             </div>
           ))}
         </div>
