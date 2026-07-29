@@ -27,6 +27,7 @@ import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
+import { fungicidesFor, ratingsSourceFor } from '@/lib/fungicides'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
@@ -5518,6 +5519,8 @@ function KnowledgeTab({ courseInfo }) {
   const [q, setQ] = useState('')
   const [kind, setKind] = useState('All')
   const [openId, setOpenId] = useState(null)
+  const [fungAll, setFungAll] = useState(false)
+  const openProfile = (id) => { setFungAll(false); setOpenId(id) }
   const club = (courseInfo?.siteGrasses || []).map((g) => String(g).toLowerCase())
   const applies = (grasses) => !club.length || grasses.includes('any') || grasses.some((tok) => club.some((g) => g.includes(tok)))
   const term = q.trim().toLowerCase()
@@ -5559,7 +5562,7 @@ function KnowledgeTab({ courseInfo }) {
               const relevant = applies(p.grasses)
               return (
                 <div key={p.id} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden" style={{ opacity: relevant ? 1 : 0.62 }}>
-                  <button onClick={() => setOpenId(open ? null : p.id)} className="w-full text-left p-4">
+                  <button onClick={() => (open ? setOpenId(null) : openProfile(p.id))} className="w-full text-left p-4">
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <span className="font-display text-base font-semibold text-slate-900">{p.name}</span>
                       <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: ks.bg, color: ks.fg }}>{p.kind}</span>
@@ -5578,6 +5581,35 @@ function KnowledgeTab({ courseInfo }) {
                       <Kv label="Favored by" value={p.favoredBy} />
                       <Kv label="How to identify" value={p.identify} />
                       <Kv label="How to manage" value={p.manage} accent />
+                      {(() => {
+                        const src = ratingsSourceFor(p.id)
+                        if (!src) return null
+                        const list = fungicidesFor(p.id, src)
+                        const shown = fungAll ? list : list.slice(0, 6)
+                        return (
+                          <div className="rounded-xl p-2.5" style={{ backgroundColor: '#F5F3FB' }}>
+                            <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#6D4AC2' }}>Rated fungicides · {src === 'Rutgers' ? 'Rutgers PPA-1 (pro)' : 'NC State (home lawn)'}</p>
+                            <div className="space-y-1.5">
+                              {shown.map((f, i) => {
+                                const sc = f.score >= 3.5 ? { bg: '#DDEEDF', fg: '#2E7D46' } : f.score >= 2.5 ? { bg: '#FBF0D5', fg: '#9A6B12' } : { bg: '#EEF1F4', fg: '#64748B' }
+                                return (
+                                  <div key={i} className="flex items-center gap-2">
+                                    <span className="font-body text-[11px] font-bold rounded px-1.5 py-0.5 shrink-0 w-9 text-center" style={{ backgroundColor: sc.bg, color: sc.fg }}>{f.rating}</span>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="font-body text-[12px] font-semibold text-slate-800 truncate">{f.trade || f.ai}</p>
+                                      <p className="font-body text-[10px] text-slate-400 truncate">{f.ai}{f.frac ? ` · FRAC ${f.frac}` : ''}{f.interval ? ` · every ${f.interval} d` : ''}</p>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                            {list.length > 6 && (
+                              <button onClick={(e) => { e.stopPropagation(); setFungAll((v) => !v) }} className="font-body text-[11px] font-bold mt-2" style={{ color: '#6D4AC2' }}>{fungAll ? 'Show fewer' : `Show all ${list.length}`}</button>
+                            )}
+                            <p className="font-body text-[10px] text-slate-400 mt-2">{src === 'Rutgers' ? 'Scale 1–4 (4 best), L = limited data. ' : 'Scale ++++ (best) to +. '}Rotate FRAC codes to prevent resistance. Always follow the label.</p>
+                          </div>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>
