@@ -12,6 +12,7 @@ import { downloadCSV } from '@/lib/calc'
 import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
 import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
 import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGGER_MODES, GDD_BASES, statusRank, coverageDays, isoAddDays } from '@/lib/triggers'
+import { suppressionMap } from '@/lib/pgr'
 
 // ── Coverage grid helpers ────────────────────────────────────────────────────
 // Every application protects its area for a stretch (coverageDays). We paint each
@@ -262,7 +263,10 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   }, [location?.lat, location?.lng])
   // Live status for one event (a mix shares one trigger). Anchor GDD/interval on
   // the growth-reg product when there is one, else the first product.
-  const statusCtx = { season, soilSeries, sheets, today: nowIso }
+  // Products whose spray also suppresses growth (PGRs + DMI fungicides) — so a
+  // DMI application resets a growth-reg trigger's GDD clock, just like the dashboard.
+  const suppressors = new Set(Object.keys(suppressionMap(products)).map((n) => n.trim().toLowerCase()))
+  const statusCtx = { season, soilSeries, sheets, today: nowIso, suppressors }
   const eventStatus = (ev) => {
     const items = ev.items || []
     const lead = items.find((i) => String(i.type || '').toLowerCase().includes('growth')) || items[0] || {}
