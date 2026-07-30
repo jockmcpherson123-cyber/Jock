@@ -6880,7 +6880,7 @@ function TimingTab({ soilSeries, hasLocation }) {
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <span className="font-body text-sm font-semibold text-slate-800 truncate">{t.label}</span>
                   <span className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: st.dot }} />{st.label}
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: st.dot }} />{t.status === 'offseason' ? monthRange(t.months) : st.label}
                   </span>
                 </div>
                 <p className="font-body text-[11px] text-slate-400">Trigger ~{t.threshold}°F ({t.direction === 'falling' ? 'cooling' : 'warming'}){t.months ? ` · ${monthRange(t.months)}` : ''} · {t.note}</p>
