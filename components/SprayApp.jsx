@@ -1130,12 +1130,19 @@ const PROT_STYLE = {
 function DiseaseProtectionCard({ rows, heatOn, onToggleHeat, heatAvailable }) {
   const shown = rows.filter((r) => r.last)
   const heatAdjusted = shown.some((r) => r.mode === 'temp')
+  // Projected reapply date = today + the days of cover left (heat-adjusted in temp
+  // mode), so this card counts FORWARD to the next spray like Growth-Reg timing.
+  const reapplyDate = (r) => {
+    if (r.status === 'expired' || r.remaining == null || r.remaining <= 0) return null
+    const d = new Date(); d.setDate(d.getDate() + r.remaining)
+    return d.toISOString().slice(0, 10)
+  }
   return (
     <section>
       <div className="flex items-end justify-between gap-2 mb-3">
-        <SectionHeader title="Disease Protection" subtitle="Fungicide cover left per area since the last spray" noMargin />
+        <SectionHeader title="Disease Protection" subtitle="How far each area is through its fungicide window — fills up as it's time to reapply" noMargin />
         {onToggleHeat && (
-          <button onClick={onToggleHeat} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5 shrink-0 transition" style={heatOn ? { backgroundColor: '#FEF3DD', color: '#92660D' } : { backgroundColor: 'white', color: '#94A3B8', border: '1px solid #E2E8F0' }} title="Speed the countdown up in heat">
+          <button onClick={onToggleHeat} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5 shrink-0 transition" style={heatOn ? { backgroundColor: '#FEF3DD', color: '#92660D' } : { backgroundColor: 'white', color: '#94A3B8', border: '1px solid #E2E8F0' }} title="Use the window up faster in heat">
             <Thermometer size={12} /> Heat {heatOn ? 'on' : 'off'}
           </button>
         )}
@@ -1143,22 +1150,23 @@ function DiseaseProtectionCard({ rows, heatOn, onToggleHeat, heatAvailable }) {
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm space-y-3">
         {shown.map((r) => {
           const st = PROT_STYLE[r.status] || PROT_STYLE.ok
-          const badge = r.status === 'expired'
-            ? (r.mode === 'temp' ? st.label : `${st.label} · ${Math.abs(r.remaining)}d over`)
-            : `${st.label} · ${r.remaining}d left`
+          // Forward bar: fills as the window is used up (0% just-sprayed → 100% due).
+          const usedPct = r.status === 'expired' ? 100 : Math.max(4, Math.min(100, Math.round(100 - r.pct)))
+          const date = reapplyDate(r)
           return (
             <div key={r.area}>
               <div className="flex items-center justify-between mb-1 gap-2">
                 <span className="font-body text-sm font-semibold text-slate-800 truncate">{r.area}</span>
-                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>{badge}</span>
+                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>{st.label}</span>
               </div>
               <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
-                {/* Expired shows a full status-coloured bar so it's clearly visible,
-                    not an empty sliver. Otherwise it fills to the cover remaining. */}
-                <div className="h-full rounded-full transition-all" style={{ width: r.status === 'expired' ? '100%' : `${Math.max(8, r.pct)}%`, backgroundColor: st.bar }} />
+                <div className="h-full rounded-full transition-all" style={{ width: `${usedPct}%`, backgroundColor: st.bar }} />
               </div>
               <p className="font-body text-[10px] text-slate-400 mt-0.5 truncate">
                 Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)} · {r.mode === 'temp' ? `${r.window}-day label, heat-adjusted` : `${r.window}-day window`}
+              </p>
+              <p className="font-body text-[10px] font-semibold mt-0.5 truncate" style={{ color: r.status === 'expired' ? '#B91C1C' : r.status === 'soon' ? '#92660D' : FERN }}>
+                {r.status === 'expired' ? 'Reapply now — cover expired' : `Reapply by ~${fmtDate(date)} (${r.remaining}d${r.mode === 'temp' ? ', heat-adj' : ''})`}
               </p>
             </div>
           )
@@ -1166,7 +1174,7 @@ function DiseaseProtectionCard({ rows, heatOn, onToggleHeat, heatAvailable }) {
       </div>
       <p className="font-body text-[10px] text-slate-400 mt-1.5">
         {heatAdjusted
-          ? 'Countdown speeds up in heat — it burns down by soil temperature (warm days use up cover faster), not just calendar days. Guidance, not a lab test.'
+          ? 'The bar fills up faster in heat — warm days use up fungicide cover quicker (by soil temperature), not just calendar days. Guidance, not a lab test.'
           : "Window comes from each fungicide's spray interval (set in Chemical Library). Contact products protect ~7–14 days; systemics longer."}
       </p>
     </section>
