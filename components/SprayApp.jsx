@@ -28,6 +28,7 @@ import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
 import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget } from '@/lib/fungicides'
+import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
@@ -862,15 +863,18 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   const PGR_TARGET = 360
   const pgrRows = (() => {
     if (!manage || !wx.season.length) return []
-    const pgrNames = new Set((products || []).filter((p) => p.type === 'Growth Reg').map((p) => p.name))
-    if (pgrNames.size === 0) return []
+    // Growth suppression comes from true PGRs AND DMI (FRAC 3) fungicides, which
+    // also regulate growth — so both reset the "GDD since suppression" clock.
+    const supMap = suppressionMap(products)
+    if (Object.keys(supMap).length === 0) return []
     const lastByArea = {}
     ;(sheets || [])
       .filter((s) => (s.status === 'approved' || s.completed) && s.date)
       .forEach((s) => {
-        const pgr = (s.products || []).filter((p) => pgrNames.has(p.product)).map((p) => p.product)
-        if (pgr.length === 0) return
-        if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: pgr }
+        const sup = (s.products || []).filter((p) => supMap[p.product])
+        if (sup.length === 0) return
+        const dmiOnly = sup.every((p) => supMap[p.product] === 'dmi')
+        if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: sup.map((p) => p.product), dmiOnly }
       })
     // Iterate the areas that actually have a PGR spray (by the sheet's own area
     // name), so a name mismatch with Settings can't hide the bars.
@@ -1187,7 +1191,7 @@ function PgrTimingCard({ rows, target }) {
   const st = { due: { bg: '#FEE2E2', fg: '#B91C1C', bar: '#DC2626', label: 'Reapply now' }, soon: { bg: '#FEF3DD', fg: '#92660D', bar: '#D97706', label: 'Soon' }, ok: { bg: '#E8F3EC', fg: FERN, bar: FERN, label: 'On track' } }
   return (
     <section>
-      <SectionHeader title="Growth-Reg Timing" subtitle={`GDD since each area's last PGR (base 32°F) · target ~${target}`} />
+      <SectionHeader title="Growth-Reg Timing" subtitle={`GDD since the last growth-suppressing spray — PGR or DMI fungicide (base 32°F) · target ~${target}`} />
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm space-y-3">
         {rows.map((r) => {
           const s = st[r.status] || st.ok
@@ -1202,7 +1206,7 @@ function PgrTimingCard({ rows, target }) {
               <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
                 <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(4, r.pct)}%`, backgroundColor: s.bar }} />
               </div>
-              <p className="font-body text-[10px] text-slate-400 mt-0.5 truncate">Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)}</p>
+              <p className="font-body text-[10px] text-slate-400 mt-0.5 truncate">Last: {r.last.products.join(', ')}{r.last.dmiOnly && <span className="font-bold" style={{ color: '#6D4AC2' }}> · DMI (also regulates)</span>} · {fmtDate(r.last.date)}</p>
               {r.est && (
                 <p className="font-body text-[10px] font-semibold mt-0.5 truncate" style={{ color: r.status === 'due' ? '#B91C1C' : FERN }}>
                   {r.status === 'due' ? 'Reapply now — target reached' : `Est. reapply ~${fmtDate(r.est.date)} (${r.est.days}d, forecast)`}
@@ -1528,6 +1532,25 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             </div>
           </div>
         )}
+
+        {(() => {
+          const kinds = (s.products || []).filter((p) => p.product).map((p) => suppressionKind(products.find((x) => x.name === p.product))).filter(Boolean)
+          if (!kinds.includes('dmi')) return null
+          const hasPGR = kinds.includes('pgr')
+          return (
+            <div className="rounded-2xl border p-3" style={{ backgroundColor: '#F5F3FB', borderColor: '#E4DCF5' }}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <Info size={15} style={{ color: '#6D4AC2' }} />
+                <p className="font-body text-[12px] font-bold" style={{ color: '#5B3EA6' }}>Growth regulation from a DMI</p>
+              </div>
+              <p className="font-body text-[11px]" style={{ color: '#5B3EA6' }}>
+                {hasPGR
+                  ? 'This tank has a PGR and a DMI (FRAC 3) fungicide. DMIs also suppress growth, so they stack — watch for over-regulation, especially in summer heat, and consider easing the PGR rate.'
+                  : 'This tank includes a DMI (FRAC 3) fungicide, which also regulates growth. It will count as a growth-suppression event in your Growth-Reg timing.'}
+              </p>
+            </div>
+          )
+        })()}
 
         <Card>
           <div className="flex items-center justify-between mb-2">
@@ -5745,14 +5768,16 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
   const gddSeries = gddFromDaily(daily)
   const seasonGdd = gddSeries.length ? gddSeries[gddSeries.length - 1].acc : 0
 
-  const pgrNames = new Set(products.filter((p) => p.type === 'Growth Reg').map((p) => p.name))
+  // Both PGRs and DMI (FRAC 3) fungicides suppress growth, so either resets the clock.
+  const supMap = suppressionMap(products)
   const lastByArea = {}
   ;(sheets || [])
     .filter((s) => (s.status === 'approved' || s.completed) && s.date)
     .forEach((s) => {
-      const pgr = (s.products || []).filter((p) => pgrNames.has(p.product)).map((p) => p.product)
-      if (pgr.length === 0) return
-      if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: pgr }
+      const sup = (s.products || []).filter((p) => supMap[p.product])
+      if (sup.length === 0) return
+      const dmiOnly = sup.every((p) => supMap[p.product] === 'dmi')
+      if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: sup.map((p) => p.product), dmiOnly }
     })
 
   const todayIso = new Date().toISOString().slice(0, 10)
@@ -5786,7 +5811,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
             <span className="font-body text-[11px] text-slate-400">GDD</span>
           </div>
         </div>
-        <p className="font-body text-[11px] text-slate-400 mb-3">GDD since each area's last growth-reg spray (base 32°F). ~360 is the classic greens target (the "200 GDD" Primo model stated at base 0°C); fairways run higher.</p>
+        <p className="font-body text-[11px] text-slate-400 mb-3">GDD since each area's last growth-suppressing spray — a PGR <b>or</b> a DMI (FRAC 3) fungicide, which also regulates growth (base 32°F). ~360 is the classic greens target (the "200 GDD" Primo model at base 0°C); fairways run higher.</p>
         <div className="space-y-3">
           {areaRows.map((r) => (
             <div key={r.area}>
@@ -5803,7 +5828,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
               <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
                 <div className="h-full rounded-full transition-all" style={{ width: `${r.pct}%`, backgroundColor: r.gdd == null ? '#E2E8F0' : statusStyle[r.status].fg }} />
               </div>
-              {r.last && <p className="font-body text-[10px] text-slate-400 mt-0.5">Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)}</p>}
+              {r.last && <p className="font-body text-[10px] text-slate-400 mt-0.5">Last: {r.last.products.join(', ')}{r.last.dmiOnly && <span className="font-bold" style={{ color: '#6D4AC2' }}> · DMI (also regulates)</span>} · {fmtDate(r.last.date)}</p>}
               {r.est && (
                 <p className="font-body text-[10px] font-semibold mt-0.5" style={{ color: r.status === 'due' ? '#B91C1C' : FERN }}>
                   {r.status === 'due' ? 'Reapply now — target reached' : `Est. reapply ~${fmtDate(r.est.date)} · ${r.est.days} days out (from forecast)`}
