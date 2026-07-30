@@ -681,6 +681,17 @@ function TimingList({ timings }) {
               </span>
             </div>
             <p className="font-body text-[11px] text-slate-400">Trigger ~{t.threshold}°F ({t.direction === 'falling' ? 'cooling' : 'warming'}) · {t.note}</p>
+            {(() => {
+              const active = t.status === 'now' || t.status === 'soon'
+              const body = active ? t.control : t.watch
+              if (!body) return null
+              return (
+                <div className="mt-1.5 rounded-lg p-2" style={{ backgroundColor: active ? '#F0F6F2' : '#F8FAFC' }}>
+                  <p className="font-body text-[9px] font-bold uppercase tracking-wide mb-0.5" style={{ color: active ? FERN : '#94A3B8' }}>{active ? 'How to control' : 'Watch for'}</p>
+                  <p className="font-body text-[11px] text-slate-600 leading-relaxed">{body}</p>
+                </div>
+              )
+            })()}
           </div>
         )
       })}
