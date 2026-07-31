@@ -5558,7 +5558,7 @@ function TurfPerformanceModule() {
         )}
         {route === 'timing' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <TimingTab soilSeries={soilSeries} hasLocation={turf.location?.lat != null} />
+          : <TimingTab soilSeries={soilSeries} hasLocation={turf.location?.lat != null} products={turf.products} />
         )}
         {route === 'soil' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
@@ -6850,7 +6850,11 @@ const TIMING_STATUS_STYLE = {
   offseason: { bg: '#F8FAFC', fg: '#94A3B8', dot: '#E2E8F0', label: 'Out of season' },
   unknown: { bg: '#F1F5F9', fg: '#64748B', dot: '#CBD5E1', label: '—' },
 }
-function TimingTab({ soilSeries, hasLocation }) {
+// Soil-temp timing window id → Knowledge/fungicide disease id (only disease
+// windows with efficacy ratings).
+const TIMING_DISEASE_ID = { dollarspot: 'dollar_spot', brownpatch: 'brown_patch', pythium: 'pythium', anthracnose: 'anthracnose', fairyring: 'fairy_ring' }
+function TimingTab({ soilSeries, hasLocation, products = [] }) {
+  const [openFung, setOpenFung] = useState(null)
   if (!hasLocation) return <ComingSoonCard title="Set your location first" desc="Soil temperature comes from your course location. Add it in Spray Ops → Settings → Location, then come back." />
   const soilNow = currentSoilTemp(soilSeries)
   const trend = soilTrend(soilSeries)
@@ -6896,10 +6900,36 @@ function TimingTab({ soilSeries, hasLocation }) {
                   const active = t.status === 'now' || t.status === 'soon'
                   const body = active ? t.control : t.watch
                   if (!body) return null
+                  const did = TIMING_DISEASE_ID[t.id]
+                  const src = active && did ? ratingsSourceFor(did) : null
+                  const open = openFung === t.id
+                  const list = src ? fungicidesFor(did, src).map((f) => ({ ...f, owned: !!ownedMatch(f, products) })).sort((a, b) => (b.owned ? 1 : 0) - (a.owned ? 1 : 0) || b.score - a.score) : []
                   return (
                     <div className="mt-1.5 rounded-lg p-2" style={{ backgroundColor: active ? '#F0F6F2' : '#F8FAFC' }}>
                       <p className="font-body text-[9px] font-bold uppercase tracking-wide mb-0.5" style={{ color: active ? FERN : '#94A3B8' }}>{active ? 'How to control' : 'Watch for'}</p>
                       <p className="font-body text-[11px] text-slate-600 leading-relaxed">{body}</p>
+                      {src && list.length > 0 && (
+                        <>
+                          <button onClick={() => setOpenFung(open ? null : t.id)} className="font-body text-[11px] font-bold mt-1.5" style={{ color: '#6D4AC2' }}>{open ? 'Hide rated fungicides' : `See rated fungicides (${list.length})`}</button>
+                          {open && (
+                            <div className="space-y-1.5 mt-1.5">
+                              {(list.slice(0, 6)).map((f, i) => {
+                                const sc = f.score >= 3.5 ? { bg: '#DDEEDF', fg: '#2E7D46' } : f.score >= 2.5 ? { bg: '#FBF0D5', fg: '#9A6B12' } : { bg: '#EEF1F4', fg: '#64748B' }
+                                return (
+                                  <div key={i} className="flex items-center gap-2">
+                                    <span className="font-body text-[11px] font-bold rounded px-1.5 py-0.5 shrink-0 w-9 text-center" style={{ backgroundColor: sc.bg, color: sc.fg }}>{f.rating}</span>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="font-body text-[12px] font-semibold text-slate-800 truncate">{f.trade || f.ai}{f.owned && <span className="font-body text-[10px] font-bold ml-1.5" style={{ color: '#2E7D46' }}>✓ in library</span>}</p>
+                                      <p className="font-body text-[10px] text-slate-400 truncate">{f.ai}{f.frac ? ` · FRAC ${f.frac}` : ''}{f.interval ? ` · every ${f.interval} d` : ''}</p>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                              <p className="font-body text-[10px] text-slate-400">{src === 'Rutgers' ? 'Rutgers 1–4 (4 best)' : 'NC State ++'} · rotate FRAC codes · follow the label.</p>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   )
                 })()}
