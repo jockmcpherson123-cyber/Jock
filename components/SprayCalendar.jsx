@@ -11,10 +11,10 @@ const FOREST = '#16291F'
 const FERN = '#3A6B4A'
 const GOLD = '#C9A84C'
 // Clubhouse × Instrument restyle tokens (mirror globals.css / SprayApp.jsx)
-const PAPER = '#FCFBF7'
-const HAIR = '#E4DECE'
-const INK_2 = '#5B6560'
-const INK_3 = '#8C8A79'
+const PAPER = '#F9F8F5'
+const HAIR = '#E2E0DB'
+const INK_2 = '#5B6160'
+const INK_3 = '#8A8984'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 

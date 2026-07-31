@@ -41,13 +41,15 @@ const FERN = '#3A6B4A'
 const GOLD = '#C9A84C'
 const CREAM = '#F7F5EF'
 const INK = '#1A1A16'
-// Clubhouse × Instrument restyle: warm paper surfaces + warmer inks than flat
-// slate. Mirrors the CSS tokens in globals.css so inline styles stay in sync.
-const PAPER = '#FCFBF7'
-const PAPER_2 = '#EFEADD'
-const HAIR = '#E4DECE'
-const INK_2 = '#5B6560'
-const INK_3 = '#8C8A79'
+// Clubhouse × Instrument restyle: "soft stone" surfaces + warm-neutral inks
+// (warmth dialled out). Mirrors the CSS tokens in globals.css so inline styles
+// stay in sync.
+const PAPER = '#F9F8F5'
+const PAPER_2 = '#E8E7E2'
+const HAIR = '#E2E0DB'
+const INK_2 = '#5B6160'
+const INK_3 = '#8A8984'
+const GOLD_SOFT = '#B9982F' // toned-down gold for decorative hairlines
 
 // ── ROLE HELPERS ────────────────────────────────────────────────────────────
 const canManage = (role) => role === 'superintendent' || role === 'director'
@@ -1089,7 +1091,7 @@ function SprayWindowStrip({ current, today, hasLocation, attention = [], onGoWea
   return (
     <div className="rounded-[10px] overflow-hidden" style={{ border: `1px solid ${HAIR}` }}>
       {/* Clubhouse identity band — dark forest with a gold hairline beneath */}
-      <button onClick={onGoWeather} className="w-full text-left" style={{ backgroundColor: FOREST, borderBottom: `2px solid ${GOLD}` }}>
+      <button onClick={onGoWeather} className="w-full text-left" style={{ backgroundColor: FOREST, borderBottom: `2px solid ${GOLD_SOFT}` }}>
         <div className="px-4 py-3.5 flex items-center justify-between gap-3 text-white">
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex items-center gap-1.5 shrink-0">
@@ -1238,7 +1240,7 @@ function SectionHeader({ title, subtitle, noMargin }) {
     <div className={noMargin ? '' : 'mb-3'}>
       <h2 className="font-display text-lg font-semibold" style={{ color: FOREST }}>{title}</h2>
       {/* short gold rule under each heading — the club-stationery signature */}
-      <div className="mt-1 h-px" style={{ width: 26, backgroundColor: GOLD }} />
+      <div className="mt-1 h-px" style={{ width: 26, backgroundColor: GOLD_SOFT }} />
       {subtitle && <p className="font-body text-xs mt-1.5" style={{ color: INK_2 }}>{subtitle}</p>}
     </div>
   )

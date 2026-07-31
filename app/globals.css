@@ -9,18 +9,20 @@
   --forest-2: #1E3A29;
   --fern: #3A6B4A;     /* mid-green accent */
   --gold: #C9A84C;     /* highlight / call-to-action */
-  --cream: #F7F5EF;    /* page background */
+  --gold-soft: #B9982F;/* toned-down gold for decorative hairlines */
+  --cream: #F1F0EC;    /* page background — soft neutral stone mat */
   --ink: #1A1A16;
 
   /* ── Clubhouse × Instrument restyle tokens ────────────────────────────
-     Warm "paper" surfaces + hairline rules instead of white cards with drop
-     shadows, and warmer inks than flat slate. Used by the .paper-card /
-     .eyebrow / .tnum helpers below and inline on restyled screens. */
-  --paper: #FCFBF7;    /* raised card surface, a touch lighter than the page */
-  --paper-2: #EFEADD;  /* inset track / progress-bar background */
-  --hair: #E4DECE;     /* warm hairline (borders + dividers) */
-  --ink-2: #5B6560;    /* muted body ink (replaces slate-500/600) */
-  --ink-3: #8C8A79;    /* faint labels (replaces slate-400) */
+     "Soft stone" surfaces + hairline rules instead of white cards with drop
+     shadows. Neutral off-whites (the warmth/beige dialled out), with warm-
+     neutral inks. Used by the .paper-card / .eyebrow / .tnum helpers below
+     and inline on restyled screens. */
+  --paper: #F9F8F5;    /* raised card surface, a touch lighter than the mat */
+  --paper-2: #E8E7E2;  /* inset track / progress-bar background */
+  --hair: #E2E0DB;     /* neutral hairline (borders + dividers) */
+  --ink-2: #5B6160;    /* muted body ink (replaces slate-500/600) */
+  --ink-3: #8A8984;    /* faint labels (replaces slate-400) */
 }
 
 /* Make the palette available as Tailwind color utilities (e.g. bg-forest). */
