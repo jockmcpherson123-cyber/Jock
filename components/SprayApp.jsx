@@ -41,6 +41,13 @@ const FERN = '#3A6B4A'
 const GOLD = '#C9A84C'
 const CREAM = '#F7F5EF'
 const INK = '#1A1A16'
+// Clubhouse × Instrument restyle: warm paper surfaces + warmer inks than flat
+// slate. Mirrors the CSS tokens in globals.css so inline styles stay in sync.
+const PAPER = '#FCFBF7'
+const PAPER_2 = '#EFEADD'
+const HAIR = '#E4DECE'
+const INK_2 = '#5B6560'
+const INK_3 = '#8C8A79'
 
 // ── ROLE HELPERS ────────────────────────────────────────────────────────────
 const canManage = (role) => role === 'superintendent' || role === 'director'
@@ -925,19 +932,19 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       {manage && hasLocation && wx.season.length > 0 && (() => {
         const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today)
         return (
-          <button onClick={onGoWeather} className="w-full bg-white rounded-2xl border border-black/5 shadow-sm p-4 flex items-center justify-between gap-3 hover:border-slate-200 transition">
+          <button onClick={onGoWeather} className="w-full paper-card p-4 flex items-center justify-between gap-3 transition">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: '#EFF6FF' }}>
-                <CloudRain size={18} style={{ color: '#2563EB' }} />
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8EEF6' }}>
+                <CloudRain size={18} style={{ color: '#3A6187' }} />
               </div>
               <div className="text-left min-w-0">
-                <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">Rain · {rain.year}</p>
-                <p className="font-display text-lg font-bold text-slate-900 leading-tight">{rain.ytd.toFixed(2)}" <span className="font-body text-[11px] font-semibold text-slate-400">year to date</span></p>
+                <p className="eyebrow">Rain · {rain.year}</p>
+                <p className="font-display text-lg font-bold leading-tight tnum" style={{ color: FOREST }}>{rain.ytd.toFixed(2)}" <span className="font-body text-[11px] font-semibold" style={{ color: INK_3 }}>year to date</span></p>
               </div>
             </div>
             <div className="text-right shrink-0">
-              <p className="font-body text-sm font-bold text-slate-700">{rain.last30.toFixed(2)}"</p>
-              <p className="font-body text-[10px] text-slate-400">last 30 days ›</p>
+              <p className="font-body text-sm font-bold tnum" style={{ color: INK_2 }}>{rain.last30.toFixed(2)}"</p>
+              <p className="font-body text-[10px]" style={{ color: INK_3 }}>last 30 days ›</p>
             </div>
           </button>
         )
@@ -945,19 +952,19 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
       {/* Soil-temp timing nudge — a window is open based on current soil temp */}
       {manage && timingNudge && openWins.length > 0 && (
-        <div className="rounded-2xl border shadow-sm p-4" style={{ backgroundColor: '#F0F6F2', borderColor: '#CFE0D5' }}>
+        <div className="rounded-[10px] p-4" style={{ backgroundColor: '#EEF4EF', border: `1px solid #CFE0D5` }}>
           <div className="flex items-start justify-between gap-2 mb-1.5">
             <p className="font-body text-sm font-bold flex items-center gap-1.5" style={{ color: FERN }}>
-              <Sprout size={15} /> Soil temp {soilNow}°F — good timing now
+              <Sprout size={15} /> Soil temp <span className="tnum">{soilNow}°F</span> — good timing now
             </p>
-            <button onClick={toggleTimingNudge} className="font-body text-[10px] font-bold text-slate-400 shrink-0" title="Turn off this nudge">Hide</button>
+            <button onClick={toggleTimingNudge} className="font-body text-[10px] font-bold shrink-0" style={{ color: INK_3 }} title="Turn off this nudge">Hide</button>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {openWins.map((w) => (
-              <span key={w.id} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: 'white', color: FERN, border: '1px solid #DCE8E0' }}>{w.label}</span>
+              <span key={w.id} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-md" style={{ backgroundColor: PAPER, color: FERN, border: `1px solid #DCE8E0` }}>{w.label}</span>
             ))}
           </div>
-          <p className="font-body text-[10px] text-slate-400 mt-2">Based on your current 2&quot; soil temperature. See Turf → Timing for the full list.</p>
+          <p className="font-body text-[10px] mt-2" style={{ color: INK_3 }}>Based on your current 2&quot; soil temperature. See Turf → Timing for the full list.</p>
         </div>
       )}
 
@@ -970,8 +977,8 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
         onCreateFromProgram={manage ? onCreateFromProgram : undefined}
       />
 
-      {/* Stats strip */}
-      <div className="grid grid-cols-4 gap-3">
+      {/* Stats cluster — one connected instrument panel, hairline between cells */}
+      <div className="paper-card stat-cluster grid grid-cols-4 overflow-hidden">
         <StatCard icon={<ClipboardList size={16} />} label="Pending Approval" value={pending.length} accent={pending.length > 0 ? '#B45309' : FERN} />
         <StatCard icon={<ShieldCheck size={16} />} label="Approved" value={approved.length} accent={FERN} />
         <StatCard icon={<Droplet size={16} />} label="Today" value={todaySheets.length} accent={GOLD} />
@@ -994,15 +1001,15 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
           <SectionHeader title="From the Program" subtitle="Planned in the next 7 days — tap to start a spray sheet" />
           <div className="space-y-2">
             {upcomingGroups.map((g) => (
-              <div key={`${g.date}|${g.area}`} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between gap-3" style={{ borderColor: '#EFE6C9' }}>
+              <div key={`${g.date}|${g.area}`} className="paper-card p-4 flex items-center justify-between gap-3" style={{ borderColor: '#E8CE92' }}>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="font-body text-[11px] font-bold flex items-center gap-1" style={{ color: '#92660D' }}>
+                    <span className="font-body text-[11px] font-bold flex items-center gap-1 tnum" style={{ color: '#92660D' }}>
                       <Calendar size={11} />{new Date(g.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                     </span>
-                    <span className="font-body text-sm font-semibold text-slate-800 truncate">{g.area}</span>
+                    <span className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{g.area}</span>
                   </div>
-                  <p className="font-body text-[11px] text-slate-400 truncate">
+                  <p className="font-body text-[11px] truncate" style={{ color: INK_3 }}>
                     {g.items.map((a) => a.product).join(', ')}
                   </p>
                 </div>
@@ -1018,11 +1025,11 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       {manage && lowStock.length > 0 && (
         <section>
           <SectionHeader title="Low Stock" subtitle="Running low — order soon" />
-          <div className="bg-white rounded-2xl border border-red-100 overflow-hidden shadow-sm">
+          <div className="paper-card overflow-hidden" style={{ borderColor: '#E9C9C2' }}>
             {lowStock.map((p, i) => (
-              <div key={p.name} className={`flex items-center justify-between px-4 py-3 ${i !== 0 ? 'border-t border-red-50' : ''}`}>
-                <span className="font-body text-sm text-slate-700">{p.name}</span>
-                <span className="font-body text-xs font-bold text-red-500">{p.stock} {p.unit} left</span>
+              <div key={p.name} className="flex items-center justify-between px-4 py-3" style={i !== 0 ? { borderTop: `1px solid ${HAIR}` } : undefined}>
+                <span className="font-body text-sm" style={{ color: INK_2 }}>{p.name}</span>
+                <span className="font-body text-xs font-bold tnum" style={{ color: '#C0392B' }}>{p.stock} {p.unit} left</span>
               </div>
             ))}
           </div>
@@ -1057,12 +1064,14 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   )
 }
 
+// One cell of the instrument-panel stat cluster (the wrapping .paper-card and
+// hairline dividers live in the Dashboard grid).
 function StatCard({ icon, label, value, accent }) {
   return (
-    <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+    <div className="p-4">
       <div className="flex items-center gap-1.5 mb-2" style={{ color: accent }}>{icon}</div>
-      <p className="font-display text-3xl font-semibold text-slate-900">{value}</p>
-      <p className="font-body text-[11px] text-slate-400 mt-0.5 leading-tight">{label}</p>
+      <p className="font-display text-3xl font-semibold tnum" style={{ color: FOREST }}>{value}</p>
+      <p className="font-body text-[11px] mt-0.5 leading-tight" style={{ color: INK_3 }}>{label}</p>
     </div>
   )
 }
@@ -1078,20 +1087,21 @@ function SprayWindowStrip({ current, today, hasLocation, attention = [], onGoWea
   const win = today?.spray?.level ? WINDOW_STYLE[today.spray.level] : null
   const toneColor = { bad: '#DC2626', warn: '#92660D', ok: FERN }
   return (
-    <div className="rounded-2xl overflow-hidden shadow-sm border border-black/5">
-      <button onClick={onGoWeather} className="w-full text-left" style={{ backgroundColor: FOREST }}>
+    <div className="rounded-[10px] overflow-hidden" style={{ border: `1px solid ${HAIR}` }}>
+      {/* Clubhouse identity band — dark forest with a gold hairline beneath */}
+      <button onClick={onGoWeather} className="w-full text-left" style={{ backgroundColor: FOREST, borderBottom: `2px solid ${GOLD}` }}>
         <div className="px-4 py-3.5 flex items-center justify-between gap-3 text-white">
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex items-center gap-1.5 shrink-0">
               <Thermometer size={16} style={{ color: GOLD }} />
-              <span className="font-display text-xl font-semibold">
+              <span className="font-display text-xl font-semibold tnum">
                 {current?.temp ? `${current.temp}°` : hasLocation ? '—' : 'Set location'}
               </span>
             </div>
             {current && (current.wind || current.humidity) && (
               <span className="font-body text-[11px] opacity-70 flex items-center gap-2 min-w-0 truncate">
-                {current.wind && <span className="flex items-center gap-1"><Wind size={11} />{current.wind} mph</span>}
-                {current.humidity && <span>{current.humidity}% RH</span>}
+                {current.wind && <span className="flex items-center gap-1 tnum"><Wind size={11} />{current.wind} mph</span>}
+                {current.humidity && <span className="tnum">{current.humidity}% RH</span>}
               </span>
             )}
           </div>
@@ -1109,14 +1119,14 @@ function SprayWindowStrip({ current, today, hasLocation, attention = [], onGoWea
         </div>
       </button>
       {win && today?.spray?.reasons?.length > 0 && (
-        <div className="px-4 py-2 bg-white font-body text-[11px] text-slate-500 border-b border-black/5">
+        <div className="px-4 py-2 font-body text-[11px]" style={{ backgroundColor: PAPER, color: INK_2, borderBottom: `1px solid ${HAIR}` }}>
           6am–noon: {today.spray.reasons.join(' · ')}
         </div>
       )}
       {attention.length > 0 && (
-        <div className="px-4 py-2.5 bg-white flex flex-wrap gap-1.5">
+        <div className="px-4 py-2.5 flex flex-wrap gap-1.5" style={{ backgroundColor: PAPER }}>
           {attention.map((a, i) => (
-            <span key={i} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ backgroundColor: '#F8FAFC', color: toneColor[a.tone] || FERN, border: '1px solid #EEF2F6' }}>
+            <span key={i} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-md flex items-center gap-1.5" style={{ backgroundColor: CREAM, color: toneColor[a.tone] || FERN, border: `1px solid ${HAIR}` }}>
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: toneColor[a.tone] || FERN }} />
               {a.label}
             </span>
@@ -1149,12 +1159,12 @@ function DiseaseProtectionCard({ rows, heatOn, onToggleHeat, heatAvailable }) {
       <div className="flex items-end justify-between gap-2 mb-3">
         <SectionHeader title="Disease Protection" subtitle="How far each area is through its fungicide window — fills up as it's time to reapply" noMargin />
         {onToggleHeat && (
-          <button onClick={onToggleHeat} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5 shrink-0 transition" style={heatOn ? { backgroundColor: '#FEF3DD', color: '#92660D' } : { backgroundColor: 'white', color: '#94A3B8', border: '1px solid #E2E8F0' }} title="Use the window up faster in heat">
+          <button onClick={onToggleHeat} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-md flex items-center gap-1.5 shrink-0 transition" style={heatOn ? { backgroundColor: '#FEF3DD', color: '#92660D' } : { backgroundColor: PAPER, color: INK_3, border: `1px solid ${HAIR}` }} title="Use the window up faster in heat">
             <Thermometer size={12} /> Heat {heatOn ? 'on' : 'off'}
           </button>
         )}
       </div>
-      <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm space-y-3">
+      <div className="paper-card p-4 space-y-3">
         {shown.map((r) => {
           const st = PROT_STYLE[r.status] || PROT_STYLE.ok
           // Forward bar: fills as the window is used up (0% just-sprayed → 100% due).
@@ -1163,13 +1173,13 @@ function DiseaseProtectionCard({ rows, heatOn, onToggleHeat, heatAvailable }) {
           return (
             <div key={r.area}>
               <div className="flex items-center justify-between mb-1 gap-2">
-                <span className="font-body text-sm font-semibold text-slate-800 truncate">{r.area}</span>
-                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>{st.label}</span>
+                <span className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{r.area}</span>
+                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>{st.label}</span>
               </div>
-              <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+              <div className="h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: PAPER_2 }}>
                 <div className="h-full rounded-full transition-all" style={{ width: `${usedPct}%`, backgroundColor: st.bar }} />
               </div>
-              <p className="font-body text-[10px] text-slate-400 mt-0.5 truncate">
+              <p className="font-body text-[10px] mt-0.5 truncate" style={{ color: INK_3 }}>
                 Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)} · {r.mode === 'temp' ? `${r.window}-day label, heat-adjusted` : `${r.window}-day window`}
               </p>
               <p className="font-body text-[10px] font-semibold mt-0.5 truncate" style={{ color: r.status === 'expired' ? '#B91C1C' : r.status === 'soon' ? '#92660D' : FERN }}>
@@ -1179,7 +1189,7 @@ function DiseaseProtectionCard({ rows, heatOn, onToggleHeat, heatAvailable }) {
           )
         })}
       </div>
-      <p className="font-body text-[10px] text-slate-400 mt-1.5">
+      <p className="font-body text-[10px] mt-1.5" style={{ color: INK_3 }}>
         {heatAdjusted
           ? 'The bar fills up faster in heat — warm days use up fungicide cover quicker (by soil temperature), not just calendar days. Guidance, not a lab test.'
           : "Window comes from each fungicide's spray interval (set in Chemical Library). Contact products protect ~7–14 days; systemics longer."}
@@ -1195,21 +1205,21 @@ function PgrTimingCard({ rows, target }) {
   return (
     <section>
       <SectionHeader title="Growth-Reg Timing" subtitle={`GDD since the last growth-suppressing spray — PGR or DMI fungicide (base 32°F) · target ~${target}`} />
-      <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm space-y-3">
+      <div className="paper-card p-4 space-y-3">
         {rows.map((r) => {
           const s = st[r.status] || st.ok
           return (
             <div key={r.area}>
               <div className="flex items-center justify-between mb-1 gap-2">
-                <span className="font-body text-sm font-semibold text-slate-800 truncate">{r.area}</span>
-                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: s.bg, color: s.fg }}>
+                <span className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{r.area}</span>
+                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded shrink-0 tnum" style={{ backgroundColor: s.bg, color: s.fg }}>
                   {r.gdd} / {target} · {s.label}
                 </span>
               </div>
-              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+              <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: PAPER_2 }}>
                 <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(4, r.pct)}%`, backgroundColor: s.bar }} />
               </div>
-              <p className="font-body text-[10px] text-slate-400 mt-0.5 truncate">Last: {r.last.products.join(', ')}{r.last.dmiOnly && <span className="font-bold" style={{ color: '#6D4AC2' }}> · DMI (also regulates)</span>} · {fmtDate(r.last.date)}</p>
+              <p className="font-body text-[10px] mt-0.5 truncate" style={{ color: INK_3 }}>Last: {r.last.products.join(', ')}{r.last.dmiOnly && <span className="font-bold" style={{ color: '#6D4AC2' }}> · DMI (also regulates)</span>} · {fmtDate(r.last.date)}</p>
               {r.est && (
                 <p className="font-body text-[10px] font-semibold mt-0.5 truncate" style={{ color: r.status === 'due' ? '#B91C1C' : FERN }}>
                   {r.status === 'due' ? 'Reapply now — target reached' : `Est. reapply ~${fmtDate(r.est.date)} (${r.est.days}d, forecast)`}
@@ -1226,17 +1236,19 @@ function PgrTimingCard({ rows, target }) {
 function SectionHeader({ title, subtitle, noMargin }) {
   return (
     <div className={noMargin ? '' : 'mb-3'}>
-      <h2 className="font-display text-lg font-semibold text-slate-900">{title}</h2>
-      {subtitle && <p className="font-body text-xs text-slate-400 mt-0.5">{subtitle}</p>}
+      <h2 className="font-display text-lg font-semibold" style={{ color: FOREST }}>{title}</h2>
+      {/* short gold rule under each heading — the club-stationery signature */}
+      <div className="mt-1 h-px" style={{ width: 26, backgroundColor: GOLD }} />
+      {subtitle && <p className="font-body text-xs mt-1.5" style={{ color: INK_2 }}>{subtitle}</p>}
     </div>
   )
 }
 
 function EmptyState({ onNew, manage }) {
   return (
-    <div className="bg-white rounded-2xl border border-black/5 p-10 text-center shadow-sm">
-      <Sprout className="mx-auto mb-3 text-slate-300" size={28} />
-      <p className="font-body text-sm text-slate-400 mb-4">No spray sheets yet</p>
+    <div className="paper-card p-10 text-center">
+      <Sprout className="mx-auto mb-3" size={28} style={{ color: HAIR }} />
+      <p className="font-body text-sm mb-4" style={{ color: INK_3 }}>No spray sheets yet</p>
       {manage && (
         <button onClick={onNew} className="font-body text-xs font-semibold px-4 py-2 rounded-full text-white" style={{ backgroundColor: FOREST }}>
           Create your first sheet
@@ -1251,25 +1263,25 @@ function SheetRow({ sheet, onClick, highlight }) {
   return (
     <button
       onClick={onClick}
-      className="w-full text-left bg-white rounded-2xl border p-4 flex items-center justify-between transition active:scale-[0.99] shadow-sm"
-      style={{ borderColor: highlight ? '#FDE9C8' : 'rgba(0,0,0,0.05)', backgroundColor: highlight ? '#FFFBF3' : 'white' }}
+      className="w-full text-left paper-card p-4 flex items-center justify-between transition active:scale-[0.99]"
+      style={highlight ? { borderColor: '#E8CE92', backgroundColor: '#FBF6E9' } : undefined}
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 mb-1">
-          <p className="font-body font-semibold text-sm text-slate-900 truncate">{sheet.area}</p>
+          <p className="font-body font-semibold text-sm truncate" style={{ color: FOREST }}>{sheet.area}</p>
           {sheet.completed ? (
-            <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide" style={{ backgroundColor: '#E8F3EC', color: FERN }}>Sprayed</span>
+            <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wide" style={{ backgroundColor: '#E8F3EC', color: FERN }}>Sprayed</span>
           ) : (
             <StatusPill status={sheet.status} />
           )}
         </div>
-        <div className="flex items-center gap-3 mt-1.5 font-body text-[11px] text-slate-400">
-          <span className="flex items-center gap-1"><Calendar size={10} />{fmtDate(sheet.date)}</span>
+        <div className="flex items-center gap-3 mt-1.5 font-body text-[11px]" style={{ color: INK_3 }}>
+          <span className="flex items-center gap-1 tnum"><Calendar size={10} />{fmtDate(sheet.date)}</span>
           {sheet.operator && <span className="flex items-center gap-1"><User size={10} />{sheet.operator}</span>}
-          <span>{productCount} product{productCount !== 1 ? 's' : ''}</span>
+          <span className="tnum">{productCount} product{productCount !== 1 ? 's' : ''}</span>
         </div>
       </div>
-      <ChevronRight size={16} className="text-slate-300 shrink-0 ml-2" />
+      <ChevronRight size={16} className="shrink-0 ml-2" style={{ color: HAIR }} />
     </button>
   )
 }
@@ -1277,7 +1289,7 @@ function SheetRow({ sheet, onClick, highlight }) {
 function StatusPill({ status }) {
   const styles = status === 'approved' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEF3DD', color: '#92660D' }
   return (
-    <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide" style={styles}>
+    <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wide" style={styles}>
       {status === 'approved' ? 'Approved' : 'Pending'}
     </span>
   )

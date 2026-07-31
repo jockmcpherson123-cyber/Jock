@@ -11,6 +11,16 @@
   --gold: #C9A84C;     /* highlight / call-to-action */
   --cream: #F7F5EF;    /* page background */
   --ink: #1A1A16;
+
+  /* ── Clubhouse × Instrument restyle tokens ────────────────────────────
+     Warm "paper" surfaces + hairline rules instead of white cards with drop
+     shadows, and warmer inks than flat slate. Used by the .paper-card /
+     .eyebrow / .tnum helpers below and inline on restyled screens. */
+  --paper: #FCFBF7;    /* raised card surface, a touch lighter than the page */
+  --paper-2: #EFEADD;  /* inset track / progress-bar background */
+  --hair: #E4DECE;     /* warm hairline (borders + dividers) */
+  --ink-2: #5B6560;    /* muted body ink (replaces slate-500/600) */
+  --ink-3: #8C8A79;    /* faint labels (replaces slate-400) */
 }
 
 /* Make the palette available as Tailwind color utilities (e.g. bg-forest). */
@@ -27,6 +37,29 @@
 
 .font-display { font-family: 'Fraunces', serif; }
 .font-body { font-family: 'Inter', sans-serif; }
+
+/* ── Restyle helpers (Clubhouse × Instrument) ──────────────────────────────
+   .paper-card  — warm surface + hairline rule, no drop shadow (replaces the
+                  bg-white / rounded-2xl / shadow-sm card pattern)
+   .tnum        — tabular, lining figures so numbers don't jump as they change
+   .eyebrow     — engraved small-caps section label (the "stationery" touch)
+   .stat-cluster— a connected instrument-panel row (hairline between cells) */
+.paper-card {
+  background: var(--paper);
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  box-shadow: none;
+}
+.tnum { font-variant-numeric: tabular-nums lining-nums; }
+.eyebrow {
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fern);
+}
+.stat-cluster > * + * { border-left: 1px solid var(--hair); }
 
 body {
   background: var(--cream);

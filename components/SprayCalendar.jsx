@@ -10,6 +10,11 @@ import { rotationWarnings } from '@/lib/calc'
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
 const GOLD = '#C9A84C'
+// Clubhouse × Instrument restyle tokens (mirror globals.css / SprayApp.jsx)
+const PAPER = '#FCFBF7'
+const HAIR = '#E4DECE'
+const INK_2 = '#5B6560'
+const INK_3 = '#8C8A79'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -78,24 +83,24 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
 
   return (
     <section>
-      <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+      <div className="paper-card overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-black/5">
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${HAIR}` }}>
           <div className="flex items-center gap-2">
             <CalIcon size={16} style={{ color: FERN }} />
-            <p className="font-display text-base font-semibold text-slate-900">{monthLabel}</p>
+            <p className="font-display text-base font-semibold" style={{ color: FOREST }}>{monthLabel}</p>
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={goToday} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full text-slate-500 border border-slate-200 mr-1">Today</button>
-            <button onClick={() => step(-1)} className="p-1.5 rounded-full hover:bg-slate-100"><ChevronLeft size={16} className="text-slate-500" /></button>
-            <button onClick={() => step(1)} className="p-1.5 rounded-full hover:bg-slate-100"><ChevronRight size={16} className="text-slate-500" /></button>
+            <button onClick={goToday} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-md mr-1" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>Today</button>
+            <button onClick={() => step(-1)} className="p-1.5 rounded-md"><ChevronLeft size={16} style={{ color: INK_2 }} /></button>
+            <button onClick={() => step(1)} className="p-1.5 rounded-md"><ChevronRight size={16} style={{ color: INK_2 }} /></button>
           </div>
         </div>
 
         {/* Weekday labels */}
         <div className="grid grid-cols-7 px-2 pt-2">
           {WEEKDAYS.map((w) => (
-            <div key={w} className="text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide py-1">{w}</div>
+            <div key={w} className="text-center font-body text-[10px] font-bold uppercase tracking-wide py-1" style={{ color: INK_3 }}>{w}</div>
           ))}
         </div>
 
@@ -134,15 +139,15 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
                   opacity: inMonth ? 1 : 0.4,
                 }}
               >
-                <span className="font-body text-[11px] font-semibold px-0.5" style={{ color: isSel ? FOREST : '#334155' }}>{c.d}</span>
+                <span className="font-body text-[11px] font-semibold px-0.5 tnum" style={{ color: isSel ? FOREST : INK_2 }}>{c.d}</span>
                 <div className="mt-0.5 space-y-0.5 overflow-hidden">
                   {shown.map((it, i) => (
                     <div key={i} className="flex items-center gap-1 rounded px-0.5" style={{ backgroundColor: `${it.color}18` }}>
                       <span className="w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: it.color }} />
-                      <span className="font-body text-[8px] leading-tight truncate" style={{ color: '#334155' }}>{it.area}</span>
+                      <span className="font-body text-[8px] leading-tight truncate" style={{ color: INK_2 }}>{it.area}</span>
                     </div>
                   ))}
-                  {extra > 0 && <span className="font-body text-[8px] text-slate-400 px-0.5">+{extra} more</span>}
+                  {extra > 0 && <span className="font-body text-[8px] px-0.5" style={{ color: INK_3 }}>+{extra} more</span>}
                 </div>
               </button>
             )
@@ -150,7 +155,7 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
         </div>
 
         {/* Legend */}
-        <div className="flex items-center gap-4 px-4 py-2 border-t border-black/5 font-body text-[10px] text-slate-400">
+        <div className="flex items-center gap-4 px-4 py-2 font-body text-[10px]" style={{ borderTop: `1px solid ${HAIR}`, color: INK_3 }}>
           <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: GOLD }} /> Planned</span>
           <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#D97706' }} /> Pending</span>
           <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: FERN }} /> Approved</span>
@@ -159,12 +164,12 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
 
       {/* Selected-day detail */}
       <div className="mt-3">
-        <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">
+        <p className="eyebrow mb-2">
           {new Date(selected + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
         </p>
 
         {selSheets.length === 0 && selPlanned.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-black/5 p-6 text-center text-slate-400 font-body text-sm shadow-sm">
+          <div className="paper-card p-6 text-center font-body text-sm" style={{ color: INK_3 }}>
             Nothing scheduled for this day.
           </div>
         ) : (
@@ -174,16 +179,16 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
               const lines = (s.products || []).filter((p) => p.product)
               const warns = new Set(rotationWarnings(s, sheets, products).map((w) => w.product))
               return (
-                <button key={s.id} onClick={() => onOpenSheet?.(s)} className="w-full text-left bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+                <button key={s.id} onClick={() => onOpenSheet?.(s)} className="w-full text-left paper-card p-4">
                   <div className="flex items-center justify-between gap-2 mb-2">
-                    <p className="font-body text-sm font-semibold text-slate-800 truncate">{s.sheetType} · {s.area}</p>
+                    <p className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{s.sheetType} · {s.area}</p>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {warns.size > 0 && (
-                        <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1" style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}>
+                        <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wide flex items-center gap-1" style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}>
                           <RotateCw size={9} /> Rotation
                         </span>
                       )}
-                      <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide" style={s.status === 'approved' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEF3DD', color: '#92660D' }}>
+                      <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wide" style={s.status === 'approved' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEF3DD', color: '#92660D' }}>
                         {s.status}
                       </span>
                     </div>
@@ -194,7 +199,7 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
                         const code = moaOf[p.product]
                         const risky = warns.has(p.product)
                         return (
-                          <span key={i} className="font-body text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: risky ? '#FEF2F2' : '#F0F6F2', color: risky ? '#B91C1C' : FERN, border: risky ? '1px solid #FECACA' : '1px solid transparent' }}>
+                          <span key={i} className="font-body text-[11px] px-2 py-0.5 rounded-md flex items-center gap-1" style={{ backgroundColor: risky ? '#FEF2F2' : '#EEF4EF', color: risky ? '#B91C1C' : FERN, border: risky ? '1px solid #FECACA' : `1px solid ${HAIR}` }}>
                             {p.product}
                             {code && <span className="font-bold opacity-70" style={{ fontSize: '9px' }}>· {code}</span>}
                           </span>
@@ -202,7 +207,7 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
                       })}
                     </div>
                   ) : (
-                    <p className="font-body text-[11px] text-slate-400">No products</p>
+                    <p className="font-body text-[11px]" style={{ color: INK_3 }}>No products</p>
                   )}
                 </button>
               )
@@ -210,18 +215,18 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
 
             {/* Planned from the program (one card per area) */}
             {Object.entries(plannedByArea).map(([area, items]) => (
-              <div key={area} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between gap-3" style={{ borderColor: '#EFE6C9' }}>
+              <div key={area} className="paper-card p-4 flex items-center justify-between gap-3" style={{ borderColor: '#E8CE92' }}>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: GOLD }} />
-                    <p className="font-body text-sm font-semibold text-slate-800 truncate">{area}</p>
-                    <span className="font-body text-[10px] text-slate-400">planned</span>
+                    <p className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{area}</p>
+                    <span className="font-body text-[10px]" style={{ color: INK_3 }}>planned</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {items.map((a, i) => {
                       const code = moaOf[a.product]
                       return (
-                        <span key={i} className="font-body text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: '#FBF6E7', color: '#92660D' }}>
+                        <span key={i} className="font-body text-[11px] px-2 py-0.5 rounded-md flex items-center gap-1" style={{ backgroundColor: '#FBF6E7', color: '#92660D' }}>
                           {a.product}
                           {code && <span className="font-bold opacity-70" style={{ fontSize: '9px' }}>· {code}</span>}
                         </span>
