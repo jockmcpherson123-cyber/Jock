@@ -868,17 +868,20 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
     const supMap = suppressionMap(products)
     if (Object.keys(supMap).length === 0) return []
     const lastByArea = {}
+    const areaHasPGR = {} // only areas actually running a PGR program get tracked
     ;(sheets || [])
       .filter((s) => (s.status === 'approved' || s.completed) && s.date)
       .forEach((s) => {
         const sup = (s.products || []).filter((p) => supMap[p.product])
         if (sup.length === 0) return
+        if (sup.some((p) => supMap[p.product] === 'pgr')) areaHasPGR[s.area] = true
         const dmiOnly = sup.every((p) => supMap[p.product] === 'dmi')
         if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: sup.map((p) => p.product), dmiOnly }
       })
-    // Iterate the areas that actually have a PGR spray (by the sheet's own area
-    // name), so a name mismatch with Settings can't hide the bars.
-    return Object.keys(lastByArea).map((area) => {
+    // Only show areas with a real PGR program. A DMI fungicide (e.g. on the rough)
+    // regulates growth, so it shifts the clock where you already run a PGR — but
+    // it should NOT create a growth-reg task for a fungicide-only area.
+    return Object.keys(lastByArea).filter((area) => areaHasPGR[area]).map((area) => {
       const last = lastByArea[area]
       const gdd = gddSince(wx.season, last.date, 32)
       const pct = gdd != null && PGR_TARGET > 0 ? Math.min(100, Math.round((gdd / PGR_TARGET) * 100)) : 0
@@ -5768,17 +5771,22 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
   const gddSeries = gddFromDaily(daily)
   const seasonGdd = gddSeries.length ? gddSeries[gddSeries.length - 1].acc : 0
 
-  // Both PGRs and DMI (FRAC 3) fungicides suppress growth, so either resets the clock.
+  // Both PGRs and DMI (FRAC 3) fungicides suppress growth, so either resets the
+  // clock — but only for areas actually running a PGR program (a DMI on the rough
+  // shouldn't create a growth-reg task there).
   const supMap = suppressionMap(products)
   const lastByArea = {}
+  const areaHasPGR = {}
   ;(sheets || [])
     .filter((s) => (s.status === 'approved' || s.completed) && s.date)
     .forEach((s) => {
       const sup = (s.products || []).filter((p) => supMap[p.product])
       if (sup.length === 0) return
+      if (sup.some((p) => supMap[p.product] === 'pgr')) areaHasPGR[s.area] = true
       const dmiOnly = sup.every((p) => supMap[p.product] === 'dmi')
       if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: sup.map((p) => p.product), dmiOnly }
     })
+  Object.keys(lastByArea).forEach((a) => { if (!areaHasPGR[a]) delete lastByArea[a] })
 
   const todayIso = new Date().toISOString().slice(0, 10)
   const areaRows = Object.keys(areas).map((area) => {
