@@ -14,7 +14,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon,
+  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -30,6 +30,7 @@ import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
 import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget } from '@/lib/fungicides'
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { localDateISO } from '@/lib/dates'
+import PlaybookModule from '@/components/Playbook'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
@@ -259,6 +260,13 @@ export default function SprayApp({ user }) {
           >
             <ClipboardList size={12} /> Whiteboard
           </button>
+          <button
+            onClick={() => setModule('playbook')}
+            className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
+            style={module === 'playbook' ? { backgroundColor: GOLD, color: FOREST } : { color: 'rgba(255,255,255,0.5)' }}
+          >
+            <BookOpen size={12} /> Playbook
+          </button>
 
           <div className="ml-auto flex items-center gap-3">
             <span className="font-body text-[11px] text-white/50 hidden sm:inline">
@@ -273,7 +281,10 @@ export default function SprayApp({ user }) {
         </div>
       </div>
 
-      {module === 'spray' ? <SprayOpsModule user={user} /> : module === 'turf' ? <TurfPerformanceModule /> : <WhiteboardModule user={user} />}
+      {module === 'spray' ? <SprayOpsModule user={user} />
+        : module === 'turf' ? <TurfPerformanceModule />
+        : module === 'playbook' ? <PlaybookModule user={user} manage={canManage(user.role)} />
+        : <WhiteboardModule user={user} />}
     </ErrorBoundary>
   )
 }
