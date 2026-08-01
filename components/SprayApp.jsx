@@ -816,6 +816,11 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   useEffect(() => {
     if (!hasLocation) return
     let cancelled = false
+    // On a location change, drop the previous location's readings first so we
+    // never show (e.g.) DC's soil temp or GDD under a Chicago location while the
+    // refetch lands — reseed from this location's own cache if we have it.
+    const cached = readWxCache(location.lat, location.lng, today)
+    setWx({ current: null, todayWindow: null, season: cached?.season || [], breakdownTemps: cached?.breakdownTemps || [], forecast: [] })
     // Fire all four independently and in parallel — each updates the dashboard as
     // soon as it lands. (They used to run one-after-another, so Growth-Reg timing,
     // which needs the season data, had to wait behind the other calls — the lag
