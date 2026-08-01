@@ -8,12 +8,15 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import * as db from '@/lib/db'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { fetchCurrent } from '@/lib/weather'
+import { localDateISO } from '@/lib/dates'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
 const GOLD = '#C9A84C'
 
-const todayStr = () => new Date().toISOString().slice(0, 10)
+// Local calendar date so the board rolls over at local midnight, not UTC
+// midnight (which is early evening in US timezones).
+const todayStr = () => localDateISO()
 const prettyDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 
 export default function CrewBoard() {

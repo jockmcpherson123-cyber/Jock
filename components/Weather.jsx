@@ -9,6 +9,7 @@ import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDa
 import { applicationTimings, soilTrend, currentSoilTemp } from '@/lib/soiltiming'
 import { diseaseRisks, pestStages } from '@/lib/pests'
 import { profileById, photoSearchUrl } from '@/lib/knowledge'
+import { localDateISO } from '@/lib/dates'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -229,7 +230,7 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
   // Apply any manual rainfall corrections so every readout below — the Rain stat,
   // the forecast, ET "put back tonight", and the disease models — uses them.
   const daily = rawDaily.map((d) => (rainOverrides[d.date] != null ? { ...d, precip: rainOverrides[d.date], rainManual: true } : d))
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localDateISO()
   const todayRow = daily.find((d) => d.date === today) || daily[daily.length - 1]
   const forecast = daily.filter((d) => d.date >= today).slice(0, 7)
   const recentDays = daily.filter((d) => d.date < today).slice(-7).reverse()
@@ -560,7 +561,7 @@ function HourlyGraph({ raw, forecast }) {
   const [date, setDate] = useState(days[0]?.date)
   const hours = hourlyForDay(raw, date || days[0]?.date)
   const svgRef = useRef(null)
-  const isToday = date === new Date().toISOString().slice(0, 10)
+  const isToday = date === localDateISO()
   const [active, setActive] = useState(null)
 
   // Default the scrubber to the current hour (today) or 9 AM.

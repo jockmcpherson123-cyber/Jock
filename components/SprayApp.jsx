@@ -29,6 +29,7 @@ import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WIN
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
 import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget } from '@/lib/fungicides'
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
+import { localDateISO } from '@/lib/dates'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
@@ -514,7 +515,7 @@ function SprayOpsModule({ user }) {
     setActiveSheet({
       id: crypto.randomUUID(),
       sheetType: firstArea || 'Spray Sheet',
-      date: new Date().toISOString().slice(0, 10),
+      date: localDateISO(),
       operator: '',
       area: firstArea,
       tanks: firstArea ? areas[firstArea].tanks : 1,
@@ -552,7 +553,7 @@ function SprayOpsModule({ user }) {
     setActiveSheet({
       id: crypto.randomUUID(),
       sheetType: area || 'Spray Sheet',
-      date: planned[0].plannedDate || new Date().toISOString().slice(0, 10),
+      date: planned[0].plannedDate || localDateISO(),
       operator: '',
       area,
       tanks: area && areas[area] ? areas[area].tanks : 1,
@@ -578,7 +579,7 @@ function SprayOpsModule({ user }) {
 
   const pending = sheets.filter((s) => s.status === 'pending')
   const approved = sheets.filter((s) => s.status === 'approved')
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localDateISO()
   const todaySheets = sheets.filter((s) => s.date === today)
 
   if (loading) {
@@ -804,7 +805,7 @@ function writeWxCache(lat, lng, day, patch) {
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
 function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, courseInfo, onGoWeather }) {
   const lowStock = (products || []).filter((p) => p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold)
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localDateISO()
 
   // ── Live weather for the spray-window strip + season GDD for PGR timing.
   // Best-effort: the dashboard still renders everything else if this fails.
@@ -3415,7 +3416,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
 // ── INVENTORY ─────────────────────────────────────────────────────────────
 function Inventory({ products, deliveries, onAddDelivery }) {
   const [showForm, setShowForm] = useState(false)
-  const [draft, setDraft] = useState({ product: '', qty: '', unit: 'oz', supplier: '', date: new Date().toISOString().slice(0, 10) })
+  const [draft, setDraft] = useState({ product: '', qty: '', unit: 'oz', supplier: '', date: localDateISO() })
   const [filter, setFilter] = useState('All')
 
   const lowStock = products.filter((p) => p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold)
@@ -3424,7 +3425,7 @@ function Inventory({ products, deliveries, onAddDelivery }) {
   const submitDelivery = () => {
     if (!draft.product || !draft.qty) return
     onAddDelivery(draft)
-    setDraft({ product: '', qty: '', unit: 'oz', supplier: '', date: new Date().toISOString().slice(0, 10) })
+    setDraft({ product: '', qty: '', unit: 'oz', supplier: '', date: localDateISO() })
     setShowForm(false)
   }
 
@@ -3618,7 +3619,7 @@ function Reports({ sheets, products, areas, courseInfo = {} }) {
   const exportCSV = () => {
     const rows = [['Area', 'Month', 'N (lbs)', 'P (lbs)', 'K (lbs)', 'N per 1000 sqft', 'P per 1000 sqft', 'K per 1000 sqft', 'Approved Sheets']]
     npkData.forEach((r) => rows.push([r.area, r.month, r.n, r.p, r.k, r.nPerM ?? '', r.pPerM ?? '', r.kPerM ?? '', r.sheetCount]))
-    downloadCSV(rows, `NPK_Totals_${new Date().toISOString().slice(0, 10)}.csv`)
+    downloadCSV(rows, `NPK_Totals_${localDateISO()}.csv`)
   }
 
   return (
@@ -3831,7 +3832,7 @@ function CostReport({ sheets, products, areas }) {
     data.byMonth.forEach((r) => out.push([r.month, r.cost]))
     out.push([])
     out.push(['Total', data.totalCost])
-    downloadCSV(out, `Spray_Costs_${new Date().toISOString().slice(0, 10)}.csv`)
+    downloadCSV(out, `Spray_Costs_${localDateISO()}.csv`)
   }
 
   const hasData = data.rows.length > 0
@@ -3922,7 +3923,7 @@ function ImpactReport({ sheets, products, areas }) {
     out.push([]); out.push(['Month', 'EIQ load'])
     data.byMonth.forEach((r) => out.push([r.month, r.load]))
     out.push([]); out.push(['Total', data.total])
-    downloadCSV(out, `EIQ_Impact_${new Date().toISOString().slice(0, 10)}.csv`)
+    downloadCSV(out, `EIQ_Impact_${localDateISO()}.csv`)
   }
 
   const hasData = data.rows.length > 0
@@ -3999,7 +4000,7 @@ function ProductUsageReport({ sheets, products, areas }) {
   const exportCSV = () => {
     const out = [['Product', 'Type', 'Applications', 'Total applied', 'Unit']]
     rows.forEach((r) => out.push([r.name, r.type, r.apps, r.total, r.unit]))
-    downloadCSV(out, `Product_Usage_${new Date().toISOString().slice(0, 10)}.csv`)
+    downloadCSV(out, `Product_Usage_${localDateISO()}.csv`)
   }
   return (
     <div className="mt-4">
@@ -4051,7 +4052,7 @@ function SprayHistoryReport({ sheets }) {
   const exportCSV = () => {
     const out = [['Date', 'Area', 'Applicator', 'Status', 'Tanks', 'Products']]
     rows.forEach((h) => out.push([h.date || '', h.area, h.operator, h.status, h.tanks, h.products.join('; ')]))
-    downloadCSV(out, `Spray_History_${new Date().toISOString().slice(0, 10)}.csv`)
+    downloadCSV(out, `Spray_History_${localDateISO()}.csv`)
   }
   return (
     <div className="mt-4">
@@ -5000,7 +5001,7 @@ function WhiteboardModule({ user }) {
 
 // The daily job board — who's doing what today. Fetches its own tasks by date.
 function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, courses = [], crew = {}, boardMessage = '', onSaveMessage }) {
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(localDateISO())
   const [msgDraft, setMsgDraft] = useState(boardMessage)
   useEffect(() => { setMsgDraft(boardMessage) }, [boardMessage])
   const [tasks, setTasks] = useState([])
@@ -5104,7 +5105,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const orderedOps = activeCourse
     ? [...operators].sort((a, b) => (((crew[a]?.course === activeCourse) ? 0 : 1) - ((crew[b]?.course === activeCourse) ? 0 : 1)) || operators.indexOf(a) - operators.indexOf(b))
     : operators
-  const isToday = date === new Date().toISOString().slice(0, 10)
+  const isToday = date === localDateISO()
 
   const groups = {}
   view.forEach((t) => { const k = t.assignee || '__none'; (groups[k] = groups[k] || []).push(t) })
@@ -5124,7 +5125,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
           <p className="font-body text-[10px] text-slate-400">{view.length} job{view.length !== 1 ? 's' : ''}</p>
         </div>
         <button onClick={() => setDate(shiftDate(date, 1))} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Next day"><ChevronRight size={16} className="text-slate-500" /></button>
-        {!isToday && <button onClick={() => setDate(new Date().toISOString().slice(0, 10))} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FERN }}>Today</button>}
+        {!isToday && <button onClick={() => setDate(localDateISO())} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FERN }}>Today</button>}
       </div>
 
       {manage && (
@@ -5383,7 +5384,7 @@ function WhiteboardInsights() {
     let cancelled = false
     ;(async () => {
       setLoading(true)
-      const to = new Date().toISOString().slice(0, 10)
+      const to = localDateISO()
       const from = shiftDate(to, -(Number(range) - 1))
       try { const t = await db.fetchCrewTasks(from, to); if (!cancelled) setRows(t) } catch (e) { console.error(e) }
       if (!cancelled) setLoading(false)
@@ -5807,7 +5808,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
     })
   Object.keys(lastByArea).forEach((a) => { if (!areaHasPGR[a]) delete lastByArea[a] })
 
-  const todayIso = new Date().toISOString().slice(0, 10)
+  const todayIso = localDateISO()
   const areaRows = Object.keys(areas).map((area) => {
     const last = lastByArea[area]
     const gdd = last ? gddSince(daily, last.date, 32) : null
@@ -5965,7 +5966,7 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
   const pickerGreens = !hasCourses ? greenOptions
     : courseTab === 'other' ? greenOptions.filter((g) => !courseNames.some((n) => g.startsWith(n)))
     : greenOptions.filter((g) => g.startsWith(courseTab))
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(localDateISO())
   const [unit] = useState('L') // we log clippings in litres
   const [notes, setNotes] = useState('')
   const [selected, setSelected] = useState([]) // green names being logged
@@ -6236,7 +6237,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
   const contextFor = (name) => (areas[name] ? { grasses: areas[name].grasses || [], soilType: areas[name].soilType || '' } : greensSeed())
 
   const seed0 = contextFor(areaOptions[0] || '')
-  const blank = { area: areaOptions[0] || '', course: courseNames[0] || '', date: new Date().toISOString().slice(0, 10), annualN: String(suggestedAnnualN(seed0.grasses).n), units: 'ppm', ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', na: '', fe: '', mn: '', cu: '', zn: '', b: '', bsCa: '', bsMg: '', bsK: '', bsNa: '', bsH: '', lab: '', notes: '', grasses: seed0.grasses, soilType: seed0.soilType }
+  const blank = { area: areaOptions[0] || '', course: courseNames[0] || '', date: localDateISO(), annualN: String(suggestedAnnualN(seed0.grasses).n), units: 'ppm', ph: '', bufferPh: '', om: '', cec: '', p: '', k: '', ca: '', mg: '', s: '', na: '', fe: '', mn: '', cu: '', zn: '', b: '', bsCa: '', bsMg: '', bsK: '', bsNa: '', bsH: '', lab: '', notes: '', grasses: seed0.grasses, soilType: seed0.soilType }
   const [showMicros, setShowMicros] = useState(false)
   const [showBaseSat, setShowBaseSat] = useState(false)
   const [form, setForm] = useState(blank)
@@ -6250,7 +6251,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
   // ppm, so edit in ppm mode (no re-conversion).
   const editTest = (t) => {
     setForm({
-      area: t.area, course: t.course || courseOf(t.area) || '', date: t.date || new Date().toISOString().slice(0, 10), units: 'ppm',
+      area: t.area, course: t.course || courseOf(t.area) || '', date: t.date || localDateISO(), units: 'ppm',
       annualN: t.annualN != null ? String(t.annualN) : '',
       ph: t.ph ?? '', bufferPh: t.bufferPh ?? '', om: t.om ?? '', cec: t.cec ?? '',
       p: t.p ?? '', k: t.k ?? '', ca: t.ca ?? '', mg: t.mg ?? '', s: t.s ?? '', na: t.na ?? '',
@@ -6719,7 +6720,7 @@ const PRACTICE_OPTIONS = ['Mow', 'Roll', 'Brush', 'Groom', 'Verticut', 'Topdress
 function PracticesTab({ practices, areas, onAddMany, onDelete }) {
   const areaNames = Object.keys(areas || {})
   const [practice, setPractice] = useState('Mow')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(localDateISO())
   const [selected, setSelected] = useState([])
   const [value, setValue] = useState('')
   const [unit, setUnit] = useState('')

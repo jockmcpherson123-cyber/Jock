@@ -13,6 +13,7 @@ import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
 import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
 import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGGER_MODES, GDD_BASES, statusRank, coverageDays, isoAddDays } from '@/lib/triggers'
 import { suppressionMap } from '@/lib/pgr'
+import { localDateISO } from '@/lib/dates'
 
 // ── Coverage grid helpers ────────────────────────────────────────────────────
 // Every application protects its area for a stretch (coverageDays). We paint each
@@ -253,7 +254,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   // still shows without it (growth triggers just read "waiting on data").
   const [season, setSeason] = useState([])
   const [soilSeries, setSoilSeries] = useState([])
-  const nowIso = new Date().toISOString().slice(0, 10)
+  const nowIso = localDateISO()
   useEffect(() => {
     if (location?.lat == null) return
     let off = false
@@ -443,7 +444,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     setEditApp({
       originalIds: [],
       area: areaFilter !== 'all' ? areaFilter : '',
-      plannedDate: new Date().toISOString().slice(0, 10),
+      plannedDate: localDateISO(),
       trigger: { mode: 'date' },
       products: [blankRow()],
     })
