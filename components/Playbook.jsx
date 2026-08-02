@@ -52,6 +52,66 @@ function haystack(i) {
     ...(i.attachments || []).map((a) => a.name)].join(' '))
 }
 
+// A ready-made starter set — genuinely useful procedures plus templates with a
+// few blanks (marked ___) for the club to fill in. Loaded on demand from the
+// empty state; everything is editable or deletable afterwards.
+const STARTER_ITEMS = [
+  // ── Emergency ──
+  { kind: 'sop', emergency: true, sort: 1, category: 'Irrigation · Emergency', title: 'Pump station loses power',
+    notes: [
+      'Confirm the outage — check the main panel and the utility status.',
+      'Switch the pump station to the backup generator (breaker location: ___).',
+      'If the generator won’t start, call the irrigation tech and the electrician (see Contacts).',
+      'Hand-water greens and new seed if downtime will pass ~4 hours in summer heat.',
+      'Log the event and note the generator run-hours.',
+    ].join('\n'), data: {}, attachments: [] },
+  { kind: 'sop', emergency: true, sort: 2, category: 'Chemical · Emergency', title: 'Chemical spill',
+    notes: [
+      'Put on PPE. Keep people back and upwind.',
+      'Contain it — the spill kit is at: ___.',
+      'Stop the source; dam and absorb. Do not hose into a drain.',
+      'Call the distributor rep; if it’s large, the state hotline (see Contacts).',
+      'Record what spilled, how much, and how it was cleaned up.',
+    ].join('\n'), data: {}, attachments: [] },
+  { kind: 'sop', emergency: true, sort: 3, category: 'Weather · Emergency', title: 'Severe storm / lightning',
+    notes: [
+      'Sound the horn and clear the course and crew to shelter.',
+      'Don’t resume until 30 minutes after the last thunder or strike.',
+    ].join('\n'), data: {}, attachments: [] },
+  // ── SOPs ──
+  { kind: 'sop', emergency: false, sort: 10, category: 'Equipment', title: 'Fill & calibrate the sprayer',
+    notes: [
+      'Check nozzles and screens; rinse from the last load.',
+      'Half-fill with water, start agitation, add products in order (dry → flowable → liquid).',
+      'Verify gpm against the area’s saved sprayer setting; catch-test if unsure.',
+      'Triple-rinse and log the load.',
+    ].join('\n'), data: {}, attachments: [] },
+  { kind: 'sop', emergency: false, sort: 11, category: 'Equipment', title: 'Set greens-mower height of cut',
+    notes: [
+      'Bench-set to the target height of cut.',
+      'Check reel-to-bedknife with a strip test.',
+      'Record the setting per mower. (Attach the maker’s SOP with the button below.)',
+    ].join('\n'), data: {}, attachments: [] },
+  { kind: 'sop', emergency: false, sort: 12, category: 'Irrigation', title: 'Winterize the irrigation system',
+    notes: [
+      'Blow out zone-by-zone at safe pressure with the compressor.',
+      'Open the drains.',
+      'Document the sequence and note any repairs for spring.',
+    ].join('\n'), data: {}, attachments: [] },
+  { kind: 'sop', emergency: false, sort: 13, category: 'Clubhouse & grounds', title: 'Seal the teak patio furniture',
+    notes: 'Clean and let dry a day, then reseal each spring — the exact product is under Supplies.', data: {}, attachments: [] },
+  // ── Contacts (add the real numbers) ──
+  { kind: 'contact', sort: 20, category: 'Irrigation', title: 'Irrigation Service', notes: 'Pump station & controllers. Add the phone number.', data: { company: '', phone: '', email: '' }, attachments: [] },
+  { kind: 'contact', sort: 21, category: 'Chemical supplier', title: 'Chemical Distributor Rep', notes: 'Fungicides, fertilizer, PGRs. Add the phone number.', data: { company: '', phone: '', email: '' }, attachments: [] },
+  { kind: 'contact', sort: 22, category: 'Services', title: 'Electrician', notes: 'Pump house & shop panels. Add the phone number.', data: { company: '', phone: '', email: '' }, attachments: [] },
+  { kind: 'contact', sort: 23, category: 'Equipment', title: 'Equipment Dealer', notes: 'Parts & mower service. Add the phone number.', data: { company: '', phone: '', email: '' }, attachments: [] },
+  { kind: 'contact', sort: 24, category: 'Utilities', title: 'Power Company (outages)', notes: '24-hour outage line. Add the phone number.', data: { company: '', phone: '', email: '' }, attachments: [] },
+  // ── Supplies ──
+  { kind: 'supply', sort: 30, category: '', title: 'Teak patio furniture', notes: 'Reseal each spring; 2 thin coats.', data: { product: 'Australian Timber Oil — Natural', supplier: 'Hardware supplier' }, attachments: [] },
+  { kind: 'supply', sort: 31, category: '', title: 'Bunker sand', notes: 'Match the existing spec sheet.', data: { product: 'Angular white bunker sand', supplier: 'Aggregate supplier' }, attachments: [] },
+  { kind: 'supply', sort: 32, category: '', title: 'Line marking', notes: 'Case kept in the paint shop.', data: { product: 'White marking paint', supplier: 'Golf supply' }, attachments: [] },
+]
+
 function saveErr(e) {
   const m = String(e?.message || e || '')
   if (/relation|does not exist|schema cache|bucket|column/i.test(m)) {
@@ -69,6 +129,7 @@ export default function PlaybookModule({ user, manage }) {
   const [q, setQ] = useState('')
   const [editing, setEditing] = useState(null) // draft item or null
   const [confirmDel, setConfirmDel] = useState(null)
+  const [seeding, setSeeding] = useState(false)
 
   useEffect(() => {
     (async () => {
@@ -102,6 +163,14 @@ export default function PlaybookModule({ user, manage }) {
   const onSaved = (saved, isNew) => {
     setItems((prev) => (isNew ? [...prev, saved] : prev.map((i) => (i.id === saved.id ? saved : i))))
     setEditing(null)
+  }
+  const loadStarters = async () => {
+    setSeeding(true)
+    try {
+      for (const s of STARTER_ITEMS) await db.addPlaybookItem(s)
+      setItems(await db.fetchPlaybookItems())
+    } catch (e) { setLoadError(saveErr(e)) }
+    setSeeding(false)
   }
   const doDelete = async (item) => {
     setConfirmDel(null)
@@ -154,6 +223,19 @@ export default function PlaybookModule({ user, manage }) {
                 </button>
               )
             })}
+          </div>
+        )}
+
+        {/* First-run: offer a ready-made starter set */}
+        {!loading && !loadError && !searching && items.length === 0 && manage && (
+          <div className="paper-card p-5 mb-5" style={{ borderLeft: `3px solid ${GOLD}` }}>
+            <h3 className="font-display text-base font-semibold" style={{ color: FOREST }}>Start with a few examples?</h3>
+            <p className="font-body text-[13.5px] mt-1.5" style={{ color: INK_2 }}>
+              I’ll drop in some ready-made procedures (like <b>“Pump station loses power”</b>), a few contact templates, and supply examples — with a couple of blanks for you to fill in. Edit or delete any of them; they’re just a starting point.
+            </p>
+            <button onClick={loadStarters} disabled={seeding} className="mt-3 font-body text-xs font-bold px-4 py-2.5 rounded-full text-white inline-flex items-center gap-1.5 disabled:opacity-50" style={{ backgroundColor: FOREST }}>
+              {seeding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} {seeding ? 'Adding…' : 'Add starter examples'}
+            </button>
           </div>
         )}
 
