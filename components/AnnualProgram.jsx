@@ -16,30 +16,39 @@ import { suppressionMap } from '@/lib/pgr'
 import { localDateISO } from '@/lib/dates'
 
 // ── Coverage grid helpers ────────────────────────────────────────────────────
-// Every application protects its area for a stretch (coverageDays). We paint each
-// month by how much of it is covered, and flag an *interior* uncovered month —
-// one that sits between covered months — as a gap worth closing.
-function monthKeysBetween(startMk, endMk) {
+// Every application protects its area for a stretch (coverageDays). We paint the
+// season WEEK BY WEEK — summer disease/weed pressure moves week to week, so
+// months are too coarse to reveal a gap that opens and closes inside a month —
+// and flag an *interior* uncovered week (one between covered weeks) as a gap.
+// Weeks are 7-day buckets anchored to the Sunday on/before the first spray.
+function weeksBetween(startIso, endIso) {
+  const s = new Date(startIso + 'T00:00:00')
+  s.setDate(s.getDate() - s.getDay()) // back up to Sunday
+  const end = new Date(endIso + 'T00:00:00')
   const out = []
-  let [y, m] = startMk.split('-').map(Number)
-  const [ey, em] = endMk.split('-').map(Number)
-  while (y < ey || (y === ey && m <= em)) {
-    out.push(`${y}-${String(m).padStart(2, '0')}`)
-    m++; if (m > 12) { m = 1; y++ }
+  for (let d = new Date(s); d <= end; d.setDate(d.getDate() + 7)) {
+    const start = d.toISOString().slice(0, 10)
+    out.push({ start, end: isoAddDays(start, 7) }) // [start, end)
   }
   return out
 }
-function coverageRow(areaApps, months) {
+// Label a week column: the month's short name on the first week of each month,
+// otherwise the day-of-month tick — gives month context without clutter.
+function weekLabel(week, i, weeks) {
+  const d = new Date(week.start + 'T00:00:00')
+  const prevMonth = i > 0 ? new Date(weeks[i - 1].start + 'T00:00:00').getMonth() : -1
+  if (d.getMonth() !== prevMonth) return d.toLocaleDateString('en-US', { month: 'short' })
+  return String(d.getDate())
+}
+function coverageRow(areaApps, weeks) {
   const spans = areaApps
     .map((a) => { const start = a.plannedDate || a.templateDate; return start ? { start, end: isoAddDays(start, coverageDays(a)) } : null })
     .filter(Boolean)
   const covered = (iso) => spans.some((s) => iso >= s.start && iso < s.end)
-  const cells = months.map((mk) => {
-    const [y, m] = mk.split('-').map(Number)
-    const dim = new Date(y, m, 0).getDate()
+  const cells = weeks.map((w) => {
     let c = 0
-    for (let d = 1; d <= dim; d++) { if (covered(`${mk}-${String(d).padStart(2, '0')}`)) c++ }
-    return { mk, frac: c / dim }
+    for (let i = 0; i < 7; i++) { if (covered(isoAddDays(w.start, i))) c++ }
+    return { start: w.start, end: w.end, frac: c / 7 }
   })
   const firstOn = cells.findIndex((c) => c.frac > 0)
   const lastOn = cells.length - 1 - [...cells].reverse().findIndex((c) => c.frac > 0)
@@ -1376,39 +1385,47 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
             (() => {
               const dated = visibleApps.filter((a) => a.plannedDate || a.templateDate)
               if (dated.length === 0) return <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">Add planned sprays with dates to see season coverage.</div>
-              const mks = dated.map((a) => (a.plannedDate || a.templateDate).slice(0, 7)).sort()
-              const months = monthKeysBetween(mks[0], mks[mks.length - 1])
+              // Season bounds: earliest planned date → the latest date any spray's
+              // cover runs out, so the last window is fully shown.
+              const startsIso = dated.map((a) => a.plannedDate || a.templateDate).sort()
+              let endIso = startsIso[startsIso.length - 1]
+              dated.forEach((a) => { const s = a.plannedDate || a.templateDate; if (s) { const e = isoAddDays(s, coverageDays(a)); if (e > endIso) endIso = e } })
+              const weeks = weeksBetween(startsIso[0], endIso)
               const rows = areaGroups
               return (
                 <div>
-                  <p className="font-body text-xs text-slate-400 mb-3">How long each area stays protected, month by month. A <b style={{ color: '#B23A2E' }}>gap</b> is an uncovered stretch between sprays — tap it to slot one in.</p>
+                  <p className="font-body text-xs text-slate-400 mb-3">How long each area stays protected, <b>week by week</b>. A <b style={{ color: '#B23A2E' }}>gap</b> is an uncovered week between sprays — tap it to slot one in. Scroll sideways to see the whole season.</p>
                   <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-3 overflow-x-auto">
-                    <table className="border-separate w-full" style={{ borderSpacing: 3, minWidth: Math.max(360, 120 + months.length * 46) }}>
+                    <table className="border-separate" style={{ borderSpacing: 2, minWidth: Math.max(360, 132 + weeks.length * 26) }}>
                       <thead>
                         <tr>
-                          <th></th>
-                          {months.map((mk) => <th key={mk} className="font-body text-[10px] font-bold uppercase text-slate-400 text-center px-1" style={{ letterSpacing: '.04em' }}>{fmtMonthShort(mk)}</th>)}
+                          <th style={{ width: 120 }}></th>
+                          {weeks.map((w, i) => {
+                            const lbl = weekLabel(w, i, weeks)
+                            const isMonth = /[A-Za-z]/.test(lbl)
+                            return <th key={w.start} className="font-body text-[9px] font-bold text-center px-0.5" style={{ letterSpacing: '.02em', color: isMonth ? '#64748B' : '#B8BEB4', textTransform: 'uppercase' }}>{lbl}</th>
+                          })}
                         </tr>
                       </thead>
                       <tbody>
                         {rows.map((ag) => {
-                          const cells = coverageRow(ag.items, months)
+                          const cells = coverageRow(ag.items, weeks)
                           return (
                             <tr key={ag.area}>
-                              <td className="font-body text-[12px] font-semibold text-slate-700 pr-2 whitespace-nowrap">{ag.area}</td>
+                              <td className="font-body text-[12px] font-semibold text-slate-700 pr-2 whitespace-nowrap" style={{ width: 120 }}>{ag.area}</td>
                               {cells.map((c) => {
                                 const bg = c.state === 'on' ? COVER : c.state === 'light' ? COVER_LIGHT : c.state === 'gap' ? GAPCLR : '#F1F3EF'
                                 const isGap = c.state === 'gap'
                                 return (
-                                  <td key={c.mk} className="p-0">
+                                  <td key={c.start} className="p-0">
                                     <button
                                       type="button"
-                                      onClick={isGap ? () => setEditApp({ originalIds: [], area: ag.area, plannedDate: `${c.mk}-15`, trigger: { mode: 'date' }, products: [blankRow()] }) : undefined}
-                                      title={isGap ? `Coverage gap in ${fmtMonthShort(c.mk)} — tap to add a spray` : ''}
-                                      className="w-full rounded-md border transition"
-                                      style={{ height: 28, backgroundColor: bg, borderColor: isGap ? '#D9B3AC' : 'transparent', cursor: isGap ? 'pointer' : 'default' }}
+                                      onClick={isGap ? () => setEditApp({ originalIds: [], area: ag.area, plannedDate: isoAddDays(c.start, 3), trigger: { mode: 'date' }, products: [blankRow()] }) : undefined}
+                                      title={isGap ? `Coverage gap — week of ${fmtDate(c.start)}. Tap to add a spray.` : `Week of ${fmtDate(c.start)}`}
+                                      className="w-full rounded border transition"
+                                      style={{ height: 26, backgroundColor: bg, borderColor: isGap ? '#D9B3AC' : 'transparent', cursor: isGap ? 'pointer' : 'default' }}
                                     >
-                                      {isGap && <span style={{ color: '#B23A2E', fontWeight: 800, fontSize: 13 }}>!</span>}
+                                      {isGap && <span style={{ color: '#B23A2E', fontWeight: 800, fontSize: 12 }}>!</span>}
                                     </button>
                                   </td>
                                 )
@@ -1421,8 +1438,8 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                   </div>
                   <div className="flex flex-wrap gap-4 mt-3 font-body text-[12px] text-slate-500">
                     <span className="flex items-center gap-1.5"><i style={{ width: 16, height: 12, borderRadius: 3, background: COVER, display: 'inline-block' }} /> Protected</span>
-                    <span className="flex items-center gap-1.5"><i style={{ width: 16, height: 12, borderRadius: 3, background: COVER_LIGHT, display: 'inline-block' }} /> Partial</span>
-                    <span className="flex items-center gap-1.5"><i style={{ width: 16, height: 12, borderRadius: 3, background: GAPCLR, display: 'inline-block' }} /> <b style={{ color: '#B23A2E' }}>Gap</b></span>
+                    <span className="flex items-center gap-1.5"><i style={{ width: 16, height: 12, borderRadius: 3, background: COVER_LIGHT, display: 'inline-block' }} /> Part-week</span>
+                    <span className="flex items-center gap-1.5"><i style={{ width: 16, height: 12, borderRadius: 3, background: GAPCLR, display: 'inline-block' }} /> <b style={{ color: '#B23A2E' }}>Gap week</b></span>
                   </div>
                 </div>
               )
