@@ -14,6 +14,7 @@ import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/pla
 import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGGER_MODES, GDD_BASES, statusRank, coverageDays, isoAddDays } from '@/lib/triggers'
 import { suppressionMap } from '@/lib/pgr'
 import { localDateISO } from '@/lib/dates'
+import { diseasesForProduct } from '@/lib/fungicides'
 
 // ── Coverage grid helpers ────────────────────────────────────────────────────
 // Every application protects its area for a stretch (coverageDays). We paint the
@@ -1504,12 +1505,17 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                             {covering.map((a, i) => {
                               const s = a.plannedDate || a.templateDate
                               const end = isoAddDays(s, coverageDays(a))
+                              // Prefer the target the user typed; otherwise infer likely
+                              // diseases from the fungicide ratings library.
+                              const prod = products.find((p) => p.name === a.product)
+                              const inferred = a.target ? [] : diseasesForProduct({ name: a.product, activeIngredient: prod?.activeIngredient })
+                              const targetTxt = a.target ? `Targets ${a.target}` : (inferred.length ? `Likely covers ${inferred.slice(0, 3).join(', ')}` : '')
                               return (
                                 <div key={i} className="flex items-start gap-2">
                                   <span className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: typeColor(a.type) }} />
                                   <div className="min-w-0">
                                     <p className="font-body text-[13px] font-semibold text-slate-800">{a.product}{a.type ? <span className="font-normal text-slate-400"> · {a.type}</span> : null}</p>
-                                    <p className="font-body text-[11px] text-slate-500">{a.target ? `Targets ${a.target} · ` : ''}sprayed {fmtDate(s)} · covers to ~{fmtDate(end)}</p>
+                                    <p className="font-body text-[11px] text-slate-500">{targetTxt ? `${targetTxt} · ` : ''}sprayed {fmtDate(s)} · covers to ~{fmtDate(end)}</p>
                                   </div>
                                 </div>
                               )
