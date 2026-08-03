@@ -14,7 +14,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen,
+  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -27,7 +27,7 @@ import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
-import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget } from '@/lib/fungicides'
+import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget, diseasesForProduct } from '@/lib/fungicides'
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { localDateISO } from '@/lib/dates'
 import PlaybookModule from '@/components/Playbook'
@@ -1791,9 +1791,14 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
     const total = amt !== null ? Math.round((amt * (sheet.tanks || 1) + partialAmt) * 10) / 10 : null
     return { ...p, amt, total, unit }
   })
-  const productRows = rows.map((p, i) => `<tr style="background:${i % 2 === 0 ? '#fff' : '#F5F5F0'}">
-    <td style="${R}">${esc(p.product)}</td><td style="${R}">${esc(p.rate)}</td><td style="${R}">${esc(p.basis)}</td>
-    <td style="${R}">${p.amt ?? '—'} ${esc(p.unit || '')}</td><td style="${R};font-weight:700">${p.total ?? '—'} ${esc(p.unit || '')}</td></tr>`).join('')
+  const productRows = rows.map((p, i) => {
+    const prodInfo = (products || []).find((pr) => pr.name === p.product)
+    const purpose = sprayPurpose(p, prodInfo)
+    const forLine = purpose ? `<div style="font-size:9px;color:#3A6B4A;margin-top:1px">For: ${esc(purpose.text)}${purpose.inferred ? ' (typical)' : ''}</div>` : ''
+    return `<tr style="background:${i % 2 === 0 ? '#fff' : '#F5F5F0'}">
+    <td style="${R}">${esc(p.product)}${forLine}</td><td style="${R}">${esc(p.rate)}</td><td style="${R}">${esc(p.basis)}</td>
+    <td style="${R}">${p.amt ?? '—'} ${esc(p.unit || '')}</td><td style="${R};font-weight:700">${p.total ?? '—'} ${esc(p.unit || '')}</td></tr>`
+  }).join('')
   const partialNote = hasPartial ? `<div style="font-size:10px;color:#555;margin:-6px 0 12px">Totals include the ${esc(partialGal)} gal partial fill (${sheet.tanks || 1} full tank${(sheet.tanks || 1) !== 1 ? 's' : ''} + ${esc(partialGal)} gal).</div>` : ''
   const sig = (v) => v ? `<img src="${v}" style="height:48px;max-width:100%" />` : blank
   const w = sheet.weather || {}
@@ -2115,6 +2120,23 @@ function SignaturePad({ value, onChange }) {
 }
 
 // ── SHEET VIEWER ──────────────────────────────────────────────────────────
+// What a product is being sprayed FOR, so the crew member applying it knows the
+// intent behind the super/director's choice. Prefer the typed target; otherwise
+// infer likely diseases (fungicides) from the ratings library; otherwise fall
+// back to the product type's purpose. Returns { text, inferred } or null.
+function sprayPurpose(p, prodInfo) {
+  const typed = String(p?.target || '').trim()
+  if (typed) return { text: typed, inferred: false }
+  const diseases = diseasesForProduct({ name: p?.product, activeIngredient: prodInfo?.activeIngredient })
+  if (diseases.length) return { text: diseases.slice(0, 3).join(', '), inferred: true }
+  const t = String(p?.type || prodInfo?.type || '').toLowerCase()
+  if (t.includes('growth')) return { text: 'Growth regulation', inferred: true }
+  if (t.includes('herb')) return { text: 'Weed control', inferred: true }
+  if (t.includes('insect')) return { text: 'Insect control', inferred: true }
+  if (t.includes('fert')) return { text: 'Feed / nutrition', inferred: true }
+  return null
+}
+
 function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, directorPins = {}, location, courseInfo, manage, approve }) {
   const [sig, setSig] = useState('')
   const [dirPin, setDirPin] = useState('')
@@ -2345,6 +2367,15 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                       <p className="text-[11px] text-slate-400">
                         {p.rate} {p.basis}{insufficient ? ` · only ${stock} ${unit} in stock` : ''}
                       </p>
+                      {(() => {
+                        const purpose = sprayPurpose(p, prodInfo)
+                        return purpose ? (
+                          <p className="text-[11px] mt-0.5 flex items-start gap-1" style={{ color: FERN }}>
+                            <Target size={11} className="shrink-0 mt-0.5" />
+                            <span><span className="font-bold">Spraying for:</span> {purpose.text}{purpose.inferred ? <span className="text-slate-400 font-normal"> · typical</span> : ''}</span>
+                          </p>
+                        ) : null
+                      })()}
                       {grassConflicts(prodInfo, area).length > 0 && (
                         <p className="text-[10px] font-semibold text-red-600 mt-0.5">⚠ May damage {grassConflicts(prodInfo, area).join(', ')}</p>
                       )}
