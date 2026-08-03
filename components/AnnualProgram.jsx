@@ -32,21 +32,24 @@ function weeksBetween(startIso, endIso) {
   }
   return out
 }
-// Two-row header: group the weeks by month (for the spanning month labels) and
-// number each week within its month (W1, W2, …) — much easier to read than a
-// row of dates.
+// Two-row header: the month spanning its weeks up top, and each week's actual
+// date range (e.g. "29–4") underneath — you read the real dates, no counting.
 function weekHeader(weeks) {
   const groups = []
-  const nums = []
-  let n = 0, prevKey = ''
+  let prevKey = ''
   weeks.forEach((w) => {
     const d = new Date(w.start + 'T00:00:00')
     const key = `${d.getFullYear()}-${d.getMonth()}`
-    if (key !== prevKey) { n = 1; prevKey = key; groups.push({ label: d.toLocaleDateString('en-US', { month: 'long' }), span: 1 }) }
-    else { n++; groups[groups.length - 1].span++ }
-    nums.push(n)
+    if (key !== prevKey) { prevKey = key; groups.push({ label: d.toLocaleDateString('en-US', { month: 'long' }), span: 1 }) }
+    else groups[groups.length - 1].span++
   })
-  return { groups, nums }
+  return { groups }
+}
+// A week's date range as day numbers, e.g. "29–4" for Sun 29 → Sat 4.
+function weekRange(w) {
+  const s = new Date(w.start + 'T00:00:00')
+  const e = new Date(s); e.setDate(e.getDate() + 6)
+  return `${s.getDate()}–${e.getDate()}`
 }
 function coverageRow(areaApps, weeks) {
   const spans = areaApps
@@ -1399,13 +1402,13 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               let endIso = startsIso[startsIso.length - 1]
               dated.forEach((a) => { const s = a.plannedDate || a.templateDate; if (s) { const e = isoAddDays(s, coverageDays(a)); if (e > endIso) endIso = e } })
               const weeks = weeksBetween(startsIso[0], endIso)
-              const { groups: monthGroups, nums: weekNums } = weekHeader(weeks)
+              const { groups: monthGroups } = weekHeader(weeks)
               const rows = areaGroups
               return (
                 <div>
                   <p className="font-body text-xs text-slate-400 mb-3">How long each area stays protected, <b>week by week</b>. A <b style={{ color: '#B23A2E' }}>gap</b> is an uncovered week between sprays — tap it to slot one in. Scroll sideways to see the whole season.</p>
                   <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-3 overflow-x-auto">
-                    <table className="border-separate" style={{ borderSpacing: 2, minWidth: Math.max(360, 132 + weeks.length * 30) }}>
+                    <table className="border-separate" style={{ borderSpacing: 2, minWidth: Math.max(360, 132 + weeks.length * 36) }}>
                       <thead>
                         <tr>
                           <th rowSpan={2} style={{ width: 120 }}></th>
@@ -1414,8 +1417,8 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                           ))}
                         </tr>
                         <tr>
-                          {weeks.map((w, i) => (
-                            <th key={w.start} className="font-body text-[9px] font-semibold text-center px-0.5 pt-1" style={{ color: '#94A3B8' }}>W{weekNums[i]}</th>
+                          {weeks.map((w) => (
+                            <th key={w.start} className="font-body text-[10px] font-semibold text-center px-0.5 pt-1 tnum" style={{ color: '#64748B' }}>{weekRange(w)}</th>
                           ))}
                         </tr>
                       </thead>
