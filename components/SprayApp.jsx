@@ -1622,6 +1622,26 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                         </select>
                       </div>
 
+                      {/* What are we spraying this for — the crew sees this on the sheet.
+                          Options: likely diseases for this product, its purpose, and
+                          your saved target list. */}
+                      {(() => {
+                        const suggested = diseasesForProduct({ name: p.product, activeIngredient: prodInfo?.activeIngredient })
+                        const t = String(prodInfo?.type || '').toLowerCase()
+                        const tp = t.includes('growth') ? 'Growth Reg' : t.includes('herb') ? 'Weed control' : t.includes('insect') ? 'Insect control' : t.includes('fert') ? 'Feed / nutrition' : null
+                        const opts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...(targetOptions || [])].filter(Boolean)))
+                        if (p.target && !opts.includes(p.target)) opts.unshift(p.target)
+                        return (
+                          <div className="mb-2">
+                            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1 mb-1"><Target size={11} /> Spraying for</label>
+                            <select value={p.target || ''} onChange={(e) => updateProduct(p.id, { target: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm font-body bg-white">
+                              <option value="">— not specified —</option>
+                              {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                          </div>
+                        )
+                      })()}
+
                       {prodInfo?.type === 'Fertilizer' && (() => {
                         const canN = productRateForN(1, prodInfo) != null
                         return (
@@ -1792,9 +1812,7 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
     return { ...p, amt, total, unit }
   })
   const productRows = rows.map((p, i) => {
-    const prodInfo = (products || []).find((pr) => pr.name === p.product)
-    const purpose = sprayPurpose(p, prodInfo)
-    const forLine = purpose ? `<div style="font-size:9px;color:#3A6B4A;margin-top:1px">For: ${esc(purpose.text)}${purpose.inferred ? ' (typical)' : ''}</div>` : ''
+    const forLine = (p.target && String(p.target).trim()) ? `<div style="font-size:9px;color:#3A6B4A;margin-top:1px">For: ${esc(p.target)}</div>` : ''
     return `<tr style="background:${i % 2 === 0 ? '#fff' : '#F5F5F0'}">
     <td style="${R}">${esc(p.product)}${forLine}</td><td style="${R}">${esc(p.rate)}</td><td style="${R}">${esc(p.basis)}</td>
     <td style="${R}">${p.amt ?? '—'} ${esc(p.unit || '')}</td><td style="${R};font-weight:700">${p.total ?? '—'} ${esc(p.unit || '')}</td></tr>`
@@ -2120,23 +2138,6 @@ function SignaturePad({ value, onChange }) {
 }
 
 // ── SHEET VIEWER ──────────────────────────────────────────────────────────
-// What a product is being sprayed FOR, so the crew member applying it knows the
-// intent behind the super/director's choice. Prefer the typed target; otherwise
-// infer likely diseases (fungicides) from the ratings library; otherwise fall
-// back to the product type's purpose. Returns { text, inferred } or null.
-function sprayPurpose(p, prodInfo) {
-  const typed = String(p?.target || '').trim()
-  if (typed) return { text: typed, inferred: false }
-  const diseases = diseasesForProduct({ name: p?.product, activeIngredient: prodInfo?.activeIngredient })
-  if (diseases.length) return { text: diseases.slice(0, 3).join(', '), inferred: true }
-  const t = String(p?.type || prodInfo?.type || '').toLowerCase()
-  if (t.includes('growth')) return { text: 'Growth regulation', inferred: true }
-  if (t.includes('herb')) return { text: 'Weed control', inferred: true }
-  if (t.includes('insect')) return { text: 'Insect control', inferred: true }
-  if (t.includes('fert')) return { text: 'Feed / nutrition', inferred: true }
-  return null
-}
-
 function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, directorPins = {}, location, courseInfo, manage, approve }) {
   const [sig, setSig] = useState('')
   const [dirPin, setDirPin] = useState('')
@@ -2367,15 +2368,12 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                       <p className="text-[11px] text-slate-400">
                         {p.rate} {p.basis}{insufficient ? ` · only ${stock} ${unit} in stock` : ''}
                       </p>
-                      {(() => {
-                        const purpose = sprayPurpose(p, prodInfo)
-                        return purpose ? (
-                          <p className="text-[11px] mt-0.5 flex items-start gap-1" style={{ color: FERN }}>
-                            <Target size={11} className="shrink-0 mt-0.5" />
-                            <span><span className="font-bold">Spraying for:</span> {purpose.text}{purpose.inferred ? <span className="text-slate-400 font-normal"> · typical</span> : ''}</span>
-                          </p>
-                        ) : null
-                      })()}
+                      {p.target && String(p.target).trim() && (
+                        <p className="text-[11px] mt-0.5 flex items-start gap-1" style={{ color: FERN }}>
+                          <Target size={11} className="shrink-0 mt-0.5" />
+                          <span><span className="font-bold">Spraying for:</span> {p.target}</span>
+                        </p>
+                      )}
                       {grassConflicts(prodInfo, area).length > 0 && (
                         <p className="text-[10px] font-semibold text-red-600 mt-0.5">⚠ May damage {grassConflicts(prodInfo, area).join(', ')}</p>
                       )}
