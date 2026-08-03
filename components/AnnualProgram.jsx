@@ -5,7 +5,7 @@
 // then browse it by area. (Editing individual applications, the early-order
 // calculator and auto-populating spray sheets come in the next phase.)
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid, Sparkles } from 'lucide-react'
+import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, CalendarPlus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid, Sparkles, X } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
 import { downloadCSV } from '@/lib/calc'
@@ -50,6 +50,15 @@ function weekRange(w) {
   const s = new Date(w.start + 'T00:00:00')
   const e = new Date(s); e.setDate(e.getDate() + 6)
   return `${s.getDate()}–${e.getDate()}`
+}
+// The applications whose protective window overlaps [cellStart, cellEnd) — i.e.
+// what's actually protecting an area that week, for the tap-to-see-detail panel.
+function appsCoveringWeek(items, cellStart, cellEnd) {
+  return items.filter((a) => {
+    const s = a.plannedDate || a.templateDate
+    if (!s) return false
+    return s < cellEnd && isoAddDays(s, coverageDays(a)) > cellStart
+  })
 }
 function coverageRow(areaApps, weeks) {
   const spans = areaApps
@@ -311,6 +320,8 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [editProgForm, setEditProgForm] = useState(null) // rename/edit-season form
   const [orderEdit, setOrderEdit] = useState(null) // { name, caseSize, ozPerCase } for early-order inline edit
   const [viewMode, setViewMode] = useState('now') // 'now' | 'timeline' | 'area' | 'order'
+  const [covFilter, setCovFilter] = useState('all') // coverage grid: 'all' | product type
+  const [covSel, setCovSel] = useState(null) // selected coverage cell: { area, start, end, state }
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
   const fileRef = useRef(null)
@@ -1404,9 +1415,27 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               const weeks = weeksBetween(startsIso[0], endIso)
               const { groups: monthGroups } = weekHeader(weeks)
               const rows = areaGroups
+              const covTypes = Array.from(new Set(dated.map((a) => a.type).filter(Boolean)))
+              const filterItems = (items) => (covFilter === 'all' ? items : items.filter((a) => a.type === covFilter))
               return (
                 <div>
-                  <p className="font-body text-xs text-slate-400 mb-3">How long each area stays protected, <b>week by week</b>. A <b style={{ color: '#B23A2E' }}>gap</b> is an uncovered week between sprays — tap it to slot one in. Scroll sideways to see the whole season.</p>
+                  <p className="font-body text-xs text-slate-400 mb-2">How long each area stays protected, <b>week by week</b>. <b>Tap any week</b> to see exactly what’s covering it; a <b style={{ color: '#B23A2E' }}>gap</b> is an uncovered week — tap to slot one in. Scroll sideways for the whole season.</p>
+                  {/* What are we looking at coverage FOR — all products, or one type? */}
+                  {covTypes.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {['all', ...covTypes].map((t) => {
+                        const on = covFilter === t
+                        const clr = t === 'all' ? FERN : typeColor(t)
+                        return (
+                          <button key={t} onClick={() => { setCovFilter(t); setCovSel(null) }}
+                            className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full transition"
+                            style={on ? { backgroundColor: clr, color: 'white' } : { backgroundColor: 'white', color: clr, border: `1px solid ${clr}40` }}>
+                            {t === 'all' ? 'All coverage' : t}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                   <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-3 overflow-x-auto">
                     <table className="border-separate" style={{ borderSpacing: 2, minWidth: Math.max(360, 132 + weeks.length * 36) }}>
                       <thead>
@@ -1424,21 +1453,22 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                       </thead>
                       <tbody>
                         {rows.map((ag) => {
-                          const cells = coverageRow(ag.items, weeks)
+                          const cells = coverageRow(filterItems(ag.items), weeks)
                           return (
                             <tr key={ag.area}>
                               <td className="font-body text-[12px] font-semibold text-slate-700 pr-2 whitespace-nowrap" style={{ width: 120 }}>{ag.area}</td>
                               {cells.map((c) => {
                                 const bg = c.state === 'on' ? COVER : c.state === 'light' ? COVER_LIGHT : c.state === 'gap' ? GAPCLR : '#F1F3EF'
                                 const isGap = c.state === 'gap'
+                                const isSel = covSel && covSel.area === ag.area && covSel.start === c.start
                                 return (
                                   <td key={c.start} className="p-0">
                                     <button
                                       type="button"
-                                      onClick={isGap ? () => setEditApp({ originalIds: [], area: ag.area, plannedDate: isoAddDays(c.start, 3), trigger: { mode: 'date' }, products: [blankRow()] }) : undefined}
-                                      title={isGap ? `Coverage gap — week of ${fmtDate(c.start)}. Tap to add a spray.` : `Week of ${fmtDate(c.start)}`}
-                                      className="w-full rounded border transition"
-                                      style={{ height: 26, backgroundColor: bg, borderColor: isGap ? '#D9B3AC' : 'transparent', cursor: isGap ? 'pointer' : 'default' }}
+                                      onClick={() => setCovSel({ area: ag.area, start: c.start, end: c.end, state: c.state })}
+                                      title={`Week of ${fmtDate(c.start)}`}
+                                      className="w-full rounded transition"
+                                      style={{ height: 26, backgroundColor: bg, border: isSel ? `2px solid ${FOREST}` : (isGap ? '1px solid #D9B3AC' : '1px solid transparent'), cursor: 'pointer' }}
                                     >
                                       {isGap && <span style={{ color: '#B23A2E', fontWeight: 800, fontSize: 12 }}>!</span>}
                                     </button>
@@ -1456,6 +1486,46 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                     <span className="flex items-center gap-1.5"><i style={{ width: 16, height: 12, borderRadius: 3, background: COVER_LIGHT, display: 'inline-block' }} /> Part-week</span>
                     <span className="flex items-center gap-1.5"><i style={{ width: 16, height: 12, borderRadius: 3, background: GAPCLR, display: 'inline-block' }} /> <b style={{ color: '#B23A2E' }}>Gap week</b></span>
                   </div>
+
+                  {/* Tap-a-week detail: exactly what's protecting this area that week */}
+                  {covSel && (() => {
+                    const ag = rows.find((g) => g.area === covSel.area)
+                    const covering = appsCoveringWeek(ag ? filterItems(ag.items) : [], covSel.start, covSel.end)
+                    const endIncl = isoAddDays(covSel.start, 6)
+                    return (
+                      <div className="mt-3 bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: '#E2E0DB' }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="font-body text-sm font-bold" style={{ color: FOREST }}>{covSel.area} · {fmtDate(covSel.start)} – {fmtDate(endIncl)}</p>
+                          <button onClick={() => setCovSel(null)} className="text-slate-400 shrink-0"><X size={16} /></button>
+                        </div>
+                        {covering.length > 0 ? (
+                          <div className="space-y-2">
+                            <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: FERN }}>Protecting this week</p>
+                            {covering.map((a, i) => {
+                              const s = a.plannedDate || a.templateDate
+                              const end = isoAddDays(s, coverageDays(a))
+                              return (
+                                <div key={i} className="flex items-start gap-2">
+                                  <span className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: typeColor(a.type) }} />
+                                  <div className="min-w-0">
+                                    <p className="font-body text-[13px] font-semibold text-slate-800">{a.product}{a.type ? <span className="font-normal text-slate-400"> · {a.type}</span> : null}</p>
+                                    <p className="font-body text-[11px] text-slate-500">{a.target ? `Targets ${a.target} · ` : ''}sprayed {fmtDate(s)} · covers to ~{fmtDate(end)}</p>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div>
+                            <p className="font-body text-[13px] font-semibold" style={{ color: '#B23A2E' }}>Exposed — nothing{covFilter !== 'all' ? ` (${String(covFilter).toLowerCase()})` : ''} is protecting this week.</p>
+                            <button onClick={() => setEditApp({ originalIds: [], area: covSel.area, plannedDate: isoAddDays(covSel.start, 3), trigger: { mode: 'date' }, products: [blankRow()] })} className="mt-2 font-body text-xs font-bold px-3.5 py-2 rounded-full text-white inline-flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
+                              <Plus size={13} /> Add a spray for this week
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
               )
             })()
