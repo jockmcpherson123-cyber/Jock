@@ -32,13 +32,21 @@ function weeksBetween(startIso, endIso) {
   }
   return out
 }
-// Label a week column: the month's short name on the first week of each month,
-// otherwise the day-of-month tick — gives month context without clutter.
-function weekLabel(week, i, weeks) {
-  const d = new Date(week.start + 'T00:00:00')
-  const prevMonth = i > 0 ? new Date(weeks[i - 1].start + 'T00:00:00').getMonth() : -1
-  if (d.getMonth() !== prevMonth) return d.toLocaleDateString('en-US', { month: 'short' })
-  return String(d.getDate())
+// Two-row header: group the weeks by month (for the spanning month labels) and
+// number each week within its month (W1, W2, …) — much easier to read than a
+// row of dates.
+function weekHeader(weeks) {
+  const groups = []
+  const nums = []
+  let n = 0, prevKey = ''
+  weeks.forEach((w) => {
+    const d = new Date(w.start + 'T00:00:00')
+    const key = `${d.getFullYear()}-${d.getMonth()}`
+    if (key !== prevKey) { n = 1; prevKey = key; groups.push({ label: d.toLocaleDateString('en-US', { month: 'long' }), span: 1 }) }
+    else { n++; groups[groups.length - 1].span++ }
+    nums.push(n)
+  })
+  return { groups, nums }
 }
 function coverageRow(areaApps, weeks) {
   const spans = areaApps
@@ -1391,20 +1399,24 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               let endIso = startsIso[startsIso.length - 1]
               dated.forEach((a) => { const s = a.plannedDate || a.templateDate; if (s) { const e = isoAddDays(s, coverageDays(a)); if (e > endIso) endIso = e } })
               const weeks = weeksBetween(startsIso[0], endIso)
+              const { groups: monthGroups, nums: weekNums } = weekHeader(weeks)
               const rows = areaGroups
               return (
                 <div>
                   <p className="font-body text-xs text-slate-400 mb-3">How long each area stays protected, <b>week by week</b>. A <b style={{ color: '#B23A2E' }}>gap</b> is an uncovered week between sprays — tap it to slot one in. Scroll sideways to see the whole season.</p>
                   <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-3 overflow-x-auto">
-                    <table className="border-separate" style={{ borderSpacing: 2, minWidth: Math.max(360, 132 + weeks.length * 26) }}>
+                    <table className="border-separate" style={{ borderSpacing: 2, minWidth: Math.max(360, 132 + weeks.length * 30) }}>
                       <thead>
                         <tr>
-                          <th style={{ width: 120 }}></th>
-                          {weeks.map((w, i) => {
-                            const lbl = weekLabel(w, i, weeks)
-                            const isMonth = /[A-Za-z]/.test(lbl)
-                            return <th key={w.start} className="font-body text-[9px] font-bold text-center px-0.5" style={{ letterSpacing: '.02em', color: isMonth ? '#64748B' : '#B8BEB4', textTransform: 'uppercase' }}>{lbl}</th>
-                          })}
+                          <th rowSpan={2} style={{ width: 120 }}></th>
+                          {monthGroups.map((g, i) => (
+                            <th key={i} colSpan={g.span} className="font-body text-[11px] font-bold text-center pb-0.5" style={{ color: FOREST, borderBottom: '1px solid #E2E0DB' }}>{g.label}</th>
+                          ))}
+                        </tr>
+                        <tr>
+                          {weeks.map((w, i) => (
+                            <th key={w.start} className="font-body text-[9px] font-semibold text-center px-0.5 pt-1" style={{ color: '#94A3B8' }}>W{weekNums[i]}</th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
