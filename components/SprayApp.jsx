@@ -14,7 +14,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target,
+  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target, Scissors,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -31,6 +31,7 @@ import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget, diseas
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { localDateISO } from '@/lib/dates'
 import PlaybookModule from '@/components/Playbook'
+import MowingRoutes from '@/components/MowingRoutes'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
@@ -4402,6 +4403,19 @@ function LocationSettings({ location, onSave }) {
   )
 }
 
+// Small inline add-a-name control (its own text state so typing never churns
+// the parent draft). Used for practice greens per course.
+function PracticeGreenAdder({ onAdd }) {
+  const [v, setV] = useState('')
+  const add = () => { const n = v.trim(); if (!n) return; onAdd(n); setV('') }
+  return (
+    <div className="flex items-center gap-2">
+      <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }} placeholder="e.g. Putting Green, Nursery" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body" />
+      <button type="button" onClick={add} disabled={!v.trim()} className="font-body text-[11px] font-bold px-3 py-2 rounded-lg text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FERN }}>Add</button>
+    </div>
+  )
+}
+
 function CourseInfoSettings({ courseInfo, grassTypes = [], onSave }) {
   const [draft, setDraft] = useState({
     ...courseInfo,
@@ -4426,7 +4440,7 @@ function CourseInfoSettings({ courseInfo, grassTypes = [], onSave }) {
   }
 
   const save = () => {
-    const cleanCourses = courses.map((c) => ({ name: String(c.name || '').trim(), holes: Number(c.holes) || 0 })).filter((c) => c.holes > 0)
+    const cleanCourses = courses.map((c) => ({ name: String(c.name || '').trim(), holes: Number(c.holes) || 0, practiceGreens: (c.practiceGreens || []).map((x) => String(x).trim()).filter(Boolean) })).filter((c) => c.holes > 0)
     onSave({ courseInfo: { ...draft, courses: cleanCourses, holes: cleanCourses.reduce((s, c) => s + c.holes, 0), onboarded: true } })
   }
 
@@ -4441,15 +4455,30 @@ function CourseInfoSettings({ courseInfo, grassTypes = [], onSave }) {
 
       <Card>
         <FieldLabel>Courses &amp; Holes</FieldLabel>
-        <p className="font-body text-[11px] text-slate-400 mt-1 mb-2">One row per course. This builds your greens lists — add a course to grow from 18 to 36, 54 holes and beyond.</p>
+        <p className="font-body text-[11px] text-slate-400 mt-1 mb-2">One row per course. This builds your greens lists (holes 1–N) for spraying, soil tests and mowing routes — add a course to grow from 18 to 36, 54 holes and beyond.</p>
         <div className="space-y-2 mb-2">
           {courses.map((c, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <input value={c.name || ''} onChange={(e) => setCourse(i, { name: e.target.value })} placeholder={courses.length > 1 ? `Course ${i + 1} name` : 'Course name (optional)'} className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-              <select value={Number(c.holes) || 18} onChange={(e) => setCourse(i, { holes: Number(e.target.value) })} className="border border-slate-200 rounded-xl px-2.5 py-2.5 text-sm font-body bg-white shrink-0">
-                {[9, 18, 27].map((h) => <option key={h} value={h}>{h} holes</option>)}
-              </select>
-              {courses.length > 1 && <button type="button" onClick={() => removeCourse(i)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove course"><Trash2 size={16} /></button>}
+            <div key={i} className="border border-slate-200 rounded-xl p-2.5">
+              <div className="flex items-center gap-2">
+                <input value={c.name || ''} onChange={(e) => setCourse(i, { name: e.target.value })} placeholder={courses.length > 1 ? `Course ${i + 1} name` : 'Course name (optional)'} className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+                <select value={Number(c.holes) || 18} onChange={(e) => setCourse(i, { holes: Number(e.target.value) })} className="border border-slate-200 rounded-xl px-2.5 py-2.5 text-sm font-body bg-white shrink-0">
+                  {[9, 18, 27].map((h) => <option key={h} value={h}>{h} holes</option>)}
+                </select>
+                {courses.length > 1 && <button type="button" onClick={() => removeCourse(i)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove course"><Trash2 size={16} /></button>}
+              </div>
+              <div className="mt-2 pl-0.5">
+                <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Practice / putting greens (optional)</p>
+                {(c.practiceGreens || []).length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-1.5">
+                    {(c.practiceGreens || []).map((pg, pi) => (
+                      <span key={pi} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ backgroundColor: '#EAF2EC', color: FERN }}>
+                        {pg}<button type="button" onClick={() => setCourse(i, { practiceGreens: (c.practiceGreens || []).filter((_, x) => x !== pi) })} className="opacity-60 hover:opacity-100">×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <PracticeGreenAdder onAdd={(name) => { if (!(c.practiceGreens || []).includes(name)) setCourse(i, { practiceGreens: [...(c.practiceGreens || []), name] }) }} />
+              </div>
             </div>
           ))}
         </div>
@@ -4937,6 +4966,7 @@ function PeoplePicker({ options = [], selected = [], onToggle, placeholder, max 
 
 const WB_SECTIONS = [
   { key: 'workboard', label: 'Workboard', icon: ClipboardList },
+  { key: 'mowing', label: 'Mowing Routes', icon: Scissors },
   { key: 'insights', label: 'Time & Efficiency', icon: BarChart3 },
   { key: 'crew', label: 'Crew', icon: User },
   { key: 'equipment', label: 'Equipment', icon: Truck },
@@ -5033,6 +5063,7 @@ function WhiteboardModule({ user }) {
         </aside>
         <div className="flex-1 min-w-0">
           {section === 'workboard' && <WorkboardView manage={manage} settings={settings} roster={roster} jobTypes={jobTypes} equipment={equipment} courses={courses} crew={crew} boardMessage={courseInfo.boardMessage || ''} onSaveMessage={(m) => saveCourse({ boardMessage: m })} />}
+          {section === 'mowing' && <MowingRoutes courses={courses} courseInfo={courseInfo} roster={roster} manage={manage} onSave={saveCourse} />}
           {section === 'insights' && <WhiteboardInsights />}
           {section === 'crew' && <WhiteboardCrew roster={roster} operators={operators} crewMembers={crewMembers} courses={courses} crew={crew} manage={manage} onSaveCrew={(next) => saveCourse({ crew: next })} onSaveMembers={(list) => saveCourse({ crewMembers: list })} />}
           {section === 'equipment' && <WhiteboardListSection title="Equipment" hint="The mowers, rollers, blowers and carts your crew runs. These become quick-pick chips when you add a job." items={equipment} manage={manage} accent={FERN} onSave={(list) => saveCourse({ equipment: list })} />}
