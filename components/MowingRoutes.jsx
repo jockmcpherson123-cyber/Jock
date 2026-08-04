@@ -9,7 +9,7 @@
 // route and gives each person their greens. Greens = practice greens first, then
 // holes 1..N. Everything saves in the courseInfo blob (no new table).
 import { useState, useEffect } from 'react'
-import { ChevronUp, ChevronDown, Scissors, Check, Info, Lock, Plus } from 'lucide-react'
+import { ChevronUp, ChevronDown, Scissors, Check, Lock, Plus } from 'lucide-react'
 import { greensForCourse, reconcileOrder, layoutForCount } from '@/lib/mowing'
 
 const FOREST = '#16291F'
@@ -37,7 +37,8 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
   const [setGroups, setSetGroups] = useState([])
   const [setSaved, setSetSaved] = useState(false)
   const [order, setOrder] = useState(reconcileOrder(courseInfo.mowingOrder?.[courseName], allIds))
-  const [showOrder, setShowOrder] = useState(false)
+  const greenById = Object.fromEntries(greens.map((g) => [g.id, g]))
+  const orderedGreens = order.map((id) => greenById[id]).filter(Boolean)
 
   const hasLockedSet = (count) => {
     const saved = courseInfo.mowingSets?.[courseName]?.[count]?.groups
@@ -56,7 +57,6 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
     const ids = greensForCourse(c).map((g) => g.id)
     setOrder(reconcileOrder(courseInfo.mowingOrder?.[courseName], ids))
     setMaxSet(Math.max(DEFAULT_MAX_SET, ...savedCountsFor(courseName)))
-    setShowOrder(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseName])
 
@@ -67,13 +67,14 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
   const saveSet = () => {
     const sets = { ...(courseInfo.mowingSets || {}) }
     sets[courseName] = { ...(sets[courseName] || {}), [setCnt]: { groups: setGroups } }
-    onSave({ mowingSets: sets })
+    const orders = { ...(courseInfo.mowingOrder || {}), [courseName]: order }
+    onSave({ mowingSets: sets, mowingOrder: orders })
     setSetSaved(true); setTimeout(() => setSetSaved(false), 2200)
   }
   const moveInOrder = (i, dir) => {
     const j = i + dir
     if (j < 0 || j >= order.length) return
-    setOrder((o) => { const n = [...o]; [n[i], n[j]] = [n[j], n[i]]; return n })
+    setOrder((o) => { const n = [...o]; [n[i], n[j]] = [n[j], n[i]]; return n }); setSetSaved(false)
   }
 
   // No greens configured yet.
@@ -149,12 +150,20 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
               </tr>
             </thead>
             <tbody>
-              {greens.map((green) => {
+              {orderedGreens.map((green, ri) => {
                 const onCount = setGroups.filter((g) => g.includes(green.id)).length
                 const rowBg = onCount === 0 ? '#FBEEEC' : 'white'
                 return (
                   <tr key={green.id} style={{ borderTop: `1px solid ${HAIR}` }}>
-                    <td className="font-body text-[12px] font-semibold px-2.5 py-1 tnum whitespace-nowrap" style={{ color: onCount === 0 ? '#B23A2E' : INK, position: 'sticky', left: 0, backgroundColor: rowBg, zIndex: 1 }}>{green.label}</td>
+                    <td className="px-1.5 py-1 whitespace-nowrap" style={{ position: 'sticky', left: 0, backgroundColor: rowBg, zIndex: 1 }}>
+                      <div className="flex items-center gap-1">
+                        <div className="flex flex-col">
+                          <button onClick={() => moveInOrder(ri, -1)} disabled={ri === 0} className="disabled:opacity-20" style={{ color: INK_3, lineHeight: 0.6 }} aria-label="Move up"><ChevronUp size={14} /></button>
+                          <button onClick={() => moveInOrder(ri, 1)} disabled={ri === orderedGreens.length - 1} className="disabled:opacity-20" style={{ color: INK_3, lineHeight: 0.6 }} aria-label="Move down"><ChevronDown size={14} /></button>
+                        </div>
+                        <span className="font-body text-[12px] font-semibold tnum" style={{ color: onCount === 0 ? '#B23A2E' : INK }}>{green.label}</span>
+                      </div>
+                    </td>
                     {setGroups.map((g, mi) => {
                       const on = g.includes(green.id)
                       const c = MOWER_COLORS[mi % MOWER_COLORS.length]
@@ -173,7 +182,7 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
           </table>
         </div>
       </div>
-      <p className="font-body text-[11px] mb-2" style={{ color: INK_3 }}>Tap a box to put that green on that mower. Tick it under <b>more than one</b> to share it (two mowers on the practice greens). A <span style={{ color: '#B23A2E' }}>red row</span> means that green isn't on any mower yet.</p>
+      <p className="font-body text-[11px] mb-2" style={{ color: INK_3 }}>Use the <b>▲▼</b> to set the mow order (practice greens first, nursery last, etc.). Tap a box to put a green on a mower — tick <b>more than one</b> to share it. A <span style={{ color: '#B23A2E' }}>red row</span> means a green isn't on any mower yet.</p>
 
       {unassigned.length > 0 && (
         <p className="font-body text-[11px] mb-2" style={{ color: '#B23A2E' }}>⚠ Not on any mower: {unassigned.map(labelOf).join(', ')}</p>
@@ -182,29 +191,7 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
       <button onClick={saveSet} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white inline-flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
         {setSaved ? <><Check size={14} /> Locked in</> : <><Lock size={13} /> Save &amp; lock this {setCnt}-mower route</>}
       </button>
-
-      {/* Starting order — seeds a fresh count before you tweak it */}
-      <div className="mt-5">
-        <button onClick={() => setShowOrder((v) => !v)} className="font-body text-xs font-bold flex items-center gap-1.5" style={{ color: FERN }}>
-          {showOrder ? <ChevronUp size={14} /> : <ChevronDown size={14} />} Starting order (used before you tweak a new count)
-        </button>
-        {showOrder && (
-          <div className="mt-2 p-3 rounded-xl" style={{ backgroundColor: PAPER, border: `1px solid ${HAIR}` }}>
-            <p className="font-body text-[11px] mb-2 flex items-start gap-1" style={{ color: INK_3 }}><Info size={12} className="mt-0.5 shrink-0" /> When you first open a mower-count, greens are split evenly in this order (practice greens first). Editing it only affects counts you haven't locked yet.</p>
-            <div className="space-y-1">
-              {order.map((id, i) => (
-                <div key={id} className="flex items-center gap-2 py-1 px-2 rounded-lg" style={{ backgroundColor: 'white', border: `1px solid ${HAIR}` }}>
-                  <span className="font-body text-[10px] font-bold tnum w-6" style={{ color: INK_3 }}>{i + 1}.</span>
-                  <span className="font-body text-[13px] font-semibold flex-1 tnum" style={{ color: INK }}>{labelOf(id)}</span>
-                  <button onClick={() => moveInOrder(i, -1)} disabled={i === 0} className="p-1 disabled:opacity-25" style={{ color: INK_2 }}><ChevronUp size={15} /></button>
-                  <button onClick={() => moveInOrder(i, 1)} disabled={i === order.length - 1} className="p-1 disabled:opacity-25" style={{ color: INK_2 }}><ChevronDown size={15} /></button>
-                </div>
-              ))}
-            </div>
-            <button onClick={() => onSave({ mowingOrder: { ...(courseInfo.mowingOrder || {}), [courseName]: order } })} className="font-body text-xs font-bold px-4 py-2 rounded-full text-white mt-3 inline-flex items-center gap-1.5" style={{ backgroundColor: FERN }}>Save order</button>
-          </div>
-        )}
-      </div>
+      <p className="font-body text-[10px] mt-2" style={{ color: INK_3 }}>Saves this route <b>and</b> the mow order for {courseName || 'this course'}.</p>
     </div>
   )
 }
