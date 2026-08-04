@@ -49,15 +49,17 @@ function splitEven(arr, n) {
   return out
 }
 // Bring a saved layout up to date with the current greens: keep valid ids, drop
-// any that vanished, and drop any new greens onto the last mower so nothing is
-// lost. If the saved layout doesn't match the count, start from an even split.
+// any that vanished, and drop any greens on NO mower onto the last one so nothing
+// is lost. A green may sit on more than one mower (e.g. 2 mowers on the practice
+// greens), so we only de-dup WITHIN a mower, not across them. If the saved layout
+// doesn't match the count, start from an even split.
 function reconcileGroups(groups, count, allIds, order) {
   const fallback = () => splitEven(reconcileOrder(order, allIds), count)
   if (!Array.isArray(groups) || groups.length !== count) return fallback()
-  const seen = new Set()
-  const g = groups.map((arr) => (arr || []).filter((id) => { if (!allIds.includes(id) || seen.has(id)) return false; seen.add(id); return true }))
-  const missing = reconcileOrder(order, allIds).filter((id) => !seen.has(id))
-  if (missing.length) g[g.length - 1] = [...g[g.length - 1], ...missing]
+  const g = groups.map((arr) => [...new Set((arr || []).filter((id) => allIds.includes(id)))])
+  const covered = new Set(g.flat())
+  const missing = reconcileOrder(order, allIds).filter((id) => !covered.has(id))
+  if (missing.length && g.length) g[g.length - 1] = [...g[g.length - 1], ...missing]
   return g
 }
 
@@ -98,9 +100,11 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseName, setCnt])
 
-  const moveGreenInSet = (gid, toIdx) => {
-    setSetGroups((prev) => prev.map((g, idx) => (idx === toIdx ? [...g.filter((x) => x !== gid), gid] : g.filter((x) => x !== gid))))
-    setSetMoveId(null); setSetSaved(false)
+  // Toggle a green on/off a given mower. A green can be on several mowers at once
+  // (two mowers sharing the practice greens, say).
+  const toggleGreenOnMower = (gid, mowerIdx) => {
+    setSetGroups((prev) => prev.map((g, idx) => (idx !== mowerIdx ? g : (g.includes(gid) ? g.filter((x) => x !== gid) : [...g, gid]))))
+    setSetSaved(false)
   }
   const saveSet = () => {
     const sets = { ...(courseInfo.mowingSets || {}) }
@@ -301,7 +305,25 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
           </div>
           <p className="font-body text-[10px] mb-3" style={{ color: INK_3 }}>Numbers = how many mowers. 🔒 = a route is locked for that count. Tap ＋ for more.</p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
+          {/* Toggle bar: which mowers the tapped green is on (can be several) */}
+          {setMoveId && (
+            <div className="mb-3 p-3 rounded-xl flex items-center gap-2 flex-wrap" style={{ backgroundColor: PAPER, border: `1px solid ${FOREST}` }}>
+              <span className="font-body text-[12px] font-bold tnum" style={{ color: FOREST }}>{labelOf(setMoveId)} on mowers:</span>
+              {setGroups.map((g, di) => {
+                const on = g.includes(setMoveId)
+                const c = MOWER_COLORS[di % MOWER_COLORS.length]
+                return (
+                  <button key={di} onClick={() => toggleGreenOnMower(setMoveId, di)} className="font-body text-[12px] font-bold rounded-md px-2.5 py-1 inline-flex items-center gap-1"
+                    style={on ? { backgroundColor: c, color: 'white' } : { backgroundColor: 'white', color: c, border: `1px solid ${c}55` }}>
+                    {on && <Check size={11} />} M{di + 1}
+                  </button>
+                )
+              })}
+              <button onClick={() => setSetMoveId(null)} className="ml-auto font-body text-[11px] font-bold" style={{ color: INK_3 }}>Done</button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-2">
             {setGroups.map((g, idx) => {
               const color = MOWER_COLORS[idx % MOWER_COLORS.length]
               return (
@@ -313,19 +335,11 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
                         style={{ backgroundColor: `${color}15`, color, border: setMoveId === gid ? `1px solid ${color}` : '1px solid transparent' }}>{labelOf(gid)}</button>
                     ))}
                   </div>
-                  {setMoveId && g.includes(setMoveId) && (
-                    <div className="mt-2 pt-2 flex items-center gap-1.5 flex-wrap" style={{ borderTop: `1px solid ${HAIR}` }}>
-                      <span className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>Move {labelOf(setMoveId)} →</span>
-                      {setGroups.map((_, di) => di !== idx && (
-                        <button key={di} onClick={() => moveGreenInSet(setMoveId, di)} className="font-body text-[11px] font-bold rounded px-2 py-0.5" style={{ backgroundColor: `${MOWER_COLORS[di % MOWER_COLORS.length]}18`, color: MOWER_COLORS[di % MOWER_COLORS.length] }}>M{di + 1}</button>
-                      ))}
-                      <button onClick={() => setSetMoveId(null)} style={{ color: INK_3 }}><X size={13} /></button>
-                    </div>
-                  )}
                 </div>
               )
             })}
           </div>
+          <p className="font-body text-[11px] mb-2" style={{ color: INK_3 }}>Tap a green, then tap the mowers it should be on — a green can be on <b>more than one</b> (e.g. two mowers sharing the practice greens).</p>
 
           {setUnassigned.length > 0 && (
             <p className="font-body text-[11px] mb-2" style={{ color: '#B23A2E' }}>⚠ Not on any mower: {setUnassigned.map(labelOf).join(', ')} — tap a green to move it on.</p>
