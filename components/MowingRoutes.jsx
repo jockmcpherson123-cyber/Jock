@@ -93,10 +93,9 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
   const [maxSet, setMaxSet] = useState(Math.max(DEFAULT_MAX_SET, ...savedCountsFor(courseName)))
   const countButtons = Array.from({ length: maxSet }, (_, i) => i + 1)
   const [setGroups, setSetGroups] = useState([])
-  const [setMoveId, setSetMoveId] = useState(null)
   const [setSaved, setSetSaved] = useState(false)
   useEffect(() => {
-    setSetGroups(layoutFor(setCnt)); setSetMoveId(null); setSetSaved(false)
+    setSetGroups(layoutFor(setCnt)); setSetSaved(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseName, setCnt])
 
@@ -305,41 +304,51 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
           </div>
           <p className="font-body text-[10px] mb-3" style={{ color: INK_3 }}>Numbers = how many mowers. 🔒 = a route is locked for that count. Tap ＋ for more.</p>
 
-          {/* Toggle bar: which mowers the tapped green is on (can be several) */}
-          {setMoveId && (
-            <div className="mb-3 p-3 rounded-xl flex items-center gap-2 flex-wrap" style={{ backgroundColor: PAPER, border: `1px solid ${FOREST}` }}>
-              <span className="font-body text-[12px] font-bold tnum" style={{ color: FOREST }}>{labelOf(setMoveId)} on mowers:</span>
-              {setGroups.map((g, di) => {
-                const on = g.includes(setMoveId)
-                const c = MOWER_COLORS[di % MOWER_COLORS.length]
-                return (
-                  <button key={di} onClick={() => toggleGreenOnMower(setMoveId, di)} className="font-body text-[12px] font-bold rounded-md px-2.5 py-1 inline-flex items-center gap-1"
-                    style={on ? { backgroundColor: c, color: 'white' } : { backgroundColor: 'white', color: c, border: `1px solid ${c}55` }}>
-                    {on && <Check size={11} />} M{di + 1}
-                  </button>
-                )
-              })}
-              <button onClick={() => setSetMoveId(null)} className="ml-auto font-body text-[11px] font-bold" style={{ color: INK_3 }}>Done</button>
+          {/* Grid: greens down the side, mowers across the top. Tap a box to put
+              that green on that mower. A green can be ticked under several. */}
+          <div className="rounded-xl overflow-hidden mb-2" style={{ border: `1px solid ${HAIR}` }}>
+            <div className="overflow-x-auto">
+              <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                <thead>
+                  <tr style={{ backgroundColor: PAPER }}>
+                    <th className="font-body text-[10px] font-bold uppercase tracking-wide text-left px-2.5 py-2" style={{ color: INK_3, position: 'sticky', left: 0, backgroundColor: PAPER, zIndex: 1 }}>Green</th>
+                    {setGroups.map((g, mi) => {
+                      const c = MOWER_COLORS[mi % MOWER_COLORS.length]
+                      return (
+                        <th key={mi} className="px-1 py-1.5 text-center" style={{ minWidth: 42 }}>
+                          <div className="font-body text-[11px] font-bold" style={{ color: c }}>M{mi + 1}</div>
+                          <div className="font-body text-[9px] tnum" style={{ color: INK_3 }}>{g.length}</div>
+                        </th>
+                      )
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {greens.map((green) => {
+                    const onCount = setGroups.filter((g) => g.includes(green.id)).length
+                    const rowBg = onCount === 0 ? '#FBEEEC' : 'white'
+                    return (
+                      <tr key={green.id} style={{ borderTop: `1px solid ${HAIR}` }}>
+                        <td className="font-body text-[12px] font-semibold px-2.5 py-1 tnum whitespace-nowrap" style={{ color: onCount === 0 ? '#B23A2E' : INK, position: 'sticky', left: 0, backgroundColor: rowBg, zIndex: 1 }}>{green.label}</td>
+                        {setGroups.map((g, mi) => {
+                          const on = g.includes(green.id)
+                          const c = MOWER_COLORS[mi % MOWER_COLORS.length]
+                          return (
+                            <td key={mi} className="text-center px-1 py-1" style={{ backgroundColor: rowBg }}>
+                              <button onClick={() => toggleGreenOnMower(green.id, mi)} className="rounded-md mx-auto flex items-center justify-center" style={{ width: 32, height: 28, backgroundColor: on ? c : '#F1F1EE', border: `1px solid ${on ? c : HAIR}` }} aria-label={`${green.label} on Mower ${mi + 1}`}>
+                                {on && <Check size={14} className="text-white" />}
+                              </button>
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-2">
-            {setGroups.map((g, idx) => {
-              const color = MOWER_COLORS[idx % MOWER_COLORS.length]
-              return (
-                <div key={idx} className="p-3 rounded-xl" style={{ backgroundColor: PAPER, border: `1px solid ${HAIR}`, borderLeft: `4px solid ${color}` }}>
-                  <span className="font-body text-[13px] font-bold" style={{ color }}>Mower {idx + 1}</span>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {g.length === 0 ? <span className="font-body text-[11px]" style={{ color: INK_3 }}>No greens</span> : g.map((gid) => (
-                      <button key={gid} type="button" onClick={() => setSetMoveId(setMoveId === gid ? null : gid)} className="font-body text-[12px] font-bold rounded-md px-2 py-1 tnum"
-                        style={{ backgroundColor: `${color}15`, color, border: setMoveId === gid ? `1px solid ${color}` : '1px solid transparent' }}>{labelOf(gid)}</button>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
           </div>
-          <p className="font-body text-[11px] mb-2" style={{ color: INK_3 }}>Tap a green, then tap the mowers it should be on — a green can be on <b>more than one</b> (e.g. two mowers sharing the practice greens).</p>
+          <p className="font-body text-[11px] mb-2" style={{ color: INK_3 }}>Tap a box to put that green on that mower. Tick it under <b>more than one</b> to share it (two mowers on the practice greens). A <span style={{ color: '#B23A2E' }}>red row</span> means that green isn't on any mower yet.</p>
 
           {setUnassigned.length > 0 && (
             <p className="font-body text-[11px] mb-2" style={{ color: '#B23A2E' }}>⚠ Not on any mower: {setUnassigned.map(labelOf).join(', ')} — tap a green to move it on.</p>
