@@ -10,7 +10,13 @@
 // Greens = the course's holes (1..N) plus any practice/putting greens set in
 // Settings. Crew see a read-only list; managers edit.
 import { useState, useEffect } from 'react'
-import { ChevronUp, ChevronDown, Scissors, X, Check, Info } from 'lucide-react'
+import { ChevronUp, ChevronDown, Scissors, X, Check, Info, ClipboardList, Loader2 } from 'lucide-react'
+import * as db from '@/lib/db'
+import { localDateISO } from '@/lib/dates'
+
+// The job label used for mowing tasks pushed to the Workboard — matched on so a
+// re-push replaces the previous set instead of duplicating.
+const MOW_JOB = 'Greens Mowing'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -96,6 +102,30 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
   const setName = (idx, val) => setNames((prev) => { const n = [...prev]; n[idx] = val; return n })
   const saveRoutes = () => { onSave({ mowingRoutes: { ...(courseInfo.mowingRoutes || {}), [courseName]: { mowers, groups, names } } }); flash('routes') }
   const flash = (what) => { setSavedTick(what); setTimeout(() => setSavedTick(''), 1800) }
+
+  const [pushing, setPushing] = useState(false)
+  const [pushMsg, setPushMsg] = useState('')
+  // Save the routes AND drop them onto today's Job Board — one task per mower,
+  // under the driver's name, greens in the note. Re-pushing replaces the last
+  // set for this course today (no duplicates).
+  const sendToBoard = async () => {
+    setPushing(true); setPushMsg('')
+    try {
+      onSave({ mowingRoutes: { ...(courseInfo.mowingRoutes || {}), [courseName]: { mowers, groups, names } } })
+      const today = localDateISO()
+      const existing = await db.fetchCrewTasks(today, today)
+      for (const t of existing) {
+        if (t.job === MOW_JOB && String(t.course || '') === String(courseName || '')) await db.deleteCrewTask(t.id)
+      }
+      const rows = groups
+        .map((g, idx) => ({ date: today, job: MOW_JOB, assignee: names[idx] || '', equipment: `Mower ${idx + 1}`, course: courseName || '', status: 'todo', sort: idx, notes: g.map(labelOf).join(', ') }))
+        .filter((r) => r.notes) // skip an empty mower
+      if (rows.length) await db.addCrewTasks(rows)
+      setPushMsg('on-board')
+      setTimeout(() => setPushMsg(''), 2500)
+    } catch (e) { console.error(e); setPushMsg('err') }
+    setPushing(false)
+  }
 
   const assigned = new Set(groups.flat())
   const unassigned = order.filter((id) => !assigned.has(id))
@@ -197,9 +227,19 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
           )}
 
           {manage && groups.length > 0 && (
-            <button onClick={saveRoutes} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white inline-flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
-              {savedTick === 'routes' ? <><Check size={14} /> Saved</> : 'Save routes'}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={sendToBoard} disabled={pushing} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white inline-flex items-center gap-1.5 disabled:opacity-50" style={{ backgroundColor: FOREST }}>
+                {pushing ? <Loader2 size={14} className="animate-spin" /> : pushMsg === 'on-board' ? <Check size={14} /> : <ClipboardList size={14} />}
+                {pushing ? 'Adding…' : pushMsg === 'on-board' ? "On today's board" : "Put on today's Job Board"}
+              </button>
+              <button onClick={saveRoutes} className="font-body text-xs font-bold px-4 py-2.5 rounded-full inline-flex items-center gap-1.5" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>
+                {savedTick === 'routes' ? <><Check size={14} /> Saved</> : 'Save only'}
+              </button>
+              {pushMsg === 'err' && <span className="font-body text-[11px]" style={{ color: '#B23A2E' }}>Couldn’t reach the board — try again.</span>}
+            </div>
+          )}
+          {manage && groups.length > 0 && (
+            <p className="font-body text-[11px] mt-2" style={{ color: INK_3 }}>“Put on today’s board” drops each mower under its driver’s name on the Workboard (greens in the note). Re-tap after a change and it refreshes today’s set.</p>
           )}
         </>
       )}
