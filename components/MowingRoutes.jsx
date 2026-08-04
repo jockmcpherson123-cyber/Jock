@@ -32,8 +32,9 @@ const DEFAULT_MAX_SET = 8 // counts 1..this shown by default; "+" adds more
 function greensForCourse(course) {
   const holes = Number(course?.holes) || 0
   const out = []
-  for (let i = 1; i <= holes; i++) out.push({ id: String(i), label: `#${i}` })
+  // Practice / putting greens first — they're mowed first — then holes 1 → N.
   ;(course?.practiceGreens || []).forEach((nm) => { const n = String(nm).trim(); if (n) out.push({ id: `p:${n}`, label: n }) })
+  for (let i = 1; i <= holes; i++) out.push({ id: String(i), label: `#${i}` })
   return out
 }
 function reconcileOrder(saved, allIds) {
