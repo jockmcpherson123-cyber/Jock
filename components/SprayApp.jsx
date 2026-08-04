@@ -5310,6 +5310,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                       <div className="min-w-0 flex-1">
                         <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{jobText}</p>
                         {jobText !== t.job && <p className="font-body text-[10px] text-slate-400 italic truncate">{t.job}</p>}
+                        {t.notes && <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>}
                         {tools.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
                             {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}
@@ -5331,6 +5332,12 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
             const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
             const open = !!openJobs[jk]
             const alreadyOn = list.map((t) => t.assignee).filter(Boolean)
+            // A note that's the SAME on every task is a shared job note (shown once
+            // up top). Different notes per task — e.g. each mower's greens — are
+            // per-person and shown under each name instead.
+            const distinctNotes = [...new Set(list.map((t) => (t.notes || '').trim()).filter(Boolean))]
+            const sharedNote = distinctNotes.length === 1 && list.every((t) => (t.notes || '').trim() === distinctNotes[0]) ? distinctNotes[0] : ''
+            const perPersonNotes = distinctNotes.length > 0 && !sharedNote
             return (
               <div key={jk} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
                 {/* Job header bar */}
@@ -5348,7 +5355,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                 <div className="px-3 pt-2 pb-3">
                   {langs.map((l) => <p key={l} className="font-body text-[11px] text-slate-400 italic mb-0.5 px-1">{txGet(tx, l, jk) || jk} <span className="not-italic">· {(CREW_LANGS.find(([c]) => c === l) || [])[1] || l}</span></p>)}
                   {(() => {
-                    const nt = (list.find((t) => t.notes) || {}).notes || ''
                     if (editingNoteJob === jk) {
                       return (
                         <div className="flex items-center gap-2 mb-2">
@@ -5358,16 +5364,18 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                         </div>
                       )
                     }
-                    if (!nt) return manage ? <button type="button" onClick={() => { setEditingNoteJob(jk); setNoteDraft('') }} className="font-body text-[11px] font-bold mb-2 flex items-center gap-1" style={{ color: '#B07A16' }}><Plus size={12} /> Add note</button> : null
-                    const noteVariants = langs.map((l) => txGet(tx, l, nt)).filter((v) => v && v !== nt)
+                    // Per-person notes (each mower's greens) show under each name — nothing up here.
+                    if (perPersonNotes) return null
+                    if (!sharedNote) return manage ? <button type="button" onClick={() => { setEditingNoteJob(jk); setNoteDraft('') }} className="font-body text-[11px] font-bold mb-2 flex items-center gap-1" style={{ color: '#B07A16' }}><Plus size={12} /> Add note</button> : null
+                    const noteVariants = langs.map((l) => txGet(tx, l, sharedNote)).filter((v) => v && v !== sharedNote)
                     return (
                       <div className="flex items-start gap-1.5 mb-2 rounded-lg" style={{ backgroundColor: '#FFFBEB', border: '1px solid #FDE9C8', padding: '6px 8px' }}>
                         <Info size={13} style={{ color: '#B07A16' }} className="shrink-0 mt-0.5" />
                         <div className="min-w-0 flex-1">
-                          <p className="font-body text-[11px]" style={{ color: '#8A5A12' }}>{nt}</p>
+                          <p className="font-body text-[11px]" style={{ color: '#8A5A12' }}>{sharedNote}</p>
                           {noteVariants.map((v, i) => <p key={i} className="font-body text-[11px] italic" style={{ color: '#A98547' }}>{v}</p>)}
                         </div>
-                        {manage && <button type="button" onClick={() => { setEditingNoteJob(jk); setNoteDraft(nt) }} className="font-body text-[10px] font-bold shrink-0" style={{ color: '#B07A16' }}>Edit</button>}
+                        {manage && <button type="button" onClick={() => { setEditingNoteJob(jk); setNoteDraft(sharedNote) }} className="font-body text-[10px] font-bold shrink-0" style={{ color: '#B07A16' }}>Edit</button>}
                       </div>
                     )
                   })()}
@@ -5384,6 +5392,9 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                         <div key={t.id} className="flex items-center gap-2 rounded-lg" style={{ borderLeft: `4px solid ${FERN}`, backgroundColor: '#FAFAF7' }}>
                           <div className="min-w-0 flex-1 py-2 pl-2.5">
                             <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee || 'Unassigned'}</p>
+                            {perPersonNotes && t.notes && (
+                              <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>
+                            )}
                             {tools.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-0.5 items-center">
                                 {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}

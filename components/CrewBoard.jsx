@@ -163,6 +163,11 @@ export default function CrewBoard() {
               const list = jobGroups[jk]
               const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
               const variants = langs.map((l) => txGet(tx, l, jk)).filter(Boolean)
+              // Same note on every task = a shared job note (shown once). Different
+              // notes per task (each mower's greens) show under each name.
+              const distinctNotes = [...new Set(list.map((t) => (t.notes || '').trim()).filter(Boolean))]
+              const sharedNote = distinctNotes.length === 1 && list.every((t) => (t.notes || '').trim() === distinctNotes[0]) ? distinctNotes[0] : ''
+              const perPersonNotes = distinctNotes.length > 0 && !sharedNote
               return (
                 <div key={jk} style={{ breakInside: 'avoid', WebkitColumnBreakInside: 'avoid', marginBottom: '1.1vw', background: '#FBFAF6', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.28)' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '0.55vw 0.8vw', background: '#E6EDE4', borderBottom: '1px solid #D3DCD2' }}>
@@ -173,12 +178,11 @@ export default function CrewBoard() {
                     <span style={{ fontSize: 'clamp(11px,1vw,17px)', fontWeight: 700, color: '#8A9A8E', fontVariantNumeric: 'tabular-nums' }}>{list.length}</span>
                   </div>
                   {(() => {
-                    const nt = (list.find((t) => t.notes) || {}).notes
-                    if (!nt) return null
-                    const noteVariants = langs.map((l) => txGet(tx, l, nt)).filter((v) => v && v !== nt)
+                    if (perPersonNotes || !sharedNote) return null
+                    const noteVariants = langs.map((l) => txGet(tx, l, sharedNote)).filter((v) => v && v !== sharedNote)
                     return (
                       <div style={{ padding: '0.35vw 0.8vw', background: '#FFF7E6', borderBottom: '1px solid #F0E4C8' }}>
-                        <div style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#8A5A12', fontWeight: 600 }}>{nt}</div>
+                        <div style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#8A5A12', fontWeight: 600 }}>{sharedNote}</div>
                         {noteVariants.map((v, i) => <div key={i} style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#A98547', fontStyle: 'italic' }}>{v}</div>)}
                       </div>
                     )
@@ -193,6 +197,7 @@ export default function CrewBoard() {
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <span style={{ fontSize: 'clamp(13px,1.2vw,22px)', fontWeight: 600, color: '#23241E' }}>{t.assignee || 'Unassigned'}</span>
                             {detail && <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#7C8A80' }}>{'  ·  ' + detail}</span>}
+                            {perPersonNotes && t.notes && <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: FERN, fontWeight: 600 }}>{'  ·  ' + t.notes}</span>}
                           </div>
                           {!course && t.course && <span style={{ fontSize: 'clamp(9px,0.8vw,14px)', fontWeight: 700, color: '#3B5BA5', background: '#E7ECF8', padding: '1px 7px', borderRadius: 999, whiteSpace: 'nowrap' }}>{t.course}</span>}
                         </div>
