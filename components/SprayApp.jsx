@@ -32,6 +32,7 @@ import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { localDateISO } from '@/lib/dates'
 import PlaybookModule from '@/components/Playbook'
 import MowingRoutes from '@/components/MowingRoutes'
+import { labelledLayout } from '@/lib/mowing'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
@@ -5139,7 +5140,19 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
       // One row per assigned person (or a single unassigned job) — so each person
       // keeps their own status, and they group together by job on the board.
       const people = assignees.length ? assignees : ['']
-      await db.addCrewTasks(people.map((name, i) => ({ ...base, assignee: name, sort: startSort + i })))
+      // For a greens-mow job with people on it, pull the locked route for that
+      // head-count and give each person their own greens in the note.
+      const isGreensMow = /mow\w*\s+greens/i.test(job)
+      let rows
+      if (isGreensMow && assignees.length) {
+        const course = courses.find((c) => c.name === activeCourse) || courses[0] || {}
+        const cName = course.name || activeCourse || ''
+        const lay = labelledLayout(settings.courseInfo || {}, cName, course, assignees.length)
+        rows = assignees.map((name, i) => ({ ...base, assignee: name, sort: startSort + i, notes: (lay[i] || []).join(', ') || base.notes }))
+      } else {
+        rows = people.map((name, i) => ({ ...base, assignee: name, sort: startSort + i }))
+      }
+      await db.addCrewTasks(rows)
       setJob(''); setEquip(''); setEquipList([]); setAssignees([]); setNote('')
       await reload()
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
