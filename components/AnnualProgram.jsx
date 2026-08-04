@@ -15,6 +15,7 @@ import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGG
 import { suppressionMap } from '@/lib/pgr'
 import { localDateISO } from '@/lib/dates'
 import { diseasesForProduct } from '@/lib/fungicides'
+import { DEFAULT_TARGETS } from '@/lib/defaults'
 
 // ── Coverage grid helpers ────────────────────────────────────────────────────
 // Every application protects its area for a stretch (coverageDays). We paint the
@@ -1049,7 +1050,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                         <button onClick={() => removeRow(r.key)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove product"><Trash2 size={15} /></button>
                       )}
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Rate oz/M</label>
                         <input type="number" step="any" value={r.rateOzM} onChange={(e) => updateRow(r.key, { rateOzM: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
@@ -1058,11 +1059,36 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                         <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Rate oz/A</label>
                         <input type="number" step="any" value={r.rateOzA} onChange={(e) => updateRow(r.key, { rateOzA: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
                       </div>
-                      <div>
-                        <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Target</label>
-                        <input value={r.target} onChange={(e) => updateRow(r.key, { target: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="e.g. Dollar Spot" />
-                      </div>
                     </div>
+                    {/* Spraying for — multi-select. Set here on the plan and it rolls
+                        straight into the spray sheets built from it. */}
+                    {(() => {
+                      const prodInfo = products.find((x) => x.name === r.product)
+                      const suggested = diseasesForProduct({ name: r.product, activeIngredient: prodInfo?.activeIngredient })
+                      const t = String(r.type || prodInfo?.type || '').toLowerCase()
+                      const tp = t.includes('growth') ? 'Growth Reg' : t.includes('herb') ? 'Weed control' : t.includes('insect') ? 'Insect control' : t.includes('fert') ? 'Feed / nutrition' : null
+                      const sel = String(r.target || '').split(',').map((x) => x.trim()).filter(Boolean)
+                      const opts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...DEFAULT_TARGETS].filter(Boolean))).filter((o) => !sel.includes(o))
+                      const setSel = (arr) => updateRow(r.key, { target: arr.join(', ') })
+                      return (
+                        <div className="mt-2">
+                          <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Spraying for</label>
+                          {sel.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mb-1.5">
+                              {sel.map((tg) => (
+                                <span key={tg} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ backgroundColor: '#EAF2EC', color: FERN, border: '1px solid #D5E5DA' }}>
+                                  {tg}<button type="button" onClick={() => setSel(sel.filter((x) => x !== tg))} className="opacity-60 hover:opacity-100">×</button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <select value="" onChange={(e) => { if (e.target.value) setSel([...sel, e.target.value]) }} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white">
+                            <option value="">{sel.length ? '+ Add another…' : '— select what you’re spraying for —'}</option>
+                            {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        </div>
+                      )
+                    })()}
                   </div>
                 ))}
               </div>
