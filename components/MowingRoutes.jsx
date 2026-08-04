@@ -27,7 +27,7 @@ const INK_2 = '#5B6160'
 const INK_3 = '#8A8984'
 const MOWER_COLORS = ['#3A6B4A', '#2B6C8F', '#9A6B12', '#6D4AC2', '#B23A2E', '#0E7C7B', '#8A5A2B', '#4B5563']
 const MOW_JOB = 'Greens Mowing'
-const COUNTS = [4, 5, 6, 7, 8]
+const DEFAULT_MAX_SET = 8 // counts 1..this shown by default; "+" adds more
 
 function greensForCourse(course) {
   const holes = Number(course?.holes) || 0
@@ -86,7 +86,10 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
   }
 
   // ── Route sets (setup) ─────────────────────────────────────────────────────
+  const savedCountsFor = (cn) => Object.keys(courseInfo.mowingSets?.[cn] || {}).map(Number).filter((n) => n > 0)
   const [setCnt, setSetCnt] = useState(5)
+  const [maxSet, setMaxSet] = useState(Math.max(DEFAULT_MAX_SET, ...savedCountsFor(courseName)))
+  const countButtons = Array.from({ length: maxSet }, (_, i) => i + 1)
   const [setGroups, setSetGroups] = useState([])
   const [setMoveId, setSetMoveId] = useState(null)
   const [setSaved, setSetSaved] = useState(false)
@@ -122,6 +125,7 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
     setOrder(reconcileOrder(courseInfo.mowingOrder?.[courseName], ids))
     const st = courseInfo.mowingToday?.[courseName]
     setPeople(st && st.date === todayIso ? (st.people || []) : [])
+    setMaxSet(Math.max(DEFAULT_MAX_SET, ...savedCountsFor(courseName)))
     setTouched(false); setSynced(false); setShowOrder(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseName])
@@ -285,14 +289,17 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
           </div>
           <p className="font-body text-[11px] mb-2.5" style={{ color: INK_3 }}>Build a route for each mower-count you run. Pick a count, arrange which greens each mower gets, then Save — it locks in and gets pulled automatically when that many people mow.</p>
 
-          <div className="flex gap-1.5 mb-3">
-            {COUNTS.map((n) => (
+          <div className="flex gap-1.5 mb-1 flex-wrap items-center">
+            {countButtons.map((n) => (
               <button key={n} onClick={() => setSetCnt(n)} className="font-body text-sm font-bold rounded-lg tnum flex items-center justify-center gap-1"
-                style={{ minWidth: 46, height: 40, backgroundColor: n === setCnt ? FOREST : PAPER, color: n === setCnt ? 'white' : INK_2, border: `1px solid ${n === setCnt ? FOREST : HAIR}` }}>
+                style={{ minWidth: 44, height: 40, backgroundColor: n === setCnt ? FOREST : PAPER, color: n === setCnt ? 'white' : INK_2, border: `1px solid ${n === setCnt ? FOREST : HAIR}` }}>
                 {n}{hasLockedSet(n) && <Lock size={10} style={{ opacity: 0.7 }} />}
               </button>
             ))}
+            <button onClick={() => { const n = maxSet + 1; setMaxSet(n); setSetCnt(n) }} className="font-body text-sm font-bold rounded-lg flex items-center justify-center" title="Add a bigger route"
+              style={{ minWidth: 44, height: 40, backgroundColor: PAPER, color: FERN, border: `1px dashed ${HAIR}` }}><Plus size={16} /></button>
           </div>
+          <p className="font-body text-[10px] mb-3" style={{ color: INK_3 }}>Numbers = how many mowers. 🔒 = a route is locked for that count. Tap ＋ for more.</p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
             {setGroups.map((g, idx) => {
