@@ -20,7 +20,7 @@ import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
   productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, productRateForN, eiqLoad,
 } from '@/lib/calc'
-import { PRODUCT_TYPES, UNITS } from '@/lib/defaults'
+import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate, buildRainYear } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
@@ -4484,16 +4484,19 @@ function CourseInfoSettings({ courseInfo, grassTypes = [], onSave }) {
   )
 }
 
-function NameListEditor({ title, items, onSave, accent }) {
+function NameListEditor({ title, items, onSave, accent, presets }) {
   const [list, setList] = useState(items)
   const [newName, setNewName] = useState('')
   const dirty = JSON.stringify(list) !== JSON.stringify(items)
+  // Standard entries not already in the list — offered as a one-tap top-up.
+  const missing = (presets || []).filter((p) => !list.includes(p))
 
   const add = () => {
     if (!newName.trim() || list.includes(newName.trim())) return
     setList([...list, newName.trim()])
     setNewName('')
   }
+  const addPresets = () => { const merged = [...list, ...missing]; setList(merged); onSave(merged) }
   const remove = (name) => setList(list.filter((n) => n !== name))
 
   return (
@@ -4512,6 +4515,11 @@ function NameListEditor({ title, items, onSave, accent }) {
         <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder="Add a name..." className="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
         <button onClick={add} className="font-body text-xs font-bold px-4 rounded-xl text-white" style={{ backgroundColor: FOREST }}>Add</button>
       </div>
+      {missing.length > 0 && (
+        <button onClick={addPresets} className="font-body text-[11px] font-bold mt-2 flex items-center gap-1" style={{ color: accent }}>
+          <Plus size={13} /> Add the standard list ({missing.length} more)
+        </button>
+      )}
       {dirty && (
         <button onClick={() => onSave(list)} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white mt-3" style={{ backgroundColor: accent }}>
           Save Changes
@@ -4713,7 +4721,7 @@ function ApplicatorsEditor({ operators, licenses, onSave }) {
 function ListsSettings({ targets, sheetTypes, grassTypes, soilTypes, onSave }) {
   return (
     <div className="space-y-4">
-      <NameListEditor title="Spray Targets" items={targets} accent="#7C3AED" onSave={(list) => onSave({ targets: list })} />
+      <NameListEditor title="Spray Targets" items={targets} accent="#7C3AED" presets={DEFAULT_TARGETS} onSave={(list) => onSave({ targets: list })} />
       <NameListEditor title="Sheet Types" items={sheetTypes} accent={FOREST} onSave={(list) => onSave({ sheetTypes: list })} />
       <NameListEditor title="Grass Types" items={grassTypes || []} accent="#2E7D32" onSave={(list) => onSave({ grassTypes: list })} />
       <NameListEditor title="Soil Types" items={soilTypes || []} accent="#92660D" onSave={(list) => onSave({ soilTypes: list })} />
