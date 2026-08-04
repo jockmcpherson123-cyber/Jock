@@ -575,6 +575,7 @@ function SprayOpsModule({ user }) {
         rate: a.rateOzM != null ? String(a.rateOzM) : '',
         basis: a.basis || 'oz / M',
         forceGal: false,
+        target: a.target || '', // carry the plan's target onto the product line
       })),
       targets: [...new Set(planned.map((a) => a.target).filter(Boolean))],
       instructions: '',
@@ -1506,19 +1507,18 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
     const prod = products.find((p) => p.name === name)
     updateProduct(id, { product: name, basis: prod?.basis || '', defaultRate: prod?.rate ?? null })
   }
-  const toggleTarget = (t) => {
-    setS((prev) => ({
-      ...prev,
-      targets: prev.targets.includes(t) ? prev.targets.filter((x) => x !== t) : [...prev.targets, t],
-    }))
-  }
+  // A product line's target is a comma-joined string ("Dollar Spot, Brown Patch").
+  const splitTargets = (str) => String(str || '').split(',').map((x) => x.trim()).filter(Boolean)
+  // The sheet's overall targets are derived from the per-product "Spraying for"
+  // choices — there's no separate sheet-level target picker any more.
+  const productTargets = [...new Set((s.products || []).flatMap((p) => splitTargets(p.target)))]
 
   return (
     <div className="pt-6 pb-10 max-w-2xl mx-auto">
       <div className="flex items-center justify-between mb-5">
         <button onClick={onCancel} className="font-body text-sm font-medium text-slate-400">Cancel</button>
         <h2 className="font-display text-lg font-semibold text-slate-900">{sheet.status === 'pending' && sheet.directorSig === '' ? 'Spray Sheet' : 'Edit Sheet'}</h2>
-        <button onClick={() => onSave(s)} disabled={saving} className="font-body text-xs font-bold px-4 py-2 rounded-full text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
+        <button onClick={() => onSave({ ...s, targets: productTargets.length ? productTargets : (s.targets || []) })} disabled={saving} className="font-body text-xs font-bold px-4 py-2 rounded-full text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
           {saving ? 'Saving…' : 'Save'}
         </button>
       </div>
@@ -1623,19 +1623,29 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                       </div>
 
                       {/* What are we spraying this for — the crew sees this on the sheet.
-                          Options: likely diseases for this product, its purpose, and
-                          your saved target list. */}
+                          Multi-select: pick one or more. Options are the likely diseases
+                          for this product, its purpose, and your saved target list. */}
                       {(() => {
                         const suggested = diseasesForProduct({ name: p.product, activeIngredient: prodInfo?.activeIngredient })
                         const t = String(prodInfo?.type || '').toLowerCase()
                         const tp = t.includes('growth') ? 'Growth Reg' : t.includes('herb') ? 'Weed control' : t.includes('insect') ? 'Insect control' : t.includes('fert') ? 'Feed / nutrition' : null
-                        const opts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...(targetOptions || [])].filter(Boolean)))
-                        if (p.target && !opts.includes(p.target)) opts.unshift(p.target)
+                        const sel = splitTargets(p.target)
+                        const opts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...(targetOptions || [])].filter(Boolean))).filter((o) => !sel.includes(o))
+                        const setSel = (arr) => updateProduct(p.id, { target: arr.join(', ') })
                         return (
                           <div className="mb-2">
                             <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1 mb-1"><Target size={11} /> Spraying for</label>
-                            <select value={p.target || ''} onChange={(e) => updateProduct(p.id, { target: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm font-body bg-white">
-                              <option value="">— not specified —</option>
+                            {sel.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                                {sel.map((tg) => (
+                                  <span key={tg} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ backgroundColor: '#EEF4EF', color: FERN, border: '1px solid #DCE8E0' }}>
+                                    {tg}<button type="button" onClick={() => setSel(sel.filter((x) => x !== tg))} className="opacity-60 hover:opacity-100">×</button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <select value="" onChange={(e) => { if (e.target.value) setSel([...sel, e.target.value]) }} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm font-body bg-white">
+                              <option value="">{sel.length ? '+ Add another…' : '— select what you’re spraying for —'}</option>
                               {opts.map((o) => <option key={o} value={o}>{o}</option>)}
                             </select>
                           </div>
@@ -1694,22 +1704,8 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
           </div>
         </Card>
 
-        <Card>
-          <FieldLabel>Target  <span className="font-normal normal-case text-slate-400">(select all that apply)</span></FieldLabel>
-          <div className="flex flex-wrap gap-2 mt-2">
-            {targetOptions.map((t) => {
-              const active = s.targets.includes(t)
-              return (
-                <button key={t} onClick={() => toggleTarget(t)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition border" style={active ? { backgroundColor: FERN, color: 'white', borderColor: FERN } : { backgroundColor: 'white', color: '#64748B', borderColor: '#E2E8F0' }}>
-                  {t}
-                </button>
-              )
-            })}
-          </div>
-        </Card>
-
         {(() => {
-          const dids = [...new Set((s.targets || []).map(diseaseIdForTarget).filter(Boolean))]
+          const dids = [...new Set(productTargets.map(diseaseIdForTarget).filter(Boolean))]
           if (dids.length === 0) return null
           const tankProducts = (s.products || []).filter((p) => p.product).map((p) => ({ name: p.product }))
           const nameOf = (id) => PROFILES.find((p) => p.id === id)?.name || id
