@@ -71,15 +71,19 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
   const [names, setNames] = useState(savedRoutes?.names || [])
   const [moveId, setMoveId] = useState(null)
   const [savedTick, setSavedTick] = useState('')
+  const [touched, setTouched] = useState(false) // a user change the board should mirror
+  const [syncing, setSyncing] = useState(false)
+  const [synced, setSynced] = useState(false)
 
-  // Re-seed everything when the course changes.
+  // Re-seed everything when the course changes (and don't let that count as a
+  // user change, so switching courses never pushes to the board on its own).
   useEffect(() => {
     const c = courses.find((x) => x.name === courseName) || {}
     const ids = greensForCourse(c).map((g) => g.id)
     setOrder(reconcileOrder(courseInfo.mowingOrder?.[courseName], ids))
     const sr = courseInfo.mowingRoutes?.[courseName]
     setMowers(sr?.mowers || 4); setGroups(sr?.groups || []); setNames(sr?.names || [])
-    setMoveId(null); setShowOrder(false); setSavedTick('')
+    setMoveId(null); setShowOrder(false); setSavedTick(''); setTouched(false); setSynced(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseName])
 
@@ -93,23 +97,22 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
   const saveOrder = () => { onSave({ mowingOrder: { ...(courseInfo.mowingOrder || {}), [courseName]: order } }); flash('order') }
   const resetOrder = () => setOrder(allIds)
 
-  // Pick a mower count → split immediately along the saved order.
-  const setCount = (n) => { setMowers(n); setGroups(splitEven(order, n)); setNames((p) => p.slice(0, n)); setMoveId(null) }
+  // Pick a mower count → split immediately along the saved order (and mirror to
+  // the board via the auto-sync effect below).
+  const setCount = (n) => { setTouched(true); setMowers(n); setGroups(splitEven(order, n)); setNames((p) => p.slice(0, n)); setMoveId(null) }
   const moveTo = (gid, toIdx) => {
+    setTouched(true)
     setGroups((prev) => prev.map((g, idx) => (idx === toIdx ? [...g.filter((x) => x !== gid), gid] : g.filter((x) => x !== gid))))
     setMoveId(null)
   }
-  const setName = (idx, val) => setNames((prev) => { const n = [...prev]; n[idx] = val; return n })
-  const saveRoutes = () => { onSave({ mowingRoutes: { ...(courseInfo.mowingRoutes || {}), [courseName]: { mowers, groups, names } } }); flash('routes') }
+  const setName = (idx, val) => { setTouched(true); setNames((prev) => { const n = [...prev]; n[idx] = val; return n }) }
   const flash = (what) => { setSavedTick(what); setTimeout(() => setSavedTick(''), 1800) }
 
-  const [pushing, setPushing] = useState(false)
-  const [pushMsg, setPushMsg] = useState('')
-  // Save the routes AND drop them onto today's Job Board — one task per mower,
-  // under the driver's name, greens in the note. Re-pushing replaces the last
-  // set for this course today (no duplicates).
-  const sendToBoard = async () => {
-    setPushing(true); setPushMsg('')
+  // Save the routes AND mirror them onto today's Job Board — one task per mower,
+  // under the driver's name, greens in the note. Re-running replaces this
+  // course's mowing tasks for today (no duplicates).
+  const pushToBoard = async () => {
+    setSyncing(true)
     try {
       onSave({ mowingRoutes: { ...(courseInfo.mowingRoutes || {}), [courseName]: { mowers, groups, names } } })
       const today = localDateISO()
@@ -121,11 +124,19 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
         .map((g, idx) => ({ date: today, job: MOW_JOB, assignee: names[idx] || '', equipment: `Mower ${idx + 1}`, course: courseName || '', status: 'todo', sort: idx, notes: g.map(labelOf).join(', ') }))
         .filter((r) => r.notes) // skip an empty mower
       if (rows.length) await db.addCrewTasks(rows)
-      setPushMsg('on-board')
-      setTimeout(() => setPushMsg(''), 2500)
-    } catch (e) { console.error(e); setPushMsg('err') }
-    setPushing(false)
+      setSynced(true); setTimeout(() => setSynced(false), 2500)
+    } catch (e) { console.error(e) }
+    setSyncing(false)
   }
+  // Auto-sync: any user change (count / driver / moved green) mirrors to the
+  // board after a short debounce — no button to press. Never fires on load or a
+  // course switch (touched stays false there).
+  useEffect(() => {
+    if (!manage || !touched) return
+    const id = setTimeout(() => { pushToBoard() }, 700)
+    return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, names, touched])
 
   const assigned = new Set(groups.flat())
   const unassigned = order.filter((id) => !assigned.has(id))
@@ -227,19 +238,15 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, roster = [
           )}
 
           {manage && groups.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              <button onClick={sendToBoard} disabled={pushing} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white inline-flex items-center gap-1.5 disabled:opacity-50" style={{ backgroundColor: FOREST }}>
-                {pushing ? <Loader2 size={14} className="animate-spin" /> : pushMsg === 'on-board' ? <Check size={14} /> : <ClipboardList size={14} />}
-                {pushing ? 'Adding…' : pushMsg === 'on-board' ? "On today's board" : "Put on today's Job Board"}
-              </button>
-              <button onClick={saveRoutes} className="font-body text-xs font-bold px-4 py-2.5 rounded-full inline-flex items-center gap-1.5" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>
-                {savedTick === 'routes' ? <><Check size={14} /> Saved</> : 'Save only'}
-              </button>
-              {pushMsg === 'err' && <span className="font-body text-[11px]" style={{ color: '#B23A2E' }}>Couldn’t reach the board — try again.</span>}
+            <div className="flex items-center gap-1.5 font-body text-[12px] rounded-lg px-3 py-2" style={{ backgroundColor: PAPER, border: `1px solid ${HAIR}`, color: INK_2 }}>
+              {syncing ? (
+                <><Loader2 size={13} className="animate-spin" style={{ color: FERN }} /> Updating today’s Job Board…</>
+              ) : synced ? (
+                <span style={{ color: FERN }}><Check size={13} className="inline mr-1" />Live on today’s Job Board</span>
+              ) : (
+                <><ClipboardList size={13} style={{ color: INK_3 }} /> These routes show on today’s Job Board under each driver — they update as you change them.</>
+              )}
             </div>
-          )}
-          {manage && groups.length > 0 && (
-            <p className="font-body text-[11px] mt-2" style={{ color: INK_3 }}>“Put on today’s board” drops each mower under its driver’s name on the Workboard (greens in the note). Re-tap after a change and it refreshes today’s set.</p>
           )}
         </>
       )}
