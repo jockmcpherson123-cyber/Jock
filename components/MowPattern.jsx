@@ -1,51 +1,53 @@
 'use client'
 
-// A little striped-turf tile that shows the day's mow direction the way it
-// actually looks on the course — light/dark mowing stripes running in the
-// direction of cut:
-//   - axis   → a GREEN (oval) with straight stripes along the clock axis
-//              (12–6 = up/down, 3–9 = across, 2–8 = diagonal, …)
-//   - circle → a FAIRWAY (rounded rectangle) cut "half & half": the two halves
-//              striped opposite ways, with a curved arrow for clockwise /
-//              anti-clockwise.
+// A little illustrated turf tile showing the day's mow direction the way it
+// looks on the course:
+//   - axis   → a GREEN with a collar, a bunker and a pin/flag, striped light/
+//              dark along the clock axis (12–6 up/down, 3–9 across, 2–8 diag…)
+//   - circle → a FAIRWAY cut "half & half": split clean up the middle, one side
+//              dark, the other light, with arrows for clockwise / anti-clockwise.
+// Drawn in a fixed 100×72 viewBox so it scales cleanly to any size.
 import { useId } from 'react'
 
-const DARK = '#2F7D46'   // stripe mowed toward you
-const LIGHT = '#63B77C'  // stripe mowed away
-const EDGE = '#245F37'
-const ARROW = 'rgba(255,255,255,0.92)'
-const ARROW_LINE = 'rgba(20,45,28,0.55)'
+// Turf palette
+const ROUGH = '#2C6A3D'
+const COLLAR = '#4A8B58'
+const G_DARK = '#3C9A57'   // green stripe — mowed toward you
+const G_LIGHT = '#69C283'  // green stripe — mowed away
+const EDGE = '#20502F'
+// fairway stripe sets — one half clearly dark, the other clearly light, so the
+// split reads at a glance (only a faint stripe texture within each half).
+const F_DARK1 = '#297040', F_DARK2 = '#2F7D47'
+const F_LIGHT1 = '#6AC384', F_LIGHT2 = '#77CE90'
+// features
+const SAND = '#EADEB4', SAND_EDGE = '#C9B47C'
+const FLAG = '#D6452F', STICK = '#F4F4F0', HOLE = '#16261C'
+const SEAM = 'rgba(255,255,255,0.55)'
+const ARROW = 'rgba(255,255,255,0.96)'
+const ARROW_EDGE = 'rgba(18,40,26,0.4)'
 
-// A field of parallel light/dark bands, rotated to the mow angle, big enough to
-// cover the tile once clipped. angle is degrees from vertical (0 = up/down).
-function Bands({ angle, W, H, band, cx, cy, keyOffset = 0 }) {
-  const diag = Math.ceil(Math.sqrt(W * W + H * H)) + band * 2
+// A field of parallel light/dark bands, rotated to the mow angle, centered on
+// the tile so it fills whatever shape clips it.
+function Bands({ angle, cA, cB, band = 11, off = 0 }) {
+  const cx = 50, cy = 36, diag = 132
   const n = Math.ceil((diag * 2) / band)
   const rects = []
-  for (let i = 0; i < n; i++) {
-    rects.push(<rect key={i} x={cx - diag + i * band} y={cy - diag} width={band + 0.5} height={diag * 2} fill={(i + keyOffset) % 2 ? LIGHT : DARK} />)
-  }
+  for (let i = 0; i < n; i++) rects.push(<rect key={i} x={cx - diag + i * band} y={cy - diag} width={band + 0.6} height={diag * 2} fill={(i + off) % 2 ? cB : cA} />)
   return <g transform={`rotate(${angle} ${cx} ${cy})`}>{rects}</g>
 }
 
-function CurvedArrow({ cx, cy, r, cw }) {
-  const p = (deg) => [cx + r * Math.sin((deg * Math.PI) / 180), cy - r * Math.cos((deg * Math.PI) / 180)]
-  const start = cw ? -120 : 120
-  const end = cw ? 120 : -120
-  const [sx, sy] = p(start)
-  const [ex, ey] = p(end)
-  const sweep = cw ? 1 : 0
-  const endRad = (end * Math.PI) / 180
-  const tang = endRad + (cw ? Math.PI / 2 : -Math.PI / 2) + Math.PI / 2 * 0 // tangent at end
-  const s = r * 0.5
-  const back = tang + Math.PI
-  const spread = 0.5
-  const a1 = [ex + s * Math.cos(back - spread), ey + s * Math.sin(back - spread)]
-  const a2 = [ex + s * Math.cos(back + spread), ey + s * Math.sin(back + spread)]
+// A straight mow arrow (points up or down), white with a soft dark edge so it
+// reads on any stripe.
+function VArrow({ x, top, bottom, dir }) {
+  const headY = dir === 'up' ? top : bottom
+  const head = dir === 'up'
+    ? `${x},${headY} ${x - 4.2},${headY + 6.5} ${x + 4.2},${headY + 6.5}`
+    : `${x},${headY} ${x - 4.2},${headY - 6.5} ${x + 4.2},${headY - 6.5}`
   return (
     <g>
-      <path d={`M ${sx} ${sy} A ${r} ${r} 0 1 ${sweep} ${ex} ${ey}`} fill="none" stroke={ARROW} strokeWidth={Math.max(2, r * 0.28)} strokeLinecap="round" />
-      <polygon points={`${ex},${ey} ${a1[0]},${a1[1]} ${a2[0]},${a2[1]}`} fill={ARROW} />
+      <line x1={x} y1={top} x2={x} y2={bottom} stroke={ARROW_EDGE} strokeWidth={4} strokeLinecap="round" />
+      <line x1={x} y1={top} x2={x} y2={bottom} stroke={ARROW} strokeWidth={2.4} strokeLinecap="round" />
+      <polygon points={head} fill={ARROW} stroke={ARROW_EDGE} strokeWidth={0.6} />
     </g>
   )
 }
@@ -54,50 +56,66 @@ export default function MowPattern({ step, size = 72 }) {
   const rid = useId().replace(/[:]/g, '')
   const W = size
   const H = Math.round(size * 0.72)
-  const cx = W / 2
-  const cy = H / 2
-  const band = Math.max(5, Math.round(size / 6))
+  const svg = { width: W, height: H, viewBox: '0 0 100 72', style: { display: 'block' } }
 
   if (!step) {
-    return <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }} aria-hidden="true"><rect x="1" y="1" width={W - 2} height={H - 2} rx={H * 0.28} fill="#EDEFEA" stroke="#D8D6D0" /></svg>
+    return <svg {...svg} aria-hidden="true"><rect x="1" y="1" width="98" height="70" rx="14" fill="#EDEFEA" stroke="#D8D6D0" /></svg>
   }
 
-  // ── GREEN: straight stripes along the clock axis ──────────────────────────
+  // ── GREEN ─────────────────────────────────────────────────────────────────
   if (step.type === 'axis') {
-    // angle from vertical: 12–6 = 0°, 1–7 = 30°, … 3–9 = 90°, 5–11 = 150°.
-    const angle = ((step.a % 12) * 30)
+    const angle = (step.a % 12) * 30
     const clip = `g${rid}`
     return (
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }} aria-hidden="true">
-        <defs><clipPath id={clip}><ellipse cx={cx} cy={cy} rx={W / 2 - 1.5} ry={H / 2 - 1.5} /></clipPath></defs>
-        <g clipPath={`url(#${clip})`}><Bands angle={angle} W={W} H={H} band={band} cx={cx} cy={cy} /></g>
-        <ellipse cx={cx} cy={cy} rx={W / 2 - 1.5} ry={H / 2 - 1.5} fill="none" stroke={EDGE} strokeWidth={1.5} />
+      <svg {...svg} aria-hidden="true">
+        <defs><clipPath id={clip}><ellipse cx="49" cy="37" rx="37" ry="24" /></clipPath></defs>
+        {/* rough */}
+        <rect x="1" y="1" width="98" height="70" rx="14" fill={ROUGH} />
+        {/* collar */}
+        <ellipse cx="49" cy="37" rx="40" ry="26.5" fill={COLLAR} />
+        {/* striped putting surface */}
+        <g clipPath={`url(#${clip})`}><Bands angle={angle} cA={G_DARK} cB={G_LIGHT} /></g>
+        <ellipse cx="49" cy="37" rx="37" ry="24" fill="none" stroke={EDGE} strokeWidth="1" />
+        {/* bunker, lower-left */}
+        <g transform="rotate(-14 27 58)">
+          <ellipse cx="27" cy="58" rx="15" ry="7.5" fill={SAND} stroke={SAND_EDGE} strokeWidth="1" />
+          <ellipse cx="27" cy="57" rx="10" ry="4.2" fill="#F1E8C9" opacity="0.6" />
+        </g>
+        {/* hole + pin, upper-right */}
+        <ellipse cx="69" cy="28" rx="2.6" ry="1.7" fill={HOLE} />
+        <line x1="69" y1="27" x2="69" y2="7" stroke={ARROW_EDGE} strokeWidth="2.4" strokeLinecap="round" />
+        <line x1="69" y1="27" x2="69" y2="7" stroke={STICK} strokeWidth="1.5" strokeLinecap="round" />
+        <polygon points="69,7 83,10.5 69,14.5" fill={FLAG} />
       </svg>
     )
   }
 
-  // ── FAIRWAY: half & half, two halves cut opposite ways + loop arrow ────────
+  // ── FAIRWAY: half & half, split up the middle ─────────────────────────────
   const cw = step.dir !== 'acw'
-  const clip = `f${rid}`
-  const lClip = `fl${rid}`
-  const rClip = `fr${rid}`
-  const rx = H * 0.26
-  const leftAngle = cw ? 40 : 140
-  const rightAngle = cw ? 140 : 40
+  const fair = `f${rid}`, lClip = `fl${rid}`, rClip = `fr${rid}`
+  const leftSet = cw ? [F_DARK1, F_DARK2] : [F_LIGHT1, F_LIGHT2]
+  const rightSet = cw ? [F_LIGHT1, F_LIGHT2] : [F_DARK1, F_DARK2]
   return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }} aria-hidden="true">
+    <svg {...svg} aria-hidden="true">
       <defs>
-        <clipPath id={clip}><rect x="1.5" y="1.5" width={W - 3} height={H - 3} rx={rx} /></clipPath>
-        <clipPath id={lClip}><rect x="0" y="0" width={cx} height={H} /></clipPath>
-        <clipPath id={rClip}><rect x={cx} y="0" width={cx} height={H} /></clipPath>
+        <clipPath id={fair}><rect x="7" y="8" width="86" height="56" rx="13" /></clipPath>
+        <clipPath id={lClip}><rect x="0" y="0" width="50" height="72" /></clipPath>
+        <clipPath id={rClip}><rect x="50" y="0" width="50" height="72" /></clipPath>
       </defs>
-      <g clipPath={`url(#${clip})`}>
-        <g clipPath={`url(#${lClip})`}><Bands angle={leftAngle} W={W} H={H} band={band} cx={cx} cy={cy} /></g>
-        <g clipPath={`url(#${rClip})`}><Bands angle={rightAngle} W={W} H={H} band={band} cx={cx} cy={cy} keyOffset={1} /></g>
+      {/* rough */}
+      <rect x="1" y="1" width="98" height="70" rx="14" fill={ROUGH} />
+      {/* fairway, two halves striped down its length */}
+      <g clipPath={`url(#${fair})`}>
+        <g clipPath={`url(#${lClip})`}><Bands angle={0} cA={leftSet[0]} cB={leftSet[1]} band={9} /></g>
+        <g clipPath={`url(#${rClip})`}><Bands angle={0} cA={rightSet[0]} cB={rightSet[1]} band={9} off={1} /></g>
       </g>
-      <line x1={cx} y1={2} x2={cx} y2={H - 2} stroke="rgba(255,255,255,0.35)" strokeWidth={1} strokeDasharray="2 2" />
-      <CurvedArrow cx={cx} cy={cy} r={Math.min(W, H) * 0.26} cw={cw} />
-      <rect x="1.5" y="1.5" width={W - 3} height={H - 3} rx={rx} fill="none" stroke={EDGE} strokeWidth={1.5} />
+      <rect x="7" y="8" width="86" height="56" rx="13" fill="none" stroke={EDGE} strokeWidth="1" />
+      {/* clean seam up the middle */}
+      <line x1="50" y1="9" x2="50" y2="63" stroke="rgba(18,40,26,0.35)" strokeWidth="2.2" />
+      <line x1="50" y1="9" x2="50" y2="63" stroke={SEAM} strokeWidth="1" />
+      {/* mow-loop arrows: up one half, down the other (cw vs acw flips them) */}
+      <VArrow x={29} top={18} bottom={54} dir={cw ? 'up' : 'down'} />
+      <VArrow x={71} top={18} bottom={54} dir={cw ? 'down' : 'up'} />
     </svg>
   )
 }

@@ -5378,7 +5378,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                     if (!dir) return null
                     return (
                       <div className="flex items-center gap-2 mb-2 rounded-lg" style={{ backgroundColor: '#F1F7F2', border: '1px solid #D9E7DD', padding: '6px 8px' }}>
-                        <MowPattern step={dir.step} size={54} />
+                        <MowPattern step={dir.step} size={68} />
                         <div>
                           <p className="font-body text-[10px] uppercase tracking-wide font-bold" style={{ color: FERN }}>Direction of cut</p>
                           <p className="font-body text-[13px] font-bold" style={{ color: FOREST }}>{stepLabel(dir.step)}</p>

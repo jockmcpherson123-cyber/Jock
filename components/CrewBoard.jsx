@@ -189,7 +189,7 @@ export default function CrewBoard() {
                     if (!dir) return null
                     return (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.45vw 0.8vw', background: '#EAF2EC', borderBottom: '1px solid #D3DCD2' }}>
-                        <MowPattern step={dir.step} size={64} />
+                        <MowPattern step={dir.step} size={88} />
                         <div style={{ lineHeight: 1.1 }}>
                           <div style={{ fontSize: 'clamp(10px,0.85vw,15px)', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: FERN }}>Direction of cut</div>
                           <div style={{ fontSize: 'clamp(15px,1.35vw,26px)', fontWeight: 800, color: '#1A2A1F' }}>{stepLabel(dir.step)}</div>

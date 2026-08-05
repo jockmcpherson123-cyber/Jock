@@ -122,7 +122,7 @@ export default function MowingDirections({ courses = [], courseInfo = {}, manage
               <div className="mb-2 flex items-center gap-2">
                 {cur ? (
                   <>
-                    <MowPattern step={cur} size={56} />
+                    <MowPattern step={cur} size={74} />
                     <div>
                       <p className="font-body text-[10px] uppercase tracking-wide font-bold" style={{ color: FERN }}>{isHistory ? 'Up next' : 'Today'}</p>
                       <p className="font-body text-[13px] font-bold" style={{ color: INK }}>{stepLabel(cur)}</p>
@@ -144,9 +144,9 @@ export default function MowingDirections({ courses = [], courseInfo = {}, manage
                   {steps.map((st, si) => {
                     const isCur = si === curIdx
                     return (
-                      <div key={si} className="rounded-lg p-1.5 relative" style={{ border: `1.5px solid ${isCur ? FERN : HAIR}`, backgroundColor: isCur ? '#EAF2EC' : PAPER, width: 66 }}>
+                      <div key={si} className="rounded-lg p-1.5 relative" style={{ border: `1.5px solid ${isCur ? FERN : HAIR}`, backgroundColor: isCur ? '#EAF2EC' : PAPER, width: 74 }}>
                         <button onClick={() => removeStep(i, si)} className="absolute -top-1.5 -right-1.5 rounded-full flex items-center justify-center" style={{ width: 17, height: 17, backgroundColor: 'white', border: `1px solid ${HAIR}`, color: '#B23A2E' }} aria-label="Remove"><X size={11} /></button>
-                        <MowPattern step={st} size={54} />
+                        <MowPattern step={st} size={62} />
                         <p className="font-body text-[9px] font-bold text-center mt-0.5 leading-tight" style={{ color: INK_2 }}>{stepShort(st)}</p>
                       </div>
                     )
