@@ -9,6 +9,8 @@ import * as db from '@/lib/db'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { fetchCurrent } from '@/lib/weather'
 import { localDateISO } from '@/lib/dates'
+import { directionForJob, stepLabel } from '@/lib/mowdir'
+import MowClock from '@/components/MowClock'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -30,6 +32,7 @@ export default function CrewBoard() {
   const [location, setLocation] = useState(null)
   const [weather, setWeather] = useState(null)
   const [boardMessage, setBoardMessage] = useState('')
+  const [courseInfo, setCourseInfo] = useState({})
   const [clock, setClock] = useState('')
   const [status, setStatus] = useState('loading') // loading | ok | error
   const [live, setLive] = useState(false)
@@ -59,6 +62,7 @@ export default function CrewBoard() {
         setCrew(s.courseInfo?.crew || {})
         setLocation(s.location || null)
         setBoardMessage(s.courseInfo?.boardMessage || '')
+        setCourseInfo(s.courseInfo || {})
       } catch (e) { console.error(e) }
     }
     pull()
@@ -177,6 +181,22 @@ export default function CrewBoard() {
                     </div>
                     <span style={{ fontSize: 'clamp(11px,1vw,17px)', fontWeight: 700, color: '#8A9A8E', fontVariantNumeric: 'tabular-nums' }}>{list.length}</span>
                   </div>
+                  {(() => {
+                    // Today's mow direction for this surface (auto for greens, "next"
+                    // for fairways) — shown with a clock so the crew sees it at a glance.
+                    const cn = list[0]?.course || course || ''
+                    const dir = directionForJob(courseInfo, cn, jk, date)
+                    if (!dir) return null
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.45vw 0.8vw', background: '#EAF2EC', borderBottom: '1px solid #D3DCD2' }}>
+                        <MowClock step={dir.step} size={52} />
+                        <div style={{ lineHeight: 1.1 }}>
+                          <div style={{ fontSize: 'clamp(10px,0.85vw,15px)', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: FERN }}>Direction of cut</div>
+                          <div style={{ fontSize: 'clamp(15px,1.35vw,26px)', fontWeight: 800, color: '#1A2A1F' }}>{stepLabel(dir.step)}</div>
+                        </div>
+                      </div>
+                    )
+                  })()}
                   {(() => {
                     if (perPersonNotes || !sharedNote) return null
                     const noteVariants = langs.map((l) => txGet(tx, l, sharedNote)).filter((v) => v && v !== sharedNote)

@@ -32,7 +32,10 @@ import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { localDateISO } from '@/lib/dates'
 import PlaybookModule from '@/components/Playbook'
 import MowingRoutes from '@/components/MowingRoutes'
+import MowingDirections from '@/components/MowingDirections'
+import MowClock from '@/components/MowClock'
 import { labelledLayout } from '@/lib/mowing'
+import { directionForJob, stepLabel } from '@/lib/mowdir'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
@@ -4967,7 +4970,7 @@ function PeoplePicker({ options = [], selected = [], onToggle, placeholder, max 
 
 const WB_SECTIONS = [
   { key: 'workboard', label: 'Workboard', icon: ClipboardList },
-  { key: 'mowing', label: 'Mowing Routes', icon: Scissors },
+  { key: 'mowing', label: 'Mowing', icon: Scissors },
   { key: 'insights', label: 'Time & Efficiency', icon: BarChart3 },
   { key: 'crew', label: 'Crew', icon: User },
   { key: 'equipment', label: 'Equipment', icon: Truck },
@@ -4983,6 +4986,7 @@ function WhiteboardModule({ user }) {
   const manage = canManage(user.role)
   const [settings, setSettings] = useState({ operators: [], areas: {}, courseInfo: {} })
   const [section, setSection] = useState('workboard')
+  const [mowSub, setMowSub] = useState('routes')
   const [drawer, setDrawer] = useState(false)
 
   useEffect(() => { (async () => { try { setSettings(await db.fetchSettings()) } catch (e) { console.error(e) } })() }, [])
@@ -5064,7 +5068,18 @@ function WhiteboardModule({ user }) {
         </aside>
         <div className="flex-1 min-w-0">
           {section === 'workboard' && <WorkboardView manage={manage} settings={settings} roster={roster} jobTypes={jobTypes} equipment={equipment} courses={courses} crew={crew} boardMessage={courseInfo.boardMessage || ''} onSaveMessage={(m) => saveCourse({ boardMessage: m })} />}
-          {section === 'mowing' && <MowingRoutes courses={courses} courseInfo={courseInfo} roster={roster} manage={manage} onSave={saveCourse} />}
+          {section === 'mowing' && (
+            <div>
+              <div className="flex gap-1.5 mb-4">
+                {[['routes', 'Routes'], ['directions', 'Directions']].map(([k, lab]) => (
+                  <button key={k} onClick={() => setMowSub(k)} className="font-body text-sm font-bold px-4 py-2 rounded-full transition"
+                    style={mowSub === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{lab}</button>
+                ))}
+              </div>
+              {mowSub === 'routes' && <MowingRoutes courses={courses} courseInfo={courseInfo} roster={roster} manage={manage} onSave={saveCourse} />}
+              {mowSub === 'directions' && <MowingDirections courses={courses} courseInfo={courseInfo} manage={manage} onSave={saveCourse} />}
+            </div>
+          )}
           {section === 'insights' && <WhiteboardInsights />}
           {section === 'crew' && <WhiteboardCrew roster={roster} operators={operators} crewMembers={crewMembers} courses={courses} crew={crew} manage={manage} onSaveCrew={(next) => saveCourse({ crew: next })} onSaveMembers={(list) => saveCourse({ crewMembers: list })} />}
           {section === 'equipment' && <WhiteboardListSection title="Equipment" hint="The mowers, rollers, blowers and carts your crew runs. These become quick-pick chips when you add a job." items={equipment} manage={manage} accent={FERN} onSave={(list) => saveCourse({ equipment: list })} />}
@@ -5354,6 +5369,23 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                 {open && (
                 <div className="px-3 pt-2 pb-3">
                   {langs.map((l) => <p key={l} className="font-body text-[11px] text-slate-400 italic mb-0.5 px-1">{txGet(tx, l, jk) || jk} <span className="not-italic">· {(CREW_LANGS.find(([c]) => c === l) || [])[1] || l}</span></p>)}
+                  {(() => {
+                    // Auto-dump today's mow direction for this surface (greens rotate
+                    // daily on their own; fairways step on "Apply next"). Derived from
+                    // the job title + date, so nothing extra is stored on the task.
+                    const cn = list[0]?.course || activeCourse || ''
+                    const dir = directionForJob(settings.courseInfo || {}, cn, jk, date)
+                    if (!dir) return null
+                    return (
+                      <div className="flex items-center gap-2 mb-2 rounded-lg" style={{ backgroundColor: '#F1F7F2', border: '1px solid #D9E7DD', padding: '6px 8px' }}>
+                        <MowClock step={dir.step} size={42} />
+                        <div>
+                          <p className="font-body text-[10px] uppercase tracking-wide font-bold" style={{ color: FERN }}>Direction of cut</p>
+                          <p className="font-body text-[13px] font-bold" style={{ color: FOREST }}>{stepLabel(dir.step)}</p>
+                        </div>
+                      </div>
+                    )
+                  })()}
                   {(() => {
                     if (editingNoteJob === jk) {
                       return (
