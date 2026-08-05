@@ -73,23 +73,44 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
   }
   // Drag to reorder greens (grab the handle, slide up/down). Uses Pointer Events
   // so it works with touch on the iPad; elementFromPoint finds the row you're
-  // over, and we live-shuffle the order as you drag.
+  // over, and we live-shuffle the order as you drag. We stop text-selection on
+  // the whole page while dragging so nothing highlights as your finger passes
+  // over the rows, and only reorder once you're past a row's midpoint so it
+  // doesn't jitter back and forth.
   const [dragId, setDragId] = useState(null)
-  const onDragStart = (e, id) => { try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* ignore */ } setDragId(id) }
+  const stopSelect = (on) => {
+    const v = on ? 'none' : ''
+    document.body.style.userSelect = v
+    document.body.style.webkitUserSelect = v
+  }
+  const onDragStart = (e, id) => {
+    e.preventDefault()
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* ignore */ }
+    stopSelect(true); setDragId(id)
+  }
   const onDragMove = (e) => {
     if (!dragId) return
+    e.preventDefault()
     const el = document.elementFromPoint(e.clientX, e.clientY)
     const rowEl = el && el.closest ? el.closest('[data-green-id]') : null
     const overId = rowEl && rowEl.getAttribute('data-green-id')
     if (!overId || overId === dragId) return
+    // Only move once you've crossed the middle of the row you're over — keeps
+    // the reorder from flickering while you hover on a boundary.
+    const r = rowEl.getBoundingClientRect()
+    const past = e.clientY > r.top + r.height / 2
     setOrder((o) => {
-      const from = o.indexOf(dragId); const to = o.indexOf(overId)
-      if (from < 0 || to < 0 || from === to) return o
+      const from = o.indexOf(dragId); let to = o.indexOf(overId)
+      if (from < 0 || to < 0) return o
+      if (from < to && !past) to -= 1
+      if (from > to && past) to += 1
+      if (from === to) return o
       const n = [...o]; n.splice(from, 1); n.splice(to, 0, dragId); return n
     })
     setSetSaved(false)
   }
-  const onDragEnd = () => setDragId(null)
+  const onDragEnd = () => { stopSelect(false); setDragId(null) }
+  useEffect(() => () => stopSelect(false), [])
 
   // No greens configured yet.
   if (allIds.length === 0) {
@@ -148,7 +169,7 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
       {/* Grid: greens × mowers */}
       <div className="rounded-xl overflow-hidden mb-2" style={{ border: `1px solid ${HAIR}` }}>
         <div className="overflow-x-auto">
-          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}>
             <thead>
               <tr style={{ backgroundColor: PAPER }}>
                 <th className="font-body text-[10px] font-bold uppercase tracking-wide text-left px-2.5 py-2" style={{ color: INK_3, position: 'sticky', left: 0, backgroundColor: PAPER, zIndex: 1 }}>Green</th>
@@ -172,8 +193,8 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
                     <td className="px-1.5 py-1 whitespace-nowrap" style={{ position: 'sticky', left: 0, backgroundColor: dragId === green.id ? '#EAF2EC' : rowBg, zIndex: 1 }}>
                       <div className="flex items-center gap-1.5">
                         <span onPointerDown={(e) => onDragStart(e, green.id)} onPointerMove={onDragMove} onPointerUp={onDragEnd} onPointerCancel={onDragEnd}
-                          className="flex items-center justify-center shrink-0" style={{ touchAction: 'none', cursor: 'grab', color: INK_3, width: 24, height: 28 }} aria-label="Drag to reorder">
-                          <GripVertical size={16} />
+                          className="flex items-center justify-center shrink-0 rounded-md" style={{ touchAction: 'none', cursor: dragId === green.id ? 'grabbing' : 'grab', color: dragId === green.id ? FERN : INK_3, backgroundColor: dragId === green.id ? '#EAF2EC' : '#F1F1EE', width: 34, height: 32, border: `1px solid ${HAIR}` }} aria-label="Drag to reorder">
+                          <GripVertical size={18} />
                         </span>
                         <span className="font-body text-[12px] font-semibold tnum" style={{ color: onCount === 0 ? '#B23A2E' : INK }}>{green.label}</span>
                       </div>
