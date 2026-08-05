@@ -17,6 +17,44 @@ import { localDateISO } from '@/lib/dates'
 import { diseasesForProduct } from '@/lib/fungicides'
 import { DEFAULT_TARGETS } from '@/lib/defaults'
 
+// A searchable, alphabetised product picker — type to filter the library
+// instead of scrolling a long unsorted dropdown.
+function ProductPicker({ value, options = [], onPick, placeholder = 'Search products…' }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const wrapRef = useRef(null)
+  useEffect(() => {
+    const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+  const sorted = [...options].sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }))
+  const query = q.trim().toLowerCase()
+  const matches = query ? sorted.filter((o) => String(o).toLowerCase().includes(query)) : sorted
+  const pick = (v) => { onPick(v); setQ(''); setOpen(false) }
+  return (
+    <div ref={wrapRef} className="relative flex-1 min-w-0">
+      <input
+        value={open ? q : (value || '')}
+        onChange={(e) => { setQ(e.target.value); setOpen(true) }}
+        onFocus={() => { setQ(''); setOpen(true) }}
+        placeholder={value ? value : placeholder}
+        className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white"
+      />
+      {open && (
+        <div className="absolute z-40 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+          {matches.length === 0 && <div className="px-3 py-2 text-sm text-slate-400 font-body">No products match “{q.trim()}”</div>}
+          {matches.map((o) => (
+            <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); pick(o) }}
+              className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50"
+              style={o === value ? { backgroundColor: '#EAF2EC', fontWeight: 700 } : {}}>{o}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Coverage grid helpers ────────────────────────────────────────────────────
 // Every application protects its area for a stretch (coverageDays). We paint the
 // season WEEK BY WEEK — summer disease/weed pressure moves week to week, so
@@ -1042,10 +1080,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                 {editApp.products.map((r) => (
                   <div key={r.key} className="rounded-xl border border-slate-100 p-2.5" style={{ backgroundColor: '#F8FAF9' }}>
                     <div className="flex items-center gap-2 mb-2">
-                      <select value={r.product} onChange={(e) => pickProduct(r.key, e.target.value)} className="flex-1 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white">
-                        <option value="">Select product…</option>
-                        {products.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-                      </select>
+                      <ProductPicker value={r.product} options={products.map((p) => p.name)} onPick={(name) => pickProduct(r.key, name)} placeholder="Search products…" />
                       {editApp.products.length > 1 && (
                         <button onClick={() => removeRow(r.key)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove product"><Trash2 size={15} /></button>
                       )}
