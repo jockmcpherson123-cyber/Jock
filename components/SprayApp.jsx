@@ -4978,6 +4978,9 @@ const WB_SECTIONS = [
 ]
 // Common crew languages (label + code) for the per-staff native-language pick.
 const CREW_LANGS = [['en', 'English'], ['es', 'Spanish'], ['pt', 'Portuguese'], ['ht', 'Haitian Creole'], ['vi', 'Vietnamese'], ['zh', 'Chinese'], ['fr', 'French'], ['ko', 'Korean']]
+// Job rounds through the day — 1st (morning), 2nd (afternoon), 3rd (later).
+const SLOTS = [['1', '1st Jobs'], ['2', '2nd Jobs'], ['3', '3rd Jobs']]
+const slotLabel = (s) => (SLOTS.find(([k]) => k === String(s)) || [])[1] || '1st Jobs'
 
 // Shell for the Whiteboard: a side menu (persistent rail on wide screens, a
 // slide-out drawer on iPad/phone) that switches between the daily board, the
@@ -5103,6 +5106,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [equip, setEquip] = useState('')
   const [equipList, setEquipList] = useState([])
   const [note, setNote] = useState('')
+  const [slot, setSlot] = useState('1') // '1' | '2' | '3' — which round of the day
   const [course, setCourse] = useState('')
   const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
   const [openJobs, setOpenJobs] = useState({}) // collapsed by default; jobKey -> open?
@@ -5150,7 +5154,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
       const tools = [...equipList]
       const leftover = equip.trim()
       if (leftover && !tools.includes(leftover)) tools.push(leftover)
-      const base = { date, job: job.trim(), area: '', equipment: tools.join(', '), notes: note.trim(), course: activeCourse, status: 'todo' }
+      const base = { date, job: job.trim(), area: '', equipment: tools.join(', '), notes: note.trim(), course: activeCourse, status: 'todo', slot }
       const startSort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
       // One row per assigned person (or a single unassigned job) — so each person
       // keeps their own status, and they group together by job on the board.
@@ -5178,23 +5182,23 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
     try { await db.deleteCrewTask(id) } catch (e) { console.error(e); reload() }
   }
   // Add one more person straight onto an existing job group (labor-board style).
-  const addPersonToJob = async (jk, name) => {
+  const addPersonToJob = async (jk, name, s = '1') => {
     try {
       const sort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
-      await db.addCrewTask({ date, job: jk, assignee: name, course: activeCourse, status: 'todo', sort })
+      await db.addCrewTask({ date, job: jk, assignee: name, course: activeCourse, status: 'todo', sort, slot: s })
       await reload()
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
   }
   // Edit the note on a whole job group (the note is shared across its people).
-  const saveJobNote = async (jk, text) => {
-    const inGroup = view.filter((t) => (t.job || '—') === jk)
+  const saveJobNote = async (jk, text, s = '1') => {
+    const inGroup = view.filter((t) => (t.job || '—') === jk && (t.slot || '1') === s)
     setTasks((prev) => prev.map((t) => (inGroup.some((g) => g.id === t.id) ? { ...t, notes: text } : t)))
     setEditingNoteJob(null)
     try { await Promise.all(inGroup.map((t) => db.updateCrewTask({ ...t, notes: text }))) } catch (e) { console.error(e); reload() }
   }
-  // Remove a whole job group for the day (only the rows currently in view).
-  const removeJobGroup = async (jk) => {
-    const ids = tasks.filter((t) => (t.job || '—') === jk && (!activeCourse || t.course === activeCourse || !t.course)).map((t) => t.id)
+  // Remove a whole job group (of one round) for the day (only rows in view).
+  const removeJobGroup = async (jk, s = '1') => {
+    const ids = tasks.filter((t) => (t.job || '—') === jk && (t.slot || '1') === s && (!activeCourse || t.course === activeCourse || !t.course)).map((t) => t.id)
     setTasks((prev) => prev.filter((t) => !ids.includes(t.id)))
     try { await Promise.all(ids.map((id) => db.deleteCrewTask(id))) } catch (e) { console.error(e); reload() }
   }
@@ -5215,9 +5219,11 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const groupKeys = Object.keys(groups).sort((a, b) => (a === '__none' ? -1 : b === '__none' ? 1 : a.localeCompare(b)))
 
   // Group by job (default): everyone on the same job shares one bubble.
-  const jobGroups = {}
-  view.forEach((t) => { const k = t.job || '—'; (jobGroups[k] = jobGroups[k] || []).push(t) })
-  const jobKeys = Object.keys(jobGroups).sort((a, b) => jobGroups[b].length - jobGroups[a].length || a.localeCompare(b))
+  // Group by job (default): everyone on the same job shares one bubble — split
+  // into rounds (1st/2nd/3rd) so the day's later jobs are their own sections.
+  const bySlot = {}
+  view.forEach((t) => { const s = t.slot || '1'; const k = t.job || '—'; (bySlot[s] = bySlot[s] || {}); (bySlot[s][k] = bySlot[s][k] || []).push(t) })
+  const slotsPresent = SLOTS.map(([k]) => k).filter((k) => bySlot[k] && Object.keys(bySlot[k]).length)
 
   return (
     <div>
@@ -5284,7 +5290,17 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
             <FieldLabel>Note (optional)</FieldLabel>
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Pond overflow on #6 — call Ryan, need gloves" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
           </div>
-          <button onClick={addTask} disabled={busy || !job.trim()} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Adding…' : 'Add to board'}</button>
+          <div className="mb-3">
+            <FieldLabel>Round of the day</FieldLabel>
+            <div className="flex gap-1.5">
+              {SLOTS.map(([k, lab]) => (
+                <button key={k} type="button" onClick={() => setSlot(k)} className="flex-1 font-body text-xs font-bold py-2 rounded-lg transition"
+                  style={slot === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{lab}</button>
+              ))}
+            </div>
+            <p className="font-body text-[10px] text-slate-400 mt-1">Post a morning board first, then add 2nd / 3rd jobs as the day goes on — they show as separate sections on the TV.</p>
+          </div>
+          <button onClick={addTask} disabled={busy || !job.trim()} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Adding…' : `Add to board · ${slotLabel(slot)}`}</button>
         </div>
       )}
 
@@ -5341,11 +5357,24 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
           ))}
         </div>
       ) : (
-        <div className="space-y-3">
-          {jobKeys.map((jk) => {
-            const list = jobGroups[jk]
+        <div className="space-y-5">
+          {slotsPresent.map((s) => {
+          const sGroups = bySlot[s]
+          const sKeys = Object.keys(sGroups).sort((a, b) => sGroups[b].length - sGroups[a].length || a.localeCompare(b))
+          return (
+          <div key={s}>
+          {slotsPresent.length > 1 && (
+            <div className="flex items-center gap-2 mb-2">
+              <span className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: FOREST, color: 'white' }}>{slotLabel(s)}</span>
+              <div className="flex-1 h-px" style={{ backgroundColor: HAIR }} />
+            </div>
+          )}
+          <div className="space-y-3">
+          {sKeys.map((jk) => {
+            const gk = `${s}::${jk}`
+            const list = sGroups[jk]
             const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
-            const open = !!openJobs[jk]
+            const open = !!openJobs[gk]
             const alreadyOn = list.map((t) => t.assignee).filter(Boolean)
             // A note that's the SAME on every task is a shared job note (shown once
             // up top). Different notes per task — e.g. each mower's greens — are
@@ -5354,17 +5383,17 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
             const sharedNote = distinctNotes.length === 1 && list.every((t) => (t.notes || '').trim() === distinctNotes[0]) ? distinctNotes[0] : ''
             const perPersonNotes = distinctNotes.length > 0 && !sharedNote
             return (
-              <div key={jk} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+              <div key={gk} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
                 {/* Job header bar */}
                 <div className="flex items-center gap-1 pl-3.5 pr-1.5 py-2.5" style={{ backgroundColor: '#F1F7F2' }}>
-                  <button onClick={() => toggleJob(jk)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
+                  <button onClick={() => toggleJob(gk)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
                     <ClipboardList size={15} className="shrink-0" style={{ color: FERN }} />
                     <p className="font-body font-bold text-sm text-slate-900 truncate">{jk}</p>
                     <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>
                   </button>
-                  {manage && <button onClick={() => { setAddingJob(addingJob === jk ? null : jk); setOpenJobs((p) => ({ ...p, [jk]: true })) }} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition" style={{ backgroundColor: addingJob === jk ? FERN : 'transparent', color: addingJob === jk ? 'white' : '#64748B' }} aria-label="Add person to this job"><UserPlus size={15} /></button>}
-                  {manage && <button onClick={() => removeJobGroup(jk)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-500 transition" aria-label="Remove job"><Trash2 size={14} /></button>}
-                  <button onClick={() => toggleJob(jk)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" aria-label={open ? 'Collapse' : 'Expand'}><ChevronRight size={16} className="text-slate-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></button>
+                  {manage && <button onClick={() => { setAddingJob(addingJob === gk ? null : gk); setOpenJobs((p) => ({ ...p, [gk]: true })) }} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition" style={{ backgroundColor: addingJob === gk ? FERN : 'transparent', color: addingJob === gk ? 'white' : '#64748B' }} aria-label="Add person to this job"><UserPlus size={15} /></button>}
+                  {manage && <button onClick={() => removeJobGroup(jk, s)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-500 transition" aria-label="Remove job"><Trash2 size={14} /></button>}
+                  <button onClick={() => toggleJob(gk)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" aria-label={open ? 'Collapse' : 'Expand'}><ChevronRight size={16} className="text-slate-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></button>
                 </div>
                 {open && (
                 <div className="px-3 pt-2 pb-3">
@@ -5387,18 +5416,18 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                     )
                   })()}
                   {(() => {
-                    if (editingNoteJob === jk) {
+                    if (editingNoteJob === gk) {
                       return (
                         <div className="flex items-center gap-2 mb-2">
-                          <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveJobNote(jk, noteDraft.trim()) }} autoFocus placeholder="Note for this job…" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] font-body" />
-                          <button type="button" onClick={() => saveJobNote(jk, noteDraft.trim())} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-lg text-white shrink-0" style={{ backgroundColor: FOREST }}>Save</button>
+                          <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveJobNote(jk, noteDraft.trim(), s) }} autoFocus placeholder="Note for this job…" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] font-body" />
+                          <button type="button" onClick={() => saveJobNote(jk, noteDraft.trim(), s)} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-lg text-white shrink-0" style={{ backgroundColor: FOREST }}>Save</button>
                           <button type="button" onClick={() => setEditingNoteJob(null)} className="text-slate-400 shrink-0" aria-label="Cancel"><X size={15} /></button>
                         </div>
                       )
                     }
                     // Per-person notes (each mower's greens) show under each name — nothing up here.
                     if (perPersonNotes) return null
-                    if (!sharedNote) return manage ? <button type="button" onClick={() => { setEditingNoteJob(jk); setNoteDraft('') }} className="font-body text-[11px] font-bold mb-2 flex items-center gap-1" style={{ color: '#B07A16' }}><Plus size={12} /> Add note</button> : null
+                    if (!sharedNote) return manage ? <button type="button" onClick={() => { setEditingNoteJob(gk); setNoteDraft('') }} className="font-body text-[11px] font-bold mb-2 flex items-center gap-1" style={{ color: '#B07A16' }}><Plus size={12} /> Add note</button> : null
                     const noteVariants = langs.map((l) => txGet(tx, l, sharedNote)).filter((v) => v && v !== sharedNote)
                     return (
                       <div className="flex items-start gap-1.5 mb-2 rounded-lg" style={{ backgroundColor: '#FFFBEB', border: '1px solid #FDE9C8', padding: '6px 8px' }}>
@@ -5407,13 +5436,13 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                           <p className="font-body text-[11px]" style={{ color: '#8A5A12' }}>{sharedNote}</p>
                           {noteVariants.map((v, i) => <p key={i} className="font-body text-[11px] italic" style={{ color: '#A98547' }}>{v}</p>)}
                         </div>
-                        {manage && <button type="button" onClick={() => { setEditingNoteJob(jk); setNoteDraft(sharedNote) }} className="font-body text-[10px] font-bold shrink-0" style={{ color: '#B07A16' }}>Edit</button>}
+                        {manage && <button type="button" onClick={() => { setEditingNoteJob(gk); setNoteDraft(sharedNote) }} className="font-body text-[10px] font-bold shrink-0" style={{ color: '#B07A16' }}>Edit</button>}
                       </div>
                     )
                   })()}
-                  {manage && addingJob === jk && (
+                  {manage && addingJob === gk && (
                     <div className="mb-2">
-                      <PeoplePicker options={orderedOps.filter((n) => !alreadyOn.includes(n))} selected={[]} onToggle={(name) => addPersonToJob(jk, name)} placeholder={`Add crew to ${jk}…`} />
+                      <PeoplePicker options={orderedOps.filter((n) => !alreadyOn.includes(n))} selected={[]} onToggle={(name) => addPersonToJob(jk, name, s)} placeholder={`Add crew to ${jk}…`} />
                     </div>
                   )}
                   <div className="space-y-1.5">
@@ -5442,6 +5471,10 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                 )}
               </div>
             )
+          })}
+          </div>
+          </div>
+          )
           })}
         </div>
       )}

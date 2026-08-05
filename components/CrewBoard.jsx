@@ -121,10 +121,12 @@ export default function CrewBoard() {
   // param = whole property.
   const shown = course ? tasks.filter((t) => t.course === course || !t.course) : tasks
 
-  // Group by job — everyone on the same job shares one bubble.
-  const jobGroups = {}
-  shown.forEach((t) => { const k = t.job || '—'; (jobGroups[k] = jobGroups[k] || []).push(t) })
-  const jobKeys = Object.keys(jobGroups).sort((a, b) => jobGroups[b].length - jobGroups[a].length || a.localeCompare(b))
+  // Group by job (one bubble each), split into rounds — 1st / 2nd / 3rd jobs —
+  // so the day's later work shows as its own section on the board.
+  const bySlot = {}
+  shown.forEach((t) => { const s = t.slot || '1'; const k = t.job || '—'; (bySlot[s] = bySlot[s] || {}); (bySlot[s][k] = bySlot[s][k] || []).push(t) })
+  const SLOT_LABELS = { '1': '1st Jobs', '2': '2nd Jobs', '3': '3rd Jobs' }
+  const slotsPresent = ['1', '2', '3'].filter((k) => bySlot[k] && Object.keys(bySlot[k]).length)
 
   return (
     <div style={{ minHeight: '100vh', background: `radial-gradient(1200px 600px at 50% -10%, #1d3527 0%, ${FOREST} 60%)`, color: '#F3F0E6', fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' }}>
@@ -152,17 +154,6 @@ export default function CrewBoard() {
         </div>
 
 
-        {/* Today's cut — whole-hole map striped to today's mow directions */}
-        {status === 'ok' && shown.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '2vw', marginBottom: '1.8vw', background: 'rgba(0,0,0,0.20)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '1vw 1.4vw' }}>
-            <div style={{ flex: '0 0 auto' }}>
-              <div style={{ fontSize: 'clamp(12px,1.1vw,20px)', letterSpacing: '0.22em', textTransform: 'uppercase', color: GOLD, fontWeight: 700 }}>Today's Cut</div>
-              <div style={{ fontSize: 'clamp(12px,1.15vw,21px)', color: '#C7CFC2', marginTop: 5 }}>Green · Approach · Fairway · Tees</div>
-            </div>
-            <div style={{ flex: '1 1 auto', maxWidth: 560, marginLeft: 'auto' }}><HoleMap courseInfo={courseInfo} courseName={course} /></div>
-          </div>
-        )}
-
         {/* Board */}
         {status === 'loading' ? (
           <div style={{ textAlign: 'center', padding: '10vh 0', color: '#8AA394', fontSize: 'clamp(16px,1.6vw,28px)' }}>Loading the board…</div>
@@ -174,9 +165,23 @@ export default function CrewBoard() {
         ) : shown.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '12vh 0', color: '#8AA394', fontSize: 'clamp(18px,2vw,34px)', fontFamily: 'ui-serif, Georgia, serif' }}>No jobs posted yet today.</div>
         ) : (
-          <div style={{ columnWidth: 360, columnGap: '1.1vw' }}>
-            {jobKeys.map((jk) => {
-              const list = jobGroups[jk]
+          <div style={{ display: 'flex', gap: '1.4vw', alignItems: 'flex-start' }}>
+            {/* Jobs — grouped into rounds, in readable columns */}
+            <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+              {slotsPresent.map((slotKey) => {
+              const sGroups = bySlot[slotKey]
+              const sKeys = Object.keys(sGroups).sort((a, b) => sGroups[b].length - sGroups[a].length || a.localeCompare(b))
+              return (
+              <div key={slotKey} style={{ marginBottom: '1.4vw' }}>
+                {slotsPresent.length > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 0.8vw' }}>
+                    <span style={{ fontSize: 'clamp(14px,1.35vw,26px)', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: GOLD }}>{SLOT_LABELS[slotKey]}</span>
+                    <div style={{ flex: 1, height: 2, background: 'rgba(201,168,76,0.28)' }} />
+                  </div>
+                )}
+                <div style={{ columnWidth: 330, columnGap: '1.1vw' }}>
+                {sKeys.map((jk) => {
+              const list = sGroups[jk]
               const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
               const variants = langs.map((l) => txGet(tx, l, jk)).filter(Boolean)
               // Same note on every task = a shared job note (shown once). Different
@@ -239,6 +244,16 @@ export default function CrewBoard() {
                 </div>
               )
             })}
+                </div>
+              </div>
+              )
+              })}
+            </div>
+            {/* Vertical hole — runs up the right side like a real hole */}
+            <div style={{ flex: '0 0 clamp(170px, 15vw, 300px)', position: 'sticky', top: '1.5vw', alignSelf: 'flex-start' }}>
+              <div style={{ fontSize: 'clamp(11px,1vw,18px)', letterSpacing: '0.2em', textTransform: 'uppercase', color: GOLD, fontWeight: 700, marginBottom: 8, textAlign: 'center' }}>Today's Cut</div>
+              <HoleMap courseInfo={courseInfo} courseName={course} orientation="vertical" />
+            </div>
           </div>
         )}
       </div>
