@@ -9,7 +9,7 @@
 // route and gives each person their greens. Greens = practice greens first, then
 // holes 1..N. Everything saves in the courseInfo blob (no new table).
 import { useState, useEffect } from 'react'
-import { ChevronUp, ChevronDown, Scissors, Check, Lock, Plus } from 'lucide-react'
+import { Scissors, Check, Lock, Plus, GripVertical } from 'lucide-react'
 import { greensForCourse, reconcileOrder, layoutForCount } from '@/lib/mowing'
 
 const FOREST = '#16291F'
@@ -71,11 +71,25 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
     onSave({ mowingSets: sets, mowingOrder: orders })
     setSetSaved(true); setTimeout(() => setSetSaved(false), 2200)
   }
-  const moveInOrder = (i, dir) => {
-    const j = i + dir
-    if (j < 0 || j >= order.length) return
-    setOrder((o) => { const n = [...o]; [n[i], n[j]] = [n[j], n[i]]; return n }); setSetSaved(false)
+  // Drag to reorder greens (grab the handle, slide up/down). Uses Pointer Events
+  // so it works with touch on the iPad; elementFromPoint finds the row you're
+  // over, and we live-shuffle the order as you drag.
+  const [dragId, setDragId] = useState(null)
+  const onDragStart = (e, id) => { try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* ignore */ } setDragId(id) }
+  const onDragMove = (e) => {
+    if (!dragId) return
+    const el = document.elementFromPoint(e.clientX, e.clientY)
+    const rowEl = el && el.closest ? el.closest('[data-green-id]') : null
+    const overId = rowEl && rowEl.getAttribute('data-green-id')
+    if (!overId || overId === dragId) return
+    setOrder((o) => {
+      const from = o.indexOf(dragId); const to = o.indexOf(overId)
+      if (from < 0 || to < 0 || from === to) return o
+      const n = [...o]; n.splice(from, 1); n.splice(to, 0, dragId); return n
+    })
+    setSetSaved(false)
   }
+  const onDragEnd = () => setDragId(null)
 
   // No greens configured yet.
   if (allIds.length === 0) {
@@ -154,13 +168,13 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
                 const onCount = setGroups.filter((g) => g.includes(green.id)).length
                 const rowBg = onCount === 0 ? '#FBEEEC' : 'white'
                 return (
-                  <tr key={green.id} style={{ borderTop: `1px solid ${HAIR}` }}>
-                    <td className="px-1.5 py-1 whitespace-nowrap" style={{ position: 'sticky', left: 0, backgroundColor: rowBg, zIndex: 1 }}>
-                      <div className="flex items-center gap-1">
-                        <div className="flex flex-col">
-                          <button onClick={() => moveInOrder(ri, -1)} disabled={ri === 0} className="disabled:opacity-20" style={{ color: INK_3, lineHeight: 0.6 }} aria-label="Move up"><ChevronUp size={14} /></button>
-                          <button onClick={() => moveInOrder(ri, 1)} disabled={ri === orderedGreens.length - 1} className="disabled:opacity-20" style={{ color: INK_3, lineHeight: 0.6 }} aria-label="Move down"><ChevronDown size={14} /></button>
-                        </div>
+                  <tr key={green.id} data-green-id={green.id} style={{ borderTop: `1px solid ${HAIR}`, opacity: dragId === green.id ? 0.5 : 1 }}>
+                    <td className="px-1.5 py-1 whitespace-nowrap" style={{ position: 'sticky', left: 0, backgroundColor: dragId === green.id ? '#EAF2EC' : rowBg, zIndex: 1 }}>
+                      <div className="flex items-center gap-1.5">
+                        <span onPointerDown={(e) => onDragStart(e, green.id)} onPointerMove={onDragMove} onPointerUp={onDragEnd} onPointerCancel={onDragEnd}
+                          className="flex items-center justify-center shrink-0" style={{ touchAction: 'none', cursor: 'grab', color: INK_3, width: 24, height: 28 }} aria-label="Drag to reorder">
+                          <GripVertical size={16} />
+                        </span>
                         <span className="font-body text-[12px] font-semibold tnum" style={{ color: onCount === 0 ? '#B23A2E' : INK }}>{green.label}</span>
                       </div>
                     </td>
@@ -182,7 +196,7 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
           </table>
         </div>
       </div>
-      <p className="font-body text-[11px] mb-2" style={{ color: INK_3 }}>Use the <b>▲▼</b> to set the mow order (practice greens first, nursery last, etc.). Tap a box to put a green on a mower — tick <b>more than one</b> to share it. A <span style={{ color: '#B23A2E' }}>red row</span> means a green isn't on any mower yet.</p>
+      <p className="font-body text-[11px] mb-2" style={{ color: INK_3 }}><b>Drag the ⣿ handle</b> to set the mow order (practice greens first, nursery last, etc.). Tap a box to put a green on a mower — tick <b>more than one</b> to share it. A <span style={{ color: '#B23A2E' }}>red row</span> means a green isn't on any mower yet.</p>
 
       {unassigned.length > 0 && (
         <p className="font-body text-[11px] mb-2" style={{ color: '#B23A2E' }}>⚠ Not on any mower: {unassigned.map(labelOf).join(', ')}</p>
