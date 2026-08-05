@@ -9,7 +9,7 @@
 import { useState, useEffect } from 'react'
 import { Plus, X, Check, ArrowRight, Trash2, Compass } from 'lucide-react'
 import MowPattern from '@/components/MowPattern'
-import { mowDirConfig, stepIndexFor, stepLabel, stepShort, sameStep, axisStep, circleStep, CLOCK_AXES } from '@/lib/mowdir'
+import { mowDirConfig, stepIndexFor, stepLabel, stepShort, sameStep, axisStep, circleStep, CLOCK_AXES, surfaceKind } from '@/lib/mowdir'
 import { localDateISO } from '@/lib/dates'
 
 const FOREST = '#16291F'
@@ -122,7 +122,7 @@ export default function MowingDirections({ courses = [], courseInfo = {}, manage
               <div className="mb-2 flex items-center gap-2">
                 {cur ? (
                   <>
-                    <MowPattern step={cur} size={74} />
+                    <MowPattern step={cur} size={74} kind={surfaceKind(surface)} />
                     <div>
                       <p className="font-body text-[10px] uppercase tracking-wide font-bold" style={{ color: FERN }}>{isHistory ? 'Up next' : 'Today'}</p>
                       <p className="font-body text-[13px] font-bold" style={{ color: INK }}>{stepLabel(cur)}</p>
@@ -146,7 +146,7 @@ export default function MowingDirections({ courses = [], courseInfo = {}, manage
                     return (
                       <div key={si} className="rounded-lg p-1.5 relative" style={{ border: `1.5px solid ${isCur ? FERN : HAIR}`, backgroundColor: isCur ? '#EAF2EC' : PAPER, width: 74 }}>
                         <button onClick={() => removeStep(i, si)} className="absolute -top-1.5 -right-1.5 rounded-full flex items-center justify-center" style={{ width: 17, height: 17, backgroundColor: 'white', border: `1px solid ${HAIR}`, color: '#B23A2E' }} aria-label="Remove"><X size={11} /></button>
-                        <MowPattern step={st} size={62} />
+                        <MowPattern step={st} size={62} kind={surfaceKind(surface)} />
                         <p className="font-body text-[9px] font-bold text-center mt-0.5 leading-tight" style={{ color: INK_2 }}>{stepShort(st)}</p>
                       </div>
                     )
@@ -165,7 +165,7 @@ export default function MowingDirections({ courses = [], courseInfo = {}, manage
                       const has = steps.some((x) => sameStep(x, st))
                       return (
                         <button key={`${ax.a}-${ax.b}`} onClick={() => addStep(i, st)} disabled={has} className="rounded-lg p-1 flex flex-col items-center" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', opacity: has ? 0.35 : 1 }}>
-                          <MowPattern step={st} size={44} />
+                          <MowPattern step={st} size={44} kind={surfaceKind(surface)} />
                           <span className="font-body text-[9px] font-bold" style={{ color: INK_2 }}>{ax.a}–{ax.b}</span>
                         </button>
                       )
@@ -178,7 +178,7 @@ export default function MowingDirections({ courses = [], courseInfo = {}, manage
                       const has = steps.some((x) => sameStep(x, st))
                       return (
                         <button key={dir} onClick={() => addStep(i, st)} disabled={has} className="rounded-lg p-1.5 flex items-center gap-1.5" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', opacity: has ? 0.35 : 1 }}>
-                          <MowPattern step={st} size={44} />
+                          <MowPattern step={st} size={44} kind={surfaceKind(surface)} />
                           <span className="font-body text-[10px] font-bold" style={{ color: INK_2 }}>{lab}</span>
                         </button>
                       )
