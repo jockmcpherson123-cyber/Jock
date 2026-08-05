@@ -249,8 +249,8 @@ export default function CrewBoard() {
               )
               })}
             </div>
-            {/* Vertical hole — runs up the right side like a real hole */}
-            <div style={{ flex: '0 0 clamp(170px, 15vw, 300px)', position: 'sticky', top: '1.5vw', alignSelf: 'flex-start' }}>
+            {/* Vertical hole — a tight column running up the right side */}
+            <div style={{ flex: '0 0 clamp(130px, 11vw, 190px)', position: 'sticky', top: '1.5vw', alignSelf: 'flex-start' }}>
               <div style={{ fontSize: 'clamp(11px,1vw,18px)', letterSpacing: '0.2em', textTransform: 'uppercase', color: GOLD, fontWeight: 700, marginBottom: 8, textAlign: 'center' }}>Today's Cut</div>
               <HoleMap courseInfo={courseInfo} courseName={course} orientation="vertical" />
             </div>
