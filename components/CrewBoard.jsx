@@ -11,6 +11,7 @@ import { fetchCurrent } from '@/lib/weather'
 import { localDateISO } from '@/lib/dates'
 import { directionForJob, stepLabel, surfaceKind } from '@/lib/mowdir'
 import MowPattern from '@/components/MowPattern'
+import HoleMap from '@/components/HoleMap'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -150,6 +151,17 @@ export default function CrewBoard() {
           </div>
         </div>
 
+
+        {/* Today's cut — whole-hole map striped to today's mow directions */}
+        {status === 'ok' && shown.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2vw', marginBottom: '1.8vw', background: 'rgba(0,0,0,0.20)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '1vw 1.4vw' }}>
+            <div style={{ flex: '0 0 auto' }}>
+              <div style={{ fontSize: 'clamp(12px,1.1vw,20px)', letterSpacing: '0.22em', textTransform: 'uppercase', color: GOLD, fontWeight: 700 }}>Today's Cut</div>
+              <div style={{ fontSize: 'clamp(12px,1.15vw,21px)', color: '#C7CFC2', marginTop: 5 }}>Green · Approach · Fairway · Tees</div>
+            </div>
+            <div style={{ flex: '1 1 auto', maxWidth: 560, marginLeft: 'auto' }}><HoleMap courseInfo={courseInfo} courseName={course} /></div>
+          </div>
+        )}
 
         {/* Board */}
         {status === 'loading' ? (
