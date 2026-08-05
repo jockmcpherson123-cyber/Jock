@@ -9,6 +9,7 @@
 import { useState, useEffect } from 'react'
 import { Plus, X, Check, ArrowRight, Trash2, Compass } from 'lucide-react'
 import MowPattern from '@/components/MowPattern'
+import HoleMap from '@/components/HoleMap'
 import { mowDirConfig, stepIndexFor, stepLabel, stepShort, sameStep, axisStep, circleStep, CLOCK_AXES, surfaceKind } from '@/lib/mowdir'
 import { localDateISO } from '@/lib/dates'
 
@@ -89,6 +90,15 @@ export default function MowingDirections({ courses = [], courseInfo = {}, manage
           ))}
         </div>
       )}
+
+      {/* Live whole-hole map — striped to today's directions */}
+      <div className="rounded-2xl overflow-hidden mb-3" style={{ border: `1px solid ${HAIR}` }}>
+        <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
+          <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: FERN }}>Today's cut · {courseName || 'this course'}</p>
+          <p className="font-body text-[10px]" style={{ color: INK_3 }}>green · approach · fairway · tees</p>
+        </div>
+        <div className="px-2 pb-2"><HoleMap courseInfo={courseInfo} courseName={courseName} /></div>
+      </div>
 
       <div className="flex items-center gap-2 mb-1.5">
         <Compass size={14} style={{ color: FERN }} />
