@@ -8,7 +8,7 @@
 // little clock picture. Saved in the courseInfo blob (no new table).
 import { useState, useEffect } from 'react'
 import { Plus, X, Check, ArrowRight, Trash2, Compass } from 'lucide-react'
-import MowClock from '@/components/MowClock'
+import MowPattern from '@/components/MowPattern'
 import { mowDirConfig, stepIndexFor, stepLabel, stepShort, sameStep, axisStep, circleStep, CLOCK_AXES } from '@/lib/mowdir'
 import { localDateISO } from '@/lib/dates'
 
@@ -122,7 +122,7 @@ export default function MowingDirections({ courses = [], courseInfo = {}, manage
               <div className="mb-2 flex items-center gap-2">
                 {cur ? (
                   <>
-                    <MowClock step={cur} size={44} color={FOREST} />
+                    <MowPattern step={cur} size={56} />
                     <div>
                       <p className="font-body text-[10px] uppercase tracking-wide font-bold" style={{ color: FERN }}>{isHistory ? 'Up next' : 'Today'}</p>
                       <p className="font-body text-[13px] font-bold" style={{ color: INK }}>{stepLabel(cur)}</p>
@@ -146,7 +146,7 @@ export default function MowingDirections({ courses = [], courseInfo = {}, manage
                     return (
                       <div key={si} className="rounded-lg p-1.5 relative" style={{ border: `1.5px solid ${isCur ? FERN : HAIR}`, backgroundColor: isCur ? '#EAF2EC' : PAPER, width: 66 }}>
                         <button onClick={() => removeStep(i, si)} className="absolute -top-1.5 -right-1.5 rounded-full flex items-center justify-center" style={{ width: 17, height: 17, backgroundColor: 'white', border: `1px solid ${HAIR}`, color: '#B23A2E' }} aria-label="Remove"><X size={11} /></button>
-                        <MowClock step={st} size={40} color={isCur ? FERN : INK_2} />
+                        <MowPattern step={st} size={54} />
                         <p className="font-body text-[9px] font-bold text-center mt-0.5 leading-tight" style={{ color: INK_2 }}>{stepShort(st)}</p>
                       </div>
                     )
@@ -165,7 +165,7 @@ export default function MowingDirections({ courses = [], courseInfo = {}, manage
                       const has = steps.some((x) => sameStep(x, st))
                       return (
                         <button key={`${ax.a}-${ax.b}`} onClick={() => addStep(i, st)} disabled={has} className="rounded-lg p-1 flex flex-col items-center" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', opacity: has ? 0.35 : 1 }}>
-                          <MowClock step={st} size={34} color={INK_2} numbers={false} />
+                          <MowPattern step={st} size={44} />
                           <span className="font-body text-[9px] font-bold" style={{ color: INK_2 }}>{ax.a}–{ax.b}</span>
                         </button>
                       )
@@ -178,7 +178,7 @@ export default function MowingDirections({ courses = [], courseInfo = {}, manage
                       const has = steps.some((x) => sameStep(x, st))
                       return (
                         <button key={dir} onClick={() => addStep(i, st)} disabled={has} className="rounded-lg p-1.5 flex items-center gap-1.5" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', opacity: has ? 0.35 : 1 }}>
-                          <MowClock step={st} size={34} color={INK_2} numbers={false} />
+                          <MowPattern step={st} size={44} />
                           <span className="font-body text-[10px] font-bold" style={{ color: INK_2 }}>{lab}</span>
                         </button>
                       )
