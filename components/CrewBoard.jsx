@@ -172,11 +172,13 @@ export default function CrewBoard() {
               const sGroups = bySlot[slotKey]
               const sKeys = Object.keys(sGroups).sort((a, b) => sGroups[b].length - sGroups[a].length || a.localeCompare(b))
               return (
-              <div key={slotKey} style={{ marginBottom: '1.4vw' }}>
+              <div key={slotKey} style={{ marginBottom: '1.4vw', marginTop: slotsPresent.indexOf(slotKey) > 0 ? '2.4vw' : 0 }}>
                 {slotsPresent.length > 1 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 0.8vw' }}>
-                    <span style={{ fontSize: 'clamp(14px,1.35vw,26px)', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: GOLD }}>{SLOT_LABELS[slotKey]}</span>
-                    <div style={{ flex: 1, height: 2, background: 'rgba(201,168,76,0.28)' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '0 0 1vw', padding: '0.6vw 1.1vw', background: 'linear-gradient(90deg, rgba(201,168,76,0.26), rgba(201,168,76,0.03))', borderLeft: `7px solid ${GOLD}`, borderRadius: 12 }}>
+                    <span style={{ fontSize: 'clamp(16px,1.6vw,32px)', fontWeight: 900, letterSpacing: '0.14em', textTransform: 'uppercase', color: GOLD }}>{SLOT_LABELS[slotKey]}</span>
+                    <span style={{ fontSize: 'clamp(11px,1vw,18px)', fontWeight: 600, color: '#B7C4B4' }}>{Object.keys(sGroups).length} job{Object.keys(sGroups).length !== 1 ? 's' : ''}</span>
+                    <div style={{ flex: 1 }} />
+                    {slotKey !== '1' && <span style={{ fontSize: 'clamp(11px,1vw,18px)', fontWeight: 700, color: '#B7C4B4' }}>{slotKey === '2' ? 'Afternoon' : 'Later'}</span>}
                   </div>
                 )}
                 <div style={{ columnWidth: 330, columnGap: '1.1vw' }}>

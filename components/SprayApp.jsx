@@ -5362,11 +5362,12 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
           const sGroups = bySlot[s]
           const sKeys = Object.keys(sGroups).sort((a, b) => sGroups[b].length - sGroups[a].length || a.localeCompare(b))
           return (
-          <div key={s}>
+          <div key={s} className={slotsPresent.indexOf(s) > 0 ? 'mt-5' : ''}>
           {slotsPresent.length > 1 && (
-            <div className="flex items-center gap-2 mb-2">
-              <span className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: FOREST, color: 'white' }}>{slotLabel(s)}</span>
-              <div className="flex-1 h-px" style={{ backgroundColor: HAIR }} />
+            <div className="flex items-center gap-2 mb-2.5 px-3 py-2 rounded-xl" style={{ backgroundColor: '#F1F7F2', borderLeft: `5px solid ${GOLD}` }}>
+              <span className="font-body text-sm font-extrabold uppercase tracking-wide" style={{ color: FOREST }}>{slotLabel(s)}</span>
+              <span className="font-body text-[11px] font-semibold" style={{ color: INK_2 }}>· {Object.keys(sGroups).length} job{Object.keys(sGroups).length !== 1 ? 's' : ''}</span>
+              {s !== '1' && <span className="font-body text-[11px] font-bold ml-auto" style={{ color: INK_2 }}>{s === '2' ? 'Afternoon' : 'Later'}</span>}
             </div>
           )}
           <div className="space-y-3">
