@@ -4979,8 +4979,8 @@ const WB_SECTIONS = [
 ]
 // Common crew languages (label + code) for the per-staff native-language pick.
 const CREW_LANGS = [['en', 'English'], ['es', 'Spanish'], ['pt', 'Portuguese'], ['ht', 'Haitian Creole'], ['vi', 'Vietnamese'], ['zh', 'Chinese'], ['fr', 'French'], ['ko', 'Korean']]
-// Job rounds through the day — 1st (morning), 2nd (afternoon), 3rd (later).
-const SLOTS = [['1', '1st Jobs'], ['2', '2nd Jobs'], ['3', '3rd Jobs']]
+// Job rounds through the day — 1st (morning), 2nd (afternoon), 3rd/4th (later).
+const SLOTS = [['1', '1st Jobs'], ['2', '2nd Jobs'], ['3', '3rd Jobs'], ['4', '4th Jobs']]
 const slotLabel = (s) => (SLOTS.find(([k]) => k === String(s)) || [])[1] || '1st Jobs'
 
 // Shell for the Whiteboard: a side menu (persistent rail on wide screens, a
@@ -5326,11 +5326,12 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
         </div>
       ) : (() => {
         // Which rounds to show: managers always get 1st (with an inline add
-        // slot), then 2nd appears once 1st has a job, 3rd once 2nd does — so
-        // later rounds reveal themselves instead of needing a round picker.
+        // slot), then each next round appears once the one before has a job —
+        // 2nd after 1st, 3rd after 2nd, 4th after 3rd — so later rounds reveal
+        // themselves instead of needing a round picker.
         const hasRound = (x) => bySlot[x] && Object.keys(bySlot[x]).length > 0
-        let roundsToShow = manage ? ['1', ...(hasRound('1') ? ['2'] : []), ...(hasRound('2') ? ['3'] : [])] : [...slotsPresent]
-        ;['2', '3'].forEach((x) => { if (hasRound(x) && !roundsToShow.includes(x)) roundsToShow.push(x) })
+        let roundsToShow = manage ? ['1', ...(hasRound('1') ? ['2'] : []), ...(hasRound('2') ? ['3'] : []), ...(hasRound('3') ? ['4'] : [])] : [...slotsPresent]
+        ;['2', '3', '4'].forEach((x) => { if (hasRound(x) && !roundsToShow.includes(x)) roundsToShow.push(x) })
         roundsToShow = [...new Set(roundsToShow)].sort()
         return (
         <div className="space-y-5">

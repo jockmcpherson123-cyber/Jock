@@ -163,8 +163,8 @@ export default function CrewBoard() {
   // so the day's later work shows as its own section on the board.
   const bySlot = {}
   shown.forEach((t) => { const s = t.slot || '1'; const k = t.job || '—'; (bySlot[s] = bySlot[s] || {}); (bySlot[s][k] = bySlot[s][k] || []).push(t) })
-  const SLOT_LABELS = { '1': '1st Jobs', '2': '2nd Jobs', '3': '3rd Jobs' }
-  const slotsPresent = ['1', '2', '3'].filter((k) => bySlot[k] && Object.keys(bySlot[k]).length)
+  const SLOT_LABELS = { '1': '1st Jobs', '2': '2nd Jobs', '3': '3rd Jobs', '4': '4th Jobs' }
+  const slotsPresent = ['1', '2', '3', '4'].filter((k) => bySlot[k] && Object.keys(bySlot[k]).length)
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: `radial-gradient(1200px 600px at 50% -10%, #1d3527 0%, ${FOREST} 60%)`, color: '#F3F0E6', fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' }}>
