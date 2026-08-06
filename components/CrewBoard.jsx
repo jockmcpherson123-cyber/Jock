@@ -4,7 +4,7 @@
 // the shop screen. It fetches today's jobs, then subscribes to Realtime so any
 // change made on an iPad shows up here within a second, no refresh needed. Big
 // type, high contrast, and it rolls over to the new day on its own overnight.
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react'
 import * as db from '@/lib/db'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { fetchCurrent } from '@/lib/weather'
@@ -39,6 +39,31 @@ export default function CrewBoard() {
   const [live, setLive] = useState(false)
   const dateRef = useRef(date)
   useEffect(() => { dateRef.current = date }, [date])
+
+  // The shop TV can't scroll, so shrink the whole board just enough to fit the
+  // screen as more rounds/jobs get added — everything always stays on one page.
+  const [fitScale, setFitScale] = useState(1)
+  const fitWrapRef = useRef(null)
+  const fitContentRef = useRef(null)
+  useLayoutEffect(() => {
+    const fit = () => {
+      const wrap = fitWrapRef.current, content = fitContentRef.current
+      if (!wrap || !content) return
+      const cw = content.scrollWidth, ch = content.scrollHeight
+      if (!cw || !ch || !wrap.clientHeight) return
+      // scale on layout size (transform doesn't change scrollWidth/Height)
+      const s = Math.min(1, wrap.clientWidth / cw, wrap.clientHeight / ch)
+      setFitScale(s > 0.2 ? s : 0.2)
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    if (fitWrapRef.current) ro.observe(fitWrapRef.current)
+    if (fitContentRef.current) ro.observe(fitContentRef.current)
+    window.addEventListener('resize', fit)
+    const t = setTimeout(fit, 350) // catch late layout (fonts, hole SVG)
+    return () => { ro.disconnect(); window.removeEventListener('resize', fit); clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, tx, boardMessage, course])
 
   const load = useCallback(async (d) => {
     try {
@@ -129,10 +154,10 @@ export default function CrewBoard() {
   const slotsPresent = ['1', '2', '3'].filter((k) => bySlot[k] && Object.keys(bySlot[k]).length)
 
   return (
-    <div style={{ minHeight: '100vh', background: `radial-gradient(1200px 600px at 50% -10%, #1d3527 0%, ${FOREST} 60%)`, color: '#F3F0E6', fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' }}>
-      <div style={{ maxWidth: 1600, margin: '0 auto', padding: '2.2vw 2.5vw' }}>
+    <div style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: `radial-gradient(1200px 600px at 50% -10%, #1d3527 0%, ${FOREST} 60%)`, color: '#F3F0E6', fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' }}>
+      <div style={{ maxWidth: 1600, margin: '0 auto', padding: '2.2vw 2.5vw', width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, borderBottom: `2px solid ${GOLD}`, paddingBottom: '1.4vw', marginBottom: '1.8vw' }}>
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, borderBottom: `2px solid ${GOLD}`, paddingBottom: '1.4vw', marginBottom: '1.8vw' }}>
           <div>
             {club && <div style={{ fontSize: 'clamp(12px,1.1vw,20px)', letterSpacing: '0.28em', textTransform: 'uppercase', color: GOLD, fontWeight: 600 }}>{club}</div>}
             <div style={{ fontFamily: 'ui-serif, Georgia, serif', fontSize: 'clamp(30px,3.6vw,64px)', fontWeight: 700, lineHeight: 1.05 }}>{course ? `${course} · Crew Board` : 'Crew Board'}</div>
@@ -165,6 +190,8 @@ export default function CrewBoard() {
         ) : shown.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '12vh 0', color: '#8AA394', fontSize: 'clamp(18px,2vw,34px)', fontFamily: 'ui-serif, Georgia, serif' }}>No jobs posted yet today.</div>
         ) : (
+          <div ref={fitWrapRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <div ref={fitContentRef} style={{ transform: `scale(${fitScale})`, transformOrigin: 'top center', width: '100%' }}>
           <div style={{ display: 'flex', gap: '1.4vw', alignItems: 'flex-start' }}>
             {/* Jobs — grouped into rounds, in readable columns */}
             <div style={{ flex: '1 1 auto', minWidth: 0 }}>
@@ -181,7 +208,7 @@ export default function CrewBoard() {
                     {slotKey !== '1' && <span style={{ fontSize: 'clamp(11px,1vw,18px)', fontWeight: 700, color: '#B7C4B4' }}>{slotKey === '2' ? 'Afternoon' : 'Later'}</span>}
                   </div>
                 )}
-                <div style={{ columnWidth: 330, columnGap: '1.1vw' }}>
+                <div style={{ columnWidth: 300, columnGap: '1.1vw' }}>
                 {sKeys.map((jk) => {
               const list = sGroups[jk]
               const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
@@ -252,15 +279,17 @@ export default function CrewBoard() {
               })}
             </div>
             {/* Vertical hole — a tight column running up the right side */}
-            <div style={{ flex: '0 0 clamp(130px, 11vw, 190px)', position: 'sticky', top: '1.5vw', alignSelf: 'flex-start' }}>
+            <div style={{ flex: '0 0 clamp(130px, 11vw, 190px)', alignSelf: 'flex-start' }}>
               <div style={{ fontSize: 'clamp(11px,1vw,18px)', letterSpacing: '0.2em', textTransform: 'uppercase', color: GOLD, fontWeight: 700, marginBottom: 8, textAlign: 'center' }}>Today's Cut</div>
               <HoleMap courseInfo={courseInfo} courseName={course} orientation="vertical" />
             </div>
           </div>
+          </div>
+          </div>
         )}
       </div>
       {boardMessage && (
-        <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, background: '#B4232A', color: '#FFF', padding: '0.7vw 2.5vw', fontSize: 'clamp(15px,1.6vw,30px)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 -4px 20px rgba(0,0,0,0.3)' }}>
+        <div style={{ flexShrink: 0, background: '#B4232A', color: '#FFF', padding: '0.7vw 2.5vw', fontSize: 'clamp(15px,1.6vw,30px)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 -4px 20px rgba(0,0,0,0.3)' }}>
           <span style={{ fontSize: '1.1em' }}>🔔</span>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boardMessage}</span>
         </div>
