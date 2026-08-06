@@ -5240,6 +5240,9 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const bySlot = {}
   view.forEach((t) => { const s = t.slot || '1'; const k = t.job || '—'; (bySlot[s] = bySlot[s] || {}); (bySlot[s][k] = bySlot[s][k] || []).push(t) })
   const slotsPresent = SLOTS.map(([k]) => k).filter((k) => bySlot[k] && Object.keys(bySlot[k]).length)
+  // Everyone already on any job today — used to grey them in the crew checklist
+  // so you can see who's spoken for (they're still selectable).
+  const assignedToday = [...new Set(view.filter((t) => t.assignee).map((t) => t.assignee))]
 
   return (
     <div>
@@ -5394,7 +5397,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                     ))}
                     {alreadyOn.length === 0 && <p className="font-body text-[12px] text-slate-400 py-1">No one on this job yet — add crew below.</p>}
                     <div className="mt-1.5">
-                      <MultiSelect selected={alreadyOn} options={orderedOps} onToggle={(name) => (alreadyOn.includes(name) ? removePersonFromJob(jk, name, s) : addPersonToJob(jk, name, s))} hideChips placeholder="Add crew — tap to check people on…" />
+                      <MultiSelect selected={alreadyOn} options={orderedOps} onToggle={(name) => (alreadyOn.includes(name) ? removePersonFromJob(jk, name, s) : addPersonToJob(jk, name, s))} hideChips dimmed={assignedToday} dimmedLabel="on a job" placeholder="Add crew — tap to check people on…" />
                     </div>
                   </div>
                   {/* Note — write anything the crew needs for this job */}

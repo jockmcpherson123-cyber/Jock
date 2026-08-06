@@ -51,7 +51,9 @@ export function SearchSelect({ value, options = [], onPick, placeholder = 'Searc
 
 // Searchable multi-select that stays open — chips above, tap options to toggle
 // several at once without re-opening.
-export function MultiSelect({ selected = [], options = [], onToggle, placeholder = 'Search…', accent = FERN, hideChips = false }) {
+// `dimmed` names render greyed with a small tag (e.g. "on a job") — a hint that
+// they're already spoken for elsewhere, while still being selectable.
+export function MultiSelect({ selected = [], options = [], onToggle, placeholder = 'Search…', accent = FERN, hideChips = false, dimmed = [], dimmedLabel = 'busy' }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const wrapRef = useRef(null)
@@ -81,10 +83,12 @@ export function MultiSelect({ selected = [], options = [], onToggle, placeholder
           {matches.length === 0 && <div className="px-3 py-2 text-sm text-slate-400 font-body">No matches</div>}
           {matches.map((o) => {
             const on = selected.includes(o)
+            const busy = !on && dimmed.includes(o)
             return (
-              <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); onToggle(o) }} className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50 flex items-center gap-2">
+              <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); onToggle(o) }} className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50 flex items-center gap-2" style={busy ? { backgroundColor: '#F8FAFB' } : {}}>
                 <span className="inline-flex items-center justify-center rounded shrink-0" style={{ width: 16, height: 16, border: `1.5px solid ${on ? accent : '#CBD5E1'}`, backgroundColor: on ? accent : 'white' }}>{on && <Check size={11} color="white" />}</span>
-                <span className="flex-1">{o}</span>
+                <span className="flex-1" style={busy ? { color: '#94A3B8' } : {}}>{o}</span>
+                {busy && <span className="font-body text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF1F4', color: '#94A3B8' }}>{dimmedLabel}</span>}
               </button>
             )
           })}
