@@ -952,7 +952,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 
       {/* Planned-spray editor — opens as a centered popup so you edit in place */}
       {editApp && (
-        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-3 overflow-y-auto" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditApp(null)}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-3 overflow-y-auto" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditApp(null)}>
         <div className="bg-white rounded-2xl border-2 p-4 shadow-2xl my-6 w-full max-w-lg" style={{ borderColor: GOLD }} onClick={(e) => e.stopPropagation()}>
           <p className="font-display text-base font-semibold text-slate-900 mb-1">
             {editApp.originalIds?.length ? 'Edit planned spray' : 'New planned spray'}
