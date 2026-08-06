@@ -5403,26 +5403,26 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                 </div>
                 {open && (manage ? (
                 <div className="px-2.5 pt-2.5 pb-3 space-y-3">
-                  {/* Crew — who's on it, add or remove */}
+                  {/* Crew — add box on top, the names you pick fill in underneath */}
                   <div>
                     <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Crew</p>
-                    {list.filter((t) => t.assignee).map((t, pi) => (
-                      <div key={t.id} className="flex items-center gap-2.5 py-1.5" style={{ borderTop: pi > 0 ? '1px solid #F1F4F2' : 'none' }}>
-                        <span className="shrink-0 self-stretch rounded-full" style={{ width: 3, backgroundColor: FERN }} />
-                        <div className="min-w-0 flex-1">
-                          <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee}</p>
-                        </div>
-                        <button onClick={() => remove(t.id)} className="w-10 h-10 -mr-1 flex items-center justify-center text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={16} /></button>
-                      </div>
-                    ))}
-                    {alreadyOn.length === 0 && <p className="font-body text-[12px] text-slate-400 py-1">No one on this job yet — add crew below.</p>}
+                    <MultiSelect selected={alreadyOn} options={orderedOps} onToggle={(name) => {
+                      if (alreadyOn.includes(name)) { removePersonFromJob(jk, name, s); return }
+                      const others = [...new Set(view.filter((t) => t.assignee === name).map((t) => t.job).filter(Boolean))]
+                      if (others.length) { setConfirmAssign({ name, jk, s, others }); return }
+                      addPersonToJob(jk, name, s)
+                    }} hideChips autoOpen={crewAddJob === gk} dimmed={assignedToday} dimmedLabel="on a job" placeholder="Add crew — tap to check people on…" />
                     <div className="mt-1.5">
-                      <MultiSelect selected={alreadyOn} options={orderedOps} onToggle={(name) => {
-                        if (alreadyOn.includes(name)) { removePersonFromJob(jk, name, s); return }
-                        const others = [...new Set(view.filter((t) => t.assignee === name).map((t) => t.job).filter(Boolean))]
-                        if (others.length) { setConfirmAssign({ name, jk, s, others }); return }
-                        addPersonToJob(jk, name, s)
-                      }} hideChips autoOpen={crewAddJob === gk} dimmed={assignedToday} dimmedLabel="on a job" placeholder="Add crew — tap to check people on…" />
+                      {list.filter((t) => t.assignee).map((t, pi) => (
+                        <div key={t.id} className="flex items-center gap-2.5 py-1.5" style={{ borderTop: pi > 0 ? '1px solid #F1F4F2' : 'none' }}>
+                          <span className="shrink-0 self-stretch rounded-full" style={{ width: 3, backgroundColor: FERN }} />
+                          <div className="min-w-0 flex-1">
+                            <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee}</p>
+                          </div>
+                          <button onClick={() => remove(t.id)} className="w-10 h-10 -mr-1 flex items-center justify-center text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={16} /></button>
+                        </div>
+                      ))}
+                      {alreadyOn.length === 0 && <p className="font-body text-[12px] text-slate-400 py-1">No one on this job yet — tap the box above to add crew.</p>}
                     </div>
                   </div>
                   {/* Crew note — one message for everyone on the job */}
