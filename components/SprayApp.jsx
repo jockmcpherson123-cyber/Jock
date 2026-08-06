@@ -5137,9 +5137,29 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, crewSig])
 
+  // A "Mow Greens" job splits the locked greens route across whoever's on it —
+  // so each person gets their own greens in their note. Recomputed whenever the
+  // crew changes, so the split always matches the current head-count.
+  const isGreensMow = (jk) => /mow\w*\s+greens/i.test(jk || '')
+  const assignGreens = async (jk, s = '1') => {
+    const fresh = await db.fetchCrewTasks(date, date)
+    const group = fresh
+      .filter((t) => (t.job || '—') === jk && (t.slot || '1') === s && (!activeCourse || t.course === activeCourse || !t.course) && t.assignee)
+      .sort((a, b) => (a.sort || 0) - (b.sort || 0))
+    if (!group.length) return
+    const course = courses.find((c) => c.name === activeCourse) || courses[0] || {}
+    const cName = course.name || activeCourse || ''
+    const lay = labelledLayout(settings.courseInfo || {}, cName, course, group.length)
+    await Promise.all(group.map((t, i) => db.updateCrewTask({ ...t, notes: (lay[i] || []).join(', ') })))
+  }
   const remove = async (id) => {
+    const removed = tasks.find((x) => x.id === id)
     setTasks((prev) => prev.filter((x) => x.id !== id))
-    try { await db.deleteCrewTask(id) } catch (e) { console.error(e); reload() }
+    try {
+      await db.deleteCrewTask(id)
+      if (removed && isGreensMow(removed.job)) await assignGreens(removed.job, removed.slot || '1')
+      await reload()
+    } catch (e) { console.error(e); reload() }
   }
   // Add a job to a round with no crew yet — a placeholder row you then fill.
   // Picking a job in the inline slot drops it onto the board; the slot clears.
@@ -5163,12 +5183,13 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
       const groupTasks = view.filter((t) => (t.job || '—') === jk && (t.slot || '1') === s)
       const placeholder = groupTasks.length === 1 && !groupTasks[0].assignee ? groupTasks[0] : null
       if (placeholder) {
-        setTasks((prev) => prev.map((t) => (t.id === placeholder.id ? { ...t, assignee: name } : t)))
         await db.updateCrewTask({ ...placeholder, assignee: name })
-        return
+      } else {
+        const sort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
+        await db.addCrewTask({ date, job: jk, assignee: name, course: activeCourse, status: 'todo', sort, slot: s })
       }
-      const sort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
-      await db.addCrewTask({ date, job: jk, assignee: name, course: activeCourse, status: 'todo', sort, slot: s })
+      // Greens mow: re-split the route across everyone now on the job.
+      if (isGreensMow(jk)) await assignGreens(jk, s)
       await reload()
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
   }
