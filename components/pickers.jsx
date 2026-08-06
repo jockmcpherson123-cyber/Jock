@@ -22,9 +22,9 @@ export function SearchSelect({ value, options = [], onPick, placeholder = 'Searc
   const matches = query ? sorted.filter((o) => String(o).toLowerCase().includes(query)) : sorted
   const pick = (v) => { onPick(v); setQ(''); setOpen(false) }
   return (
-    <div ref={wrapRef} className="relative flex-1 min-w-0">
+    <div ref={wrapRef} className="relative w-full min-w-0">
       <input value={open ? q : (value || '')} onChange={(e) => { setQ(e.target.value); setOpen(true) }} onFocus={() => { setQ(''); setOpen(true) }}
-        placeholder={value ? value : placeholder} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+        placeholder={value ? value : placeholder} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" />
       {open && (
         <div className="absolute z-40 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
           {matches.length === 0 && <div className="px-3 py-2 text-sm text-slate-400 font-body">No matches</div>}

@@ -1478,13 +1478,9 @@ function Card({ children }) {
 function FieldLabel({ children, noMargin }) {
   return <label className={`font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block ${noMargin ? '' : 'mb-1.5'}`}>{children}</label>
 }
+// Every dropdown in the app is a type-to-search picker (see components/pickers).
 function Select({ value, onChange, options, placeholder }) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white">
-      {placeholder && <option value="">{placeholder}</option>}
-      {options.map((o) => <option key={o}>{o}</option>)}
-    </select>
-  )
+  return <SearchSelect value={value} options={options} onPick={onChange} placeholder={placeholder || 'Search…'} />
 }
 function InfoChip({ label, value }) {
   return (
@@ -3477,10 +3473,7 @@ function Inventory({ products, deliveries, onAddDelivery }) {
           <div className="space-y-3">
             <div>
               <FieldLabel>Product</FieldLabel>
-              <select value={draft.product} onChange={(e) => handleProductPick(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white">
-                <option value="">Select product...</option>
-                {products.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-              </select>
+              <SearchSelect value={draft.product} options={products.map((p) => p.name)} onPick={handleProductPick} placeholder="Search products…" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -5245,7 +5238,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
             {orderedOps.length === 0 ? (
               <p className="font-body text-[11px] text-slate-400">Add crew in the Crew tab first.</p>
             ) : (
-              <PeoplePicker options={orderedOps} selected={assignees} onToggle={toggleAssignee} placeholder="Search crew to assign…" />
+              <MultiSelect selected={assignees} options={orderedOps} onToggle={toggleAssignee} placeholder="Search crew — tap to add several…" />
             )}
             <p className="font-body text-[10px] text-slate-400 mt-1">Add everyone on this job — they'll share one bubble on the board.</p>
           </div>
