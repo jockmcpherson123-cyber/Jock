@@ -5077,6 +5077,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
   const [openJobs, setOpenJobs] = useState({}) // jobKey -> open? each job is a drop-down box; tap to open and edit
   const [jobEquipDraft, setJobEquipDraft] = useState({}) // gk -> in-progress "add a tool" text
+  const [addJobOpen, setAddJobOpen] = useState(false) // the "Add a job" form is a drop-down — tap to open when you need it
   const [busy, setBusy] = useState(false)
   const [tx, setTx] = useState({})
   const toggleJob = (jk) => setOpenJobs((p) => ({ ...p, [jk]: !p[jk] }))
@@ -5228,8 +5229,14 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
       {msg && <div className="rounded-xl px-3 py-2 mb-3 font-body text-[12px] font-semibold" style={msg.type === 'ok' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}>{msg.text}</div>}
 
       {manage && (
-        <div className="bg-white rounded-2xl border-2 p-4 shadow-sm mb-4" style={{ borderColor: GOLD }}>
-          <p className="font-display text-base font-semibold text-slate-900 mb-2">Add a job{activeCourse ? ` — ${activeCourse}` : ''}</p>
+        <div className="bg-white rounded-2xl border-2 shadow-sm mb-4 overflow-hidden" style={{ borderColor: GOLD }}>
+          <button type="button" onClick={() => setAddJobOpen((v) => !v)} className="w-full flex items-center gap-2 px-4 py-3 text-left">
+            <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: FOREST, color: 'white' }}><Plus size={15} /></span>
+            <span className="font-display text-base font-semibold text-slate-900 flex-1">Add a job{activeCourse ? ` — ${activeCourse}` : ''}</span>
+            <ChevronRight size={18} className="text-slate-400 transition-transform" style={{ transform: addJobOpen ? 'rotate(90deg)' : 'none' }} />
+          </button>
+          {addJobOpen && (
+          <div className="px-4 pb-4">
           <div className="mb-2">
             <FieldLabel>Job</FieldLabel>
             <Combobox value={job} onChange={setJob} options={jobTypes} placeholder="Type to search jobs, or enter your own…" />
@@ -5272,6 +5279,8 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
             <p className="font-body text-[10px] text-slate-400 mt-1">Post a morning board first, then add 2nd / 3rd jobs as the day goes on — they show as separate sections on the TV.</p>
           </div>
           <button onClick={addTask} disabled={busy || !job.trim()} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Adding…' : `Add to board · ${slotLabel(slot)}`}</button>
+          </div>
+          )}
         </div>
       )}
 
