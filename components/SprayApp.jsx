@@ -30,6 +30,7 @@ import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
 import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget, diseasesForProduct } from '@/lib/fungicides'
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { localDateISO } from '@/lib/dates'
+import { sheetApplied } from '@/lib/applied'
 import PlaybookModule from '@/components/Playbook'
 import MowingRoutes from '@/components/MowingRoutes'
 import MowingDirections from '@/components/MowingDirections'
@@ -902,7 +903,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
     const lastByArea = {}
     const areaHasPGR = {} // only areas actually running a PGR program get tracked
     ;(sheets || [])
-      .filter((s) => (s.status === 'approved' || s.completed) && s.date)
+      .filter((s) => sheetApplied(s) && s.date)
       .forEach((s) => {
         const sup = (s.products || []).filter((p) => supMap[p.product])
         if (sup.length === 0) return
@@ -5963,7 +5964,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
   const lastByArea = {}
   const areaHasPGR = {}
   ;(sheets || [])
-    .filter((s) => (s.status === 'approved' || s.completed) && s.date)
+    .filter((s) => sheetApplied(s) && s.date)
     .forEach((s) => {
       const sup = (s.products || []).filter((p) => supMap[p.product])
       if (sup.length === 0) return
