@@ -31,6 +31,7 @@ import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget, diseas
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { localDateISO } from '@/lib/dates'
 import { sheetApplied } from '@/lib/applied'
+import { SearchSelect, MultiSelect } from '@/components/pickers'
 import PlaybookModule from '@/components/Playbook'
 import MowingRoutes from '@/components/MowingRoutes'
 import MowingDirections from '@/components/MowingDirections'
@@ -1613,10 +1614,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               return (
                 <div key={p.id} className="border rounded-xl p-3" style={{ borderColor: outOfRange ? '#FCA5A5' : '#E2E8F0' }}>
                   <div className="flex items-center gap-2 mb-2">
-                    <select value={p.product} onChange={(e) => handleProductSelect(p.id, e.target.value)} className="flex-1 border border-slate-200 rounded-lg px-2 py-2 text-sm font-body bg-white min-w-0">
-                      <option value="">Select product...</option>
-                      {products.map((pr) => <option key={pr.name} value={pr.name}>{pr.name}</option>)}
-                    </select>
+                    <SearchSelect value={p.product} options={products.map((pr) => pr.name)} onPick={(name) => handleProductSelect(p.id, name)} placeholder="Search products…" />
                     <button onClick={() => removeRow(p.id)} className="text-red-400 p-1 shrink-0"><Trash2 size={15} /></button>
                   </div>
                   {p.product && (
@@ -1636,24 +1634,12 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                         const t = String(prodInfo?.type || '').toLowerCase()
                         const tp = t.includes('growth') ? 'Growth Reg' : t.includes('herb') ? 'Weed control' : t.includes('insect') ? 'Insect control' : t.includes('fert') ? 'Feed / nutrition' : null
                         const sel = splitTargets(p.target)
-                        const opts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...(targetOptions || [])].filter(Boolean))).filter((o) => !sel.includes(o))
-                        const setSel = (arr) => updateProduct(p.id, { target: arr.join(', ') })
+                        const allOpts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...(targetOptions || [])].filter(Boolean)))
+                        const toggleT = (tg) => updateProduct(p.id, { target: (sel.includes(tg) ? sel.filter((x) => x !== tg) : [...sel, tg]).join(', ') })
                         return (
                           <div className="mb-2">
                             <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1 mb-1"><Target size={11} /> Spraying for</label>
-                            {sel.length > 0 && (
-                              <div className="flex flex-wrap gap-1.5 mb-1.5">
-                                {sel.map((tg) => (
-                                  <span key={tg} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ backgroundColor: '#EEF4EF', color: FERN, border: '1px solid #DCE8E0' }}>
-                                    {tg}<button type="button" onClick={() => setSel(sel.filter((x) => x !== tg))} className="opacity-60 hover:opacity-100">×</button>
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                            <select value="" onChange={(e) => { if (e.target.value) setSel([...sel, e.target.value]) }} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm font-body bg-white">
-                              <option value="">{sel.length ? '+ Add another…' : '— select what you’re spraying for —'}</option>
-                              {opts.map((o) => <option key={o} value={o}>{o}</option>)}
-                            </select>
+                            <MultiSelect selected={sel} options={allOpts} onToggle={toggleT} placeholder="Search what you’re spraying for — tap several…" />
                           </div>
                         )
                       })()}
