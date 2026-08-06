@@ -4936,7 +4936,7 @@ function PeoplePicker({ options = [], selected = [], onToggle, placeholder, max 
 
 // Inline "add a job" slot that lives right in the board (taskTracker-style):
 // type or pick a job, it commits and clears so the next blank line is ready.
-function AddJobRow({ options = [], onAdd, placeholder = 'Add a job…', max = 8 }) {
+function AddJobRow({ options = [], onAdd, placeholder = 'Add a job…', max = 100 }) {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
   const wrapRef = useRef(null)
