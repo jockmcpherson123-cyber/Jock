@@ -1514,6 +1514,16 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
     const prod = products.find((p) => p.name === name)
     updateProduct(id, { product: name, basis: prod?.basis || '', defaultRate: prod?.rate ?? null })
   }
+  // Add or remove a product from the tank mix — tap several at once, like the
+  // Annual Program. Fills a leading blank row first, else appends.
+  const toggleProductRow = (name) => setS((prev) => {
+    if (prev.products.some((p) => p.product === name)) return { ...prev, products: prev.products.filter((p) => p.product !== name) }
+    const prod = products.find((pr) => pr.name === name)
+    const filled = { product: name, basis: prod?.basis || '', defaultRate: prod?.rate ?? null }
+    const blankIdx = prev.products.findIndex((p) => !p.product)
+    if (blankIdx >= 0) { const copy = [...prev.products]; copy[blankIdx] = { ...copy[blankIdx], ...filled }; return { ...prev, products: copy } }
+    return { ...prev, products: [...prev.products, { id: uid(), rate: '', forceGal: false, ...filled }] }
+  })
   // A product line's target is a comma-joined string ("Dollar Spot, Brown Patch").
   const splitTargets = (str) => String(str || '').split(',').map((x) => x.trim()).filter(Boolean)
   // The sheet's overall targets are derived from the per-product "Spraying for"
@@ -1594,14 +1604,10 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
         })()}
 
         <Card>
-          <div className="flex items-center justify-between mb-2">
-            <FieldLabel noMargin>Products</FieldLabel>
-            <button onClick={addRow} className="font-body text-xs font-bold flex items-center gap-1" style={{ color: FERN }}>
-              <Plus size={13} /> Add
-            </button>
-          </div>
-          <div className="space-y-2.5">
-            {s.products.map((p) => {
+          <FieldLabel>Products</FieldLabel>
+          <MultiSelect selected={s.products.map((p) => p.product).filter(Boolean)} options={products.map((pr) => pr.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
+          <div className="space-y-2.5 mt-3">
+            {s.products.filter((p) => p.product).map((p) => {
               const { value: amt, unit: amtUnit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
               const total = amt !== null ? Math.round(amt * s.tanks * 10) / 10 : null
               const prodInfo = products.find((pr) => pr.name === p.product)
@@ -1614,7 +1620,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               return (
                 <div key={p.id} className="border rounded-xl p-3" style={{ borderColor: outOfRange ? '#FCA5A5' : '#E2E8F0' }}>
                   <div className="flex items-center gap-2 mb-2">
-                    <SearchSelect value={p.product} options={products.map((pr) => pr.name)} onPick={(name) => handleProductSelect(p.id, name)} placeholder="Search products…" />
+                    <span className="font-body text-sm font-bold flex-1 min-w-0 truncate" style={{ color: FOREST }}>{p.product}</span>
                     <button onClick={() => removeRow(p.id)} className="text-red-400 p-1 shrink-0"><Trash2 size={15} /></button>
                   </div>
                   {p.product && (
@@ -1695,51 +1701,6 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             })}
           </div>
         </Card>
-
-        {(() => {
-          const dids = [...new Set(productTargets.map(diseaseIdForTarget).filter(Boolean))]
-          if (dids.length === 0) return null
-          const tankProducts = (s.products || []).filter((p) => p.product).map((p) => ({ name: p.product }))
-          const nameOf = (id) => PROFILES.find((p) => p.id === id)?.name || id
-          return (
-            <Card>
-              <FieldLabel>Rated fungicides for your targets</FieldLabel>
-              <div className="space-y-3 mt-2">
-                {dids.map((did) => {
-                  const src = ratingsSourceFor(did)
-                  if (!src) return null
-                  const list = fungicidesFor(did, src)
-                    .map((f) => ({ ...f, owned: !!ownedMatch(f, products), inTank: !!ownedMatch(f, tankProducts) }))
-                    .sort((a, b) => (b.owned ? 1 : 0) - (a.owned ? 1 : 0) || b.score - a.score)
-                    .slice(0, 6)
-                  return (
-                    <div key={did}>
-                      <p className="font-body text-[11px] font-bold text-slate-500 mb-1.5">{nameOf(did)} <span className="font-normal text-slate-400">· {src === 'Rutgers' ? 'Rutgers 1–4' : 'NC State ++'}</span></p>
-                      <div className="space-y-1.5">
-                        {list.map((f, i) => {
-                          const sc = f.score >= 3.5 ? { bg: '#DDEEDF', fg: '#2E7D46' } : f.score >= 2.5 ? { bg: '#FBF0D5', fg: '#9A6B12' } : { bg: '#EEF1F4', fg: '#64748B' }
-                          return (
-                            <div key={i} className="flex items-center gap-2" style={{ opacity: f.owned || f.inTank ? 1 : 0.7 }}>
-                              <span className="font-body text-[11px] font-bold rounded px-1.5 py-0.5 shrink-0 w-9 text-center" style={{ backgroundColor: sc.bg, color: sc.fg }}>{f.rating}</span>
-                              <div className="min-w-0 flex-1">
-                                <p className="font-body text-[12px] font-semibold text-slate-800 truncate">{f.trade || f.ai}
-                                  {f.inTank && <span className="font-body text-[10px] font-bold ml-1.5" style={{ color: '#2563EB' }}>• in tank</span>}
-                                  {!f.inTank && f.owned && <span className="font-body text-[10px] font-bold ml-1.5" style={{ color: '#2E7D46' }}>✓ in library</span>}
-                                </p>
-                                <p className="font-body text-[10px] text-slate-400 truncate">{f.ai}{f.frac ? ` · FRAC ${f.frac}` : ''}{f.interval ? ` · every ${f.interval} d` : ''}</p>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-              <p className="font-body text-[10px] text-slate-400 mt-2.5">Best-rated first, the ones you own on top. Rotate FRAC codes between sprays to prevent resistance; always follow the label.</p>
-            </Card>
-          )
-        })()}
 
         <Card>
           <FieldLabel>Instructions</FieldLabel>

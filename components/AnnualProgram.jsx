@@ -1037,7 +1037,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 
             <div>
               <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Products in the tank</label>
-              <MultiSelect selected={editApp.products.map((r) => r.product).filter(Boolean)} options={products.map((p) => p.name)} onToggle={toggleProductRow} placeholder="Search products — tap to add several…" />
+              <MultiSelect selected={editApp.products.map((r) => r.product).filter(Boolean)} options={products.map((p) => p.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
               <div className="space-y-2 mt-2">
                 {editApp.products.filter((r) => r.product).map((r) => (
                   <div key={r.key} className="rounded-xl border border-slate-100 p-2.5" style={{ backgroundColor: '#F8FAF9' }}>

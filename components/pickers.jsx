@@ -40,7 +40,7 @@ export function SearchSelect({ value, options = [], onPick, placeholder = 'Searc
 
 // Searchable multi-select that stays open — chips above, tap options to toggle
 // several at once without re-opening.
-export function MultiSelect({ selected = [], options = [], onToggle, placeholder = 'Search…', accent = FERN }) {
+export function MultiSelect({ selected = [], options = [], onToggle, placeholder = 'Search…', accent = FERN, hideChips = false }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const wrapRef = useRef(null)
@@ -54,7 +54,7 @@ export function MultiSelect({ selected = [], options = [], onToggle, placeholder
   const matches = query ? sorted.filter((o) => String(o).toLowerCase().includes(query)) : sorted
   return (
     <div ref={wrapRef} className="relative">
-      {selected.length > 0 && (
+      {!hideChips && selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-1.5">
           {selected.map((tg) => (
             <span key={tg} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ backgroundColor: '#EAF2EC', color: accent, border: '1px solid #D5E5DA' }}>
