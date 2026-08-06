@@ -5200,6 +5200,17 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
     const t = view.find((x) => (x.job || '—') === jk && (x.slot || '1') === s && x.assignee === name)
     if (t) remove(t.id)
   }
+  // Move a person to this job — take them off every other job first, then add.
+  const movePersonToJob = async (name, jk, s = '1') => {
+    try {
+      const others = view.filter((t) => t.assignee === name && !((t.job || '—') === jk && (t.slot || '1') === s))
+      for (const t of others) {
+        await db.deleteCrewTask(t.id)
+        if (isGreensMow(t.job)) await assignGreens(t.job, t.slot || '1') // re-split the job they left
+      }
+      await addPersonToJob(jk, name, s) // this reloads at the end
+    } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
+  }
   // Edit the note on a whole job group (the note is shared across its people).
   const saveJobNote = async (jk, text, s = '1') => {
     const inGroup = view.filter((t) => (t.job || '—') === jk && (t.slot || '1') === s)
@@ -5499,11 +5510,12 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ backgroundColor: 'rgba(15,23,42,0.45)' }} onClick={() => setConfirmAssign(null)}>
           <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5" onClick={(e) => e.stopPropagation()}>
             <p className="font-body text-sm text-slate-700 text-center leading-relaxed">
-              <b>{confirmAssign.name}</b> is already on {confirmAssign.others.join(', ')}. Put {confirmAssign.name} on <b>{confirmAssign.jk}</b> as well?
+              <b>{confirmAssign.name}</b> is on {confirmAssign.others.join(', ')}. Move {confirmAssign.name} to <b>{confirmAssign.jk}</b>?
             </p>
+            <p className="font-body text-[11px] text-slate-400 text-center mt-1">They'll be taken off {confirmAssign.others.length > 1 ? 'those jobs' : 'that job'}.</p>
             <div className="flex gap-2 mt-4">
               <button type="button" onClick={() => setConfirmAssign(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Cancel</button>
-              <button type="button" onClick={() => { const c = confirmAssign; setConfirmAssign(null); addPersonToJob(c.jk, c.name, c.s) }} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: FOREST }}>Add to job</button>
+              <button type="button" onClick={() => { const c = confirmAssign; setConfirmAssign(null); movePersonToJob(c.name, c.jk, c.s) }} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: FOREST }}>Move here</button>
             </div>
           </div>
         </div>
