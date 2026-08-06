@@ -5075,13 +5075,11 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [slot, setSlot] = useState('1') // '1' | '2' | '3' — which round of the day
   const [course, setCourse] = useState('')
   const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
-  const [openJobs, setOpenJobs] = useState({}) // jobKey -> open? (undefined = open by default, so the whole board reads at a glance)
-  const [addingJob, setAddingJob] = useState(null) // jobKey whose add-person picker is open
-  const [editingNoteJob, setEditingNoteJob] = useState(null) // jobKey whose note is being edited
-  const [noteDraft, setNoteDraft] = useState('')
+  const [openJobs, setOpenJobs] = useState({}) // jobKey -> open? each job is a drop-down box; tap to open and edit
+  const [jobEquipDraft, setJobEquipDraft] = useState({}) // gk -> in-progress "add a tool" text
   const [busy, setBusy] = useState(false)
   const [tx, setTx] = useState({})
-  const toggleJob = (jk) => setOpenJobs((p) => ({ ...p, [jk]: p[jk] === false })) // default open; a stored false means collapsed
+  const toggleJob = (jk) => setOpenJobs((p) => ({ ...p, [jk]: !p[jk] }))
 
   const courseNames = courses.map((c) => c.name)
   const hasCourses = courseNames.length >= 2
@@ -5161,6 +5159,13 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
     setTasks((prev) => prev.map((t) => (inGroup.some((g) => g.id === t.id) ? { ...t, notes: text } : t)))
     setEditingNoteJob(null)
     try { await Promise.all(inGroup.map((t) => db.updateCrewTask({ ...t, notes: text }))) } catch (e) { console.error(e); reload() }
+  }
+  // Attach / change the equipment on a whole job group (shared across its people).
+  const saveJobEquip = async (jk, tools, s = '1') => {
+    const inGroup = view.filter((t) => (t.job || '—') === jk && (t.slot || '1') === s)
+    const eq = tools.join(', ')
+    setTasks((prev) => prev.map((t) => (inGroup.some((g) => g.id === t.id) ? { ...t, equipment: eq } : t)))
+    try { await Promise.all(inGroup.map((t) => db.updateCrewTask({ ...t, equipment: eq }))) } catch (e) { console.error(e); reload() }
   }
   // Remove a whole job group (of one round) for the day (only rows in view).
   const removeJobGroup = async (jk, s = '1') => {
@@ -5342,36 +5347,79 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
             const gk = `${s}::${jk}`
             const list = sGroups[jk]
             const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
-            const open = openJobs[gk] !== false // open by default so the whole board reads at a glance
+            const open = !!openJobs[gk] // each job is a drop-down box — closed by default so you scan your list, open to edit
             const alreadyOn = list.map((t) => t.assignee).filter(Boolean)
-            // A note that's the SAME on every task is a shared job note (shown once
-            // up top). Different notes per task — e.g. each mower's greens — are
-            // per-person and shown under each name instead.
+            const crewSummary = alreadyOn.length ? alreadyOn.join(', ') : 'No one assigned yet'
+            const groupTools = [...new Set(list.flatMap((t) => (t.equipment || '').split(',').map((x) => x.trim()).filter(Boolean)))]
+            // A note that's the SAME on every task is a shared job note. Different
+            // notes per task — e.g. each mower's greens — are per-person.
             const distinctNotes = [...new Set(list.map((t) => (t.notes || '').trim()).filter(Boolean))]
             const sharedNote = distinctNotes.length === 1 && list.every((t) => (t.notes || '').trim() === distinctNotes[0]) ? distinctNotes[0] : ''
             const perPersonNotes = distinctNotes.length > 0 && !sharedNote
             return (
               <div key={gk} style={{ borderTop: jobIdx > 0 ? '1px solid #EDF1EE' : 'none' }}>
-                {/* Job header row — numbered, with its people count and controls */}
-                <div className="flex items-center gap-2 pl-2 pr-1.5 py-2" style={{ backgroundColor: '#F6FAF7' }}>
+                {/* Job drop-down header — tap to open the box and edit it */}
+                <div className="flex items-center gap-2 pl-2 pr-1.5 py-2" style={{ backgroundColor: open ? '#EAF2EC' : '#F6FAF7' }}>
                   <span className="shrink-0 inline-flex items-center justify-center font-body text-[12px] font-extrabold rounded-md" style={{ width: 22, height: 22, backgroundColor: '#E4EEE7', color: FOREST }}>{jobIdx + 1}</span>
-                  <button onClick={() => toggleJob(gk)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
-                    <p className="font-body font-bold text-sm text-slate-900 truncate">{jk}</p>
-                    <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>
+                  <button onClick={() => toggleJob(gk)} className="flex items-start gap-2 flex-1 min-w-0 text-left">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-body font-bold text-sm text-slate-900 truncate">{jk}</p>
+                        <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>
+                      </div>
+                      {!open && <p className="font-body text-[11px] text-slate-400 truncate mt-0.5">{crewSummary}{groupTools.length ? ` · ${groupTools.join(', ')}` : ''}</p>}
+                    </div>
                   </button>
-                  {manage && <button onClick={() => { setAddingJob(addingJob === gk ? null : gk); setOpenJobs((p) => ({ ...p, [gk]: true })) }} className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition" style={{ backgroundColor: addingJob === gk ? FERN : 'transparent', color: addingJob === gk ? 'white' : '#64748B' }} aria-label="Add person to this job"><UserPlus size={16} /></button>}
                   {manage && <button onClick={() => removeJobGroup(jk, s)} className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-500 transition" aria-label="Remove job"><Trash2 size={15} /></button>}
                   <button onClick={() => toggleJob(gk)} className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" aria-label={open ? 'Collapse' : 'Expand'}><ChevronRight size={16} className="text-slate-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></button>
                 </div>
-                {open && (
+                {open && (manage ? (
+                <div className="px-2.5 pt-2.5 pb-3 space-y-3">
+                  {/* Crew — who's on it, add or remove */}
+                  <div>
+                    <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Crew</p>
+                    {list.map((t, pi) => (
+                      <div key={t.id} className="flex items-center gap-2.5 py-1.5" style={{ borderTop: pi > 0 ? '1px solid #F1F4F2' : 'none' }}>
+                        <span className="shrink-0 self-stretch rounded-full" style={{ width: 3, backgroundColor: FERN }} />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee || 'Unassigned'}</p>
+                          {perPersonNotes && t.notes && <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>}
+                        </div>
+                        <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={14} /></button>
+                      </div>
+                    ))}
+                    <div className="mt-1.5">
+                      <PeoplePicker options={orderedOps.filter((n) => !alreadyOn.includes(n))} selected={[]} onToggle={(name) => addPersonToJob(jk, name, s)} placeholder={`Add crew to ${jk}…`} />
+                    </div>
+                  </div>
+                  {/* Note — write anything the crew needs for this job */}
+                  {!perPersonNotes && (
+                    <div>
+                      <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Note</p>
+                      <input key={`${gk}:${sharedNote}`} defaultValue={sharedNote} onBlur={(e) => { const v = e.target.value.trim(); if (v !== sharedNote) saveJobNote(jk, v, s) }} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} placeholder="Write a note for this job…" className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-[13px] font-body" />
+                    </div>
+                  )}
+                  {/* Equipment — attach the tools for this job */}
+                  <div>
+                    <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Equipment</p>
+                    {groupTools.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-1.5">
+                        {groupTools.map((tool) => (
+                          <span key={tool} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{tool}<button type="button" onClick={() => saveJobEquip(jk, groupTools.filter((x) => x !== tool), s)} className="opacity-60 hover:opacity-100">×</button></span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <div className="flex-1 min-w-0"><Combobox value={jobEquipDraft[gk] || ''} onChange={(v) => setJobEquipDraft((p) => ({ ...p, [gk]: v }))} options={equipment} accent={FERN} placeholder="Add a tool…" /></div>
+                      <button type="button" onClick={() => { const v = (jobEquipDraft[gk] || '').trim(); if (v && !groupTools.includes(v)) saveJobEquip(jk, [...groupTools, v], s); setJobEquipDraft((p) => ({ ...p, [gk]: '' })) }} disabled={!(jobEquipDraft[gk] || '').trim()} className="font-body text-sm font-bold px-3.5 rounded-xl text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FERN }}>+</button>
+                    </div>
+                  </div>
+                </div>
+                ) : (
                 <div className="px-2.5 pt-2 pb-2.5">
+                  {/* Crew-facing read-only view keeps the direction badge, notes, tools */}
                   {langs.map((l) => <p key={l} className="font-body text-[11px] text-slate-400 italic mb-0.5 px-1">{txGet(tx, l, jk) || jk} <span className="not-italic">· {(CREW_LANGS.find(([c]) => c === l) || [])[1] || l}</span></p>)}
                   {(() => {
-                    // Auto-dump today's mow direction for this surface (greens rotate
-                    // daily on their own; fairways step on "Apply next"). Derived from
-                    // the job title + date, so nothing extra is stored on the task.
-                    // Only for crew-facing views — the super's build board stays clean.
-                    if (manage) return null
                     const cn = list[0]?.course || activeCourse || ''
                     const dir = directionForJob(settings.courseInfo || {}, cn, jk, date)
                     if (!dir) return null
@@ -5385,19 +5433,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                       </div>
                     )
                   })()}
-                  {(() => {
-                    if (editingNoteJob === gk) {
-                      return (
-                        <div className="flex items-center gap-2 mb-2">
-                          <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveJobNote(jk, noteDraft.trim(), s) }} autoFocus placeholder="Note for this job…" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] font-body" />
-                          <button type="button" onClick={() => saveJobNote(jk, noteDraft.trim(), s)} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-lg text-white shrink-0" style={{ backgroundColor: FOREST }}>Save</button>
-                          <button type="button" onClick={() => setEditingNoteJob(null)} className="text-slate-400 shrink-0" aria-label="Cancel"><X size={15} /></button>
-                        </div>
-                      )
-                    }
-                    // Per-person notes (each mower's greens) show under each name — nothing up here.
-                    if (perPersonNotes) return null
-                    if (!sharedNote) return manage ? <button type="button" onClick={() => { setEditingNoteJob(gk); setNoteDraft('') }} className="font-body text-[11px] font-bold mb-2 flex items-center gap-1" style={{ color: '#B07A16' }}><Plus size={12} /> Add note</button> : null
+                  {!perPersonNotes && sharedNote && (() => {
                     const noteVariants = langs.map((l) => txGet(tx, l, sharedNote)).filter((v) => v && v !== sharedNote)
                     return (
                       <div className="flex items-start gap-1.5 mb-2 rounded-lg" style={{ backgroundColor: '#FFFBEB', border: '1px solid #FDE9C8', padding: '6px 8px' }}>
@@ -5406,40 +5442,31 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                           <p className="font-body text-[11px]" style={{ color: '#8A5A12' }}>{sharedNote}</p>
                           {noteVariants.map((v, i) => <p key={i} className="font-body text-[11px] italic" style={{ color: '#A98547' }}>{v}</p>)}
                         </div>
-                        {manage && <button type="button" onClick={() => { setEditingNoteJob(gk); setNoteDraft(sharedNote) }} className="font-body text-[10px] font-bold shrink-0" style={{ color: '#B07A16' }}>Edit</button>}
                       </div>
                     )
                   })()}
-                  {manage && addingJob === gk && (
-                    <div className="mb-2">
-                      <PeoplePicker options={orderedOps.filter((n) => !alreadyOn.includes(n))} selected={[]} onToggle={(name) => addPersonToJob(jk, name, s)} placeholder={`Add crew to ${jk}…`} />
-                    </div>
-                  )}
                   <div>
                     {list.map((t, pi) => {
-                      const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
+                      const tools = (t.equipment || '').split(',').map((x) => x.trim()).filter(Boolean)
                       const lang = crew[t.assignee]?.lang
                       return (
                         <div key={t.id} className="flex items-center gap-2.5 py-1.5" style={{ borderTop: pi > 0 ? '1px solid #F1F4F2' : 'none' }}>
                           <span className="shrink-0 self-stretch rounded-full" style={{ width: 3, backgroundColor: FERN }} />
                           <div className="min-w-0 flex-1">
                             <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee || 'Unassigned'}</p>
-                            {perPersonNotes && t.notes && (
-                              <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>
-                            )}
+                            {perPersonNotes && t.notes && <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>}
                             {tools.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-0.5 items-center">
                                 {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}
                               </div>
                             )}
                           </div>
-                          {manage && <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={14} /></button>}
                         </div>
                       )
                     })}
                   </div>
                 </div>
-                )}
+                ))}
               </div>
             )
           })}
@@ -5450,7 +5477,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
         </div>
       )}
 
-      <p className="font-body text-[10px] text-slate-400 mt-4 text-center">Every job shows its crew at a glance. Tap the arrow to fold one up; add people with the + on each job.</p>
+      <p className="font-body text-[10px] text-slate-400 mt-4 text-center">Each job is a drop-down box — you see the job and who's on it; tap to open and edit the crew, note and equipment.</p>
     </div>
   )
 }
