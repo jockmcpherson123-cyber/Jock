@@ -5368,19 +5368,15 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
             return (
               <div key={gk} style={{ borderTop: jobIdx > 0 ? '1px solid #EDF1EE' : 'none' }}>
                 {/* Job drop-down header — tap to open the box and edit it */}
-                <div className="flex items-center gap-2 pl-2 pr-1.5 py-2" style={{ backgroundColor: open ? '#EAF2EC' : '#F6FAF7' }}>
-                  <span className="shrink-0 inline-flex items-center justify-center font-body text-[12px] font-extrabold rounded-md" style={{ width: 22, height: 22, backgroundColor: '#E4EEE7', color: FOREST }}>{jobIdx + 1}</span>
-                  <button onClick={() => toggleJob(gk)} className="flex items-start gap-2 flex-1 min-w-0 text-left">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-body font-bold text-sm text-slate-900 truncate">{jk}</p>
-                        <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>
-                      </div>
-                      {!open && <p className="font-body text-[11px] text-slate-400 truncate mt-0.5">{crewSummary}{groupTools.length ? ` · ${groupTools.join(', ')}` : ''}</p>}
-                    </div>
+                <div className="flex items-center gap-2 pl-2 pr-1 py-1.5" style={{ backgroundColor: open ? '#EAF2EC' : '#F6FAF7' }}>
+                  <span className="shrink-0 inline-flex items-center justify-center font-body text-[11px] font-extrabold rounded" style={{ width: 20, height: 20, backgroundColor: '#E4EEE7', color: FOREST }}>{jobIdx + 1}</span>
+                  <button onClick={() => toggleJob(gk)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
+                    <p className="font-body font-bold text-sm text-slate-900 truncate shrink-0 max-w-[55%]">{jk}</p>
+                    <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>
+                    {!open && crewSummary && <span className="font-body text-[11px] text-slate-400 truncate">· {crewSummary}</span>}
                   </button>
-                  {manage && <button onClick={() => removeJobGroup(jk, s)} className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-500 transition" aria-label="Remove job"><Trash2 size={15} /></button>}
-                  <button onClick={() => toggleJob(gk)} className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" aria-label={open ? 'Collapse' : 'Expand'}><ChevronRight size={16} className="text-slate-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></button>
+                  {manage && <button onClick={() => removeJobGroup(jk, s)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-500 transition" aria-label="Remove job"><Trash2 size={14} /></button>}
+                  <button onClick={() => toggleJob(gk)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" aria-label={open ? 'Collapse' : 'Expand'}><ChevronRight size={16} className="text-slate-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></button>
                 </div>
                 {open && (manage ? (
                 <div className="px-2.5 pt-2.5 pb-3 space-y-3">
