@@ -5213,10 +5213,18 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
   }
   // Edit the note on a whole job group (the note is shared across its people).
+  // Whole-crew note — the same message shown to everyone on the job (group_note).
   const saveJobNote = async (jk, text, s = '1') => {
     const inGroup = view.filter((t) => (t.job || '—') === jk && (t.slot || '1') === s)
-    setTasks((prev) => prev.map((t) => (inGroup.some((g) => g.id === t.id) ? { ...t, notes: text } : t)))
-    try { await Promise.all(inGroup.map((t) => db.updateCrewTask({ ...t, notes: text }))) } catch (e) { console.error(e); reload() }
+    setTasks((prev) => prev.map((t) => (inGroup.some((g) => g.id === t.id) ? { ...t, groupNote: text } : t)))
+    try { await Promise.all(inGroup.map((t) => db.updateCrewTask({ ...t, groupNote: text }))) } catch (e) { console.error(e); reload() }
+  }
+  // Individual note for one person on the job (their own `notes` line).
+  const savePersonNote = async (id, text) => {
+    const t = tasks.find((x) => x.id === id)
+    if (!t) return
+    setTasks((prev) => prev.map((x) => (x.id === id ? { ...x, notes: text } : x)))
+    try { await db.updateCrewTask({ ...t, notes: text }) } catch (e) { console.error(e); reload() }
   }
   // Attach / change the equipment on a whole job group (shared across its people).
   const saveJobEquip = async (jk, tools, s = '1') => {
@@ -5373,11 +5381,10 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
             const alreadyOn = list.map((t) => t.assignee).filter(Boolean)
             const crewSummary = alreadyOn.length ? alreadyOn.join(', ') : 'No one assigned yet'
             const groupTools = [...new Set(list.flatMap((t) => (t.equipment || '').split(',').map((x) => x.trim()).filter(Boolean)))]
-            // A note that's the SAME on every task is a shared job note. Different
-            // notes per task — e.g. each mower's greens — are per-person.
-            const distinctNotes = [...new Set(list.map((t) => (t.notes || '').trim()).filter(Boolean))]
-            const sharedNote = distinctNotes.length === 1 && list.every((t) => (t.notes || '').trim() === distinctNotes[0]) ? distinctNotes[0] : ''
-            const perPersonNotes = distinctNotes.length > 0 && !sharedNote
+            // Two note levels: a whole-crew note (group_note, same for everyone)
+            // and each person's own note (their `notes` line).
+            const groupNoteVal = (list.find((t) => (t.groupNote || '').trim()) || {}).groupNote || ''
+            const anyPersonNote = list.some((t) => t.assignee && (t.notes || '').trim())
             return (
               <div key={gk} style={{ borderTop: jobIdx > 0 ? '1px solid #EDF1EE' : 'none' }}>
                 {/* Job drop-down header — tap to open the box and edit it */}
@@ -5404,7 +5411,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                         <span className="shrink-0 self-stretch rounded-full" style={{ width: 3, backgroundColor: FERN }} />
                         <div className="min-w-0 flex-1">
                           <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee}</p>
-                          {perPersonNotes && t.notes && <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>}
                         </div>
                         <button onClick={() => remove(t.id)} className="w-10 h-10 -mr-1 flex items-center justify-center text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={16} /></button>
                       </div>
@@ -5419,11 +5425,23 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                       }} hideChips autoOpen={crewAddJob === gk} dimmed={assignedToday} dimmedLabel="on a job" placeholder="Add crew — tap to check people on…" />
                     </div>
                   </div>
-                  {/* Note — write anything the crew needs for this job */}
-                  {!perPersonNotes && (
+                  {/* Crew note — one message for everyone on the job */}
+                  <div>
+                    <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Crew note <span className="font-normal normal-case tracking-normal">· everyone on this job</span></p>
+                    <input key={`${gk}:gn:${groupNoteVal}`} defaultValue={groupNoteVal} onBlur={(e) => { const v = e.target.value.trim(); if (v !== groupNoteVal) saveJobNote(jk, v, s) }} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} placeholder="A note for the whole crew on this job…" className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-base font-body" />
+                  </div>
+                  {/* Individual notes — one per person on the job */}
+                  {alreadyOn.length > 0 && (
                     <div>
-                      <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Note</p>
-                      <input key={`${gk}:${sharedNote}`} defaultValue={sharedNote} onBlur={(e) => { const v = e.target.value.trim(); if (v !== sharedNote) saveJobNote(jk, v, s) }} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} placeholder="Write a note for this job…" className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-base font-body" />
+                      <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Individual notes</p>
+                      <div className="space-y-1.5">
+                        {list.filter((t) => t.assignee).map((t) => (
+                          <div key={t.id} className="flex items-center gap-2">
+                            <span className="font-body text-[12px] font-semibold text-slate-600 shrink-0 truncate" style={{ width: 92 }}>{t.assignee}</span>
+                            <input key={`${t.id}:in:${t.notes}`} defaultValue={t.notes} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (t.notes || '')) savePersonNote(t.id, v) }} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} placeholder={`Note for ${(t.assignee || '').split(' ')[0]}…`} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-base font-body" />
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {/* Equipment — attach the tools for this job */}
@@ -5460,13 +5478,13 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                       </div>
                     )
                   })()}
-                  {!perPersonNotes && sharedNote && (() => {
-                    const noteVariants = langs.map((l) => txGet(tx, l, sharedNote)).filter((v) => v && v !== sharedNote)
+                  {groupNoteVal && (() => {
+                    const noteVariants = langs.map((l) => txGet(tx, l, groupNoteVal)).filter((v) => v && v !== groupNoteVal)
                     return (
                       <div className="flex items-start gap-1.5 mb-2 rounded-lg" style={{ backgroundColor: '#FFFBEB', border: '1px solid #FDE9C8', padding: '6px 8px' }}>
                         <Info size={13} style={{ color: '#B07A16' }} className="shrink-0 mt-0.5" />
                         <div className="min-w-0 flex-1">
-                          <p className="font-body text-[11px]" style={{ color: '#8A5A12' }}>{sharedNote}</p>
+                          <p className="font-body text-[11px]" style={{ color: '#8A5A12' }}>{groupNoteVal}</p>
                           {noteVariants.map((v, i) => <p key={i} className="font-body text-[11px] italic" style={{ color: '#A98547' }}>{v}</p>)}
                         </div>
                       </div>
@@ -5481,7 +5499,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                           <span className="shrink-0 self-stretch rounded-full" style={{ width: 3, backgroundColor: FERN }} />
                           <div className="min-w-0 flex-1">
                             <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee || 'Unassigned'}</p>
-                            {perPersonNotes && t.notes && <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>}
+                            {t.notes && <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>}
                             {tools.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-0.5 items-center">
                                 {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}
