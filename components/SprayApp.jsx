@@ -1500,7 +1500,6 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
 
   const update = (patch) => setS((prev) => ({ ...prev, ...patch }))
   const updateProduct = (id, patch) => setS((prev) => ({ ...prev, products: prev.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))
-  const addRow = () => setS((prev) => ({ ...prev, products: [...prev.products, { id: uid(), product: '', rate: '', basis: '', forceGal: false }] }))
   const removeRow = (id) => setS((prev) => ({ ...prev, products: prev.products.filter((p) => p.id !== id) }))
 
   // Area is now the sheet's identity — keep sheetType mirroring it so older
