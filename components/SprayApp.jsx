@@ -5106,6 +5106,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
   const [openJobs, setOpenJobs] = useState({}) // jobKey -> open? accordion — only one job box open at a time
   const [jobEquipDraft, setJobEquipDraft] = useState({}) // gk -> in-progress "add a tool" text
+  const [confirmAssign, setConfirmAssign] = useState(null) // { name, jk, s, others } when adding someone already on a job
   const [tx, setTx] = useState({})
   // Accordion: opening a job closes any other that's open, so the board stays tidy.
   const toggleJob = (jk) => setOpenJobs((p) => (p[jk] ? {} : { [jk]: true }))
@@ -5397,7 +5398,12 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                     ))}
                     {alreadyOn.length === 0 && <p className="font-body text-[12px] text-slate-400 py-1">No one on this job yet — add crew below.</p>}
                     <div className="mt-1.5">
-                      <MultiSelect selected={alreadyOn} options={orderedOps} onToggle={(name) => (alreadyOn.includes(name) ? removePersonFromJob(jk, name, s) : addPersonToJob(jk, name, s))} hideChips dimmed={assignedToday} dimmedLabel="on a job" placeholder="Add crew — tap to check people on…" />
+                      <MultiSelect selected={alreadyOn} options={orderedOps} onToggle={(name) => {
+                        if (alreadyOn.includes(name)) { removePersonFromJob(jk, name, s); return }
+                        const others = [...new Set(view.filter((t) => t.assignee === name).map((t) => t.job).filter(Boolean))]
+                        if (others.length) { setConfirmAssign({ name, jk, s, others }); return }
+                        addPersonToJob(jk, name, s)
+                      }} hideChips dimmed={assignedToday} dimmedLabel="on a job" placeholder="Add crew — tap to check people on…" />
                     </div>
                   </div>
                   {/* Note — write anything the crew needs for this job */}
@@ -5488,6 +5494,20 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
         })()}
 
       <p className="font-body text-[10px] text-slate-400 mt-4 text-center">Pick a job in the “Add a job” line and it drops onto the board; tap any job to open it and set the crew, note and equipment.</p>
+
+      {confirmAssign && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ backgroundColor: 'rgba(15,23,42,0.45)' }} onClick={() => setConfirmAssign(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5" onClick={(e) => e.stopPropagation()}>
+            <p className="font-body text-sm text-slate-700 text-center leading-relaxed">
+              <b>{confirmAssign.name}</b> is already on {confirmAssign.others.join(', ')}. Put {confirmAssign.name} on <b>{confirmAssign.jk}</b> as well?
+            </p>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setConfirmAssign(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Cancel</button>
+              <button type="button" onClick={() => { const c = confirmAssign; setConfirmAssign(null); addPersonToJob(c.jk, c.name, c.s) }} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: FOREST }}>Add to job</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
