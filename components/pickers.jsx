@@ -35,7 +35,7 @@ export function SearchSelect({ value, options = [], onPick, placeholder = 'Searc
   return (
     <div ref={wrapRef} className="relative w-full min-w-0">
       <input value={open ? q : shown} onChange={(e) => { setQ(e.target.value); setOpen(true) }} onFocus={() => { setQ(''); setOpen(true) }}
-        placeholder={shown || placeholder} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" />
+        placeholder={shown || placeholder} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body bg-white" />
       {open && (
         <div className="absolute z-40 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto overscroll-contain">
           {matches.length === 0 && <div className="px-3 py-2 text-sm text-slate-400 font-body">No matches</div>}
@@ -77,7 +77,7 @@ export function MultiSelect({ selected = [], options = [], onToggle, placeholder
         </div>
       )}
       <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)} placeholder={placeholder}
-        className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+        className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-base font-body bg-white" />
       {open && (
         <div className="absolute z-40 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
           {matches.length === 0 && <div className="px-3 py-2 text-sm text-slate-400 font-body">No matches</div>}
@@ -85,8 +85,8 @@ export function MultiSelect({ selected = [], options = [], onToggle, placeholder
             const on = selected.includes(o)
             const busy = !on && dimmed.includes(o)
             return (
-              <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); onToggle(o) }} className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50 flex items-center gap-2" style={busy ? { backgroundColor: '#F8FAFB' } : {}}>
-                <span className="inline-flex items-center justify-center rounded shrink-0" style={{ width: 16, height: 16, border: `1.5px solid ${on ? accent : '#CBD5E1'}`, backgroundColor: on ? accent : 'white' }}>{on && <Check size={11} color="white" />}</span>
+              <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); onToggle(o) }} className="w-full text-left px-3 py-3 text-base font-body hover:bg-slate-50 flex items-center gap-2.5" style={busy ? { backgroundColor: '#F8FAFB' } : {}}>
+                <span className="inline-flex items-center justify-center rounded shrink-0" style={{ width: 20, height: 20, border: `1.5px solid ${on ? accent : '#CBD5E1'}`, backgroundColor: on ? accent : 'white' }}>{on && <Check size={13} color="white" />}</span>
                 <span className="flex-1" style={busy ? { color: '#94A3B8' } : {}}>{o}</span>
                 {busy && <span className="font-body text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF1F4', color: '#94A3B8' }}>{dimmedLabel}</span>}
               </button>

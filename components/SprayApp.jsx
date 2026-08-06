@@ -4881,7 +4881,7 @@ function Combobox({ value, onChange, options = [], placeholder, accent = FOREST,
         onChange={(e) => { setQ(e.target.value); onChange(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
         placeholder={placeholder}
-        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body"
+        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body"
       />
       {open && (matches.length > 0 || (query && !exact)) && (
         <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto overscroll-contain">
@@ -4954,14 +4954,14 @@ function AddJobRow({ options = [], onAdd, placeholder = 'Add a job…', max = 10
       <span className="shrink-0 inline-flex items-center justify-center rounded" style={{ width: 20, height: 20, backgroundColor: '#EAF2EC', color: FERN }}><Plus size={13} /></span>
       <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)}
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(q) } }}
-        placeholder={placeholder} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body bg-white" />
+        placeholder={placeholder} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2.5 text-base font-body bg-white" />
       {open && (matches.length > 0 || (query && !exact)) && (
         <div className="absolute z-30 left-8 right-2 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto overscroll-contain">
           {matches.map((o) => (
-            <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); commit(o) }} className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50">{o}</button>
+            <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); commit(o) }} className="w-full text-left px-3 py-3 text-base font-body hover:bg-slate-50">{o}</button>
           ))}
           {query && !exact && (
-            <button type="button" onMouseDown={(e) => { e.preventDefault(); commit(q) }} className="w-full text-left px-3 py-2 text-sm font-body font-semibold hover:bg-slate-50" style={{ color: FERN }}>Use “{q.trim()}”</button>
+            <button type="button" onMouseDown={(e) => { e.preventDefault(); commit(q) }} className="w-full text-left px-3 py-3 text-base font-body font-semibold hover:bg-slate-50" style={{ color: FERN }}>Use “{q.trim()}”</button>
           )}
         </div>
       )}
@@ -5389,8 +5389,8 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                     </span>
                     {!open && <span className="block font-body text-[12px] text-slate-500 mt-0.5 leading-snug">{crewSummary}</span>}
                   </button>
-                  {manage && <button onClick={() => removeJobGroup(jk, s)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-500 transition" aria-label="Remove job"><Trash2 size={14} /></button>}
-                  <button onClick={() => toggleJob(gk)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" aria-label={open ? 'Collapse' : 'Expand'}><ChevronRight size={16} className="text-slate-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></button>
+                  {manage && <button onClick={() => removeJobGroup(jk, s)} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-500 transition" aria-label="Remove job"><Trash2 size={16} /></button>}
+                  <button onClick={() => toggleJob(gk)} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" aria-label={open ? 'Collapse' : 'Expand'}><ChevronRight size={18} className="text-slate-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></button>
                 </div>
                 {open && (manage ? (
                 <div className="px-2.5 pt-2.5 pb-3 space-y-3">
@@ -5404,7 +5404,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                           <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee}</p>
                           {perPersonNotes && t.notes && <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>}
                         </div>
-                        <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={14} /></button>
+                        <button onClick={() => remove(t.id)} className="w-10 h-10 -mr-1 flex items-center justify-center text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={16} /></button>
                       </div>
                     ))}
                     {alreadyOn.length === 0 && <p className="font-body text-[12px] text-slate-400 py-1">No one on this job yet — add crew below.</p>}
@@ -5421,7 +5421,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                   {!perPersonNotes && (
                     <div>
                       <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Note</p>
-                      <input key={`${gk}:${sharedNote}`} defaultValue={sharedNote} onBlur={(e) => { const v = e.target.value.trim(); if (v !== sharedNote) saveJobNote(jk, v, s) }} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} placeholder="Write a note for this job…" className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-[13px] font-body" />
+                      <input key={`${gk}:${sharedNote}`} defaultValue={sharedNote} onBlur={(e) => { const v = e.target.value.trim(); if (v !== sharedNote) saveJobNote(jk, v, s) }} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} placeholder="Write a note for this job…" className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-base font-body" />
                     </div>
                   )}
                   {/* Equipment — attach the tools for this job */}
