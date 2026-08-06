@@ -16,7 +16,7 @@ import { suppressionMap } from '@/lib/pgr'
 import { localDateISO } from '@/lib/dates'
 import { diseasesForProduct } from '@/lib/fungicides'
 import { DEFAULT_TARGETS } from '@/lib/defaults'
-import { MultiSelect } from '@/components/pickers'
+import { MultiSelect, SearchSelect } from '@/components/pickers'
 
 // ── Coverage grid helpers ────────────────────────────────────────────────────
 // Every application protects its area for a stretch (coverageDays). We paint the
@@ -1005,9 +1005,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                       </div>
                       <div className="flex-1">
                         <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Base °F</label>
-                        <select value={trig.base} onChange={(e) => setTrig({ base: Number(e.target.value) })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white">
-                          {GDD_BASES.map((b) => <option key={b} value={b}>{b}°F</option>)}
-                        </select>
+                        <SearchSelect value={trig.base} options={GDD_BASES.map((b) => ({ value: b, label: `${b}°F` }))} onPick={(v) => setTrig({ base: Number(v) })} sort={false} />
                       </div>
                     </div>
                   )}
@@ -1025,10 +1023,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                       </div>
                       <div className="flex-1">
                         <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Direction</label>
-                        <select value={trig.dir} onChange={(e) => setTrig({ dir: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white">
-                          <option value="rising">at or above &amp; rising</option>
-                          <option value="falling">at or below &amp; falling</option>
-                        </select>
+                        <SearchSelect value={trig.dir} options={[{ value: 'rising', label: 'at or above & rising' }, { value: 'falling', label: 'at or below & falling' }]} onPick={(v) => setTrig({ dir: v })} sort={false} />
                       </div>
                     </div>
                   )}
@@ -1125,9 +1120,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               <div className="grid grid-cols-2 gap-3 mt-3">
                 <div>
                   <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Learn from</label>
-                  <select value={buildPrev.sourceYear} onChange={(e) => rebuild({ sourceYear: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white">
-                    {buildPrev.years.map((y) => <option key={y} value={y}>{y} records</option>)}
-                  </select>
+                  <SearchSelect value={buildPrev.sourceYear} options={buildPrev.years.map((y) => ({ value: y, label: `${y} records` }))} onPick={(v) => rebuild({ sourceYear: Number(v) })} sort={false} />
                 </div>
                 <div>
                   <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Draft for</label>

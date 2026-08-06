@@ -1623,9 +1623,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                     <>
                       <div className="grid grid-cols-2 gap-2 mb-1">
                         <input type="number" step="any" placeholder={p.defaultRate ? `Default ${p.defaultRate}` : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="border-2 rounded-lg px-2.5 py-2 text-sm font-semibold font-body" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
-                        <select value={p.basis} onChange={(e) => updateProduct(p.id, { basis: e.target.value })} className="border border-slate-200 rounded-lg px-2 py-2 text-xs font-body bg-white">
-                          {BASIS_OPTIONS.map((b) => <option key={b}>{b}</option>)}
-                        </select>
+                        <SearchSelect value={p.basis} options={BASIS_OPTIONS} onPick={(v) => updateProduct(p.id, { basis: v })} sort={false} placeholder="Basis…" />
                       </div>
 
                       {/* What are we spraying this for — the crew sees this on the sheet.
@@ -3659,9 +3657,9 @@ function Reports({ sheets, products, areas, courseInfo = {} }) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {years.length > 0 && (
-            <select value={reportYear} onChange={(e) => setReportYear(e.target.value)} className="border border-slate-200 rounded-full px-3 py-2 text-xs font-body font-semibold bg-white">
-              {years.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
+            <div className="shrink-0" style={{ width: 110 }}>
+              <SearchSelect value={reportYear} options={years} onPick={setReportYear} sort={false} placeholder="Year…" />
+            </div>
           )}
           <button onClick={makeSeasonReport} disabled={pdfBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 disabled:opacity-50" style={{ backgroundColor: FOREST }}>
             <Package size={14} /> {pdfBusy ? 'Building…' : 'Season PDF'}
@@ -4068,10 +4066,9 @@ function SprayHistoryReport({ sheets }) {
   return (
     <div className="mt-4">
       <div className="flex gap-2 mb-3 overflow-x-auto pb-1 items-center">
-        <select value={area} onChange={(e) => setArea(e.target.value)} className="border border-slate-200 rounded-full px-3 py-1.5 text-xs font-body bg-white">
-          <option value="all">All areas</option>
-          {areaNames.map((a) => <option key={a} value={a}>{a}</option>)}
-        </select>
+        <div className="shrink-0" style={{ width: 170 }}>
+          <SearchSelect value={area} options={[{ value: 'all', label: 'All areas' }, ...areaNames]} onPick={setArea} sort={false} placeholder="Area…" />
+        </div>
         <button onClick={exportCSV} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}><Package size={13} /> Export</button>
       </div>
       {rows.length === 0 ? (
@@ -4241,9 +4238,9 @@ function OnboardingWizard({ courseInfo = {}, grassTypes = [], onFinish, onSkip }
                 {courses.map((c, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <input value={c.name} onChange={(e) => setCourse(i, { name: e.target.value })} placeholder={courses.length > 1 ? `Course ${i + 1} name` : 'Course name (optional)'} className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-                    <select value={c.holes} onChange={(e) => setCourse(i, { holes: Number(e.target.value) })} className="border border-slate-200 rounded-xl px-2.5 py-2.5 text-sm font-body bg-white shrink-0">
-                      {[9, 18, 27].map((h) => <option key={h} value={h}>{h} holes</option>)}
-                    </select>
+                    <div className="shrink-0" style={{ width: 120 }}>
+                      <SearchSelect value={Number(c.holes) || 18} options={[9, 18, 27].map((h) => ({ value: h, label: `${h} holes` }))} onPick={(v) => setCourse(i, { holes: Number(v) })} sort={false} />
+                    </div>
                     {courses.length > 1 && (
                       <button type="button" onClick={() => removeCourse(i)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove course"><Trash2 size={16} /></button>
                     )}
@@ -4435,9 +4432,9 @@ function CourseInfoSettings({ courseInfo, grassTypes = [], onSave }) {
             <div key={i} className="border border-slate-200 rounded-xl p-2.5">
               <div className="flex items-center gap-2">
                 <input value={c.name || ''} onChange={(e) => setCourse(i, { name: e.target.value })} placeholder={courses.length > 1 ? `Course ${i + 1} name` : 'Course name (optional)'} className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-                <select value={Number(c.holes) || 18} onChange={(e) => setCourse(i, { holes: Number(e.target.value) })} className="border border-slate-200 rounded-xl px-2.5 py-2.5 text-sm font-body bg-white shrink-0">
-                  {[9, 18, 27].map((h) => <option key={h} value={h}>{h} holes</option>)}
-                </select>
+                <div className="shrink-0" style={{ width: 120 }}>
+                  <SearchSelect value={Number(c.holes) || 18} options={[9, 18, 27].map((h) => ({ value: h, label: `${h} holes` }))} onPick={(v) => setCourse(i, { holes: Number(v) })} sort={false} />
+                </div>
                 {courses.length > 1 && <button type="button" onClick={() => removeCourse(i)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove course"><Trash2 size={16} /></button>}
               </div>
               <div className="mt-2 pl-0.5">
@@ -5486,14 +5483,13 @@ function WhiteboardCrew({ roster = [], operators = [], crewMembers = [], courses
             {manage ? (
               <div className="flex items-center gap-2 shrink-0">
                 {courseNames.length >= 2 && (
-                  <select value={crew[person]?.course || ''} onChange={(e) => setField(person, 'course', e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-body bg-white">
-                    <option value="">No home course</option>
-                    {courseNames.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <div className="shrink-0" style={{ width: 140 }}>
+                    <SearchSelect value={crew[person]?.course || ''} options={[{ value: '', label: 'No home course' }, ...courseNames]} onPick={(v) => setField(person, 'course', v)} sort={false} />
+                  </div>
                 )}
-                <select value={crew[person]?.lang || 'en'} onChange={(e) => setField(person, 'lang', e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-body bg-white">
-                  {CREW_LANGS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
-                </select>
+                <div className="shrink-0" style={{ width: 130 }}>
+                  <SearchSelect value={crew[person]?.lang || 'en'} options={CREW_LANGS.map(([code, label]) => ({ value: code, label }))} onPick={(v) => setField(person, 'lang', v)} sort={false} />
+                </div>
                 {isOwn && <button type="button" onClick={() => removeMember(person)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={15} /></button>}
               </div>
             ) : (
