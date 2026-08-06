@@ -5193,6 +5193,11 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
       await reload()
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
   }
+  // Take a named person off a job (used by the crew checklist — unchecking).
+  const removePersonFromJob = (jk, name, s = '1') => {
+    const t = view.find((x) => (x.job || '—') === jk && (x.slot || '1') === s && x.assignee === name)
+    if (t) remove(t.id)
+  }
   // Edit the note on a whole job group (the note is shared across its people).
   const saveJobNote = async (jk, text, s = '1') => {
     const inGroup = view.filter((t) => (t.job || '—') === jk && (t.slot || '1') === s)
@@ -5341,7 +5346,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
             <span className="font-body text-[11px] font-semibold text-white/60">· {jobCount} job{jobCount !== 1 ? 's' : ''} · {crewCount} on</span>
             {s !== '1' && <span className="font-body text-[11px] font-bold ml-auto text-white/70">{s === '2' ? 'Afternoon' : 'Later'}</span>}
           </div>
-          <div className="border border-t-0 rounded-b-xl bg-white overflow-hidden" style={{ borderColor: '#E4EBE6' }}>
+          <div className="border border-t-0 rounded-b-xl bg-white" style={{ borderColor: '#E4EBE6' }}>
           {sKeys.map((jk, jobIdx) => {
             const gk = `${s}::${jk}`
             const list = sGroups[jk]
@@ -5385,7 +5390,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                     ))}
                     {alreadyOn.length === 0 && <p className="font-body text-[12px] text-slate-400 py-1">No one on this job yet — add crew below.</p>}
                     <div className="mt-1.5">
-                      <PeoplePicker options={orderedOps.filter((n) => !alreadyOn.includes(n))} selected={[]} onToggle={(name) => addPersonToJob(jk, name, s)} placeholder={`Add crew to ${jk}…`} />
+                      <MultiSelect selected={alreadyOn} options={orderedOps} onToggle={(name) => (alreadyOn.includes(name) ? removePersonFromJob(jk, name, s) : addPersonToJob(jk, name, s))} hideChips placeholder="Add crew — tap to check people on…" />
                     </div>
                   </div>
                   {/* Note — write anything the crew needs for this job */}
