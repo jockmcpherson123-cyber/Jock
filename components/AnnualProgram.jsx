@@ -979,9 +979,11 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               const setTrig = (patch) => setEditApp((prev) => ({ ...prev, trigger: { ...normalizeTrigger(prev.trigger, prev.products?.[0]?.type), ...patch } }))
               const pickMode = (mode) => setEditApp((prev) => ({ ...prev, trigger: normalizeTrigger({ mode }, prev.products?.[0]?.type) }))
               return (
-                <div className="rounded-xl border p-3" style={{ borderColor: '#EFE6C9', backgroundColor: '#FFFDF6' }}>
-                  <label className="font-body text-[11px] font-bold uppercase tracking-wide block mb-2" style={{ color: FERN }}>When should this fire?</label>
-                  <div className="grid grid-cols-2 gap-1.5 mb-2.5">
+                <details className="rounded-xl border p-3" style={{ borderColor: '#EFE6C9', backgroundColor: '#FFFDF6' }}>
+                  <summary className="font-body text-[11px] font-bold uppercase tracking-wide cursor-pointer" style={{ color: FERN }}>
+                    Timing (advanced) <span className="font-normal normal-case" style={{ color: '#94A3B8' }}>— {trig.mode === 'date' ? 'set date' : describeTrigger(trig, editApp.products?.[0]?.type)}</span>
+                  </summary>
+                  <div className="grid grid-cols-2 gap-1.5 mb-2.5 mt-2.5">
                     {TRIGGER_MODES.map((m) => {
                       const on = trig.mode === m.key
                       return (
@@ -1031,7 +1033,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                     </div>
                   )}
                   <p className="font-body text-[11px] mt-2" style={{ color: FERN }}>{describeTrigger(trig, editApp.products?.[0]?.type)}</p>
-                </div>
+                </details>
               )
             })()}
 
