@@ -204,7 +204,7 @@ export default function CrewBoard() {
           <div style={{ textAlign: 'center', padding: '12vh 0', color: '#8AA394', fontSize: 'clamp(18px,2vw,34px)', fontFamily: 'ui-serif, Georgia, serif' }}>No jobs posted yet today.</div>
         ) : (
           <div ref={fitWrapRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <div ref={fitContentRef} style={{ transformOrigin: 'top left', width: '100%' }}>
+          <div ref={fitContentRef} style={{ transformOrigin: 'top left' }}>
           <div style={{ display: 'flex', gap: '1.4vw', alignItems: 'flex-start' }}>
             {/* Jobs — grouped into rounds, in readable columns */}
             <div style={{ flex: '1 1 auto', minWidth: 0 }}>

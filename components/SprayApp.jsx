@@ -3596,7 +3596,7 @@ function Reports({ sheets, products, areas, courseInfo = {} }) {
   const diag = npkDiagnostics(sheets, products, areas)
   const diagItems = [
     diag.missingAnalysis.length && { title: 'Missing N-P-K analysis', fix: 'Open Chemical Library → edit each product → fill in the N %, P %, K % from the bag (e.g. 21-0-0 = N 21). Until then it counts as zero.', items: diag.missingAnalysis },
-    diag.unapprovedSheets.length && { title: 'Sheets not approved yet', fix: 'Reports only count approved sheets. A director needs to approve these for their fertilizer to show.', items: diag.unapprovedSheets },
+    diag.notCountedSheets.length && { title: 'Sheets not counted yet', fix: 'Reports only count sprays that have actually gone out — the sheet must be submitted, the applicator signed, and every product checked into the tank. Finish those steps for their fertilizer to show.', items: diag.notCountedSheets },
     diag.missingSqft.length && { title: 'Areas missing square footage', fix: 'Set the area size in Settings → Areas. Without it, the app can\'t work out pounds applied.', items: diag.missingSqft },
     diag.basisIssue.length && { title: 'Check the rate basis', fix: 'These fertilizers use a rate basis that doesn\'t match their form — granular needs lbs/M or lbs/A; liquid needs gal/M or gal/A. Fix the basis on the sheet or in the library.', items: diag.basisIssue },
   ].filter(Boolean)

@@ -30,7 +30,7 @@ export function SearchSelect({ value, options = [], onPick, placeholder = 'Searc
           {matches.length === 0 && <div className="px-3 py-2 text-sm text-slate-400 font-body">No matches</div>}
           {matches.map((o) => (
             <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); pick(o) }}
-              className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50" style={o === value ? { backgroundColor: '#EAF2EC', fontWeight: 700 } : {}}>{o}</button>
+              className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50" style={o === value ? { backgroundColor: '#EAF2EC', fontWeight: 700 } : {}}>{o === '' ? <span className="text-slate-400">— None —</span> : o}</button>
           ))}
         </div>
       )}
