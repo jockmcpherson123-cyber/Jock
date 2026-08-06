@@ -2553,6 +2553,12 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                   {sheet.applicatorSignature && (
                     <img src={sheet.applicatorSignature} alt="Applicator signature" className="mt-2 h-12 rounded border border-slate-100 bg-white" />
                   )}
+                  {!sheetApplied(sheet) && (
+                    <div className="mt-2 rounded-lg px-3 py-2 font-body text-[11px] flex items-start gap-1.5" style={{ backgroundColor: '#FFF7E6', border: '1px solid #F0E4C8', color: '#8A5A12' }}>
+                      <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                      <span><b>Not counted in the trackers.</b> This spray is missing its sign-off details (all tanks ticked + applicator signature), so it isn’t feeding growth-reg, disease or nutrition. Re-open it to finish.</span>
+                    </div>
+                  )}
                   <div className="flex gap-2 mt-3">
                     <button onClick={printRecord} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white" style={{ backgroundColor: FOREST }}>Print record</button>
                     <button onClick={exportPdf} disabled={pdfBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full disabled:opacity-50" style={{ color: FOREST, border: `1px solid ${FOREST}` }}>{pdfBusy ? 'Exporting…' : 'Export PDF'}</button>
@@ -2592,13 +2598,36 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                     <SignaturePad value={applicatorSig} onChange={setApplicatorSig} />
                   </div>
 
-                  <div className="flex gap-2 mt-3">
-                    <button onClick={() => saveLog(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Save progress</button>
-                    <button onClick={() => saveLog(true)} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
-                      <Check size={15} /> Mark as sprayed
-                    </button>
-                  </div>
-                  <p className="font-body text-[11px] text-slate-400 mt-2">Use “Save progress” for multi-day sprays; “Mark as sprayed” files it in Records (still editable).</p>
+                  {(() => {
+                    // A spray can't be signed off (and won't feed the growth-reg /
+                    // disease / nutrition trackers) until every product is checked
+                    // into every tank, the weather's filled in, and it's signed.
+                    const allTanksDone = productIds.length > 0 && completedCount === tankCount
+                    const weatherOk = !!(String(wx.temp).trim() && String(wx.humidity).trim() && String(wx.wind).trim())
+                    const missing = []
+                    if (!allTanksDone) missing.push(`tick every product into all ${tankCount} tank${tankCount > 1 ? 's' : ''}`)
+                    if (!weatherOk) missing.push('fill in the weather (temp, wind, humidity)')
+                    if (!sprayedBy) missing.push('choose who sprayed it')
+                    if (!applicatorSig) missing.push('add the applicator signature')
+                    const canSubmit = missing.length === 0
+                    return (
+                      <>
+                        <div className="flex gap-2 mt-3">
+                          <button onClick={() => saveLog(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Save progress</button>
+                          <button onClick={() => canSubmit && saveLog(true)} disabled={!canSubmit} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed" style={{ backgroundColor: FOREST }}>
+                            <Check size={15} /> Mark as sprayed
+                          </button>
+                        </div>
+                        {!canSubmit && (
+                          <div className="mt-2 rounded-lg px-3 py-2 font-body text-[11px] flex items-start gap-1.5" style={{ backgroundColor: '#FFF7E6', border: '1px solid #F0E4C8', color: '#8A5A12' }}>
+                            <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                            <span><b>Not counted yet.</b> Before this can be signed off and start counting toward growth-reg, disease &amp; nutrition, you still need to: {missing.join('; ')}.</span>
+                          </div>
+                        )}
+                        <p className="font-body text-[11px] text-slate-400 mt-2">“Save progress” keeps your spot for multi-day sprays; “Mark as sprayed” files it in Records and starts it counting in the trackers.</p>
+                      </>
+                    )
+                  })()}
                 </>
               )}
             </Card>

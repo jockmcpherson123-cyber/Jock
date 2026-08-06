@@ -17,9 +17,10 @@ import { localDateISO } from '@/lib/dates'
 import { diseasesForProduct } from '@/lib/fungicides'
 import { DEFAULT_TARGETS } from '@/lib/defaults'
 
-// A searchable, alphabetised product picker — type to filter the library
-// instead of scrolling a long unsorted dropdown.
-function ProductPicker({ value, options = [], onPick, placeholder = 'Search products…' }) {
+// A searchable multi-select — type to filter, tap to toggle several at once,
+// and the list stays open so you don't have to keep re-opening it. Selected
+// items show as chips above. Used for products and for "spraying for" targets.
+function MultiSelect({ selected = [], options = [], onToggle, placeholder = 'Search…', accent = '#3A6B4A' }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const wrapRef = useRef(null)
@@ -31,24 +32,31 @@ function ProductPicker({ value, options = [], onPick, placeholder = 'Search prod
   const sorted = [...options].sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }))
   const query = q.trim().toLowerCase()
   const matches = query ? sorted.filter((o) => String(o).toLowerCase().includes(query)) : sorted
-  const pick = (v) => { onPick(v); setQ(''); setOpen(false) }
   return (
-    <div ref={wrapRef} className="relative flex-1 min-w-0">
-      <input
-        value={open ? q : (value || '')}
-        onChange={(e) => { setQ(e.target.value); setOpen(true) }}
-        onFocus={() => { setQ(''); setOpen(true) }}
-        placeholder={value ? value : placeholder}
-        className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white"
-      />
-      {open && (
-        <div className="absolute z-40 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-          {matches.length === 0 && <div className="px-3 py-2 text-sm text-slate-400 font-body">No products match “{q.trim()}”</div>}
-          {matches.map((o) => (
-            <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); pick(o) }}
-              className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50"
-              style={o === value ? { backgroundColor: '#EAF2EC', fontWeight: 700 } : {}}>{o}</button>
+    <div ref={wrapRef} className="relative">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-1.5">
+          {selected.map((tg) => (
+            <span key={tg} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ backgroundColor: '#EAF2EC', color: accent, border: '1px solid #D5E5DA' }}>
+              {tg}<button type="button" onClick={() => onToggle(tg)} className="opacity-60 hover:opacity-100">×</button>
+            </span>
           ))}
+        </div>
+      )}
+      <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)} placeholder={placeholder}
+        className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+      {open && (
+        <div className="absolute z-40 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+          {matches.length === 0 && <div className="px-3 py-2 text-sm text-slate-400 font-body">No matches</div>}
+          {matches.map((o) => {
+            const on = selected.includes(o)
+            return (
+              <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); onToggle(o) }} className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50 flex items-center gap-2">
+                <span className="inline-flex items-center justify-center rounded shrink-0" style={{ width: 16, height: 16, border: `1.5px solid ${on ? accent : '#CBD5E1'}`, backgroundColor: on ? accent : 'white' }}>{on && <Check size={11} color="white" />}</span>
+                <span className="flex-1">{o}</span>
+              </button>
+            )
+          })}
         </div>
       )}
     </div>
@@ -537,17 +545,18 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   }
 
   const updateRow = (key, patch) => setEditApp((prev) => ({ ...prev, products: prev.products.map((r) => (r.key === key ? { ...r, ...patch } : r)) }))
-  const addRow = () => setEditApp((prev) => ({ ...prev, products: [...prev.products, blankRow()] }))
   const removeRow = (key) => setEditApp((prev) => ({ ...prev, products: prev.products.filter((r) => r.key !== key) }))
-  function pickProduct(key, name) {
+  const filledRow = (name) => {
     const prod = products.find((p) => p.name === name)
-    updateRow(key, {
-      product: name,
-      type: prod?.type || '',
-      basis: prod?.basis || 'oz / M',
-      rateOzM: prod?.rate != null ? prod.rate : '',
-    })
+    return { key: rowKey(), product: name, type: prod?.type || '', basis: prod?.basis || 'oz / M', rateOzM: prod?.rate != null ? prod.rate : '', rateOzA: '', target: '' }
   }
+  // Add or remove a product from the tank mix — lets you tap several at once.
+  const toggleProductRow = (name) => setEditApp((prev) => {
+    if (prev.products.some((r) => r.product === name)) return { ...prev, products: prev.products.filter((r) => r.product !== name) }
+    const blankIdx = prev.products.findIndex((r) => !r.product)
+    if (blankIdx >= 0) { const copy = [...prev.products]; copy[blankIdx] = filledRow(name); return { ...prev, products: copy } }
+    return { ...prev, products: [...prev.products, filledRow(name)] }
+  })
 
   async function saveApp() {
     const rows = (editApp.products || []).filter((r) => r.product)
@@ -1072,18 +1081,14 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
             })()}
 
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide">Products in the tank</label>
-                <button onClick={addRow} className="font-body text-xs font-bold flex items-center gap-1" style={{ color: FERN }}><Plus size={13} /> Add product</button>
-              </div>
-              <div className="space-y-2">
-                {editApp.products.map((r) => (
+              <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Products in the tank</label>
+              <MultiSelect selected={editApp.products.map((r) => r.product).filter(Boolean)} options={products.map((p) => p.name)} onToggle={toggleProductRow} placeholder="Search products — tap to add several…" />
+              <div className="space-y-2 mt-2">
+                {editApp.products.filter((r) => r.product).map((r) => (
                   <div key={r.key} className="rounded-xl border border-slate-100 p-2.5" style={{ backgroundColor: '#F8FAF9' }}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <ProductPicker value={r.product} options={products.map((p) => p.name)} onPick={(name) => pickProduct(r.key, name)} placeholder="Search products…" />
-                      {editApp.products.length > 1 && (
-                        <button onClick={() => removeRow(r.key)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove product"><Trash2 size={15} /></button>
-                      )}
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-body text-sm font-bold" style={{ color: FOREST }}>{r.product}</span>
+                      <button onClick={() => removeRow(r.key)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove product"><Trash2 size={15} /></button>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
@@ -1103,24 +1108,12 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                       const t = String(r.type || prodInfo?.type || '').toLowerCase()
                       const tp = t.includes('growth') ? 'Growth Reg' : t.includes('herb') ? 'Weed control' : t.includes('insect') ? 'Insect control' : t.includes('fert') ? 'Feed / nutrition' : null
                       const sel = String(r.target || '').split(',').map((x) => x.trim()).filter(Boolean)
-                      const opts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...DEFAULT_TARGETS].filter(Boolean))).filter((o) => !sel.includes(o))
-                      const setSel = (arr) => updateRow(r.key, { target: arr.join(', ') })
+                      const allOpts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...DEFAULT_TARGETS].filter(Boolean)))
+                      const toggleT = (tg) => updateRow(r.key, { target: (sel.includes(tg) ? sel.filter((x) => x !== tg) : [...sel, tg]).join(', ') })
                       return (
                         <div className="mt-2">
                           <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Spraying for</label>
-                          {sel.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 mb-1.5">
-                              {sel.map((tg) => (
-                                <span key={tg} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ backgroundColor: '#EAF2EC', color: FERN, border: '1px solid #D5E5DA' }}>
-                                  {tg}<button type="button" onClick={() => setSel(sel.filter((x) => x !== tg))} className="opacity-60 hover:opacity-100">×</button>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          <select value="" onChange={(e) => { if (e.target.value) setSel([...sel, e.target.value]) }} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white">
-                            <option value="">{sel.length ? '+ Add another…' : '— select what you’re spraying for —'}</option>
-                            {opts.map((o) => <option key={o} value={o}>{o}</option>)}
-                          </select>
+                          <MultiSelect selected={sel} options={allOpts} onToggle={toggleT} placeholder="Search what you’re spraying for — tap several…" />
                         </div>
                       )
                     })()}
