@@ -53,7 +53,7 @@ export function SearchSelect({ value, options = [], onPick, placeholder = 'Searc
 // several at once without re-opening.
 // `dimmed` names render greyed with a small tag (e.g. "on a job") — a hint that
 // they're already spoken for elsewhere, while still being selectable.
-export function MultiSelect({ selected = [], options = [], onToggle, placeholder = 'Search…', accent = FERN, hideChips = false, dimmed = [], dimmedLabel = 'busy' }) {
+export function MultiSelect({ selected = [], options = [], onToggle, placeholder = 'Search…', accent = FERN, hideChips = false, dimmed = [], dimmedLabel = 'busy', autoOpen = false }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const wrapRef = useRef(null)
@@ -62,6 +62,8 @@ export function MultiSelect({ selected = [], options = [], onToggle, placeholder
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
+  // The board's quick "+" opens the crew list straight away.
+  useEffect(() => { if (autoOpen) setOpen(true) }, [autoOpen])
   const sorted = [...options].sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }))
   const query = q.trim().toLowerCase()
   const matches = query ? sorted.filter((o) => String(o).toLowerCase().includes(query)) : sorted

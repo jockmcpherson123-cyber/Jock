@@ -5107,9 +5107,10 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [openJobs, setOpenJobs] = useState({}) // jobKey -> open? accordion — only one job box open at a time
   const [jobEquipDraft, setJobEquipDraft] = useState({}) // gk -> in-progress "add a tool" text
   const [confirmAssign, setConfirmAssign] = useState(null) // { name, jk, s, others } when adding someone already on a job
+  const [crewAddJob, setCrewAddJob] = useState(null) // gk whose crew list the "+" popped straight open
   const [tx, setTx] = useState({})
   // Accordion: opening a job closes any other that's open, so the board stays tidy.
-  const toggleJob = (jk) => setOpenJobs((p) => (p[jk] ? {} : { [jk]: true }))
+  const toggleJob = (jk) => { setCrewAddJob(null); setOpenJobs((p) => (p[jk] ? {} : { [jk]: true })) }
 
   const courseNames = courses.map((c) => c.name)
   const hasCourses = courseNames.length >= 2
@@ -5389,6 +5390,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                     </span>
                     {!open && <span className="block font-body text-[12px] text-slate-500 mt-0.5 leading-snug">{crewSummary}</span>}
                   </button>
+                  {manage && <button onClick={() => { setOpenJobs({ [gk]: true }); setCrewAddJob(gk) }} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition" style={{ color: FERN }} aria-label="Add crew to this job"><UserPlus size={18} /></button>}
                   {manage && <button onClick={() => removeJobGroup(jk, s)} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-500 transition" aria-label="Remove job"><Trash2 size={16} /></button>}
                   <button onClick={() => toggleJob(gk)} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" aria-label={open ? 'Collapse' : 'Expand'}><ChevronRight size={18} className="text-slate-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></button>
                 </div>
@@ -5414,7 +5416,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                         const others = [...new Set(view.filter((t) => t.assignee === name).map((t) => t.job).filter(Boolean))]
                         if (others.length) { setConfirmAssign({ name, jk, s, others }); return }
                         addPersonToJob(jk, name, s)
-                      }} hideChips dimmed={assignedToday} dimmedLabel="on a job" placeholder="Add crew — tap to check people on…" />
+                      }} hideChips autoOpen={crewAddJob === gk} dimmed={assignedToday} dimmedLabel="on a job" placeholder="Add crew — tap to check people on…" />
                     </div>
                   </div>
                   {/* Note — write anything the crew needs for this job */}
