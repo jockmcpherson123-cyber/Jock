@@ -5370,6 +5370,8 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                     // Auto-dump today's mow direction for this surface (greens rotate
                     // daily on their own; fairways step on "Apply next"). Derived from
                     // the job title + date, so nothing extra is stored on the task.
+                    // Only for crew-facing views — the super's build board stays clean.
+                    if (manage) return null
                     const cn = list[0]?.course || activeCourse || ''
                     const dir = directionForJob(settings.courseInfo || {}, cn, jk, date)
                     if (!dir) return null
@@ -5413,13 +5415,12 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                       <PeoplePicker options={orderedOps.filter((n) => !alreadyOn.includes(n))} selected={[]} onToggle={(name) => addPersonToJob(jk, name, s)} placeholder={`Add crew to ${jk}…`} />
                     </div>
                   )}
-                  <div className="rounded-lg overflow-hidden" style={{ border: '1px solid #EEF2EF' }}>
+                  <div>
                     {list.map((t, pi) => {
                       const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
                       const lang = crew[t.assignee]?.lang
                       return (
-                        <div key={t.id} className="flex items-center gap-2 px-2 py-1.5" style={{ borderTop: pi > 0 ? '1px solid #F0F3F1' : 'none', backgroundColor: pi % 2 ? '#FBFCFB' : 'white' }}>
-                          <span className="shrink-0 font-body text-[11px] font-bold tabular-nums" style={{ color: '#9AA8A0', minWidth: 14, textAlign: 'right' }}>{pi + 1}</span>
+                        <div key={t.id} className="flex items-center gap-2.5 py-1.5" style={{ borderTop: pi > 0 ? '1px solid #F1F4F2' : 'none' }}>
                           <span className="shrink-0 self-stretch rounded-full" style={{ width: 3, backgroundColor: FERN }} />
                           <div className="min-w-0 flex-1">
                             <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee || 'Unassigned'}</p>
