@@ -168,7 +168,7 @@ export default function CrewBoard() {
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: `radial-gradient(1200px 600px at 50% -10%, #1d3527 0%, ${FOREST} 60%)`, color: '#F3F0E6', fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' }}>
-      <div style={{ maxWidth: 2100, margin: '0 auto', padding: '2vw 2.2vw', width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ maxWidth: 'none', margin: '0 auto', padding: '2vw 2.4vw', width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {/* Header */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, borderBottom: `2px solid ${GOLD}`, paddingBottom: '1.4vw', marginBottom: '1.8vw' }}>
           <div>
