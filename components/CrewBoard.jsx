@@ -42,23 +42,36 @@ export default function CrewBoard() {
 
   // The shop TV can't scroll, so shrink the whole board just enough to fit the
   // screen as more rounds/jobs get added — everything always stays on one page.
-  const [fitScale, setFitScale] = useState(1)
   const fitWrapRef = useRef(null)
   const fitContentRef = useRef(null)
   useLayoutEffect(() => {
     const fit = () => {
       const wrap = fitWrapRef.current, content = fitContentRef.current
       if (!wrap || !content) return
-      const cw = content.scrollWidth, ch = content.scrollHeight
-      if (!cw || !ch || !wrap.clientHeight) return
-      // scale on layout size (transform doesn't change scrollWidth/Height)
-      const s = Math.min(1, wrap.clientWidth / cw, wrap.clientHeight / ch)
-      setFitScale(s > 0.2 ? s : 0.2)
+      const availW = wrap.clientWidth, availH = wrap.clientHeight
+      if (!availW || !availH) return
+      // Lay the board out WIDER than the screen (availW / scale), then scale it
+      // back down to the screen width — so it always fills the full width, and
+      // shrinks only as much as needed to fit the height. Converges in a few
+      // passes because a wider layout reflows into more/shorter columns.
+      content.style.transformOrigin = 'top left'
+      let scale = 1
+      for (let i = 0; i < 10; i++) {
+        content.style.width = Math.round(availW / scale) + 'px'
+        const ch = content.scrollHeight
+        const target = Math.min(1, availH / (ch || 1))
+        if (Math.abs(target - scale) < 0.005) { scale = target; break }
+        scale = scale + (target - scale) * 0.7
+      }
+      content.style.width = Math.round(availW / scale) + 'px'
+      if (content.scrollHeight * scale > availH + 1) scale = availH / content.scrollHeight
+      scale = Math.max(0.2, Math.min(1, scale))
+      content.style.width = Math.round(availW / scale) + 'px'
+      content.style.transform = `scale(${scale})`
     }
     fit()
     const ro = new ResizeObserver(fit)
     if (fitWrapRef.current) ro.observe(fitWrapRef.current)
-    if (fitContentRef.current) ro.observe(fitContentRef.current)
     window.addEventListener('resize', fit)
     const t = setTimeout(fit, 350) // catch late layout (fonts, hole SVG)
     return () => { ro.disconnect(); window.removeEventListener('resize', fit); clearTimeout(t) }
@@ -155,7 +168,7 @@ export default function CrewBoard() {
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: `radial-gradient(1200px 600px at 50% -10%, #1d3527 0%, ${FOREST} 60%)`, color: '#F3F0E6', fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' }}>
-      <div style={{ maxWidth: 1600, margin: '0 auto', padding: '2.2vw 2.5vw', width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ maxWidth: 2100, margin: '0 auto', padding: '2vw 2.2vw', width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {/* Header */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, borderBottom: `2px solid ${GOLD}`, paddingBottom: '1.4vw', marginBottom: '1.8vw' }}>
           <div>
@@ -191,7 +204,7 @@ export default function CrewBoard() {
           <div style={{ textAlign: 'center', padding: '12vh 0', color: '#8AA394', fontSize: 'clamp(18px,2vw,34px)', fontFamily: 'ui-serif, Georgia, serif' }}>No jobs posted yet today.</div>
         ) : (
           <div ref={fitWrapRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <div ref={fitContentRef} style={{ transform: `scale(${fitScale})`, transformOrigin: 'top center', width: '100%' }}>
+          <div ref={fitContentRef} style={{ transformOrigin: 'top left', width: '100%' }}>
           <div style={{ display: 'flex', gap: '1.4vw', alignItems: 'flex-start' }}>
             {/* Jobs — grouped into rounds, in readable columns */}
             <div style={{ flex: '1 1 auto', minWidth: 0 }}>
@@ -208,7 +221,7 @@ export default function CrewBoard() {
                     {slotKey !== '1' && <span style={{ fontSize: 'clamp(11px,1vw,18px)', fontWeight: 700, color: '#B7C4B4' }}>{slotKey === '2' ? 'Afternoon' : 'Later'}</span>}
                   </div>
                 )}
-                <div style={{ columnWidth: 300, columnGap: '1.1vw' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.1vw', alignItems: 'start' }}>
                 {sKeys.map((jk) => {
               const list = sGroups[jk]
               const langs = [...new Set(list.map((t) => crew[t.assignee]?.lang).filter((l) => l && l !== 'en'))]
@@ -219,7 +232,7 @@ export default function CrewBoard() {
               const sharedNote = distinctNotes.length === 1 && list.every((t) => (t.notes || '').trim() === distinctNotes[0]) ? distinctNotes[0] : ''
               const perPersonNotes = distinctNotes.length > 0 && !sharedNote
               return (
-                <div key={jk} style={{ breakInside: 'avoid', WebkitColumnBreakInside: 'avoid', marginBottom: '1.1vw', background: '#FBFAF6', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.28)' }}>
+                <div key={jk} style={{ maxWidth: 560, background: '#FBFAF6', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.28)' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '0.55vw 0.8vw', background: '#E6EDE4', borderBottom: '1px solid #D3DCD2' }}>
                     <div style={{ flex: 1, minWidth: 0, lineHeight: 1.15 }}>
                       <span style={{ fontSize: 'clamp(15px,1.4vw,26px)', fontWeight: 800, color: '#1A2A1F' }}>{jk}</span>
