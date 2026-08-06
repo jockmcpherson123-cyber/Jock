@@ -4884,7 +4884,7 @@ function Combobox({ value, onChange, options = [], placeholder, accent = FOREST,
         className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body"
       />
       {open && (matches.length > 0 || (query && !exact)) && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto overscroll-contain">
           {matches.map((o) => (
             <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); pick(o) }} className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50">{o}</button>
           ))}
@@ -4923,13 +4923,48 @@ function PeoplePicker({ options = [], selected = [], onToggle, placeholder, max 
       <div className="relative">
         <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)} placeholder={placeholder} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
         {open && matches.length > 0 && (
-          <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+          <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto overscroll-contain">
             {matches.map((o) => (
               <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); onToggle(o); setQ('') }} className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50">{o}</button>
             ))}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// Inline "add a job" slot that lives right in the board (taskTracker-style):
+// type or pick a job, it commits and clears so the next blank line is ready.
+function AddJobRow({ options = [], onAdd, placeholder = 'Add a job…', max = 8 }) {
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+  useEffect(() => {
+    const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+  const query = q.trim().toLowerCase()
+  const matches = options.filter((o) => o && String(o).toLowerCase().includes(query)).slice(0, max)
+  const exact = options.some((o) => String(o).toLowerCase() === query)
+  const commit = (v) => { const name = (v || '').trim(); if (!name) return; onAdd(name); setQ(''); setOpen(false) }
+  return (
+    <div ref={wrapRef} className="relative flex items-center gap-2 px-2 py-1.5" style={{ borderTop: '1px dashed #E1E8E3' }}>
+      <span className="shrink-0 inline-flex items-center justify-center rounded" style={{ width: 20, height: 20, backgroundColor: '#EAF2EC', color: FERN }}><Plus size={13} /></span>
+      <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(q) } }}
+        placeholder={placeholder} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body bg-white" />
+      {open && (matches.length > 0 || (query && !exact)) && (
+        <div className="absolute z-30 left-8 right-2 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto overscroll-contain">
+          {matches.map((o) => (
+            <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); commit(o) }} className="w-full text-left px-3 py-2 text-sm font-body hover:bg-slate-50">{o}</button>
+          ))}
+          {query && !exact && (
+            <button type="button" onMouseDown={(e) => { e.preventDefault(); commit(q) }} className="w-full text-left px-3 py-2 text-sm font-body font-semibold hover:bg-slate-50" style={{ color: FERN }}>Use “{q.trim()}”</button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -5067,18 +5102,10 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState(null)
-  const [job, setJob] = useState('')
-  const [assignees, setAssignees] = useState([])
-  const [equip, setEquip] = useState('')
-  const [equipList, setEquipList] = useState([])
-  const [note, setNote] = useState('')
-  const [slot, setSlot] = useState('1') // '1' | '2' | '3' — which round of the day
   const [course, setCourse] = useState('')
   const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
   const [openJobs, setOpenJobs] = useState({}) // jobKey -> open? each job is a drop-down box; tap to open and edit
   const [jobEquipDraft, setJobEquipDraft] = useState({}) // gk -> in-progress "add a tool" text
-  const [addJobOpen, setAddJobOpen] = useState(false) // the "Add a job" form is a drop-down — tap to open when you need it
-  const [busy, setBusy] = useState(false)
   const [tx, setTx] = useState({})
   const toggleJob = (jk) => setOpenJobs((p) => ({ ...p, [jk]: !p[jk] }))
 
@@ -5110,45 +5137,36 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, crewSig])
 
-  const addEquip = () => { const v = equip.trim(); if (!v) return; if (!equipList.includes(v)) setEquipList([...equipList, v]); setEquip('') }
-  const toggleAssignee = (name) => setAssignees((prev) => (prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name]))
-  const addTask = async () => {
-    if (!job.trim()) return
-    setBusy(true); setMsg(null)
-    try {
-      const tools = [...equipList]
-      const leftover = equip.trim()
-      if (leftover && !tools.includes(leftover)) tools.push(leftover)
-      const base = { date, job: job.trim(), area: '', equipment: tools.join(', '), notes: note.trim(), course: activeCourse, status: 'todo', slot }
-      const startSort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
-      // One row per assigned person (or a single unassigned job) — so each person
-      // keeps their own status, and they group together by job on the board.
-      const people = assignees.length ? assignees : ['']
-      // For a greens-mow job with people on it, pull the locked route for that
-      // head-count and give each person their own greens in the note.
-      const isGreensMow = /mow\w*\s+greens/i.test(job)
-      let rows
-      if (isGreensMow && assignees.length) {
-        const course = courses.find((c) => c.name === activeCourse) || courses[0] || {}
-        const cName = course.name || activeCourse || ''
-        const lay = labelledLayout(settings.courseInfo || {}, cName, course, assignees.length)
-        rows = assignees.map((name, i) => ({ ...base, assignee: name, sort: startSort + i, notes: (lay[i] || []).join(', ') || base.notes }))
-      } else {
-        rows = people.map((name, i) => ({ ...base, assignee: name, sort: startSort + i }))
-      }
-      await db.addCrewTasks(rows)
-      setJob(''); setEquip(''); setEquipList([]); setAssignees([]); setNote('')
-      await reload()
-    } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
-    setBusy(false)
-  }
   const remove = async (id) => {
     setTasks((prev) => prev.filter((x) => x.id !== id))
     try { await db.deleteCrewTask(id) } catch (e) { console.error(e); reload() }
   }
-  // Add one more person straight onto an existing job group (labor-board style).
+  // Add a job to a round with no crew yet — a placeholder row you then fill.
+  // Picking a job in the inline slot drops it onto the board; the slot clears.
+  const quickAddJob = async (name, s = '1') => {
+    const jobName = (name || '').trim()
+    if (!jobName) return
+    // Already on this round? Just open it instead of duplicating.
+    if (view.some((t) => (t.job || '') === jobName && (t.slot || '1') === s)) {
+      setOpenJobs((p) => ({ ...p, [`${s}::${jobName}`]: true })); return
+    }
+    try {
+      const sort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
+      await db.addCrewTask({ date, job: jobName, assignee: '', course: activeCourse, status: 'todo', sort, slot: s })
+      await reload()
+    } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
+  }
+  // Add one more person onto a job. If the job is still an empty placeholder
+  // (one row, nobody on it), fill that row instead of adding a second.
   const addPersonToJob = async (jk, name, s = '1') => {
     try {
+      const groupTasks = view.filter((t) => (t.job || '—') === jk && (t.slot || '1') === s)
+      const placeholder = groupTasks.length === 1 && !groupTasks[0].assignee ? groupTasks[0] : null
+      if (placeholder) {
+        setTasks((prev) => prev.map((t) => (t.id === placeholder.id ? { ...t, assignee: name } : t)))
+        await db.updateCrewTask({ ...placeholder, assignee: name })
+        return
+      }
       const sort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
       await db.addCrewTask({ date, job: jk, assignee: name, course: activeCourse, status: 'todo', sort, slot: s })
       await reload()
@@ -5158,7 +5176,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const saveJobNote = async (jk, text, s = '1') => {
     const inGroup = view.filter((t) => (t.job || '—') === jk && (t.slot || '1') === s)
     setTasks((prev) => prev.map((t) => (inGroup.some((g) => g.id === t.id) ? { ...t, notes: text } : t)))
-    setEditingNoteJob(null)
     try { await Promise.all(inGroup.map((t) => db.updateCrewTask({ ...t, notes: text }))) } catch (e) { console.error(e); reload() }
   }
   // Attach / change the equipment on a whole job group (shared across its people).
@@ -5228,62 +5245,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
 
       {msg && <div className="rounded-xl px-3 py-2 mb-3 font-body text-[12px] font-semibold" style={msg.type === 'ok' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}>{msg.text}</div>}
 
-      {manage && (
-        <div className="bg-white rounded-2xl border-2 shadow-sm mb-4 overflow-hidden" style={{ borderColor: GOLD }}>
-          <button type="button" onClick={() => setAddJobOpen((v) => !v)} className="w-full flex items-center gap-2 px-4 py-3 text-left">
-            <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: FOREST, color: 'white' }}><Plus size={15} /></span>
-            <span className="font-display text-base font-semibold text-slate-900 flex-1">Add a job{activeCourse ? ` — ${activeCourse}` : ''}</span>
-            <ChevronRight size={18} className="text-slate-400 transition-transform" style={{ transform: addJobOpen ? 'rotate(90deg)' : 'none' }} />
-          </button>
-          {addJobOpen && (
-          <div className="px-4 pb-4">
-          <div className="mb-2">
-            <FieldLabel>Job</FieldLabel>
-            <Combobox value={job} onChange={setJob} options={jobTypes} placeholder="Type to search jobs, or enter your own…" />
-          </div>
-          <div className="mb-2">
-            <FieldLabel>Assign to{assignees.length ? ` (${assignees.length})` : ''}</FieldLabel>
-            {orderedOps.length === 0 ? (
-              <p className="font-body text-[11px] text-slate-400">Add crew in the Crew tab first.</p>
-            ) : (
-              <MultiSelect selected={assignees} options={orderedOps} onToggle={toggleAssignee} placeholder="Search crew — tap to add several…" />
-            )}
-            <p className="font-body text-[10px] text-slate-400 mt-1">Add everyone on this job — they'll share one bubble on the board.</p>
-          </div>
-          <div className="mb-3">
-            <FieldLabel>Tools / equipment for this job (optional)</FieldLabel>
-            {equipList.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {equipList.map((eq) => (
-                  <span key={eq} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ backgroundColor: '#E8F3EC', color: FERN }}>{eq}<button type="button" onClick={() => setEquipList(equipList.filter((x) => x !== eq))} className="opacity-60 hover:opacity-100">×</button></span>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-2">
-              <div className="flex-1 min-w-0"><Combobox value={equip} onChange={setEquip} options={equipment} accent={FERN} placeholder="Add a tool, then +" /></div>
-              <button type="button" onClick={addEquip} disabled={!equip.trim()} className="font-body text-sm font-bold px-3.5 rounded-xl text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FERN }}>+</button>
-            </div>
-          </div>
-          <div className="mb-3">
-            <FieldLabel>Note (optional)</FieldLabel>
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Pond overflow on #6 — call Ryan, need gloves" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-          </div>
-          <div className="mb-3">
-            <FieldLabel>Round of the day</FieldLabel>
-            <div className="flex gap-1.5">
-              {SLOTS.map(([k, lab]) => (
-                <button key={k} type="button" onClick={() => setSlot(k)} className="flex-1 font-body text-xs font-bold py-2 rounded-lg transition"
-                  style={slot === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{lab}</button>
-              ))}
-            </div>
-            <p className="font-body text-[10px] text-slate-400 mt-1">Post a morning board first, then add 2nd / 3rd jobs as the day goes on — they show as separate sections on the TV.</p>
-          </div>
-          <button onClick={addTask} disabled={busy || !job.trim()} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Adding…' : `Add to board · ${slotLabel(slot)}`}</button>
-          </div>
-          )}
-        </div>
-      )}
-
       {!loading && view.length > 0 && (
         <div className="flex gap-1.5 mb-3">
           {[['job', 'By job'], ['person', 'By person']].map(([k, l]) => (
@@ -5294,11 +5255,11 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
 
       {loading ? (
         <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-      ) : view.length === 0 ? (
+      ) : (!manage && view.length === 0) ? (
         <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
-          {manage ? 'No jobs on the board for this day yet. Add one above.' : 'No jobs posted for this day yet.'}
+          No jobs posted for this day yet.
         </div>
-      ) : groupBy === 'person' ? (
+      ) : (groupBy === 'person' && view.length > 0) ? (
         <div className="space-y-3">
           {groupKeys.map((k) => (
             <div key={k} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
@@ -5336,10 +5297,18 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
             </div>
           ))}
         </div>
-      ) : (
+      ) : (() => {
+        // Which rounds to show: managers always get 1st (with an inline add
+        // slot), then 2nd appears once 1st has a job, 3rd once 2nd does — so
+        // later rounds reveal themselves instead of needing a round picker.
+        const hasRound = (x) => bySlot[x] && Object.keys(bySlot[x]).length > 0
+        let roundsToShow = manage ? ['1', ...(hasRound('1') ? ['2'] : []), ...(hasRound('2') ? ['3'] : [])] : [...slotsPresent]
+        ;['2', '3'].forEach((x) => { if (hasRound(x) && !roundsToShow.includes(x)) roundsToShow.push(x) })
+        roundsToShow = [...new Set(roundsToShow)].sort()
+        return (
         <div className="space-y-5">
-          {slotsPresent.map((s) => {
-          const sGroups = bySlot[s]
+          {roundsToShow.map((s) => {
+          const sGroups = bySlot[s] || {}
           const sKeys = Object.keys(sGroups).sort((a, b) => sGroups[b].length - sGroups[a].length || a.localeCompare(b))
           const jobCount = Object.keys(sGroups).length
           const crewCount = Object.values(sGroups).reduce((n, g) => n + g.filter((t) => t.assignee).length, 0)
@@ -5372,8 +5341,8 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                   <span className="shrink-0 inline-flex items-center justify-center font-body text-[11px] font-extrabold rounded" style={{ width: 20, height: 20, backgroundColor: '#E4EEE7', color: FOREST }}>{jobIdx + 1}</span>
                   <button onClick={() => toggleJob(gk)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
                     <p className="font-body font-bold text-sm text-slate-900 truncate shrink-0 max-w-[55%]">{jk}</p>
-                    <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{list.length}</span>
-                    {!open && crewSummary && <span className="font-body text-[11px] text-slate-400 truncate">· {crewSummary}</span>}
+                    <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{alreadyOn.length}</span>
+                    {!open && <span className="font-body text-[11px] text-slate-400 truncate">· {crewSummary}</span>}
                   </button>
                   {manage && <button onClick={() => removeJobGroup(jk, s)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-500 transition" aria-label="Remove job"><Trash2 size={14} /></button>}
                   <button onClick={() => toggleJob(gk)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" aria-label={open ? 'Collapse' : 'Expand'}><ChevronRight size={16} className="text-slate-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }} /></button>
@@ -5383,16 +5352,17 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
                   {/* Crew — who's on it, add or remove */}
                   <div>
                     <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Crew</p>
-                    {list.map((t, pi) => (
+                    {list.filter((t) => t.assignee).map((t, pi) => (
                       <div key={t.id} className="flex items-center gap-2.5 py-1.5" style={{ borderTop: pi > 0 ? '1px solid #F1F4F2' : 'none' }}>
                         <span className="shrink-0 self-stretch rounded-full" style={{ width: 3, backgroundColor: FERN }} />
                         <div className="min-w-0 flex-1">
-                          <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee || 'Unassigned'}</p>
+                          <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{t.assignee}</p>
                           {perPersonNotes && t.notes && <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>}
                         </div>
                         <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={14} /></button>
                       </div>
                     ))}
+                    {alreadyOn.length === 0 && <p className="font-body text-[12px] text-slate-400 py-1">No one on this job yet — add crew below.</p>}
                     <div className="mt-1.5">
                       <PeoplePicker options={orderedOps.filter((n) => !alreadyOn.includes(n))} selected={[]} onToggle={(name) => addPersonToJob(jk, name, s)} placeholder={`Add crew to ${jk}…`} />
                     </div>
@@ -5475,14 +5445,16 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
               </div>
             )
           })}
+          {manage && <AddJobRow options={jobTypes} onAdd={(name) => quickAddJob(name, s)} placeholder={`Add a job to ${slotLabel(s).toLowerCase()}…`} />}
           </div>
           </div>
           )
           })}
         </div>
-      )}
+        )
+        })()}
 
-      <p className="font-body text-[10px] text-slate-400 mt-4 text-center">Each job is a drop-down box — you see the job and who's on it; tap to open and edit the crew, note and equipment.</p>
+      <p className="font-body text-[10px] text-slate-400 mt-4 text-center">Pick a job in the “Add a job” line and it drops onto the board; tap any job to open it and set the crew, note and equipment.</p>
     </div>
   )
 }
