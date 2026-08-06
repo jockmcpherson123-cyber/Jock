@@ -5104,10 +5104,11 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [msg, setMsg] = useState(null)
   const [course, setCourse] = useState('')
   const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
-  const [openJobs, setOpenJobs] = useState({}) // jobKey -> open? each job is a drop-down box; tap to open and edit
+  const [openJobs, setOpenJobs] = useState({}) // jobKey -> open? accordion — only one job box open at a time
   const [jobEquipDraft, setJobEquipDraft] = useState({}) // gk -> in-progress "add a tool" text
   const [tx, setTx] = useState({})
-  const toggleJob = (jk) => setOpenJobs((p) => ({ ...p, [jk]: !p[jk] }))
+  // Accordion: opening a job closes any other that's open, so the board stays tidy.
+  const toggleJob = (jk) => setOpenJobs((p) => (p[jk] ? {} : { [jk]: true }))
 
   const courseNames = courses.map((c) => c.name)
   const hasCourses = courseNames.length >= 2
@@ -5168,7 +5169,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
     if (!jobName) return
     // Already on this round? Just open it instead of duplicating.
     if (view.some((t) => (t.job || '') === jobName && (t.slot || '1') === s)) {
-      setOpenJobs((p) => ({ ...p, [`${s}::${jobName}`]: true })); return
+      setOpenJobs({ [`${s}::${jobName}`]: true }); return
     }
     try {
       const sort = tasks.length ? Math.max(...tasks.map((t) => t.sort || 0)) + 1 : 0
