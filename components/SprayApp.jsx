@@ -6077,11 +6077,19 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
       const dmiOnly = sup.every((p) => supMap[p.product] === 'dmi')
       if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: sup.map((p) => p.product), dmiOnly }
     })
-  // The simple target tracker only counts areas on a PGR program. The curve
-  // model below wants ALL growth-suppressing sprays — including DMI-only areas
-  // (e.g. Banner Maxx on its own) — so keep a full copy before we prune.
-  const lastRegByArea = { ...lastByArea }
   Object.keys(lastByArea).forEach((a) => { if (!areaHasPGR[a]) delete lastByArea[a] })
+
+  // For the curve model, track the LAST date EACH regulating product hit EACH
+  // area — so a DMI and a PGR sprayed on different days each ride their own
+  // curve, instead of the most recent spray hiding the earlier one.
+  const regProdByArea = {} // { area: { productName: lastDate } }
+  ;(sheets || []).filter((s) => sheetApplied(s) && s.date).forEach((s) => {
+    ;(s.products || []).forEach((p) => {
+      if (!supMap[p.product]) return
+      const a = regProdByArea[s.area] = regProdByArea[s.area] || {}
+      if (!a[p.product] || s.date > a[p.product]) a[p.product] = s.date
+    })
+  })
 
   const todayIso = localDateISO()
   const areaRows = Object.keys(areas).map((area) => {
@@ -6100,19 +6108,20 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
   // Per-product suppression-curve model (GreenKeeper-style): for each area with a
   // regulating spray, walk each product's own curve at the area's GDD-since.
   const areaSurface = (name) => { const s = String(name || '').toLowerCase(); if (s.includes('green')) return 'green'; if (s.includes('tee')) return 'tee'; if (s.includes('fairway') || s.includes("f'way") || s.includes('fwy')) return 'fairway'; if (s.includes('rough')) return 'rough'; return 'green' }
-  const modelRows = Object.keys(lastRegByArea).map((area) => {
-    const last = lastRegByArea[area]
-    const gdd = gddSince(daily, last.date, 32)
+  const modelRows = Object.keys(regProdByArea).map((area) => {
     const sk = areaSurface(area)
-    const prods = last.products.map((name) => {
+    const prods = Object.entries(regProdByArea[area]).map(([name, date]) => {
       const prod = (products || []).find((p) => p.name === name) || { name }
-      const model = withTargets(modelForProduct(prod, supMap[name]), pgrTargets[modelForProduct(prod, supMap[name])?.id])
+      const base = modelForProduct(prod, supMap[name])
+      const model = withTargets(base, pgrTargets[base?.id])
+      const gdd = gddSince(daily, date, 32)
       const st = model ? regulationStatus(model, gdd, sk) : null
-      return { name, model, st, suppression: st ? st.suppression : 0 }
-    }).filter((x) => x.model && x.st)
+      return { name, model, st, gdd, date, suppression: st ? st.suppression : 0 }
+    }).filter((x) => x.model && x.st && x.st.pct < 2) // drop products fully worn off (past rebound)
+      .sort((a, b) => (b.st.target || 0) - (a.st.target || 0))
     const combined = combinedSuppression(prods)
-    const primary = prods.slice().sort((a, b) => (b.st.target || 0) - (a.st.target || 0))[0]
-    return { area, gdd, sk, prods, combined, primary }
+    const primary = prods[0]
+    return { area, sk, prods, combined, primary }
   }).filter((r) => r.prods.length).sort((a, b) => b.combined - a.combined)
 
   // Save an edited reapply-GDD target (blank or "= default" reverts to default).
@@ -6212,13 +6221,13 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
                   <span className="font-body text-sm font-semibold text-slate-800">{r.area}</span>
                   <span className="font-body text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EAF2EC', color: FERN }}>~{Math.round(r.combined * 100)}% suppression now</span>
                 </div>
-                {r.primary && <SuppressionCurve model={r.primary.model} gdd={r.gdd} surfaceKind={r.sk} />}
+                {r.primary && <SuppressionCurve model={r.primary.model} gdd={r.primary.gdd} surfaceKind={r.sk} />}
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {r.prods.map((p) => {
                     const ph = PHASE_STYLE[p.st.phase] || PHASE_STYLE.regulated
                     return (
                       <span key={p.name} className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: ph.bg, color: ph.fg }}>
-                        {p.model.label.split(' (')[0]} · {ph.label} · {r.gdd}/{p.st.target}
+                        {p.model.label.split(' (')[0]} · {ph.label} · {p.gdd}/{p.st.target}
                       </span>
                     )
                   })}
