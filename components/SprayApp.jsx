@@ -29,7 +29,7 @@ import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WIN
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
 import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget, diseasesForProduct } from '@/lib/fungicides'
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
-import { modelForProduct, regulationStatus, suppressionAt, combinedSuppression, surfaceCol, PHASE_STYLE } from '@/lib/pgrmodel'
+import { modelForProduct, regulationStatus, suppressionAt, combinedSuppression, surfaceCol, withTargets, PGR_MODELS, PHASE_STYLE } from '@/lib/pgrmodel'
 import { localDateISO } from '@/lib/dates'
 import { sheetApplied } from '@/lib/applied'
 import { SearchSelect, MultiSelect } from '@/components/pickers'
@@ -5773,6 +5773,12 @@ function TurfPerformanceModule() {
   async function reloadSpeeds() {
     try { setSpeeds(await db.fetchGreensSpeeds()) } catch (e) { console.error(e) }
   }
+  // Save a patch onto courseInfo (e.g. tuned PGR curve targets) and persist.
+  async function saveTurfCourse(patch) {
+    const next = { ...(turf.courseInfo || {}), ...patch }
+    setTurf((t) => ({ ...t, courseInfo: next }))
+    try { await db.saveSettings({ courseInfo: next }) } catch (e) { console.error(e) }
+  }
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
@@ -5800,7 +5806,7 @@ function TurfPerformanceModule() {
         {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} products={turf.products} />}
         {route === 'gdd' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <GddPgrTab daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} hasLocation={turf.location?.lat != null} />
+          : <GddPgrTab daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} hasLocation={turf.location?.lat != null} courseInfo={turf.courseInfo} onSaveTargets={(pgrTargets) => saveTurfCourse({ pgrTargets })} />
         )}
         {route === 'clippings' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
@@ -6025,7 +6031,9 @@ function Kv({ label, value, accent }) {
 
 // Season GDD, plus GDD accumulated since each area's last growth-regulator
 // application (base 32°F) against a reapply target — the Primo/Anuew model.
-function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
+function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {}, onSaveTargets }) {
+  const pgrTargets = courseInfo.pgrTargets || {}
+  const [editTargets, setEditTargets] = useState(false)
   // 360 GDD (base 32°F) = the classic 200-GDD Primo model stated at base 0°C.
   const [target, setTarget] = useState(360)
 
@@ -6051,6 +6059,10 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
       const dmiOnly = sup.every((p) => supMap[p.product] === 'dmi')
       if (!lastByArea[s.area] || s.date > lastByArea[s.area].date) lastByArea[s.area] = { date: s.date, products: sup.map((p) => p.product), dmiOnly }
     })
+  // The simple target tracker only counts areas on a PGR program. The curve
+  // model below wants ALL growth-suppressing sprays — including DMI-only areas
+  // (e.g. Banner Maxx on its own) — so keep a full copy before we prune.
+  const lastRegByArea = { ...lastByArea }
   Object.keys(lastByArea).forEach((a) => { if (!areaHasPGR[a]) delete lastByArea[a] })
 
   const todayIso = localDateISO()
@@ -6070,13 +6082,13 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
   // Per-product suppression-curve model (GreenKeeper-style): for each area with a
   // regulating spray, walk each product's own curve at the area's GDD-since.
   const areaSurface = (name) => { const s = String(name || '').toLowerCase(); if (s.includes('green')) return 'green'; if (s.includes('tee')) return 'tee'; if (s.includes('fairway') || s.includes("f'way") || s.includes('fwy')) return 'fairway'; if (s.includes('rough')) return 'rough'; return 'green' }
-  const modelRows = Object.keys(lastByArea).map((area) => {
-    const last = lastByArea[area]
+  const modelRows = Object.keys(lastRegByArea).map((area) => {
+    const last = lastRegByArea[area]
     const gdd = gddSince(daily, last.date, 32)
     const sk = areaSurface(area)
     const prods = last.products.map((name) => {
       const prod = (products || []).find((p) => p.name === name) || { name }
-      const model = modelForProduct(prod, supMap[name])
+      const model = withTargets(modelForProduct(prod, supMap[name]), pgrTargets[modelForProduct(prod, supMap[name])?.id])
       const st = model ? regulationStatus(model, gdd, sk) : null
       return { name, model, st, suppression: st ? st.suppression : 0 }
     }).filter((x) => x.model && x.st)
@@ -6084,6 +6096,17 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
     const primary = prods.slice().sort((a, b) => (b.st.target || 0) - (a.st.target || 0))[0]
     return { area, gdd, sk, prods, combined, primary }
   }).filter((r) => r.prods.length).sort((a, b) => b.combined - a.combined)
+
+  // Save an edited reapply-GDD target (blank or "= default" reverts to default).
+  const saveTarget = (modelId, surf, val, base) => {
+    const num = val === '' ? null : Number(val)
+    const forModel = { ...(pgrTargets[modelId] || {}) }
+    if (num == null || isNaN(num) || num === base) delete forModel[surf]
+    else forModel[surf] = num
+    const next = { ...pgrTargets }
+    if (Object.keys(forModel).length) next[modelId] = forModel; else delete next[modelId]
+    onSaveTargets?.(next)
+  }
 
   return (
     <div className="space-y-4">
@@ -6130,10 +6153,40 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
           {areaRows.length === 0 && <p className="font-body text-sm text-slate-400">No areas set up yet.</p>}
         </div>
       </div>
-      {modelRows.length > 0 && (
-        <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+      <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+        <div className="flex items-center justify-between mb-1">
           <p className="font-display text-base font-semibold text-slate-900">Regulation model — by product</p>
-          <p className="font-body text-[11px] text-slate-400 mb-3">Each product on its own suppression curve (like the GreenKeeper GDD models): strong right after the spray, fading to zero at the reapply point, then a <b>rebound</b> growth surge if you run past it. Stacked products (a PGR + a DMI) read as intensified. Curve targets are editable estimates — tune to your turf.</p>
+          {onSaveTargets && <button onClick={() => setEditTargets((v) => !v)} className="font-body text-[11px] font-bold" style={{ color: FERN }}>{editTargets ? 'Done' : 'Adjust targets'}</button>}
+        </div>
+        <p className="font-body text-[11px] text-slate-400 mb-3">Each product on its own suppression curve (like the GreenKeeper GDD models): strong right after the spray, fading to zero at the reapply point, then a <b>rebound</b> growth surge if you run past it. Stacked products (a PGR + a DMI) read as intensified.</p>
+
+        {editTargets && (
+          <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F8FAF9' }}>
+            <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Reapply GDD by product &amp; surface (base 32°F)</p>
+            <div className="space-y-2.5">
+              {PGR_MODELS.map((m) => (
+                <div key={m.id}>
+                  <p className="font-body text-[12px] font-semibold text-slate-700 mb-1">{m.label}</p>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {['green', 'tee', 'fairway', 'rough'].map((surf) => (
+                      <div key={surf}>
+                        <label className="font-body text-[9px] uppercase tracking-wide text-slate-400 block mb-0.5">{surf}</label>
+                        <input type="number" inputMode="numeric" key={`${m.id}:${surf}:${pgrTargets[m.id]?.[surf] ?? m.gdd[surf]}`} defaultValue={pgrTargets[m.id]?.[surf] ?? m.gdd[surf]}
+                          onBlur={(e) => saveTarget(m.id, surf, e.target.value.trim(), m.gdd[surf])} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                          className="w-full border border-slate-200 rounded-lg px-1.5 py-1.5 text-base font-body text-center" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="font-body text-[10px] text-slate-400 mt-2">Higher GDD = longer before reapply. Leave a box blank (or matching the default) to use the built-in estimate.</p>
+          </div>
+        )}
+
+        {modelRows.length === 0 ? (
+          <p className="font-body text-sm text-slate-400">Log a PGR or DMI spray on an area to see its curve here.</p>
+        ) : (
           <div className="space-y-4">
             {modelRows.map((r) => (
               <div key={r.area} className="rounded-xl p-3" style={{ backgroundColor: '#F8FAF9' }}>
@@ -6155,8 +6208,8 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
       <p className="font-body text-[10px] text-slate-400">Weather is pulled from your course location (Open-Meteo). GDD updates daily.</p>
     </div>
   )
