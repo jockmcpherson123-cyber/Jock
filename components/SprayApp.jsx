@@ -5840,9 +5840,15 @@ function TurfPerformanceModule() {
 // Reference library: turf disease/weed/insect profiles + the essential plant
 // nutrients. Profiles share ids with the risk models so they can cross-link.
 const KIND_STYLE = {
+  Grass: { bg: '#E4EFE5', fg: '#2E7D46' },
   Disease: { bg: '#FDE7E4', fg: '#B23A2E' },
   Weed: { bg: '#FCEFD2', fg: '#9A6B12' },
   Insect: { bg: '#EDE6FA', fg: '#6D4AC2' },
+}
+// Field labels read differently for a grass than for a pest.
+const KIND_LABELS = {
+  Grass: { favoredBy: 'Adaptation & climate', identify: 'How to identify', manage: 'Management & culture' },
+  _default: { favoredBy: 'Favored by', identify: 'How to identify', manage: 'How to manage' },
 }
 const TIER_STYLE = {
   Primary: { bg: '#E4EFE5', fg: FERN },
@@ -5870,7 +5876,7 @@ function KnowledgeTab({ courseInfo, products = [] }) {
     <div className="space-y-4">
       <div>
         <p className="font-display text-lg font-semibold text-slate-900">Reference</p>
-        <p className="font-body text-[11px] text-slate-400">Disease, weed &amp; insect profiles and the essential plant nutrients — what it is, what favors it, and what to do.</p>
+        <p className="font-body text-[11px] text-slate-400">Turfgrass, disease, weed &amp; insect profiles and the essential plant nutrients — what it is, what favors it, and what to do.</p>
       </div>
 
       <div className="flex gap-2">
@@ -5881,14 +5887,14 @@ function KnowledgeTab({ courseInfo, products = [] }) {
 
       <div className="relative">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={sub === 'pests' ? 'Search diseases, weeds, insects…' : 'Search nutrients…'} className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm font-body" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={sub === 'pests' ? 'Search grasses, diseases, weeds, insects…' : 'Search nutrients…'} className="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm font-body" />
       </div>
 
       {sub === 'pests' ? (
         <>
           <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {['All', 'Disease', 'Weed', 'Insect'].map((k) => (
-              <button key={k} onClick={() => setKind(k)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={kind === k ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{k === 'All' ? 'All' : `${k}s`}</button>
+            {['All', 'Grass', 'Disease', 'Weed', 'Insect'].map((k) => (
+              <button key={k} onClick={() => setKind(k)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={kind === k ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{k === 'All' ? 'All' : k === 'Grass' ? 'Grasses' : `${k}s`}</button>
             ))}
           </div>
           <div className="space-y-2.5">
@@ -5914,9 +5920,11 @@ function KnowledgeTab({ courseInfo, products = [] }) {
                           <ImageIcon size={12} /> See photos ↗
                         </a>
                       </div>
-                      <Kv label="Favored by" value={p.favoredBy} />
-                      <Kv label="How to identify" value={p.identify} />
-                      <Kv label="How to manage" value={p.manage} accent />
+                      {(() => { const kl = KIND_LABELS[p.kind] || KIND_LABELS._default; return (<>
+                        <Kv label={kl.favoredBy} value={p.favoredBy} />
+                        <Kv label={kl.identify} value={p.identify} />
+                        <Kv label={kl.manage} value={p.manage} accent />
+                      </>) })()}
                       {(() => {
                         const src = ratingsSourceFor(p.id)
                         if (!src) return null
