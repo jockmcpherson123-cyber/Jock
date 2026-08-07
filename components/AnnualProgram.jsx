@@ -952,8 +952,8 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 
       {/* Planned-spray editor — opens as a centered popup so you edit in place */}
       {editApp && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center p-3 overflow-y-auto" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditApp(null)}>
-        <div className="bg-white rounded-2xl border-2 p-4 shadow-2xl my-6 w-full max-w-lg" style={{ borderColor: GOLD }} onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-3 overflow-y-auto overscroll-contain" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditApp(null)}>
+        <div className="bg-white rounded-2xl border-2 p-4 shadow-2xl my-6 w-full max-w-4xl" style={{ borderColor: GOLD }} onClick={(e) => e.stopPropagation()}>
           <p className="font-display text-base font-semibold text-slate-900 mb-1">
             {editApp.originalIds?.length ? 'Edit planned spray' : 'New planned spray'}
           </p>
@@ -1035,7 +1035,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
             <div>
               <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Products in the tank</label>
               <MultiSelect selected={editApp.products.map((r) => r.product).filter(Boolean)} options={products.map((p) => p.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
-              <div className="space-y-2 mt-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 items-start">
                 {editApp.products.filter((r) => r.product).map((r) => (
                   <div key={r.key} className="rounded-xl border border-slate-100 p-2.5" style={{ backgroundColor: '#F8FAF9' }}>
                     <div className="flex items-center justify-between mb-2">
