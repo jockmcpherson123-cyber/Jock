@@ -3334,6 +3334,24 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                   <input type="number" step="1" value={draft.rotationDays ?? ''} onChange={(e) => setDraft({ ...draft, rotationDays: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="21" />
                 </div>
               </div>
+              {(() => {
+                // Live: the moment a product reads as a PGR or DMI (its type, its
+                // active ingredient, or FRAC 3), tell the user it'll feed the
+                // Growth-Reg model — so they know new products are recognized.
+                const k = suppressionKind(draft)
+                if (!k) return null
+                const m = modelForProduct(draft, k)
+                return (
+                  <div className="mt-2 rounded-lg px-2.5 py-2" style={{ backgroundColor: k === 'dmi' ? '#F1ECFA' : '#E8F3EC' }}>
+                    <p className="font-body text-[11px] font-bold" style={{ color: k === 'dmi' ? '#6D4AC2' : FERN }}>
+                      ✓ {k === 'dmi' ? 'Recognized as a DMI (FRAC 3) — also regulates growth' : 'Recognized as a growth regulator (PGR)'}
+                    </p>
+                    <p className="font-body text-[10px] text-slate-500 mt-0.5">
+                      Feeds the Growth-Reg model automatically{m ? ` — ${m.label.split(' (')[0]} curve (~${m.gdd.green} GDD on greens; tune it in Turf → Growing Degree Days)` : ''}.
+                    </p>
+                  </div>
+                )
+              })()}
             </div>
             {draft.type === 'Fungicide' && (
               <div className="rounded-xl p-3" style={{ backgroundColor: '#EAF3EE' }}>
