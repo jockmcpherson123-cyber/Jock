@@ -20,7 +20,7 @@ import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
   productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, productRateForN, eiqLoad,
 } from '@/lib/calc'
-import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS } from '@/lib/defaults'
+import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder, mixRank } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate, buildRainYear } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
@@ -1603,7 +1603,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
           <FieldLabel>Products</FieldLabel>
           <MultiSelect selected={s.products.map((p) => p.product).filter(Boolean)} options={products.map((pr) => pr.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
           <div className="space-y-2.5 mt-3">
-            {s.products.filter((p) => p.product).map((p) => {
+            {sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product)).map((p, mixIdx) => {
               const { value: amt, unit: amtUnit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
               const total = amt !== null ? Math.round(amt * s.tanks * 10) / 10 : null
               const prodInfo = products.find((pr) => pr.name === p.product)
@@ -1616,8 +1616,10 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               return (
                 <div key={p.id} className="border rounded-xl p-3" style={{ borderColor: outOfRange ? '#FCA5A5' : '#E2E8F0' }}>
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="font-body text-sm font-bold flex-1 min-w-0 truncate" style={{ color: FOREST }}>{p.product}</span>
-                    <button onClick={() => removeRow(p.id)} className="text-red-400 p-1 shrink-0"><Trash2 size={15} /></button>
+                    <span className="shrink-0 inline-flex items-center justify-center font-body text-[11px] font-extrabold rounded" style={{ width: 20, height: 20, backgroundColor: '#EAF2EC', color: FOREST }}>{mixIdx + 1}</span>
+                    <span className="font-body text-sm font-bold min-w-0 truncate" style={{ color: FOREST }}>{p.product}</span>
+                    <span className="font-body text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>
+                    <button onClick={() => removeRow(p.id)} className="text-red-400 p-1 shrink-0 ml-auto"><Trash2 size={15} /></button>
                   </div>
                   {p.product && (
                     <>
@@ -1744,7 +1746,7 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
   // one connected list (no separate extra-spray table).
   const partialGal = sheet.partialGallons
   const hasPartial = partialGal && area.galTank
-  const rows = (sheet.products || []).filter((p) => p.product).map((p) => {
+  const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product)).map((p) => {
     const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
     let partialAmt = 0
     if (hasPartial && amt !== null) {
@@ -1757,7 +1759,7 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
   const productRows = rows.map((p, i) => {
     const forLine = (p.target && String(p.target).trim()) ? `<div style="font-size:9px;color:#3A6B4A;margin-top:1px">For: ${esc(p.target)}</div>` : ''
     return `<tr style="background:${i % 2 === 0 ? '#fff' : '#F5F5F0'}">
-    <td style="${R}">${esc(p.product)}${forLine}</td><td style="${R}">${esc(p.rate)}</td><td style="${R}">${esc(p.basis)}</td>
+    <td style="${R}"><b>${i + 1}.</b> ${esc(p.product)}${forLine}</td><td style="${R}">${esc(p.rate)}</td><td style="${R}">${esc(p.basis)}</td>
     <td style="${R}">${p.amt ?? '—'} ${esc(p.unit || '')}</td><td style="${R};font-weight:700">${p.total ?? '—'} ${esc(p.unit || '')}</td></tr>`
   }).join('')
   const partialNote = hasPartial ? `<div style="font-size:10px;color:#555;margin:-6px 0 12px">Totals include the ${esc(partialGal)} gal partial fill (${sheet.tanks || 1} full tank${(sheet.tanks || 1) !== 1 ? 's' : ''} + ${esc(partialGal)} gal).</div>` : ''
@@ -2282,7 +2284,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
             )}
 
             <div className="divide-y divide-slate-100">
-              {sheet.products.filter((p) => p.product).map((p) => {
+              {sortByMixOrder(sheet.products.filter((p) => p.product), (p) => products?.find((pr) => pr.name === p.product)).map((p) => {
                 const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
                 const total = amt !== null ? Math.round(amt * sheet.tanks * 10) / 10 : null
                 const prodInfo = products?.find((pr) => pr.name === p.product)
@@ -3144,6 +3146,11 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
             <div className="grid grid-cols-2 gap-3">
               <div><FieldLabel>Type</FieldLabel><Select value={draft.type} onChange={(v) => setDraft({ ...draft, type: v })} options={PRODUCT_TYPES} /></div>
               <div><FieldLabel>Default Unit</FieldLabel><Select value={draft.unit} onChange={(v) => setDraft({ ...draft, unit: v })} options={UNITS} /></div>
+            </div>
+            <div>
+              <FieldLabel>Tank-mix formulation</FieldLabel>
+              <SearchSelect value={draft.formulation || guessFormulation(draft)} options={FORMULATIONS.map((f) => ({ value: f.id, label: f.label }))} onPick={(v) => setDraft({ ...draft, formulation: v })} sort={false} />
+              <p className="font-body text-[10px] text-slate-400 mt-1">Sets the tank fill order on spray sheets (dry first, adjuvants last).{!draft.formulation ? ' Auto-guessed — pick one to lock it in.' : ''}</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
