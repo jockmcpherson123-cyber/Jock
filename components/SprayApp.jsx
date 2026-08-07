@@ -14,7 +14,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target, Scissors,
+  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target, Scissors, Gauge,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -5787,7 +5787,10 @@ function TurfPerformanceModule() {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-24 pt-6">
-        {route === 'dashboard' && <TurfDashboardPlaceholder />}
+        {route === 'dashboard' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} clippings={clippings} soilTests={soilTests} practices={practices} hasLocation={turf.location?.lat != null} onGo={setRoute} />
+        )}
         {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} products={turf.products} />}
         {route === 'gdd' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
@@ -7186,36 +7189,102 @@ function TimingTab({ soilSeries, hasLocation, products = [] }) {
   )
 }
 
-function TurfDashboardPlaceholder() {
+// The Turf Performance home — an at-a-glance roll-up of everything the other
+// tabs track (GDD, growth-reg timing, clippings, soil, practices), each tile
+// tappable to jump into the detail tab.
+function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, clippings = [], soilTests = [], practices = [], hasLocation, onGo }) {
+  const PGR_TARGET = 360 // classic greens reapply target (base 32°F)
+  const gddSeries = gddFromDaily(daily)
+  const seasonGdd = gddSeries.length ? gddSeries[gddSeries.length - 1].acc : 0
+
+  // Growth-reg timing — GDD since each area's last growth-suppressing spray.
+  const supMap = suppressionMap(products)
+  const lastByArea = {}
+  const areaHasPGR = {}
+  ;(sheets || []).filter((s) => sheetApplied(s) && s.date).forEach((s) => {
+    const sup = (s.products || []).filter((p) => supMap[p.product])
+    if (!sup.length) return
+    if (sup.some((p) => supMap[p.product] === 'pgr')) areaHasPGR[s.area] = true
+    if (!lastByArea[s.area] || s.date > lastByArea[s.area]) lastByArea[s.area] = s.date
+  })
+  const pgrRows = Object.keys(areaHasPGR).map((area) => {
+    const gdd = gddSince(daily, lastByArea[area], 32)
+    return { area, gdd, status: gdd >= PGR_TARGET ? 'due' : gdd >= PGR_TARGET * 0.8 ? 'soon' : 'ok' }
+  }).sort((a, b) => b.gdd - a.gdd)
+  const dueCount = pgrRows.filter((r) => r.status === 'due').length
+  const soonCount = pgrRows.filter((r) => r.status === 'soon').length
+  const topPgr = pgrRows[0]
+
+  // Clippings — latest reading + direction against the one before it (same area).
+  const clipsSorted = [...clippings].sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+  const lastClip = clipsSorted[clipsSorted.length - 1]
+  const prevSameArea = lastClip ? clipsSorted.filter((c) => c.area === lastClip.area && c.date < lastClip.date).pop() : null
+  const clipDir = lastClip && prevSameArea ? (lastClip.volume > prevSameArea.volume ? 'up' : lastClip.volume < prevSameArea.volume ? 'down' : 'flat') : null
+
+  const lastSoil = [...soilTests].sort((a, b) => (a.date || '').localeCompare(b.date || '')).pop()
+  const lastPractice = [...practices].filter((p) => p.date).sort((a, b) => a.date.localeCompare(b.date)).pop()
+  const daysAgo = (d) => { if (!d) return null; const n = Math.round((Date.now() - new Date(d + 'T00:00:00').getTime()) / 86400000); return n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${n} days ago` }
+
+  const Tile = ({ onClick, icon, label, value, sub, tint = '#F0F6F2', fg = FERN }) => (
+    <button onClick={onClick} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm text-left w-full hover:shadow-md transition">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: tint, color: fg }}>{icon}</span>
+        <span className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</span>
+      </div>
+      <p className="font-display text-xl font-bold text-slate-900 leading-tight">{value}</p>
+      {sub && <p className="font-body text-[12px] text-slate-400 mt-0.5">{sub}</p>}
+    </button>
+  )
+
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-2xl border border-black/5 p-8 text-center shadow-sm">
-        <Sprout className="mx-auto mb-3 text-slate-300" size={32} />
-        <p className="font-display text-lg font-semibold text-slate-900 mb-1">Turf Performance</p>
-        <p className="font-body text-sm text-slate-400 max-w-sm mx-auto">
-          This is a separate space from Spray Ops, built to track Growing Degree Days, clipping yields,
-          and greens speed — the data needed to fine-tune growth regulator timing for consistent greens.
-        </p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <ComingSoonMini icon={<TrendingUp size={16} />} label="GDD Tracking" />
-        <ComingSoonMini icon={<ClipboardList size={16} />} label="Clipping Yields" />
-        <ComingSoonMini icon={<Droplet size={16} />} label="Greens Speed" />
-      </div>
-    </div>
-  )
-}
+      {/* Season GDD hero */}
+      <button onClick={() => onGo('gdd')} className="w-full text-left rounded-2xl p-4 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
+        <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Season GDD (base 50°F)</p>
+        <p className="font-display text-3xl font-bold mt-0.5">{hasLocation ? Math.round(seasonGdd).toLocaleString() : '—'}</p>
+        <p className="font-body text-[11px] opacity-70 mt-0.5">{hasLocation ? `Accumulated since Jan 1 · ${daily.length} days of weather` : 'Add your course location in Settings to track GDD'}</p>
+      </button>
 
-function ComingSoonMini({ icon, label }) {
-  return (
-    <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm flex items-center gap-3">
-      <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#F0F6F2', color: FERN }}>
-        {icon}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Tile
+          onClick={() => onGo('gdd')}
+          icon={<TrendingUp size={16} />}
+          label="Growth-Reg Timing"
+          tint={dueCount ? '#FEE2E2' : '#F0F6F2'} fg={dueCount ? '#B91C1C' : FERN}
+          value={pgrRows.length === 0 ? 'No PGR logged' : dueCount ? `${dueCount} area${dueCount !== 1 ? 's' : ''} due` : soonCount ? `${soonCount} due soon` : 'All on track'}
+          sub={topPgr ? `${topPgr.area}: ${topPgr.gdd} / ${PGR_TARGET} GDD` : 'Log a growth-reg spray to start the clock'}
+        />
+        <Tile
+          onClick={() => onGo('clippings')}
+          icon={<ClipboardList size={16} />}
+          label="Clipping Yield"
+          value={lastClip ? `${lastClip.volume} ${lastClip.unit || ''}`.trim() : 'No logs yet'}
+          sub={lastClip ? `${lastClip.area} · ${daysAgo(lastClip.date)}${clipDir ? ` · ${clipDir === 'up' ? '▲ up' : clipDir === 'down' ? '▼ down' : '– flat'}` : ''}` : 'Log clipping volumes to track growth'}
+        />
+        <Tile
+          onClick={() => onGo('soil')}
+          icon={<Droplet size={16} />}
+          label="Soil Tests"
+          value={soilTests.length ? `${soilTests.length} on file` : 'No tests yet'}
+          sub={lastSoil ? `Last: ${lastSoil.area || 'test'} · ${daysAgo(lastSoil.date)}` : 'Add a soil test to track nutrients'}
+        />
+        <Tile
+          onClick={() => onGo('practices')}
+          icon={<Scissors size={16} />}
+          label="Cultural Practices"
+          value={lastPractice ? lastPractice.practice : 'None logged'}
+          sub={lastPractice ? `${lastPractice.area || ''}${lastPractice.area ? ' · ' : ''}${daysAgo(lastPractice.date)}` : 'Log aeration, topdressing, rolling…'}
+        />
       </div>
-      <div>
-        <p className="font-body text-sm font-semibold text-slate-800">{label}</p>
-        <p className="font-body text-[11px] text-slate-400">Coming soon</p>
-      </div>
+
+      <button onClick={() => onGo('speed')} className="w-full bg-white rounded-2xl border border-black/5 p-4 shadow-sm flex items-center gap-3 text-left hover:shadow-md transition">
+        <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#F0F6F2', color: FERN }}><Gauge size={16} /></span>
+        <div className="min-w-0 flex-1">
+          <p className="font-body text-sm font-semibold text-slate-800">Greens Speed</p>
+          <p className="font-body text-[12px] text-slate-400">Stimpmeter tracking — coming soon</p>
+        </div>
+        <ChevronRight size={18} className="text-slate-300 shrink-0" />
+      </button>
     </div>
   )
 }
