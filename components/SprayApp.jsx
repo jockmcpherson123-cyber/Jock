@@ -2988,9 +2988,30 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   }
   const downloadTemplate = async () => {
     const XLSX = await import('xlsx')
-    const headers = ['Name', 'Type', 'Active Ingredient', 'Active %', 'Chemical Group', 'Rotate After (days)', 'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A', 'Stock', 'Low Stock', 'N', 'P', 'K', 'Case Size', 'Oz/Case', 'Cost/Case', 'Label link', 'SDS link', 'Avoid Grasses']
-    const example = ['Daconil Action', 'Fungicide', 'Chlorothalonil + Acibenzolar-S-methyl', 20.3, 'M05', 14, 1.8, 'oz / M', 'oz', 1.8, 3.6, '', '', 0, 0, '', '', '', '2.5 Gal', 320, 240, 'https://example.com/label.pdf', 'https://example.com/sds.pdf', 'Bentgrass, Poa Annua']
-    const ws = XLSX.utils.aoa_to_sheet([headers, example])
+    const headers = [
+      'Name', 'Type', 'Mixing Order', 'Active Ingredient', 'Active %', 'Manufacturer',
+      'Chemical Group', 'Rotate After (days)', 'Spray Interval (days)', 'EIQ', 'Signal Word', 'REI (hrs)',
+      'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A',
+      'Stock', 'Low Stock', 'Fert Form', 'N', 'P', 'K', 'N lbs/gal', 'P lbs/gal', 'K lbs/gal',
+      'Case Size', 'Oz/Case', 'Cost/Case', 'Label link', 'SDS link', 'Avoid Grasses',
+    ]
+    const example = [
+      'Daconil Action', 'Fungicide', 'Flowable (SC)', 'Chlorothalonil + Acibenzolar-S-methyl', 20.3, 'Syngenta',
+      'M05', 14, 14, 33.4, 'Warning', 12,
+      1.8, 'oz / M', 'oz', 1.8, 3.6, '', '',
+      0, 0, '', '', '', '', '', '', '',
+      '2.5 Gal', 320, 240, 'https://example.com/label.pdf', 'https://example.com/sds.pdf', 'Bentgrass, Poa Annua',
+    ]
+    // A second example — a dry-formulated fertilizer — shows the Mixing Order and
+    // fertilizer columns in use.
+    const example2 = [
+      'Primo Maxx', 'Growth Reg', 'Emulsifiable (EC)', 'Trinexapac-ethyl', 11.3, 'Syngenta',
+      'PGR', '', 21, '', 'Caution', 12,
+      0.25, 'oz / M', 'oz', 0.125, 0.75, '', '',
+      0, 0, '', '', '', '', '', '', '',
+      '1 Gal', 128, 420, '', '', '',
+    ]
+    const ws = XLSX.utils.aoa_to_sheet([headers, example, example2])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Chemical Library')
     XLSX.writeFile(wb, 'chemical-library-template.xlsx')
@@ -3073,7 +3094,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       </div>
       <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} className="hidden" />
       <p className="font-body text-[11px] text-slate-400 mt-1.5">
-        First time importing? <button onClick={downloadTemplate} className="font-bold underline" style={{ color: FERN }}>Download a blank template</button> with the right columns, fill it in, then import it.
+        First time importing? <button onClick={downloadTemplate} className="font-bold underline" style={{ color: FERN }}>Download a blank template</button> with the right columns, fill it in, then import it. The <span className="font-semibold">Mixing Order</span> column sets the tank fill order — enter a formulation like Dry, Flowable, EC, or Adjuvant (or leave it blank and we'll guess).
       </p>
 
       {importPreview && (
