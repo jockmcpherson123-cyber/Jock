@@ -13,7 +13,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
-  Check, ChevronRight, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
+  Check, ChevronRight, ChevronUp, ChevronDown, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
   Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target, Scissors, Gauge,
 } from 'lucide-react'
 import {
@@ -683,7 +683,7 @@ function SprayOpsModule({ user }) {
         {route === 'edit' && activeSheet && manage && (
           <SheetEditor
             sheet={activeSheet} saving={saving} products={products} location={location}
-            areas={areas} operators={operators} targets={targets} sheetTypes={sheetTypes} sheets={sheets}
+            areas={areas} operators={operators} targets={targets} sheetTypes={sheetTypes} sheets={sheets} courseInfo={courseInfo}
             onSave={async (s) => {
               const saved = await saveSheet(s)
               if (saved) {
@@ -754,7 +754,7 @@ function SprayOpsModule({ user }) {
           <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? saveProduct : undefined} />
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
-        {route === 'program' && manage && <AnnualProgram areas={areas} products={products} sheets={sheets} location={location} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
+        {route === 'program' && manage && <AnnualProgram areas={areas} products={products} sheets={sheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
           <SettingsPage
@@ -1493,7 +1493,7 @@ function InfoChip({ label, value }) {
 }
 
 // ── SHEET EDITOR ──────────────────────────────────────────────────────────
-function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes, location, sheets = [] }) {
+function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes, location, sheets = [], courseInfo = {} }) {
   const [s, setS] = useState({ ...sheet, targets: sheet.targets || (sheet.target ? [sheet.target] : []) })
   const [nTargets, setNTargets] = useState({}) // per-line "feed by N" target (lb N/M)
   const area = resolveArea(areas, s.area) || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
@@ -1603,7 +1603,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
           <FieldLabel>Products</FieldLabel>
           <MultiSelect selected={s.products.map((p) => p.product).filter(Boolean)} options={products.map((pr) => pr.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
           <div className="space-y-2.5 mt-3">
-            {sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product)).map((p, mixIdx) => {
+            {sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p, mixIdx) => {
               const { value: amt, unit: amtUnit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
               const total = amt !== null ? Math.round(amt * s.tanks * 10) / 10 : null
               const prodInfo = products.find((pr) => pr.name === p.product)
@@ -1746,7 +1746,7 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
   // one connected list (no separate extra-spray table).
   const partialGal = sheet.partialGallons
   const hasPartial = partialGal && area.galTank
-  const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product)).map((p) => {
+  const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p) => {
     const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
     let partialAmt = 0
     if (hasPartial && amt !== null) {
@@ -2284,7 +2284,7 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
             )}
 
             <div className="divide-y divide-slate-100">
-              {sortByMixOrder(sheet.products.filter((p) => p.product), (p) => products?.find((pr) => pr.name === p.product)).map((p) => {
+              {sortByMixOrder(sheet.products.filter((p) => p.product), (p) => products?.find((pr) => pr.name === p.product), courseInfo?.mixOrder).map((p) => {
                 const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
                 const total = amt !== null ? Math.round(amt * sheet.tanks * 10) / 10 : null
                 const prodInfo = products?.find((pr) => pr.name === p.product)
@@ -4340,7 +4340,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
       {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} onSave={onSave} />}
       {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassChoices} soilTypes={soilTypes} onSave={onSave} />}
-      {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} soilTypes={soilTypes} onSave={onSave} />}
+      {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} soilTypes={soilTypes} courseInfo={courseInfo} onSave={onSave} />}
     </div>
   )
 }
@@ -4739,14 +4739,76 @@ function ApplicatorsEditor({ operators, licenses, onSave }) {
   )
 }
 
-function ListsSettings({ targets, sheetTypes, grassTypes, soilTypes, onSave }) {
+function ListsSettings({ targets, sheetTypes, grassTypes, soilTypes, courseInfo = {}, onSave }) {
   return (
     <div className="space-y-4">
+      <MixOrderEditor courseInfo={courseInfo} onSave={onSave} />
       <NameListEditor title="Spray Targets" items={targets} accent="#7C3AED" presets={DEFAULT_TARGETS} onSave={(list) => onSave({ targets: list })} />
       <NameListEditor title="Sheet Types" items={sheetTypes} accent={FOREST} onSave={(list) => onSave({ sheetTypes: list })} />
       <NameListEditor title="Grass Types" items={grassTypes || []} accent="#2E7D32" onSave={(list) => onSave({ grassTypes: list })} />
       <NameListEditor title="Soil Types" items={soilTypes || []} accent="#92660D" onSave={(list) => onSave({ soilTypes: list })} />
     </div>
+  )
+}
+
+// Editable tank-mix fill order. Products on spray sheets and the annual planner
+// sort by formulation into this "jar test" fill sequence (dry first, adjuvants
+// last). Drag-free up/down reorder — friendly on an iPad. Saved to
+// courseInfo.mixOrder (a list of formulation ids); empty = the sensible default.
+function MixOrderEditor({ courseInfo = {}, onSave }) {
+  const defaultOrder = FORMULATIONS.map((f) => f.id)
+  // Start from the saved order, then append any formulations not yet listed
+  // (so new formulation types never silently vanish from the list).
+  const seed = () => {
+    const saved = Array.isArray(courseInfo.mixOrder) ? courseInfo.mixOrder.filter((id) => defaultOrder.includes(id)) : []
+    return [...saved, ...defaultOrder.filter((id) => !saved.includes(id))]
+  }
+  const [order, setOrder] = useState(seed)
+  const savedOrder = Array.isArray(courseInfo.mixOrder) && courseInfo.mixOrder.length ? courseInfo.mixOrder : defaultOrder
+  const dirty = JSON.stringify(order) !== JSON.stringify(savedOrder)
+
+  const move = (i, dir) => {
+    const j = i + dir
+    if (j < 0 || j >= order.length) return
+    const next = [...order]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    setOrder(next)
+  }
+
+  return (
+    <Card>
+      <p className="font-display text-base font-semibold text-slate-900 mb-1">Tank-Mix Fill Order</p>
+      <p className="font-body text-xs text-slate-500 mb-3">
+        The order products fill the tank on your spray sheets — the classic "jar test" sequence. Move items up or down to match how you like to mix. Products sort into this order automatically everywhere.
+      </p>
+      <div className="space-y-2">
+        {order.map((id, i) => {
+          const f = FORMULATIONS.find((x) => x.id === id)
+          if (!f) return null
+          return (
+            <div key={id} className="flex items-center gap-3 bg-white rounded-xl border border-slate-100 px-3 py-2.5">
+              <span className="font-body text-sm font-bold w-6 text-center shrink-0" style={{ color: FERN }}>{i + 1}</span>
+              <div className="min-w-0 flex-1">
+                <p className="font-body text-sm font-semibold text-slate-900 truncate">{f.label}</p>
+                {f.short && <p className="font-body text-[11px] text-slate-400">{f.short}</p>}
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <button onClick={() => move(i, -1)} disabled={i === 0} className="p-2 rounded-lg disabled:opacity-25" style={{ backgroundColor: '#F0F6F2', color: FERN }} aria-label="Move up"><ChevronUp size={16} /></button>
+                <button onClick={() => move(i, 1)} disabled={i === order.length - 1} className="p-2 rounded-lg disabled:opacity-25" style={{ backgroundColor: '#F0F6F2', color: FERN }} aria-label="Move down"><ChevronDown size={16} /></button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex gap-2 mt-4">
+        <button onClick={() => onSave({ courseInfo: { ...courseInfo, mixOrder: order } })} disabled={!dirty} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>
+          Save Fill Order
+        </button>
+        <button onClick={() => setOrder(defaultOrder)} disabled={JSON.stringify(order) === JSON.stringify(defaultOrder)} className="font-body text-xs font-semibold px-4 py-2.5 rounded-full disabled:opacity-40" style={{ color: '#64748B', border: '1px solid #E2E8F0' }}>
+          Reset to default
+        </button>
+      </div>
+    </Card>
   )
 }
 

@@ -280,7 +280,7 @@ function typeColor(type) {
   }[type] || '#94A3B8'
 }
 
-export default function AnnualProgram({ areas, products = [], sheets = [], location, onProductsChanged, onCreateSheet }) {
+export default function AnnualProgram({ areas, products = [], sheets = [], location, courseInfo = {}, onProductsChanged, onCreateSheet }) {
   const [programs, setPrograms] = useState([])
   // Weather that feeds the Living Calendar's live status. Best-effort — the plan
   // still shows without it (growth triggers just read "waiting on data").
@@ -1036,7 +1036,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Products in the tank</label>
               <MultiSelect selected={editApp.products.map((r) => r.product).filter(Boolean)} options={products.map((p) => p.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 items-start">
-                {sortByMixOrder(editApp.products.filter((r) => r.product), (r) => products.find((x) => x.name === r.product) || { name: r.product, type: r.type }).map((r) => (
+                {sortByMixOrder(editApp.products.filter((r) => r.product), (r) => products.find((x) => x.name === r.product) || { name: r.product, type: r.type }, courseInfo.mixOrder).map((r) => (
                   <div key={r.key} className="rounded-xl border border-slate-100 p-2.5" style={{ backgroundColor: '#F8FAF9' }}>
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-body text-sm font-bold" style={{ color: FOREST }}>{r.product}</span>
