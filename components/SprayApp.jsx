@@ -5724,6 +5724,7 @@ function TurfPerformanceModule() {
   const [clippings, setClippings] = useState([])
   const [practices, setPractices] = useState([])
   const [soilTests, setSoilTests] = useState([])
+  const [speeds, setSpeeds] = useState([])
   const [soilSeries, setSoilSeries] = useState([])
   const [loadingTurf, setLoadingTurf] = useState(true)
 
@@ -5731,7 +5732,7 @@ function TurfPerformanceModule() {
     (async () => {
       setLoadingTurf(true)
       try {
-        const [settings, sheets, products, clips, pracs, soils] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts(), db.fetchClippings().catch(() => []), db.fetchCulturalPractices().catch(() => []), db.fetchSoilTests().catch(() => [])])
+        const [settings, sheets, products, clips, pracs, soils, spds] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts(), db.fetchClippings().catch(() => []), db.fetchCulturalPractices().catch(() => []), db.fetchSoilTests().catch(() => []), db.fetchGreensSpeeds().catch(() => [])])
         // Prefer the grasses actually on site (from onboarding) for the pickers;
         // fall back to the full library when the club hasn't selected any yet.
         const siteGrasses = settings.courseInfo?.siteGrasses || []
@@ -5740,6 +5741,7 @@ function TurfPerformanceModule() {
         setClippings(clips)
         setPractices(pracs)
         setSoilTests(soils)
+        setSpeeds(spds)
         if (settings.location?.lat != null) {
           const { lat, lng } = settings.location
           // Season archive + forecast merged: the archive lags a few days and has
@@ -5767,6 +5769,9 @@ function TurfPerformanceModule() {
   async function reloadSoilTests() {
     try { setSoilTests(await db.fetchSoilTests()) } catch (e) { console.error(e) }
   }
+  async function reloadSpeeds() {
+    try { setSpeeds(await db.fetchGreensSpeeds()) } catch (e) { console.error(e) }
+  }
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
@@ -5789,7 +5794,7 @@ function TurfPerformanceModule() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-24 pt-6">
         {route === 'dashboard' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} clippings={clippings} soilTests={soilTests} practices={practices} hasLocation={turf.location?.lat != null} onGo={setRoute} />
+          : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} clippings={clippings} soilTests={soilTests} practices={practices} speeds={speeds} hasLocation={turf.location?.lat != null} onGo={setRoute} />
         )}
         {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} products={turf.products} />}
         {route === 'gdd' && (
@@ -5819,7 +5824,12 @@ function TurfPerformanceModule() {
               onAddMany={async (list) => { await db.addCulturalPractices(list); await reloadPractices() }}
               onDelete={async (id) => { await db.deleteCulturalPractice(id); await reloadPractices() }} />
         )}
-        {route === 'speed' && <ComingSoonCard title="Greens Speed" desc="Log Stimpmeter readings by green and date to track consistency over time." />}
+        {route === 'speed' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <GreensSpeedTab speeds={speeds} courseInfo={turf.courseInfo}
+              onAddMany={async (list) => { await db.addGreensSpeeds(list); await reloadSpeeds() }}
+              onDelete={async (id) => { await db.deleteGreensSpeed(id); await reloadSpeeds() }} />
+        )}
       </div>
     </div>
   )
@@ -6323,6 +6333,178 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
                   <p className="font-body text-[11px] text-slate-400">{fmtDate(c.date)}{c.notes ? ` · ${c.notes}` : ''}</p>
                 </div>
                 <p className="font-display text-base font-bold text-slate-900 shrink-0">{c.volume} <span className="font-body text-[11px] font-medium text-slate-400">{c.unit}</span></p>
+                <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const speedErrorText = (e) => saveErrorText(e, 'supabase/phase18.sql')
+
+// ── GREENS SPEED (STIMPMETER) ───────────────────────────────────────────────
+// Log each green's speed (feet) by date. The win is consistency: the day's
+// spread across greens (fastest vs slowest) matters as much as the average.
+function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete }) {
+  const greenOptions = greenOptionsFor(courseInfo)
+  const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
+  const hasCourses = courseNames.length >= 2
+  const [courseTab, setCourseTab] = useState(courseNames[0] || 'all')
+  const pickerGreens = !hasCourses ? greenOptions
+    : courseTab === 'other' ? greenOptions.filter((g) => !courseNames.some((n) => g.startsWith(n)))
+    : greenOptions.filter((g) => g.startsWith(courseTab))
+  const [date, setDate] = useState(localDateISO())
+  const [notes, setNotes] = useState('')
+  const [selected, setSelected] = useState([])
+  const [vals, setVals] = useState({}) // green -> speed (ft)
+  const [busy, setBusy] = useState(false)
+  const [filter, setFilter] = useState('all')
+  const [msg, setMsg] = useState(null)
+
+  const toggleGreen = (g) => setSelected((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]))
+  const setVal = (g, v) => setVals((prev) => ({ ...prev, [g]: v }))
+
+  const entries = selected.filter((g) => vals[g] !== '' && vals[g] != null)
+  const save = async () => {
+    if (entries.length === 0) return
+    setBusy(true); setMsg(null)
+    try {
+      await onAddMany(entries.map((g) => ({ area: g, date, speed: Number(vals[g]), notes })))
+      setVals({}); setNotes('')
+      setMsg({ type: 'ok', text: `Logged ${entries.length} green${entries.length !== 1 ? 's' : ''}.` })
+    } catch (e) { console.error(e); setMsg({ type: 'err', text: speedErrorText(e) }) }
+    setBusy(false)
+  }
+
+  // Latest reading date and its spread across greens (consistency).
+  const latestDate = speeds.length ? speeds.map((s) => s.date).sort().pop() : null
+  const latestSet = latestDate ? speeds.filter((s) => s.date === latestDate && s.speed != null) : []
+  const nums = latestSet.map((s) => Number(s.speed)).filter((n) => !isNaN(n))
+  const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null
+  const fast = nums.length ? Math.max(...nums) : null
+  const slow = nums.length ? Math.min(...nums) : null
+  const spread = fast != null ? Math.round((fast - slow) * 10) / 10 : null
+  const fastGreen = latestSet.find((s) => Number(s.speed) === fast)
+  const slowGreen = latestSet.find((s) => Number(s.speed) === slow)
+
+  const shown = filter === 'all' ? speeds : speeds.filter((c) => c.area === filter)
+  const byArea = {}
+  speeds.forEach((c) => { (byArea[c.area] = byArea[c.area] || []).push(c) })
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border-2 p-4 shadow-sm" style={{ borderColor: GOLD }}>
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Log greens speed</p>
+        <p className="font-body text-[11px] text-slate-400 mb-3">Pick the greens you Stimped, then enter each one's reading in feet — logs them all at once.</p>
+
+        <FieldLabel>Greens</FieldLabel>
+        {hasCourses && (
+          <div className="flex gap-2 mt-1 mb-2 overflow-x-auto pb-1">
+            {[...courseNames, 'other'].map((c) => (
+              <button key={c} type="button" onClick={() => setCourseTab(c)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={courseTab === c ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{c === 'other' ? 'Practice / Other' : c}</button>
+            ))}
+          </div>
+        )}
+        <div className="mt-1 mb-3">
+          <PeoplePicker options={pickerGreens} selected={selected} onToggle={toggleGreen} placeholder={hasCourses ? `Search ${courseTab === 'other' ? 'practice' : courseTab} greens…` : 'Search greens — e.g. Blue 3, Gold, Putting…'} max={40} />
+        </div>
+
+        {selected.length > 0 && (
+          <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F8FAF9' }}>
+            <FieldLabel>Speed per green (feet)</FieldLabel>
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              {[...selected].sort(sortGreens).map((g) => (
+                <div key={g} className="flex items-center gap-2">
+                  <span className="font-body text-xs font-semibold text-slate-600 w-28 shrink-0 truncate" title={g}>{g.replace('Green ', '')}</span>
+                  <input type="number" step="0.1" inputMode="decimal" value={vals[g] ?? ''} onChange={(e) => setVal(g, e.target.value)} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-base font-body bg-white" placeholder="10.5" />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mb-3">
+          <FieldLabel>Date</FieldLabel>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body" />
+        </div>
+        <div className="mb-3">
+          <FieldLabel>Notes (optional)</FieldLabel>
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body" placeholder="e.g. morning, after roll, before tournament" />
+        </div>
+        {msg && (
+          <div className="rounded-xl px-3 py-2 mb-2 font-body text-[12px] font-semibold" style={msg.type === 'ok' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}>{msg.text}</div>
+        )}
+        <button onClick={save} disabled={busy || entries.length === 0} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
+          {busy ? 'Saving…' : `Log ${entries.length || ''} green${entries.length !== 1 ? 's' : ''}`.trim()}
+        </button>
+        {entries.length === 0 && selected.length > 0 && (
+          <p className="font-body text-[11px] text-slate-400 mt-1.5 text-center">Enter a reading for at least one green to save.</p>
+        )}
+      </div>
+
+      {/* Latest-day consistency roll-up */}
+      {nums.length > 0 && (
+        <div className="rounded-2xl p-4 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Average speed · {fmtDate(latestDate)}</p>
+              <p className="font-display text-3xl font-bold mt-0.5">{avg.toFixed(1)} <span className="text-lg font-semibold opacity-80">ft</span></p>
+            </div>
+            <div className="text-right">
+              <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Spread</p>
+              <p className="font-display text-2xl font-bold mt-0.5">{spread === 0 ? 'Even' : `${spread} ft`}</p>
+              <p className="font-body text-[10px] opacity-70">{nums.length} green{nums.length !== 1 ? 's' : ''}</p>
+            </div>
+          </div>
+          {spread > 0 && fastGreen && slowGreen && (
+            <p className="font-body text-[11px] opacity-80 mt-2 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.15)' }}>
+              Fastest {fastGreen.area.replace('Green ', '')} ({fast.toFixed(1)}) · Slowest {slowGreen.area.replace('Green ', '')} ({slow.toFixed(1)})
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Trend graph per green */}
+      {Object.keys(byArea).length > 0 && (
+        <div className="space-y-3">
+          {Object.entries(byArea).sort((a, b) => sortGreens(a[0], b[0])).map(([area, list]) => {
+            const recent = [...list].sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(-12)
+            const latest = recent[recent.length - 1]
+            return (
+              <div key={area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
+                  <p className="font-body text-[10px] text-slate-400">{recent.length} reading{recent.length !== 1 ? 's' : ''} · latest {latest?.speed} ft</p>
+                </div>
+                <TrendChart points={recent.map((c) => ({ date: c.date, value: c.speed }))} unit="ft" />
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* History */}
+      <div>
+        <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+          <button onClick={() => setFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>All</button>
+          {Object.keys(byArea).sort(sortGreens).map((a) => (
+            <button key={a} onClick={() => setFilter(a)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === a ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{a.replace('Green ', '')}</button>
+          ))}
+        </div>
+        {shown.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No greens-speed readings yet.</div>
+        ) : (
+          <div className="space-y-2">
+            {shown.map((c) => (
+              <div key={c.id} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-sm font-semibold text-slate-800 truncate">{c.area}</p>
+                  <p className="font-body text-[11px] text-slate-400">{fmtDate(c.date)}{c.notes ? ` · ${c.notes}` : ''}</p>
+                </div>
+                <p className="font-display text-base font-bold text-slate-900 shrink-0">{c.speed} <span className="font-body text-[11px] font-medium text-slate-400">ft</span></p>
                 <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
               </div>
             ))}
@@ -7192,7 +7374,7 @@ function TimingTab({ soilSeries, hasLocation, products = [] }) {
 // The Turf Performance home — an at-a-glance roll-up of everything the other
 // tabs track (GDD, growth-reg timing, clippings, soil, practices), each tile
 // tappable to jump into the detail tab.
-function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, clippings = [], soilTests = [], practices = [], hasLocation, onGo }) {
+function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, clippings = [], soilTests = [], practices = [], speeds = [], hasLocation, onGo }) {
   const PGR_TARGET = 360 // classic greens reapply target (base 32°F)
   const gddSeries = gddFromDaily(daily)
   const seasonGdd = gddSeries.length ? gddSeries[gddSeries.length - 1].acc : 0
@@ -7223,6 +7405,10 @@ function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, cli
 
   const lastSoil = [...soilTests].sort((a, b) => (a.date || '').localeCompare(b.date || '')).pop()
   const lastPractice = [...practices].filter((p) => p.date).sort((a, b) => a.date.localeCompare(b.date)).pop()
+  // Greens speed — average across the most recent reading date.
+  const speedDate = speeds.length ? speeds.map((s) => s.date).sort().pop() : null
+  const speedNums = speedDate ? speeds.filter((s) => s.date === speedDate && s.speed != null).map((s) => Number(s.speed)) : []
+  const speedAvg = speedNums.length ? speedNums.reduce((a, b) => a + b, 0) / speedNums.length : null
   const daysAgo = (d) => { if (!d) return null; const n = Math.round((Date.now() - new Date(d + 'T00:00:00').getTime()) / 86400000); return n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${n} days ago` }
 
   const Tile = ({ onClick, icon, label, value, sub, tint = '#F0F6F2', fg = FERN }) => (
@@ -7280,8 +7466,8 @@ function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, cli
       <button onClick={() => onGo('speed')} className="w-full bg-white rounded-2xl border border-black/5 p-4 shadow-sm flex items-center gap-3 text-left hover:shadow-md transition">
         <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#F0F6F2', color: FERN }}><Gauge size={16} /></span>
         <div className="min-w-0 flex-1">
-          <p className="font-body text-sm font-semibold text-slate-800">Greens Speed</p>
-          <p className="font-body text-[12px] text-slate-400">Stimpmeter tracking — coming soon</p>
+          <p className="font-body text-sm font-semibold text-slate-800">Greens Speed{speedAvg != null ? ` · ${speedAvg.toFixed(1)} ft avg` : ''}</p>
+          <p className="font-body text-[12px] text-slate-400">{speedAvg != null ? `${speedNums.length} green${speedNums.length !== 1 ? 's' : ''} · ${daysAgo(speedDate)}` : 'Log Stimpmeter readings to track consistency'}</p>
         </div>
         <ChevronRight size={18} className="text-slate-300 shrink-0" />
       </button>
