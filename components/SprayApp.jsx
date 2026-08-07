@@ -29,6 +29,7 @@ import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WIN
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
 import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget, diseasesForProduct } from '@/lib/fungicides'
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
+import { modelForProduct, regulationStatus, suppressionAt, combinedSuppression, surfaceCol, PHASE_STYLE } from '@/lib/pgrmodel'
 import { localDateISO } from '@/lib/dates'
 import { sheetApplied } from '@/lib/applied'
 import { SearchSelect, MultiSelect } from '@/components/pickers'
@@ -6066,6 +6067,24 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
 
   const statusStyle = { due: { bg: '#FEE2E2', fg: '#B91C1C', label: 'Reapply now' }, soon: { bg: '#FEF3DD', fg: '#92660D', label: 'Soon' }, ok: { bg: '#E8F3EC', fg: FERN, label: 'On track' } }
 
+  // Per-product suppression-curve model (GreenKeeper-style): for each area with a
+  // regulating spray, walk each product's own curve at the area's GDD-since.
+  const areaSurface = (name) => { const s = String(name || '').toLowerCase(); if (s.includes('green')) return 'green'; if (s.includes('tee')) return 'tee'; if (s.includes('fairway') || s.includes("f'way") || s.includes('fwy')) return 'fairway'; if (s.includes('rough')) return 'rough'; return 'green' }
+  const modelRows = Object.keys(lastByArea).map((area) => {
+    const last = lastByArea[area]
+    const gdd = gddSince(daily, last.date, 32)
+    const sk = areaSurface(area)
+    const prods = last.products.map((name) => {
+      const prod = (products || []).find((p) => p.name === name) || { name }
+      const model = modelForProduct(prod, supMap[name])
+      const st = model ? regulationStatus(model, gdd, sk) : null
+      return { name, model, st, suppression: st ? st.suppression : 0 }
+    }).filter((x) => x.model && x.st)
+    const combined = combinedSuppression(prods)
+    const primary = prods.slice().sort((a, b) => (b.st.target || 0) - (a.st.target || 0))[0]
+    return { area, gdd, sk, prods, combined, primary }
+  }).filter((r) => r.prods.length).sort((a, b) => b.combined - a.combined)
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl p-4 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
@@ -6111,8 +6130,69 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation }) {
           {areaRows.length === 0 && <p className="font-body text-sm text-slate-400">No areas set up yet.</p>}
         </div>
       </div>
+      {modelRows.length > 0 && (
+        <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+          <p className="font-display text-base font-semibold text-slate-900">Regulation model — by product</p>
+          <p className="font-body text-[11px] text-slate-400 mb-3">Each product on its own suppression curve (like the GreenKeeper GDD models): strong right after the spray, fading to zero at the reapply point, then a <b>rebound</b> growth surge if you run past it. Stacked products (a PGR + a DMI) read as intensified. Curve targets are editable estimates — tune to your turf.</p>
+          <div className="space-y-4">
+            {modelRows.map((r) => (
+              <div key={r.area} className="rounded-xl p-3" style={{ backgroundColor: '#F8FAF9' }}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-body text-sm font-semibold text-slate-800">{r.area}</span>
+                  <span className="font-body text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EAF2EC', color: FERN }}>~{Math.round(r.combined * 100)}% suppression now</span>
+                </div>
+                {r.primary && <SuppressionCurve model={r.primary.model} gdd={r.gdd} surfaceKind={r.sk} />}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {r.prods.map((p) => {
+                    const ph = PHASE_STYLE[p.st.phase] || PHASE_STYLE.regulated
+                    return (
+                      <span key={p.name} className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: ph.bg, color: ph.fg }}>
+                        {p.model.label.split(' (')[0]} · {ph.label} · {r.gdd}/{p.st.target}
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <p className="font-body text-[10px] text-slate-400">Weather is pulled from your course location (Open-Meteo). GDD updates daily.</p>
     </div>
+  )
+}
+
+// Small suppression curve (the "sinewave"): plots a product's growth suppression
+// across GDD from the spray out to 2× its reapply target, with a marker showing
+// where you are today and the reapply line. Above the zero line = regulated,
+// below = rebound growth.
+function SuppressionCurve({ model, gdd, surfaceKind }) {
+  if (!model) return null
+  const target = model.gdd[surfaceCol(surfaceKind)] || model.gdd.green
+  if (!target) return null
+  const maxG = target * 2
+  const W = 320, H = 66, padT = 8, padB = 16
+  const midY = (padT + (H - padB)) / 2
+  const amp = ((H - padB) - padT) / 2
+  const xAt = (g) => (Math.min(g, maxG) / maxG) * W
+  const yAt = (s) => midY - (s / model.peak) * amp
+  const n = 48
+  const path = Array.from({ length: n + 1 }, (_, i) => { const g = (maxG * i) / n; const s = suppressionAt(model, g, surfaceKind); return `${i ? 'L' : 'M'}${xAt(g).toFixed(1)},${yAt(s).toFixed(1)}` }).join(' ')
+  const curX = xAt(gdd)
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" style={{ display: 'block' }}>
+      {/* zero (regulation gone) line */}
+      <line x1="0" y1={midY} x2={W} y2={midY} stroke="#E2E8F0" strokeWidth="1" strokeDasharray="3 3" />
+      {/* reapply target line */}
+      <line x1={xAt(target)} y1={padT} x2={xAt(target)} y2={H - padB} stroke="#CBD5E1" strokeWidth="1" />
+      <text x={xAt(target)} y={H - 4} fontSize="8" fill="#94A3B8" textAnchor="middle" fontFamily="system-ui">reapply</text>
+      {/* suppression curve */}
+      <path d={path} fill="none" stroke={FERN} strokeWidth="2" />
+      {/* you-are-here */}
+      <line x1={curX} y1={padT} x2={curX} y2={H - padB} stroke="#B07A16" strokeWidth="1.5" />
+      <circle cx={curX} cy={yAt(suppressionAt(model, gdd, surfaceKind))} r="3.5" fill="#B07A16" />
+      <text x={Math.min(curX, W - 14)} y="7" fontSize="8" fill="#B07A16" textAnchor="middle" fontFamily="system-ui">today</text>
+    </svg>
   )
 }
 
