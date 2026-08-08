@@ -147,7 +147,7 @@ function QrScanner({ onScan, onClose }) {
 }
 
 // ── Main module ────────────────────────────────────────────────────────────────
-export default function Tournament({ courseInfo = {} }) {
+export default function Tournament({ courseInfo: courseInfoProp }) {
   const [tournaments, setTournaments] = useState([])
   const [loading, setLoading] = useState(true)
   const [selId, setSelId] = useState(null)
@@ -155,6 +155,16 @@ export default function Tournament({ courseInfo = {} }) {
   const [tab, setTab] = useState('roster')
   const [toast, setToast] = useState(null)
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(null), 2600) }
+
+  // Club identity (for badges, handbook, printouts). Passed in when embedded in
+  // Spray Ops; loaded here when Tournament is its own top-level section.
+  const [courseInfo, setCourseInfo] = useState(courseInfoProp || {})
+  useEffect(() => {
+    if (courseInfoProp) { setCourseInfo(courseInfoProp); return }
+    let off = false
+    ;(async () => { try { const s = await db.fetchSettings(); if (!off && s?.courseInfo) setCourseInfo(s.courseInfo) } catch { /* ignore */ } })()
+    return () => { off = true }
+  }, [courseInfoProp])
 
   const selected = tournaments.find((t) => t.id === selId) || null
 
