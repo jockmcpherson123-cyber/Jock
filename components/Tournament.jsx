@@ -985,16 +985,61 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
     setDirty(false); showToast('Handbook saved')
   }
 
+  // Magazine-style printable handbook: a colour cover, a contents page, then
+  // each section as a numbered two-column "article" with a drop cap.
   const print = () => {
-    const body = `<div style="max-width:720px;margin:0 auto">
-      <div style="text-align:center;margin-bottom:18px">
-        <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:${GOLD};font-weight:bold">${esc(courseInfo.clubName || '')}</div>
-        <div style="font-size:24px;font-weight:bold;color:#173B2B">${esc(tournament.name)}</div>
-        <div style="font-size:14px;color:#555">Volunteer Handbook</div>
-      </div>
-      ${sections.map((s) => `<div style="break-inside:avoid;margin-bottom:14px"><div style="font-size:16px;font-weight:bold;color:#173B2B;border-bottom:1px solid #ddd;padding-bottom:3px;margin-bottom:5px">${esc(s.title)}</div><div style="font-size:13px;line-height:1.5;white-space:pre-wrap">${esc(s.body)}</div></div>`).join('')}
-    </div>`
-    printHTML(body)
+    const clubName = esc(courseInfo.clubName || '')
+    const num = (i) => String(i + 1).padStart(2, '0')
+    // Body text → paragraphs (blank line splits paragraphs; single newline = <br>).
+    const paras = (body) => String(body || '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
+      .map((p, idx) => `<p${idx === 0 ? ' class="lead"' : ''}>${esc(p).replace(/\n/g, '<br>')}</p>`).join('')
+
+    const cover = `<section class="cover"><div class="cover-inner">
+      <div class="eyebrow">${clubName}</div>
+      <div class="cover-rule"></div>
+      <h1 class="cover-title">${esc(tournament.name)}</h1>
+      <div class="cover-sub">Volunteer Handbook</div>
+      <div class="cover-meta">${esc([fmtRange(tournament.startDate, tournament.endDate), tournament.location].filter(Boolean).join('   ·   '))}</div>
+    </div></section>`
+
+    const toc = sections.length >= 3 ? `<section class="toc">
+      <h2 class="toc-h">Contents</h2>
+      ${sections.map((s, i) => `<div class="toc-row"><span class="toc-num">${num(i)}</span><span class="toc-title">${esc(s.title)}</span></div>`).join('')}
+    </section>` : ''
+
+    const arts = sections.map((s, i) => `<section class="article">
+      <div class="art-head"><span class="art-num">${num(i)}</span><h2 class="art-title">${esc(s.title)}</h2></div>
+      <div class="art-body">${paras(s.body)}</div>
+    </section>`).join('')
+
+    const style = `<style>
+      @page { margin: 0.5in; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
+      body { font-family: Georgia, 'Times New Roman', serif; color: #1a2420; }
+      .cover { min-height: 9.6in; background: ${FOREST}; color: #fff; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.7in; break-after: page; page-break-after: always; }
+      .cover-inner { border: 2px solid ${GOLD}; padding: 0.7in 0.5in; width: 100%; }
+      .eyebrow { color: ${GOLD}; letter-spacing: 5px; text-transform: uppercase; font-size: 12px; font-weight: bold; }
+      .cover-rule { width: 64px; height: 3px; background: ${GOLD}; margin: 18px auto; }
+      .cover-title { font-size: 42px; line-height: 1.08; margin: 8px 0; font-weight: bold; }
+      .cover-sub { color: ${GOLD}; letter-spacing: 4px; text-transform: uppercase; font-size: 14px; margin-top: 12px; }
+      .cover-meta { color: rgba(255,255,255,0.78); font-size: 13px; margin-top: 24px; }
+      .toc { break-after: page; page-break-after: always; padding-top: 0.2in; }
+      .toc-h { font-size: 26px; color: ${FOREST}; border-bottom: 3px solid ${GOLD}; padding-bottom: 8px; }
+      .toc-row { display: flex; align-items: baseline; gap: 14px; padding: 9px 0; border-bottom: 1px dotted #c3d0c8; }
+      .toc-num { color: ${GOLD}; font-weight: bold; font-size: 15px; width: 30px; }
+      .toc-title { font-size: 16px; color: #1a2420; }
+      .article { margin-bottom: 24px; }
+      .art-head { break-after: avoid; page-break-after: avoid; border-bottom: 2px solid ${GOLD}; margin-bottom: 10px; padding-bottom: 5px; display: flex; align-items: baseline; gap: 12px; }
+      .art-num { font-size: 30px; font-weight: bold; color: ${GOLD}; line-height: 1; }
+      .art-title { font-size: 22px; color: ${FOREST}; font-weight: bold; margin: 0; }
+      .art-body { columns: 2; column-gap: 0.35in; font-size: 12.5px; line-height: 1.55; text-align: justify; }
+      .art-body p { margin: 0 0 9px; }
+      .art-body p.lead::first-letter { font-size: 42px; font-weight: bold; color: ${FERN}; float: left; line-height: 0.85; padding: 4px 7px 0 0; }
+      .foot { text-align: center; color: #94a3a0; font-size: 10px; margin-top: 22px; }
+    </style>`
+
+    printHTML(`${style}${cover}${toc}${arts}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div>`)
+    showToast('Tip: turn on "Background graphics" in the print dialog for the colour cover')
   }
 
   return (
