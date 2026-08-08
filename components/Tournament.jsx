@@ -954,7 +954,7 @@ function JobsTab({ tournament, people, onReload, showToast, courseInfo }) {
 // Downscale + JPEG-compress a chosen photo to a data URL so it can live inside
 // the handbook JSON (no separate file storage needed) and print sharply without
 // bloating the record.
-function compressImage(file, maxW = 1400, quality = 0.72) {
+function compressImage(file, maxW = 1400, quality = 0.72, mime = 'image/jpeg') {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {
@@ -966,7 +966,7 @@ function compressImage(file, maxW = 1400, quality = 0.72) {
         const c = document.createElement('canvas')
         c.width = w; c.height = h
         c.getContext('2d').drawImage(img, 0, 0, w, h)
-        try { resolve(c.toDataURL('image/jpeg', quality)) } catch (e) { reject(e) }
+        try { resolve(c.toDataURL(mime, quality)) } catch (e) { reject(e) }
       }
       img.onerror = reject
       img.src = reader.result
@@ -975,6 +975,8 @@ function compressImage(file, maxW = 1400, quality = 0.72) {
     reader.readAsDataURL(file)
   })
 }
+// Logos: keep PNG so transparent backgrounds survive; smaller max width.
+const compressLogo = (file) => compressImage(file, 700, 0.9, 'image/png')
 
 function waitImgs(el) {
   const imgs = Array.from(el.querySelectorAll('img'))
@@ -985,7 +987,10 @@ function waitImgs(el) {
 // under .mag). Used for both the browser print and the downloadable PDF: a
 // colour cover, a Contents page, then each section as a numbered article with a
 // lead photo, drop cap, and a photo gallery.
-function buildHandbookHTML(sections, tournament, clubNameRaw) {
+function buildHandbookHTML(handbook, tournament, clubNameRaw) {
+  const sections = handbook.sections || []
+  const logo = handbook.logo || ''
+  const sponsors = (handbook.sponsors || []).filter((s) => s && s.src)
   const clubName = esc(clubNameRaw || '')
   const num = (i) => String(i + 1).padStart(2, '0')
   const paras = (body) => String(body || '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
@@ -993,12 +998,18 @@ function buildHandbookHTML(sections, tournament, clubNameRaw) {
   const figs = (images, cls) => (images || []).map((im) => `<figure class="${cls}"><img src="${im.src}">${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ''}</figure>`).join('')
 
   const cover = `<section class="cover"><div class="cover-inner">
+    ${logo ? `<img class="cover-logo" src="${logo}">` : ''}
     <div class="eyebrow">${clubName}</div>
     <div class="cover-rule"></div>
     <h1 class="cover-title">${esc(tournament.name)}</h1>
     <div class="cover-sub">Volunteer Handbook</div>
     <div class="cover-meta">${esc([fmtRange(tournament.startDate, tournament.endDate), tournament.location].filter(Boolean).join('   ·   '))}</div>
   </div></section>`
+
+  const sponsorsPage = sponsors.length ? `<section class="sponsors">
+    <h2 class="sponsors-h">With Thanks to Our Sponsors</h2>
+    <div class="sponsor-grid">${sponsors.map((s) => `<div class="sponsor"><div class="sponsor-plate"><img src="${s.src}"></div>${s.name ? `<div class="sponsor-name">${esc(s.name)}</div>` : ''}</div>`).join('')}</div>
+  </section>` : ''
 
   const toc = sections.length >= 3 ? `<section class="toc"><h2 class="toc-h">Contents</h2>${sections.map((s, i) => `<div class="toc-row"><span class="toc-num">${num(i)}</span><span class="toc-title">${esc(s.title)}</span></div>`).join('')}</section>` : ''
 
@@ -1020,6 +1031,7 @@ function buildHandbookHTML(sections, tournament, clubNameRaw) {
     .mag { font-family: Georgia, 'Times New Roman', serif; color: #1a2420; }
     .mag .cover { min-height: 9.6in; background: ${FOREST}; color: #fff; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.7in; break-after: page; page-break-after: always; }
     .mag .cover-inner { border: 2px solid ${GOLD}; padding: 0.7in 0.5in; width: 100%; }
+    .mag .cover-logo { max-height: 1.3in; max-width: 60%; margin: 0 auto 16px; display: block; object-fit: contain; }
     .mag .eyebrow { color: ${GOLD}; letter-spacing: 5px; text-transform: uppercase; font-size: 12px; font-weight: bold; }
     .mag .cover-rule { width: 64px; height: 3px; background: ${GOLD}; margin: 18px auto; }
     .mag .cover-title { font-size: 42px; line-height: 1.08; margin: 8px 0; font-weight: bold; }
@@ -1043,31 +1055,43 @@ function buildHandbookHTML(sections, tournament, clubNameRaw) {
     .mag .lead-fig { margin-bottom: 14px; }
     .mag .gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
     .mag .gallery figure { margin: 0; }
+    .mag .sponsors { break-before: page; page-break-before: always; padding-top: 0.3in; text-align: center; }
+    .mag .sponsors-h { font-size: 24px; color: ${FOREST}; margin-bottom: 22px; }
+    .mag .sponsor-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; align-items: center; }
+    .mag .sponsor { break-inside: avoid; page-break-inside: avoid; }
+    .mag .sponsor-plate { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; height: 1.2in; display: flex; align-items: center; justify-content: center; }
+    .mag .sponsor-plate img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .mag .sponsor-name { font-size: 11px; color: #555; margin-top: 6px; }
     .mag .foot { text-align: center; color: #94a3a0; font-size: 10px; margin-top: 22px; }
   </style>`
 
-  return `${style}<div class="mag">${cover}${toc}${arts}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div></div>`
+  return `${style}<div class="mag">${cover}${toc}${arts}${sponsorsPage}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div></div>`
 }
 
 // Hidden file-input button for adding photos to a handbook section.
-function PhotoAdder({ onAdd, busy }) {
+function PhotoAdder({ onAdd, busy, label = 'Add photo', multiple = true }) {
   const ref = useRef(null)
   return (
     <>
-      <input ref={ref} type="file" accept="image/*" multiple className="hidden" onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) await onAdd(files) }} />
-      <button onClick={() => ref.current?.click()} disabled={busy} className="font-body text-[11px] font-bold px-3 py-2 rounded-xl border disabled:opacity-50 flex items-center gap-1" style={{ color: FERN, borderColor: '#E2E8F0' }}><ImageIcon size={13} /> {busy ? 'Adding…' : 'Add photo'}</button>
+      <input ref={ref} type="file" accept="image/*" multiple={multiple} className="hidden" onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) await onAdd(files) }} />
+      <button onClick={() => ref.current?.click()} disabled={busy} className="font-body text-[11px] font-bold px-3 py-2 rounded-xl border disabled:opacity-50 flex items-center gap-1" style={{ color: FERN, borderColor: '#E2E8F0' }}><ImageIcon size={13} /> {busy ? 'Adding…' : label}</button>
     </>
   )
 }
 
 function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
   const [sections, setSections] = useState(tournament.data?.handbook?.sections || [])
+  const [logo, setLogo] = useState(tournament.data?.handbook?.logo || '')
+  const [sponsors, setSponsors] = useState(tournament.data?.handbook?.sponsors || [])
   const [dirty, setDirty] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [imgBusy, setImgBusy] = useState(false)
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
 
-  useEffect(() => { setSections(tournament.data?.handbook?.sections || []); setDirty(false) }, [tournament.id])
+  useEffect(() => {
+    const hb = tournament.data?.handbook || {}
+    setSections(hb.sections || []); setLogo(hb.logo || ''); setSponsors(hb.sponsors || []); setDirty(false)
+  }, [tournament.id])
 
   const STARTERS = [
     { title: 'Welcome', body: 'Thank you for volunteering. This handbook covers everything you need for the week.' },
@@ -1102,15 +1126,35 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
   const removeImage = (i, idx) => { setSections((arr) => arr.map((s, j) => (j === i ? { ...s, images: (s.images || []).filter((_, k) => k !== idx) } : s))); setDirty(true) }
   const setCaption = (i, idx, caption) => { setSections((arr) => arr.map((s, j) => (j === i ? { ...s, images: (s.images || []).map((im, k) => (k === idx ? { ...im, caption } : im)) } : s))); setDirty(true) }
 
+  const uploadLogo = async (files) => {
+    setImgBusy(true)
+    try { if (files[0]) { setLogo(await compressLogo(files[0])); setDirty(true) } } catch (e) { console.error(e) } finally { setImgBusy(false) }
+  }
+  const addSponsors = async (files) => {
+    setImgBusy(true)
+    try {
+      const added = []
+      for (const f of files) { try { added.push({ src: await compressLogo(f), name: '' }) } catch (e) { console.error(e) } }
+      if (added.length) { setSponsors((arr) => [...arr, ...added]); setDirty(true) }
+    } finally { setImgBusy(false) }
+  }
+  const removeSponsor = (idx) => { setSponsors((arr) => arr.filter((_, k) => k !== idx)); setDirty(true) }
+  const setSponsorName = (idx, name) => { setSponsors((arr) => arr.map((sp, k) => (k === idx ? { ...sp, name } : sp))); setDirty(true) }
+
+  const handbookData = () => ({
+    sections: sections.map((s) => ({ title: (s.title || '').trim(), body: s.body || '', images: (s.images || []).filter((im) => im && im.src) }))
+      .filter((s) => s.title || s.body || s.images.length),
+    logo: logo || '',
+    sponsors: sponsors.filter((sp) => sp && sp.src).map((sp) => ({ src: sp.src, name: (sp.name || '').trim() })),
+  })
+
   const save = async () => {
-    const clean = sections.map((s) => ({ title: (s.title || '').trim(), body: s.body || '', images: (s.images || []).filter((im) => im && im.src) }))
-      .filter((s) => s.title || s.body || s.images.length)
-    await onSave({ data: { ...tournament.data, handbook: { sections: clean } } })
+    await onSave({ data: { ...tournament.data, handbook: handbookData() } })
     setDirty(false); showToast('Handbook saved')
   }
 
   const print = () => {
-    printHTML(buildHandbookHTML(sections, tournament, courseInfo.clubName || ''))
+    printHTML(buildHandbookHTML(handbookData(), tournament, courseInfo.clubName || ''))
     showToast('Tip: turn on "Background graphics" in the print dialog for the colour cover')
   }
 
@@ -1123,7 +1167,7 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
       const html2pdf = (await import('html2pdf.js')).default
       holder = document.createElement('div')
       Object.assign(holder.style, { position: 'absolute', left: '-10000px', top: '0', width: '816px', background: '#fff' })
-      holder.innerHTML = buildHandbookHTML(sections, tournament, courseInfo.clubName || '')
+      holder.innerHTML = buildHandbookHTML(handbookData(), tournament, courseInfo.clubName || '')
       document.body.appendChild(holder)
       await waitImgs(holder)
       await html2pdf().set({
@@ -1148,6 +1192,46 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
         <button onClick={downloadPdf} disabled={sections.length === 0 || pdfBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-40" style={{ color: FOREST, borderColor: '#E2E8F0' }}><Download size={14} /> {pdfBusy ? 'Building…' : 'Download PDF'}</button>
         <a href={`${origin}/handbook?t=${tournament.id}`} target="_blank" rel="noopener noreferrer" className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#E2E8F0' }}><BookOpen size={14} /> Preview</a>
       </div>
+
+      {/* Branding & sponsors */}
+      <Card>
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Branding & Sponsors</p>
+        <p className="font-body text-xs text-slate-500 mb-3">Your club logo prints on the cover. Sponsor logos get their own “Thank You to Our Sponsors” page. Transparent PNG logos look best.</p>
+        <div className="flex flex-wrap gap-8">
+          <div>
+            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Club logo (cover)</label>
+            {logo ? (
+              <div className="relative w-40">
+                <div className="rounded-lg border border-slate-200 p-2 flex items-center justify-center" style={{ backgroundColor: FOREST, height: 88 }}>
+                  <img src={logo} alt="Club logo" className="max-h-full max-w-full object-contain" />
+                </div>
+                <button onClick={() => { setLogo(''); setDirty(true) }} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500" aria-label="Remove logo"><X size={13} /></button>
+              </div>
+            ) : (
+              <PhotoAdder onAdd={uploadLogo} busy={imgBusy} label="Add logo" multiple={false} />
+            )}
+            {logo && <p className="font-body text-[10px] text-slate-400 mt-1 w-40">Shown on the dark cover — use a white or light logo so it stands out.</p>}
+          </div>
+
+          <div className="flex-1 min-w-[220px]">
+            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Sponsor logos</label>
+            <div className="flex flex-wrap gap-3 items-start">
+              {sponsors.map((sp, idx) => (
+                <div key={idx} className="w-28">
+                  <div className="relative">
+                    <div className="rounded-lg border border-slate-200 bg-white p-2 flex items-center justify-center" style={{ height: 64 }}>
+                      <img src={sp.src} alt="" className="max-h-full max-w-full object-contain" />
+                    </div>
+                    <button onClick={() => removeSponsor(idx)} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500" aria-label="Remove sponsor"><X size={13} /></button>
+                  </div>
+                  <input value={sp.name || ''} onChange={(e) => setSponsorName(idx, e.target.value)} placeholder="Sponsor name" className="w-28 mt-1 text-[11px] font-body border border-slate-200 rounded px-1.5 py-1 outline-none" />
+                </div>
+              ))}
+              <div className="pt-0.5"><PhotoAdder onAdd={addSponsors} busy={imgBusy} label="Add sponsor" /></div>
+            </div>
+          </div>
+        </div>
+      </Card>
 
       {sections.length === 0 ? (
         <Card><p className="font-body text-sm text-slate-400 text-center py-6">No handbook yet. Start with a template or add your own sections. Volunteers can read it on their phones from the handbook link (in Setup).</p></Card>

@@ -22,12 +22,16 @@ export default function HandbookPage() {
       .catch(() => setErr('Could not load the handbook.'))
   }, [])
 
-  const sections = info?.handbook || []
+  const hb = info?.handbook || {}
+  const sections = hb.sections || []
+  const logo = hb.logo || ''
+  const sponsors = (hb.sponsors || []).filter((s) => s && s.src)
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#F1F5F3' }} className="py-8 px-4">
       <div className="max-w-2xl mx-auto">
         <div className="text-center mb-6">
+          {logo && <img src={logo} alt="" className="mx-auto mb-3 max-h-24 object-contain" />}
           <p className="text-[11px] tracking-[0.25em] uppercase font-bold" style={{ color: GOLD }}>Volunteer Handbook</p>
           <h1 className="text-2xl font-bold mt-1" style={{ color: FOREST }}>{info?.name || 'Tournament'}</h1>
         </div>
@@ -62,6 +66,22 @@ export default function HandbookPage() {
             )
           })}
         </div>
+
+        {sponsors.length > 0 && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm mt-4">
+            <h2 className="text-lg font-bold mb-4 text-center" style={{ color: FOREST }}>With Thanks to Our Sponsors</h2>
+            <div className="grid grid-cols-3 gap-3">
+              {sponsors.map((sp, k) => (
+                <div key={k} className="text-center">
+                  <div className="rounded-lg border border-slate-200 bg-white p-2 flex items-center justify-center" style={{ height: 80 }}>
+                    <img src={sp.src} alt={sp.name || ''} className="max-h-full max-w-full object-contain" />
+                  </div>
+                  {sp.name && <div className="text-[11px] text-slate-500 mt-1">{sp.name}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

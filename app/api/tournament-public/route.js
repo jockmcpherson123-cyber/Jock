@@ -35,7 +35,10 @@ export async function GET(request) {
     location: data.location || '',
     signupOpen: !!data.signup_open,
   }
-  if (searchParams.get('handbook')) out.handbook = data.data?.handbook?.sections || []
+  if (searchParams.get('handbook')) {
+    const hb = data.data?.handbook || {}
+    out.handbook = { sections: hb.sections || [], logo: hb.logo || '', sponsors: hb.sponsors || [] }
+  }
   return Response.json(out)
 }
 
