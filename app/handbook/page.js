@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react'
 
 const FOREST = '#16291F'
+const FERN = '#3A6B4A'
 const GOLD = '#C9A84C'
 
 export default function HandbookPage() {
@@ -35,12 +36,31 @@ export default function HandbookPage() {
         {!err && info && sections.length === 0 && <div className="bg-white rounded-2xl p-6 text-center text-slate-500 shadow-sm">The handbook hasn't been published yet. Check back soon.</div>}
 
         <div className="space-y-4">
-          {sections.map((s, i) => (
-            <div key={i} className="bg-white rounded-2xl p-5 shadow-sm">
-              <h2 className="text-lg font-bold mb-2" style={{ color: FOREST, borderBottom: `2px solid ${GOLD}`, paddingBottom: 4 }}>{s.title}</h2>
-              <p className="text-[15px] leading-relaxed text-slate-700 whitespace-pre-wrap">{s.body}</p>
-            </div>
-          ))}
+          {sections.map((s, i) => {
+            const imgs = s.images || []
+            return (
+              <div key={i} className="bg-white rounded-2xl p-5 shadow-sm">
+                <h2 className="text-lg font-bold mb-3" style={{ color: FOREST, borderBottom: `2px solid ${GOLD}`, paddingBottom: 4 }}>{s.title}</h2>
+                {imgs[0] && (
+                  <figure className="mb-3">
+                    <img src={imgs[0].src} alt="" className="w-full rounded-xl" />
+                    {imgs[0].caption && <figcaption className="text-xs italic mt-1" style={{ color: FERN }}>{imgs[0].caption}</figcaption>}
+                  </figure>
+                )}
+                <p className="text-[15px] leading-relaxed text-slate-700 whitespace-pre-wrap">{s.body}</p>
+                {imgs.length > 1 && (
+                  <div className="grid grid-cols-2 gap-2 mt-3">
+                    {imgs.slice(1).map((im, k) => (
+                      <figure key={k}>
+                        <img src={im.src} alt="" className="w-full rounded-lg" />
+                        {im.caption && <figcaption className="text-[11px] italic mt-1" style={{ color: FERN }}>{im.caption}</figcaption>}
+                      </figure>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>

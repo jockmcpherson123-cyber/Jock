@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Plus, Trash2, Trophy, Users, QrCode, ClipboardList, BookOpen, CheckCircle2,
   Clock, AlertTriangle, Camera, Printer, Upload, Link2, Search, X, Pencil,
-  UserCheck, ChevronUp, ChevronDown, Copy, Tv, Download,
+  UserCheck, ChevronUp, ChevronDown, Copy, Tv, Download, Image as ImageIcon,
 } from 'lucide-react'
 import { SearchSelect } from '@/components/pickers'
 import { localDateISO } from '@/lib/dates'
@@ -950,9 +950,121 @@ function JobsTab({ tournament, people, onReload, showToast, courseInfo }) {
 }
 
 // ── HANDBOOK ────────────────────────────────────────────────────────────────
+
+// Downscale + JPEG-compress a chosen photo to a data URL so it can live inside
+// the handbook JSON (no separate file storage needed) and print sharply without
+// bloating the record.
+function compressImage(file, maxW = 1400, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const img = new window.Image()
+      img.onload = () => {
+        const scale = Math.min(1, maxW / img.width)
+        const w = Math.round(img.width * scale)
+        const h = Math.round(img.height * scale)
+        const c = document.createElement('canvas')
+        c.width = w; c.height = h
+        c.getContext('2d').drawImage(img, 0, 0, w, h)
+        try { resolve(c.toDataURL('image/jpeg', quality)) } catch (e) { reject(e) }
+      }
+      img.onerror = reject
+      img.src = reader.result
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+function waitImgs(el) {
+  const imgs = Array.from(el.querySelectorAll('img'))
+  return Promise.all(imgs.map((im) => (im.complete ? Promise.resolve() : new Promise((r) => { im.onload = r; im.onerror = r }))))
+}
+
+// Build the magazine handbook as a self-contained HTML string (styles scoped
+// under .mag). Used for both the browser print and the downloadable PDF: a
+// colour cover, a Contents page, then each section as a numbered article with a
+// lead photo, drop cap, and a photo gallery.
+function buildHandbookHTML(sections, tournament, clubNameRaw) {
+  const clubName = esc(clubNameRaw || '')
+  const num = (i) => String(i + 1).padStart(2, '0')
+  const paras = (body) => String(body || '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
+    .map((p, idx) => `<p${idx === 0 ? ' class="lead"' : ''}>${esc(p).replace(/\n/g, '<br>')}</p>`).join('')
+  const figs = (images, cls) => (images || []).map((im) => `<figure class="${cls}"><img src="${im.src}">${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ''}</figure>`).join('')
+
+  const cover = `<section class="cover"><div class="cover-inner">
+    <div class="eyebrow">${clubName}</div>
+    <div class="cover-rule"></div>
+    <h1 class="cover-title">${esc(tournament.name)}</h1>
+    <div class="cover-sub">Volunteer Handbook</div>
+    <div class="cover-meta">${esc([fmtRange(tournament.startDate, tournament.endDate), tournament.location].filter(Boolean).join('   ·   '))}</div>
+  </div></section>`
+
+  const toc = sections.length >= 3 ? `<section class="toc"><h2 class="toc-h">Contents</h2>${sections.map((s, i) => `<div class="toc-row"><span class="toc-num">${num(i)}</span><span class="toc-title">${esc(s.title)}</span></div>`).join('')}</section>` : ''
+
+  const arts = sections.map((s, i) => {
+    const imgs = s.images || []
+    const lead = imgs[0] ? figs([imgs[0]], 'lead-fig') : ''
+    const gallery = imgs.length > 1 ? `<div class="gallery">${figs(imgs.slice(1), '')}</div>` : ''
+    return `<section class="article">
+      <div class="art-head"><span class="art-num">${num(i)}</span><h2 class="art-title">${esc(s.title)}</h2></div>
+      ${lead}
+      <div class="art-body">${paras(s.body)}</div>
+      ${gallery}
+    </section>`
+  }).join('')
+
+  const style = `<style>
+    @page { margin: 0.5in; }
+    .mag * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
+    .mag { font-family: Georgia, 'Times New Roman', serif; color: #1a2420; }
+    .mag .cover { min-height: 9.6in; background: ${FOREST}; color: #fff; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.7in; break-after: page; page-break-after: always; }
+    .mag .cover-inner { border: 2px solid ${GOLD}; padding: 0.7in 0.5in; width: 100%; }
+    .mag .eyebrow { color: ${GOLD}; letter-spacing: 5px; text-transform: uppercase; font-size: 12px; font-weight: bold; }
+    .mag .cover-rule { width: 64px; height: 3px; background: ${GOLD}; margin: 18px auto; }
+    .mag .cover-title { font-size: 42px; line-height: 1.08; margin: 8px 0; font-weight: bold; }
+    .mag .cover-sub { color: ${GOLD}; letter-spacing: 4px; text-transform: uppercase; font-size: 14px; margin-top: 12px; }
+    .mag .cover-meta { color: rgba(255,255,255,0.78); font-size: 13px; margin-top: 24px; }
+    .mag .toc { break-after: page; page-break-after: always; padding-top: 0.2in; }
+    .mag .toc-h { font-size: 26px; color: ${FOREST}; border-bottom: 3px solid ${GOLD}; padding-bottom: 8px; }
+    .mag .toc-row { display: flex; align-items: baseline; gap: 14px; padding: 9px 0; border-bottom: 1px dotted #c3d0c8; }
+    .mag .toc-num { color: ${GOLD}; font-weight: bold; font-size: 15px; width: 30px; }
+    .mag .toc-title { font-size: 16px; color: #1a2420; }
+    .mag .article { margin-bottom: 26px; page-break-inside: auto; }
+    .mag .art-head { break-after: avoid; page-break-after: avoid; border-bottom: 2px solid ${GOLD}; margin-bottom: 12px; padding-bottom: 5px; display: flex; align-items: baseline; gap: 12px; }
+    .mag .art-num { font-size: 30px; font-weight: bold; color: ${GOLD}; line-height: 1; }
+    .mag .art-title { font-size: 22px; color: ${FOREST}; font-weight: bold; margin: 0; }
+    .mag .art-body { font-size: 13px; line-height: 1.6; text-align: justify; }
+    .mag .art-body p { margin: 0 0 9px; }
+    .mag .art-body p.lead::first-letter { font-size: 46px; font-weight: bold; color: ${FERN}; float: left; line-height: 0.82; padding: 5px 8px 0 0; }
+    .mag figure { margin: 0 0 12px; break-inside: avoid; page-break-inside: avoid; }
+    .mag figure img { width: 100%; height: auto; display: block; border-radius: 4px; }
+    .mag figcaption { font-style: italic; color: ${FERN}; font-size: 11px; margin-top: 4px; }
+    .mag .lead-fig { margin-bottom: 14px; }
+    .mag .gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+    .mag .gallery figure { margin: 0; }
+    .mag .foot { text-align: center; color: #94a3a0; font-size: 10px; margin-top: 22px; }
+  </style>`
+
+  return `${style}<div class="mag">${cover}${toc}${arts}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div></div>`
+}
+
+// Hidden file-input button for adding photos to a handbook section.
+function PhotoAdder({ onAdd, busy }) {
+  const ref = useRef(null)
+  return (
+    <>
+      <input ref={ref} type="file" accept="image/*" multiple className="hidden" onChange={async (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) await onAdd(files) }} />
+      <button onClick={() => ref.current?.click()} disabled={busy} className="font-body text-[11px] font-bold px-3 py-2 rounded-xl border disabled:opacity-50 flex items-center gap-1" style={{ color: FERN, borderColor: '#E2E8F0' }}><ImageIcon size={13} /> {busy ? 'Adding…' : 'Add photo'}</button>
+    </>
+  )
+}
+
 function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
   const [sections, setSections] = useState(tournament.data?.handbook?.sections || [])
   const [dirty, setDirty] = useState(false)
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const [imgBusy, setImgBusy] = useState(false)
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
 
   useEffect(() => { setSections(tournament.data?.handbook?.sections || []); setDirty(false) }, [tournament.id])
@@ -979,67 +1091,52 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
     setSections((arr) => { const n = [...arr];[n[i], n[j]] = [n[j], n[i]]; return n }); setDirty(true)
   }
 
+  const addImages = async (i, files) => {
+    setImgBusy(true)
+    try {
+      const added = []
+      for (const f of files) { try { added.push({ src: await compressImage(f), caption: '' }) } catch (e) { console.error(e) } }
+      if (added.length) { setSections((arr) => arr.map((s, j) => (j === i ? { ...s, images: [...(s.images || []), ...added] } : s))); setDirty(true) }
+    } finally { setImgBusy(false) }
+  }
+  const removeImage = (i, idx) => { setSections((arr) => arr.map((s, j) => (j === i ? { ...s, images: (s.images || []).filter((_, k) => k !== idx) } : s))); setDirty(true) }
+  const setCaption = (i, idx, caption) => { setSections((arr) => arr.map((s, j) => (j === i ? { ...s, images: (s.images || []).map((im, k) => (k === idx ? { ...im, caption } : im)) } : s))); setDirty(true) }
+
   const save = async () => {
-    const clean = sections.map((s) => ({ title: (s.title || '').trim(), body: s.body || '' })).filter((s) => s.title || s.body)
+    const clean = sections.map((s) => ({ title: (s.title || '').trim(), body: s.body || '', images: (s.images || []).filter((im) => im && im.src) }))
+      .filter((s) => s.title || s.body || s.images.length)
     await onSave({ data: { ...tournament.data, handbook: { sections: clean } } })
     setDirty(false); showToast('Handbook saved')
   }
 
-  // Magazine-style printable handbook: a colour cover, a contents page, then
-  // each section as a numbered two-column "article" with a drop cap.
   const print = () => {
-    const clubName = esc(courseInfo.clubName || '')
-    const num = (i) => String(i + 1).padStart(2, '0')
-    // Body text → paragraphs (blank line splits paragraphs; single newline = <br>).
-    const paras = (body) => String(body || '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
-      .map((p, idx) => `<p${idx === 0 ? ' class="lead"' : ''}>${esc(p).replace(/\n/g, '<br>')}</p>`).join('')
-
-    const cover = `<section class="cover"><div class="cover-inner">
-      <div class="eyebrow">${clubName}</div>
-      <div class="cover-rule"></div>
-      <h1 class="cover-title">${esc(tournament.name)}</h1>
-      <div class="cover-sub">Volunteer Handbook</div>
-      <div class="cover-meta">${esc([fmtRange(tournament.startDate, tournament.endDate), tournament.location].filter(Boolean).join('   ·   '))}</div>
-    </div></section>`
-
-    const toc = sections.length >= 3 ? `<section class="toc">
-      <h2 class="toc-h">Contents</h2>
-      ${sections.map((s, i) => `<div class="toc-row"><span class="toc-num">${num(i)}</span><span class="toc-title">${esc(s.title)}</span></div>`).join('')}
-    </section>` : ''
-
-    const arts = sections.map((s, i) => `<section class="article">
-      <div class="art-head"><span class="art-num">${num(i)}</span><h2 class="art-title">${esc(s.title)}</h2></div>
-      <div class="art-body">${paras(s.body)}</div>
-    </section>`).join('')
-
-    const style = `<style>
-      @page { margin: 0.5in; }
-      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-      body { font-family: Georgia, 'Times New Roman', serif; color: #1a2420; }
-      .cover { min-height: 9.6in; background: ${FOREST}; color: #fff; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.7in; break-after: page; page-break-after: always; }
-      .cover-inner { border: 2px solid ${GOLD}; padding: 0.7in 0.5in; width: 100%; }
-      .eyebrow { color: ${GOLD}; letter-spacing: 5px; text-transform: uppercase; font-size: 12px; font-weight: bold; }
-      .cover-rule { width: 64px; height: 3px; background: ${GOLD}; margin: 18px auto; }
-      .cover-title { font-size: 42px; line-height: 1.08; margin: 8px 0; font-weight: bold; }
-      .cover-sub { color: ${GOLD}; letter-spacing: 4px; text-transform: uppercase; font-size: 14px; margin-top: 12px; }
-      .cover-meta { color: rgba(255,255,255,0.78); font-size: 13px; margin-top: 24px; }
-      .toc { break-after: page; page-break-after: always; padding-top: 0.2in; }
-      .toc-h { font-size: 26px; color: ${FOREST}; border-bottom: 3px solid ${GOLD}; padding-bottom: 8px; }
-      .toc-row { display: flex; align-items: baseline; gap: 14px; padding: 9px 0; border-bottom: 1px dotted #c3d0c8; }
-      .toc-num { color: ${GOLD}; font-weight: bold; font-size: 15px; width: 30px; }
-      .toc-title { font-size: 16px; color: #1a2420; }
-      .article { margin-bottom: 24px; }
-      .art-head { break-after: avoid; page-break-after: avoid; border-bottom: 2px solid ${GOLD}; margin-bottom: 10px; padding-bottom: 5px; display: flex; align-items: baseline; gap: 12px; }
-      .art-num { font-size: 30px; font-weight: bold; color: ${GOLD}; line-height: 1; }
-      .art-title { font-size: 22px; color: ${FOREST}; font-weight: bold; margin: 0; }
-      .art-body { columns: 2; column-gap: 0.35in; font-size: 12.5px; line-height: 1.55; text-align: justify; }
-      .art-body p { margin: 0 0 9px; }
-      .art-body p.lead::first-letter { font-size: 42px; font-weight: bold; color: ${FERN}; float: left; line-height: 0.85; padding: 4px 7px 0 0; }
-      .foot { text-align: center; color: #94a3a0; font-size: 10px; margin-top: 22px; }
-    </style>`
-
-    printHTML(`${style}${cover}${toc}${arts}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div>`)
+    printHTML(buildHandbookHTML(sections, tournament, courseInfo.clubName || ''))
     showToast('Tip: turn on "Background graphics" in the print dialog for the colour cover')
+  }
+
+  // One-tap professional PDF (for emailing volunteers or sending to a print
+  // shop). Renders the same magazine HTML off-screen and saves it as a PDF.
+  const downloadPdf = async () => {
+    setPdfBusy(true); showToast('Building PDF…')
+    let holder
+    try {
+      const html2pdf = (await import('html2pdf.js')).default
+      holder = document.createElement('div')
+      Object.assign(holder.style, { position: 'absolute', left: '-10000px', top: '0', width: '816px', background: '#fff' })
+      holder.innerHTML = buildHandbookHTML(sections, tournament, courseInfo.clubName || '')
+      document.body.appendChild(holder)
+      await waitImgs(holder)
+      await html2pdf().set({
+        margin: [0.5, 0.5, 0.5, 0.5],
+        filename: `${(tournament.name || 'tournament').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-handbook.pdf`,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'] },
+      }).from(holder).save()
+      showToast('PDF downloaded')
+    } catch (e) { console.error(e); showToast('Could not build the PDF') }
+    finally { if (holder) holder.remove(); setPdfBusy(false) }
   }
 
   return (
@@ -1048,6 +1145,7 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
         {sections.length === 0 && <button onClick={addStarters} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}><Plus size={14} /> Start with a template</button>}
         <button onClick={add} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST }}><Plus size={14} /> Add section</button>
         <button onClick={print} disabled={sections.length === 0} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-40" style={{ color: FOREST, borderColor: '#E2E8F0' }}><Printer size={14} /> Print</button>
+        <button onClick={downloadPdf} disabled={sections.length === 0 || pdfBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-40" style={{ color: FOREST, borderColor: '#E2E8F0' }}><Download size={14} /> {pdfBusy ? 'Building…' : 'Download PDF'}</button>
         <a href={`${origin}/handbook?t=${tournament.id}`} target="_blank" rel="noopener noreferrer" className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#E2E8F0' }}><BookOpen size={14} /> Preview</a>
       </div>
 
@@ -1064,6 +1162,23 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
                 <button onClick={() => remove(i)} className="text-red-400 p-1.5"><Trash2 size={15} /></button>
               </div>
               <textarea value={s.body} onChange={(e) => set(i, { body: e.target.value })} rows={4} className={inputCls} style={{ resize: 'vertical' }} placeholder="Write this section…" />
+              <div className="mt-3">
+                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Photos</label>
+                <div className="flex flex-wrap gap-3 items-start">
+                  {(s.images || []).map((im, idx) => (
+                    <div key={idx} className="w-28">
+                      <div className="relative">
+                        <img src={im.src} alt="" className="w-28 h-20 object-cover rounded-lg border border-slate-200" />
+                        <button onClick={() => removeImage(i, idx)} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500" aria-label="Remove photo"><X size={13} /></button>
+                        {idx === 0 && <span className="absolute bottom-1 left-1 font-body text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'rgba(0,0,0,0.55)', color: 'white' }}>Lead</span>}
+                      </div>
+                      <input value={im.caption || ''} onChange={(e) => setCaption(i, idx, e.target.value)} placeholder="Caption" className="w-28 mt-1 text-[11px] font-body border border-slate-200 rounded px-1.5 py-1 outline-none" />
+                    </div>
+                  ))}
+                  <div className="pt-0.5"><PhotoAdder onAdd={(files) => addImages(i, files)} busy={imgBusy} /></div>
+                </div>
+                {(s.images || []).length > 0 && <p className="font-body text-[10px] text-slate-400 mt-1.5">The first photo prints large under the heading; the rest appear as a gallery.</p>}
+              </div>
             </Card>
           ))}
         </div>
