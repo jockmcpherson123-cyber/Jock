@@ -704,8 +704,9 @@ function SignupReview({ tournament, people, onClose, onChanged, showToast }) {
 
 // ── CHECK-IN ────────────────────────────────────────────────────────────────
 function CheckInTab({ tournament, people, onReload, showToast }) {
-  const [scanning, setScanning] = useState(false)
-  const [manual, setManual] = useState('')
+  // How the desk is scanning: 'scanner' = hardware barcode/QR scanner (types the
+  // code + Enter into a focused box), 'camera' = device camera, 'off' = by hand.
+  const [mode, setMode] = useState('scanner')
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all') // all | here | waiting
   const [banner, setBanner] = useState(null) // { ok, text }
@@ -726,8 +727,6 @@ function CheckInTab({ tournament, people, onReload, showToast }) {
       await onReload()
     } catch (e) { console.error(e); flash(false, 'Check-in failed') }
   }, [tournament.id, onReload])
-
-  const submitManual = async () => { if (!manual.trim()) return; await doCode(manual); setManual('') }
 
   const toggle = async (p) => {
     const st = personStatus(p)
@@ -760,20 +759,20 @@ function CheckInTab({ tournament, people, onReload, showToast }) {
         <div className="rounded-2xl px-4 py-3 font-body text-sm font-bold text-center" style={banner.ok ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}>{banner.text}</div>
       )}
 
-      {scanning ? (
+      {/* How to scan */}
+      <div className="flex gap-1.5">
+        {[['scanner', 'Barcode scanner', QrCode], ['camera', 'Camera', Camera], ['off', 'By hand', UserCheck]].map(([k, l, Icon]) => (
+          <button key={k} onClick={() => setMode(k)} className="flex-1 font-body text-xs font-bold px-3 py-2 rounded-full transition flex items-center justify-center gap-1.5" style={mode === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid #E2E8F0' }}><Icon size={14} /> {l}</button>
+        ))}
+      </div>
+
+      {mode === 'scanner' && <ScannerBox onCode={doCode} />}
+      {mode === 'camera' && (
         <div>
-          <QrScanner onScan={doCode} onClose={() => setScanning(false)} />
+          <QrScanner onScan={doCode} onClose={() => setMode('off')} />
           <p className="font-body text-xs text-slate-400 text-center mt-2">Point the camera at a badge QR code. Keep it in the frame — check-ins pop up above.</p>
         </div>
-      ) : (
-        <button onClick={() => setScanning(true)} className="w-full py-4 rounded-2xl text-white font-body text-base font-bold flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}><Camera size={20} /> Scan badges</button>
       )}
-
-      {/* Manual code */}
-      <div className="flex items-center gap-2">
-        <input value={manual} onChange={(e) => setManual(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submitManual() }} placeholder="Type a badge code…" className={inputCls} autoCapitalize="characters" />
-        <button onClick={submitManual} className="font-body text-sm font-bold px-4 py-2.5 rounded-xl text-white shrink-0" style={{ backgroundColor: FERN }}>Check in</button>
-      </div>
 
       {/* Search + filter + tap list */}
       <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-3">
@@ -805,6 +804,53 @@ function CheckInTab({ tournament, people, onReload, showToast }) {
         })}
         {list.length === 0 && <Card><p className="font-body text-sm text-slate-400 text-center py-6">No matches.</p></Card>}
       </div>
+    </div>
+  )
+}
+
+// A hardware-scanner-ready box. A barcode/QR scanner acts like a keyboard: it
+// "types" the badge code and presses Enter. This input stays focused so scan
+// after scan lands here and checks people in hands-free — and you can type a
+// code by hand too. It politely gives up focus if you tap another field.
+function ScannerBox({ onCode }) {
+  const ref = useRef(null)
+  const [val, setVal] = useState('')
+
+  const refocus = () => {
+    const ae = document.activeElement
+    // Don't steal focus from the search box or another field the user tapped.
+    if (ae && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName) && ae !== ref.current) return
+    ref.current?.focus()
+  }
+  useEffect(() => { refocus() }, [])
+
+  const submit = () => {
+    const c = val.trim()
+    setVal('')
+    if (c) onCode(c)
+    // Keep focus for the next scan.
+    setTimeout(() => ref.current?.focus(), 0)
+  }
+
+  return (
+    <div className="rounded-2xl border-2 p-4 text-center" style={{ borderColor: FERN, backgroundColor: '#F5FAF6' }}>
+      <div className="flex items-center justify-center gap-2 mb-2">
+        <span className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ backgroundColor: FERN }} />
+        <span className="font-body text-sm font-bold" style={{ color: FERN }}>Ready to scan</span>
+      </div>
+      <input
+        ref={ref}
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
+        onBlur={() => setTimeout(refocus, 200)}
+        placeholder="Scan a badge — or type a code + Enter"
+        autoCapitalize="characters"
+        autoComplete="off"
+        spellCheck={false}
+        className="w-full text-center border border-slate-200 rounded-xl px-3 py-3 text-lg font-body bg-white tracking-wide"
+      />
+      <p className="font-body text-[11px] text-slate-400 mt-2">Scans check in automatically. Tip: set your scanner to send an Enter/Return after each code.</p>
     </div>
   )
 }
