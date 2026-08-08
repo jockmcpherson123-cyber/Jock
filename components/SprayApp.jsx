@@ -789,7 +789,7 @@ function SprayOpsModule({ user }) {
 // ── TOP NAV ───────────────────────────────────────────────────────────────
 function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
   const items = manage
-    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['weather', 'Weather'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
+    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['tournament', 'Tournament'], ['weather', 'Weather'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
     : [['tospray', 'To Spray'], ['records', 'Records'], ['inventory', 'Inventory'], ['documents', 'Labels & SDS'], ['weather', 'Weather']]
 
   return (
@@ -801,14 +801,9 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
             <h1 className="font-display text-2xl font-semibold mt-0.5">{courseInfo?.deptName || 'Grounds Operations'}</h1>
           </div>
           {manage && (
-            <div className="flex items-center gap-2 shrink-0">
-              <button onClick={() => setRoute('tournament')} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Tournament Operations">
-                <Trophy size={14} /> Tournament
-              </button>
-              <button onClick={onNew} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
-                <Plus size={14} /> New Sheet
-              </button>
-            </div>
+            <button onClick={onNew} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
+              <Plus size={14} /> New Sheet
+            </button>
           )}
         </div>
         <div className="flex gap-1 font-body text-sm overflow-x-auto">
