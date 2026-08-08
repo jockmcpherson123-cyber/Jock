@@ -422,18 +422,12 @@ function LinkRow({ icon: Icon, label, href, onCopy }) {
 function RosterTab({ tournament, people, onReload, showToast, courseInfo }) {
   const [editing, setEditing] = useState(null) // person object or 'new'
   const [importing, setImporting] = useState(false)
-  const [reviewing, setReviewing] = useState(false)
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('All')
-  const [signupCount, setSignupCount] = useState(0)
   const [printing, setPrinting] = useState(false)
   const committees = committeesOf(tournament)
   const shifts = shiftsOf(tournament)
   const stats = rosterStats(people)
-
-  useEffect(() => {
-    db.fetchSignups(tournament.id, 'pending').then((s) => setSignupCount(s.length)).catch(() => {})
-  }, [tournament.id, reviewing])
 
   const q = search.trim().toLowerCase()
   const filtered = people.filter((p) => {
@@ -488,9 +482,6 @@ function RosterTab({ tournament, people, onReload, showToast, courseInfo }) {
       <div className="flex flex-wrap gap-2">
         <button onClick={() => setEditing('new')} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}><Plus size={14} /> Add person</button>
         <button onClick={() => setImporting(true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST }}><Upload size={14} /> Import list</button>
-        <button onClick={() => setReviewing(true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border relative" style={{ color: FOREST, borderColor: '#E2E8F0' }}>
-          <UserCheck size={14} /> Sign-ups {signupCount > 0 && <span className="ml-0.5 font-bold px-1.5 py-0.5 rounded-full text-white text-[10px]" style={{ backgroundColor: GOLD }}>{signupCount}</span>}
-        </button>
         <button onClick={printBadges} disabled={printing} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-50" style={{ color: FOREST, borderColor: '#E2E8F0' }}><QrCode size={14} /> {printing ? 'Building…' : 'Print badges'}</button>
         <button onClick={exportCodes} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#E2E8F0' }}><Download size={14} /> Export codes</button>
       </div>
@@ -519,6 +510,7 @@ function RosterTab({ tournament, people, onReload, showToast, courseInfo }) {
                 <div className="min-w-0 flex-1">
                   <p className="font-body text-sm font-bold text-slate-900 truncate flex items-center gap-2">{p.name}
                     <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: '#F1F5F9', color: '#64748B' }}>{p.code}</span>
+                    {p.data?.source === 'signup' && <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: '#FEF3DD', color: '#92660D' }}>signed up</span>}
                   </p>
                   <p className="font-body text-[11px] text-slate-400 truncate">{[p.role, p.committee, shiftLabel(tournament, p.shift)].filter(Boolean).join(' · ') || '—'}</p>
                 </div>
@@ -533,7 +525,6 @@ function RosterTab({ tournament, people, onReload, showToast, courseInfo }) {
 
       {editing && <PersonModal person={editing === 'new' ? null : editing} tournament={tournament} people={people} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await onReload() }} showToast={showToast} committees={committees} shifts={shifts} />}
       {importing && <ImportModal tournament={tournament} people={people} onClose={() => setImporting(false)} onDone={async () => { setImporting(false); await onReload() }} showToast={showToast} />}
-      {reviewing && <SignupReview tournament={tournament} people={people} onClose={() => setReviewing(false)} onChanged={onReload} showToast={showToast} />}
     </div>
   )
 }
@@ -669,48 +660,6 @@ function ImportModal({ tournament, people, onClose, onDone, showToast }) {
   )
 }
 
-// Review public sign-ups → approve into the roster, or dismiss.
-function SignupReview({ tournament, people, onClose, onChanged, showToast }) {
-  const [signups, setSignups] = useState(null)
-  const load = useCallback(async () => { setSignups(await db.fetchSignups(tournament.id, 'pending')) }, [tournament.id])
-  useEffect(() => { load() }, [load])
-
-  const approve = async (s) => {
-    try {
-      const code = uniqueCode(people.map((p) => p.code))
-      await db.addPerson(tournament.id, { name: s.name, role: 'Volunteer', phone: s.phone, email: s.email, org: s.data?.org || '', committee: s.data?.committee || '', shift: s.data?.shift || '', shirt: s.data?.shirt || '', notes: s.data?.notes || '', code })
-      await db.updateSignupStatus(s.id, 'approved')
-      await load(); await onChanged(); showToast(`${s.name} added`)
-    } catch (e) { console.error(e); showToast('Could not approve') }
-  }
-  const dismiss = async (s) => { await db.deleteSignup(s.id); await load(); showToast('Dismissed') }
-
-  return (
-    <Modal title="Volunteer sign-ups" onClose={onClose} wide>
-      {signups == null ? <p className="font-body text-sm text-slate-400 py-6 text-center">Loading…</p>
-        : signups.length === 0 ? <p className="font-body text-sm text-slate-400 py-6 text-center">No pending sign-ups. Share the sign-up link from the Setup tab.</p>
-          : (
-            <div className="space-y-2">
-              {signups.map((s) => (
-                <div key={s.id} className="rounded-xl border border-slate-100 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-body text-sm font-bold text-slate-900">{s.name}</p>
-                      <p className="font-body text-[11px] text-slate-400 truncate">{[s.email, s.phone, s.data?.org].filter(Boolean).join(' · ')}</p>
-                      {(s.data?.committee || s.data?.shift || s.data?.notes) && <p className="font-body text-[11px] text-slate-500 mt-1">{[s.data?.committee && `Prefers: ${s.data.committee}`, s.data?.shift, s.data?.notes].filter(Boolean).join(' · ')}</p>}
-                    </div>
-                    <div className="flex gap-1.5 shrink-0">
-                      <button onClick={() => approve(s)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FERN }}>Add</button>
-                      <button onClick={() => dismiss(s)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full" style={{ backgroundColor: '#F1F5F9', color: '#64748B' }}>Dismiss</button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-    </Modal>
-  )
-}
 
 // ── CHECK-IN ────────────────────────────────────────────────────────────────
 function CheckInTab({ tournament, people, onReload, showToast }) {
@@ -1011,6 +960,16 @@ function buildHandbookHTML(handbook, tournament, clubNameRaw) {
     <div class="sponsor-grid">${sponsors.map((s) => `<div class="sponsor"><div class="sponsor-plate"><img src="${s.src}"></div>${s.name ? `<div class="sponsor-name">${esc(s.name)}</div>` : ''}</div>`).join('')}</div>
   </section>` : ''
 
+  const bc = handbook.backCover || {}
+  const hasBack = bc.photo || bc.message || bc.presentedByLogo || bc.presentedByText || logo
+  const bcStyle = bc.photo ? `background-image:linear-gradient(rgba(15,29,21,0.72),rgba(15,29,21,0.88)), url('${bc.photo}');background-size:cover;background-position:center;` : ''
+  const backCover = hasBack ? `<section class="backcover" style="${bcStyle}"><div class="bc-inner">
+    ${logo ? `<img class="bc-logo" src="${logo}">` : ''}
+    <div class="bc-msg">${esc(bc.message || 'Thank you for volunteering.')}</div>
+    ${(bc.presentedByLogo || bc.presentedByText) ? `<div class="bc-presented"><div class="bc-presented-label">Presented by</div>${bc.presentedByLogo ? `<img class="bc-presented-logo" src="${bc.presentedByLogo}">` : ''}${bc.presentedByText ? `<div class="bc-presented-text">${esc(bc.presentedByText)}</div>` : ''}</div>` : ''}
+    <div class="bc-name">${esc(tournament.name)}</div>
+  </div></section>` : ''
+
   const toc = sections.length >= 3 ? `<section class="toc"><h2 class="toc-h">Contents</h2>${sections.map((s, i) => `<div class="toc-row"><span class="toc-num">${num(i)}</span><span class="toc-title">${esc(s.title)}</span></div>`).join('')}</section>` : ''
 
   const arts = sections.map((s, i) => {
@@ -1063,9 +1022,17 @@ function buildHandbookHTML(handbook, tournament, clubNameRaw) {
     .mag .sponsor-plate img { max-width: 100%; max-height: 100%; object-fit: contain; }
     .mag .sponsor-name { font-size: 11px; color: #555; margin-top: 6px; }
     .mag .foot { text-align: center; color: #94a3a0; font-size: 10px; margin-top: 22px; }
+    .mag .backcover { break-before: page; page-break-before: always; min-height: 9.6in; background: ${FOREST}; color: #fff; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.8in; }
+    .mag .bc-logo { max-height: 1.1in; max-width: 55%; margin: 0 auto 22px; display: block; object-fit: contain; }
+    .mag .bc-msg { font-size: 26px; line-height: 1.35; max-width: 6in; margin: 0 auto; }
+    .mag .bc-presented { margin-top: 36px; }
+    .mag .bc-presented-label { color: ${GOLD}; letter-spacing: 3px; text-transform: uppercase; font-size: 11px; font-weight: bold; margin-bottom: 12px; }
+    .mag .bc-presented-logo { max-height: 0.9in; max-width: 55%; margin: 0 auto; display: block; object-fit: contain; background: #fff; padding: 8px 12px; border-radius: 6px; }
+    .mag .bc-presented-text { font-size: 18px; font-weight: bold; }
+    .mag .bc-name { color: rgba(255,255,255,0.7); font-size: 12px; margin-top: 34px; letter-spacing: 2px; text-transform: uppercase; }
   </style>`
 
-  return `${style}<div class="mag">${cover}${toc}${arts}${sponsorsPage}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div></div>`
+  return `${style}<div class="mag">${cover}${toc}${arts}${sponsorsPage}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div>${backCover}</div>`
 }
 
 // Hidden file-input button for adding photos to a handbook section.
@@ -1083,6 +1050,7 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
   const [sections, setSections] = useState(tournament.data?.handbook?.sections || [])
   const [logo, setLogo] = useState(tournament.data?.handbook?.logo || '')
   const [sponsors, setSponsors] = useState(tournament.data?.handbook?.sponsors || [])
+  const [backCover, setBackCover] = useState(tournament.data?.handbook?.backCover || {})
   const [dirty, setDirty] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [imgBusy, setImgBusy] = useState(false)
@@ -1090,7 +1058,7 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
 
   useEffect(() => {
     const hb = tournament.data?.handbook || {}
-    setSections(hb.sections || []); setLogo(hb.logo || ''); setSponsors(hb.sponsors || []); setDirty(false)
+    setSections(hb.sections || []); setLogo(hb.logo || ''); setSponsors(hb.sponsors || []); setBackCover(hb.backCover || {}); setDirty(false)
   }, [tournament.id])
 
   const STARTERS = [
@@ -1141,11 +1109,21 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
   const removeSponsor = (idx) => { setSponsors((arr) => arr.filter((_, k) => k !== idx)); setDirty(true) }
   const setSponsorName = (idx, name) => { setSponsors((arr) => arr.map((sp, k) => (k === idx ? { ...sp, name } : sp))); setDirty(true) }
 
+  const setBc = (patch) => { setBackCover((b) => ({ ...b, ...patch })); setDirty(true) }
+  const uploadBcPhoto = async (files) => { setImgBusy(true); try { if (files[0]) setBc({ photo: await compressImage(files[0], 1600, 0.75) }) } catch (e) { console.error(e) } finally { setImgBusy(false) } }
+  const uploadBcPresented = async (files) => { setImgBusy(true); try { if (files[0]) setBc({ presentedByLogo: await compressLogo(files[0]) }) } catch (e) { console.error(e) } finally { setImgBusy(false) } }
+
   const handbookData = () => ({
     sections: sections.map((s) => ({ title: (s.title || '').trim(), body: s.body || '', images: (s.images || []).filter((im) => im && im.src) }))
       .filter((s) => s.title || s.body || s.images.length),
     logo: logo || '',
     sponsors: sponsors.filter((sp) => sp && sp.src).map((sp) => ({ src: sp.src, name: (sp.name || '').trim() })),
+    backCover: {
+      photo: backCover.photo || '',
+      message: (backCover.message || '').trim(),
+      presentedByLogo: backCover.presentedByLogo || '',
+      presentedByText: (backCover.presentedByText || '').trim(),
+    },
   })
 
   const save = async () => {
@@ -1228,6 +1206,45 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
                 </div>
               ))}
               <div className="pt-0.5"><PhotoAdder onAdd={addSponsors} busy={imgBusy} label="Add sponsor" /></div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Back cover */}
+      <Card>
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Back Cover</p>
+        <p className="font-body text-xs text-slate-500 mb-3">The last page — a closing thank-you, an optional background photo, and a headline “Presented by” sponsor.</p>
+        <div className="space-y-3">
+          <div>
+            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Closing message</label>
+            <textarea value={backCover.message || ''} onChange={(e) => setBc({ message: e.target.value })} rows={2} className={inputCls} style={{ resize: 'vertical' }} placeholder="Thank you for volunteering!" />
+          </div>
+          <div className="flex flex-wrap gap-8">
+            <div>
+              <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Background photo</label>
+              {backCover.photo ? (
+                <div className="relative w-40">
+                  <img src={backCover.photo} alt="" className="w-40 h-24 object-cover rounded-lg border border-slate-200" />
+                  <button onClick={() => setBc({ photo: '' })} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500" aria-label="Remove photo"><X size={13} /></button>
+                </div>
+              ) : (
+                <PhotoAdder onAdd={uploadBcPhoto} busy={imgBusy} label="Add photo" multiple={false} />
+              )}
+            </div>
+            <div>
+              <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">“Presented by” sponsor</label>
+              {backCover.presentedByLogo ? (
+                <div className="relative w-40">
+                  <div className="rounded-lg border border-slate-200 bg-white p-2 flex items-center justify-center" style={{ height: 68 }}>
+                    <img src={backCover.presentedByLogo} alt="" className="max-h-full max-w-full object-contain" />
+                  </div>
+                  <button onClick={() => setBc({ presentedByLogo: '' })} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500" aria-label="Remove logo"><X size={13} /></button>
+                </div>
+              ) : (
+                <PhotoAdder onAdd={uploadBcPresented} busy={imgBusy} label="Add logo" multiple={false} />
+              )}
+              <input value={backCover.presentedByText || ''} onChange={(e) => setBc({ presentedByText: e.target.value })} placeholder="…or type a sponsor name" className="w-40 mt-2 text-[12px] font-body border border-slate-200 rounded-lg px-2.5 py-2 outline-none" />
             </div>
           </div>
         </div>

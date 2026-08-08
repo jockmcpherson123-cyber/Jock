@@ -26,6 +26,7 @@ export default function HandbookPage() {
   const sections = hb.sections || []
   const logo = hb.logo || ''
   const sponsors = (hb.sponsors || []).filter((s) => s && s.src)
+  const bc = hb.backCover || {}
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#F1F5F3' }} className="py-8 px-4">
@@ -80,6 +81,20 @@ export default function HandbookPage() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {(bc.message || bc.presentedByLogo || bc.presentedByText) && sections.length > 0 && (
+          <div className="rounded-2xl p-6 mt-4 text-center" style={{ backgroundColor: FOREST, color: '#fff' }}>
+            <p className="text-lg font-bold">{bc.message || 'Thank you for volunteering.'}</p>
+            {(bc.presentedByLogo || bc.presentedByText) && (
+              <div className="mt-4">
+                <p className="text-[10px] font-bold uppercase tracking-[3px]" style={{ color: GOLD }}>Presented by</p>
+                {bc.presentedByLogo
+                  ? <img src={bc.presentedByLogo} alt="" className="mx-auto mt-2 max-h-14 object-contain bg-white rounded p-1.5" />
+                  : <p className="text-base font-bold mt-1">{bc.presentedByText}</p>}
+              </div>
+            )}
           </div>
         )}
       </div>
