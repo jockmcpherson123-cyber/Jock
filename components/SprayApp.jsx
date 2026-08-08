@@ -14,7 +14,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, ChevronUp, ChevronDown, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
-  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target, Scissors, Gauge,
+  Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target, Scissors, Gauge, Trophy, ArrowLeft,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -611,6 +611,22 @@ function SprayOpsModule({ user }) {
     )
   }
 
+  // Tournament is its own self-contained section (used once a year), with its own
+  // header and a way back to daily Grounds Ops — kept out of the everyday nav.
+  if (route === 'tournament' && manage) {
+    return (
+      <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
+        {toast && (
+          <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body font-medium" style={{ backgroundColor: INK }}>{toast}</div>
+        )}
+        <TournamentTopBar courseInfo={courseInfo} onExit={() => setRoute('dashboard')} />
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-24">
+          <Tournament courseInfo={courseInfo} />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
       {toast && (
@@ -756,7 +772,6 @@ function SprayOpsModule({ user }) {
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
         {route === 'program' && manage && <AnnualProgram areas={areas} products={products} sheets={sheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
-        {route === 'tournament' && manage && <Tournament courseInfo={courseInfo} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
           <SettingsPage
@@ -774,7 +789,7 @@ function SprayOpsModule({ user }) {
 // ── TOP NAV ───────────────────────────────────────────────────────────────
 function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
   const items = manage
-    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['tournament', 'Tournament'], ['weather', 'Weather'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
+    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['weather', 'Weather'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
     : [['tospray', 'To Spray'], ['records', 'Records'], ['inventory', 'Inventory'], ['documents', 'Labels & SDS'], ['weather', 'Weather']]
 
   return (
@@ -786,9 +801,14 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
             <h1 className="font-display text-2xl font-semibold mt-0.5">{courseInfo?.deptName || 'Grounds Operations'}</h1>
           </div>
           {manage && (
-            <button onClick={onNew} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
-              <Plus size={14} /> New Sheet
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={() => setRoute('tournament')} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Tournament Operations">
+                <Trophy size={14} /> Tournament
+              </button>
+              <button onClick={onNew} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
+                <Plus size={14} /> New Sheet
+              </button>
+            </div>
           )}
         </div>
         <div className="flex gap-1 font-body text-sm overflow-x-auto">
@@ -803,6 +823,26 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
             </button>
           ))}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// Dedicated header for the Tournament section — a slim bar with the club identity
+// and a clear way back to daily Grounds Ops. Keeps the once-a-year tournament
+// workspace visually separate from the everyday app.
+function TournamentTopBar({ courseInfo, onExit }) {
+  return (
+    <div style={{ backgroundColor: FOREST }} className="text-white">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
+        <button onClick={onExit} className="font-body text-xs font-semibold px-3 py-2 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }}>
+          <ArrowLeft size={14} /> Grounds Ops
+        </button>
+        <div className="text-center min-w-0">
+          <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo?.clubName || 'Golf Club'}</p>
+          <h1 className="font-display text-lg font-semibold truncate flex items-center justify-center gap-1.5"><Trophy size={16} style={{ color: GOLD }} /> Tournament Mode</h1>
+        </div>
+        <div className="w-[104px] shrink-0" aria-hidden />
       </div>
     </div>
   )
