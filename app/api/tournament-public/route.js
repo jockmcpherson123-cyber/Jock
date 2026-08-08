@@ -3,11 +3,11 @@
 // never have to loosen row-level security for anonymous visitors.
 //
 //   GET  ?t=<tournamentId>[&handbook=1]  → { name, startDate, endDate,
-//                                            location, signupOpen, handbook? }
-//   POST { tournamentId, name, email, phone, ... } → adds the volunteer straight
-//                                            to the roster (one-stop sign-up)
+//                                            location, signupOpen, form, handbook? }
+//   POST { tournamentId, values } → adds the volunteer straight to the roster
+//                                   (one-stop sign-up; answers mapped by field)
 import { createClient } from '@supabase/supabase-js'
-import { uniqueCode } from '@/lib/tournament'
+import { uniqueCode, signupFieldsOf, SIGNUP_MAPS } from '@/lib/tournament'
 
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -33,6 +33,7 @@ export async function GET(request) {
     endDate: data.end_date || '',
     location: data.location || '',
     signupOpen: !!data.signup_open,
+    form: signupFieldsOf({ data: data.data }),
   }
   if (searchParams.get('handbook')) {
     const hb = data.data?.handbook || {}
@@ -49,45 +50,52 @@ export async function POST(request) {
   try { body = await request.json() } catch { return Response.json({ error: 'Bad request' }, { status: 400 }) }
 
   const tournamentId = String(body.tournamentId || '')
-  const name = String(body.name || '').trim().slice(0, 120)
-  if (!tournamentId || !name) return Response.json({ error: 'Name is required' }, { status: 400 })
+  const values = body.values && typeof body.values === 'object' ? body.values : {}
+  if (!tournamentId) return Response.json({ error: 'Missing tournament' }, { status: 400 })
 
-  // Only accept a sign-up when the form is open for that tournament.
-  const { data: t, error: te } = await supabase.from('tournaments').select('signup_open').eq('id', tournamentId).maybeSingle()
+  // Load the tournament (its sign-up form defines how answers are handled).
+  const { data: t, error: te } = await supabase.from('tournaments').select('signup_open, data').eq('id', tournamentId).maybeSingle()
   if (te) return Response.json({ error: te.message }, { status: 500 })
   if (!t) return Response.json({ error: 'Tournament not found' }, { status: 404 })
   if (!t.signup_open) return Response.json({ error: 'Sign-ups are closed for this tournament.' }, { status: 403 })
 
-  const clip = (v, n = 200) => String(v || '').trim().slice(0, n)
-  const email = clip(body.email, 160)
+  const fields = signupFieldsOf({ data: t.data })
+  const clip = (v, n = 300) => String(v ?? '').trim().slice(0, n)
+  const valOf = (f) => clip(values[f.id], f.type === 'textarea' ? 600 : 200)
 
-  // Pull the existing roster for this tournament — for a unique badge code and
-  // to avoid duplicate sign-ups from the same email.
+  // Server-side required check (client checks too).
+  for (const f of fields) {
+    if ((f.required || f.map === 'name') && !valOf(f)) return Response.json({ error: `${f.label} is required` }, { status: 400 })
+  }
+
+  // Route answers: mapped questions become roster fields; the rest are kept as
+  // Q&A on the person so staff can read them.
+  const mapped = {}
+  const answers = []
+  let name = ''
+  for (const f of fields) {
+    const v = valOf(f)
+    if (f.map === 'name') { name = v; continue }
+    if (SIGNUP_MAPS.includes(f.map)) { if (v) mapped[f.map] = v }
+    else if (v) answers.push({ label: f.label, value: v })
+  }
+  if (!name) return Response.json({ error: 'Name is required' }, { status: 400 })
+  name = name.slice(0, 120)
+  const email = (mapped.email || '').slice(0, 160)
+
+  // Existing roster: unique badge code + de-dupe by email.
   const { data: existing, error: ee } = await supabase.from('tournament_people').select('code, data').eq('tournament_id', tournamentId)
   if (ee) return Response.json({ error: ee.message }, { status: 500 })
   if (email && (existing || []).some((r) => String(r.data?.email || '').toLowerCase() === email.toLowerCase())) {
     return Response.json({ ok: true, duplicate: true })
   }
 
-  // One-stop sign-up: the volunteer goes straight onto the roster with a badge
-  // code. Flagged source:'signup' so staff can see who self-registered.
   const code = uniqueCode((existing || []).map((r) => r.code))
   const row = {
     tournament_id: tournamentId,
     name,
     code,
-    data: {
-      role: 'Volunteer',
-      email,
-      phone: clip(body.phone, 40),
-      org: clip(body.org),
-      committee: clip(body.committee),
-      shift: clip(body.shift, 40),
-      shirt: clip(body.shirt, 8),
-      availability: clip(body.availability, 300),
-      notes: clip(body.notes, 600),
-      source: 'signup',
-    },
+    data: { role: 'Volunteer', ...mapped, answers, source: 'signup' },
   }
   const { error } = await supabase.from('tournament_people').insert(row)
   if (error) return Response.json({ error: error.message }, { status: 500 })

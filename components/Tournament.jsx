@@ -17,7 +17,7 @@ import { SearchSelect } from '@/components/pickers'
 import { localDateISO } from '@/lib/dates'
 import * as db from '@/lib/db'
 import {
-  PERSON_ROLES, SHIRT_SIZES,
+  PERSON_ROLES, SHIRT_SIZES, SIGNUP_FIELD_TYPES, signupFieldsOf,
   uniqueCode, personStatus, rosterStats, byCommittee, shortTime,
   committeesOf, shiftsOf, shiftLabel, qrDataUrl,
 } from '@/lib/tournament'
@@ -403,7 +403,74 @@ function SetupDetails({ selected, onSave, showToast }) {
         <LinkRow icon={BookOpen} label="Volunteer handbook" href={handbookLink} onCopy={() => copy(handbookLink)} />
         <LinkRow icon={Tv} label="TV board (check-in + jobs)" href={boardLink} onCopy={() => copy(boardLink)} />
       </Card>
+
+      <SignupFormEditor selected={selected} onSave={onSave} showToast={showToast} />
     </>
+  )
+}
+
+// Build the questions volunteers answer on the public sign-up form. Fully
+// custom: rename, reorder, add/remove, choose a type, mark required. The "Full
+// name" question is locked because the roster needs a name.
+function SignupFormEditor({ selected, onSave, showToast }) {
+  const [fields, setFields] = useState(signupFieldsOf(selected))
+  const savedJson = JSON.stringify(signupFieldsOf(selected))
+  const dirty = JSON.stringify(fields) !== savedJson
+  useEffect(() => { setFields(signupFieldsOf(selected)) }, [selected.id])
+
+  const setF = (i, patch) => setFields((arr) => arr.map((f, j) => (j === i ? { ...f, ...patch } : f)))
+  const addField = () => setFields((arr) => [...arr, { id: `q${Date.now().toString(36)}`, label: 'New question', type: 'text', required: false, map: '' }])
+  const removeField = (i) => setFields((arr) => arr.filter((_, j) => j !== i))
+  const move = (i, dir) => {
+    const j = i + dir
+    if (j < 1 || j >= fields.length) return // keep the locked name field first
+    setFields((arr) => { const n = [...arr];[n[i], n[j]] = [n[j], n[i]]; return n })
+  }
+  const save = async () => {
+    const clean = fields.map((f) => ({
+      id: f.id, label: (f.label || '').trim() || 'Question', type: f.type || 'text',
+      required: f.map === 'name' ? true : !!f.required, map: f.map || '',
+      ...(f.type === 'select' ? { options: (Array.isArray(f.options) ? f.options : String(f.options || '').split(',')).map((o) => String(o).trim()).filter(Boolean) } : {}),
+      ...(f.locked ? { locked: true } : {}),
+    }))
+    await onSave({ data: { ...selected.data, signupForm: { fields: clean } } })
+    showToast('Sign-up form saved')
+  }
+
+  return (
+    <Card>
+      <p className="font-display text-base font-semibold text-slate-900 mb-1">Sign-Up Form</p>
+      <p className="font-body text-xs text-slate-500 mb-3">The questions volunteers answer. Drag-free reorder with the arrows. Answers to Name, Email, Phone, Shirt, Shift and “help with” flow onto the roster automatically; your own questions are saved with each person.</p>
+      <div className="space-y-2">
+        {fields.map((f, i) => (
+          <div key={f.id} className="rounded-xl border border-slate-100 p-2.5">
+            <div className="flex items-center gap-2">
+              <input value={f.label} onChange={(e) => setF(i, { label: e.target.value })} disabled={f.locked} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white disabled:bg-slate-50 disabled:text-slate-500" />
+              <button onClick={() => move(i, -1)} disabled={i <= 1} className="p-1.5 rounded-lg disabled:opacity-25" style={{ color: FERN }}><ChevronUp size={15} /></button>
+              <button onClick={() => move(i, 1)} disabled={i === 0 || i === fields.length - 1} className="p-1.5 rounded-lg disabled:opacity-25" style={{ color: FERN }}><ChevronDown size={15} /></button>
+              {!f.locked ? <button onClick={() => removeField(i)} className="text-red-400 p-1.5 shrink-0"><Trash2 size={14} /></button> : <span className="w-7 shrink-0" />}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mt-2 pl-0.5">
+              {f.locked ? (
+                <span className="font-body text-[11px] text-slate-400">Always asked · required</span>
+              ) : (
+                <>
+                  <div className="w-40"><SearchSelect value={f.type} options={SIGNUP_FIELD_TYPES.map((t) => ({ value: t.id, label: t.label }))} onPick={(v) => setF(i, { type: v })} sort={false} /></div>
+                  <label className="font-body text-[11px] font-semibold text-slate-500 flex items-center gap-1.5"><input type="checkbox" checked={!!f.required} onChange={(e) => setF(i, { required: e.target.checked })} /> Required</label>
+                  {f.type === 'select' && (
+                    <input value={Array.isArray(f.options) ? f.options.join(', ') : (f.options || '')} onChange={(e) => setF(i, { options: e.target.value.split(',') })} placeholder="Choices, comma-separated" className="flex-1 min-w-[160px] border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] font-body bg-white" />
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2 mt-3">
+        <button onClick={addField} className="font-body text-xs font-bold px-3 py-2 rounded-full" style={{ color: FERN, border: '1px solid #E2E8F0' }}><Plus size={13} className="inline" /> Add question</button>
+        <button onClick={save} disabled={!dirty} className="font-body text-xs font-bold px-4 py-2 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Save form</button>
+      </div>
+    </Card>
   )
 }
 
@@ -575,6 +642,14 @@ function PersonModal({ person, tournament, people, onClose, onSaved, showToast, 
           <Field label="Emergency phone"><input value={d.emergencyPhone} onChange={(e) => setD({ ...d, emergencyPhone: e.target.value })} className={inputCls} inputMode="tel" /></Field>
         </div>
         <Field label="Notes"><textarea value={d.notes} onChange={(e) => setD({ ...d, notes: e.target.value })} rows={2} className={inputCls} style={{ resize: 'vertical' }} /></Field>
+        {person?.data?.answers?.length > 0 && (
+          <div className="rounded-xl p-3" style={{ backgroundColor: '#F8FAF9' }}>
+            <p className="font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1.5">Sign-up answers</p>
+            {person.data.answers.map((a, k) => (
+              <p key={k} className="font-body text-[12px] text-slate-600"><span className="font-semibold">{a.label}:</span> {a.value}</p>
+            ))}
+          </div>
+        )}
         {person && <p className="font-body text-[11px] text-slate-400">Badge code: <span className="font-bold">{person.code}</span></p>}
         <div className="flex gap-2 pt-1">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
