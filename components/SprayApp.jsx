@@ -1538,7 +1538,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   const productTargets = [...new Set((s.products || []).flatMap((p) => splitTargets(p.target)))]
 
   return (
-    <div className="pt-6 pb-10 max-w-2xl mx-auto">
+    <div className="pt-6 pb-10 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-5">
         <button onClick={onCancel} className="font-body text-sm font-medium text-slate-400">Cancel</button>
         <h2 className="font-display text-lg font-semibold text-slate-900">{sheet.status === 'pending' && sheet.directorSig === '' ? 'Spray Sheet' : 'Edit Sheet'}</h2>
