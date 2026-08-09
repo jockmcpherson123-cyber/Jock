@@ -1613,7 +1613,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
         <Card>
           <FieldLabel>Products</FieldLabel>
           <MultiSelect selected={s.products.map((p) => p.product).filter(Boolean)} options={products.map((pr) => pr.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
-          <div className="space-y-2.5 mt-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mt-3 items-start">
             {sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p, mixIdx) => {
               const { value: amt, unit: amtUnit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
               const total = amt !== null ? Math.round(amt * s.tanks * 10) / 10 : null
