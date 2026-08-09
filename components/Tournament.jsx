@@ -255,7 +255,7 @@ export default function Tournament({ courseInfo: courseInfoProp }) {
       {tab === 'roster' && <RosterTab tournament={selected} people={people} onReload={loadPeople} showToast={showToast} courseInfo={courseInfo} />}
       {tab === 'checkin' && <CheckInTab tournament={selected} people={people} onReload={loadPeople} showToast={showToast} />}
       {tab === 'jobs' && <JobsTab tournament={selected} people={people} onReload={loadPeople} showToast={showToast} courseInfo={courseInfo} />}
-      {tab === 'handbook' && <HandbookTab tournament={selected} onSave={saveTournament} showToast={showToast} courseInfo={courseInfo} />}
+      {tab === 'handbook' && <HandbookTab tournament={selected} people={people} onSave={saveTournament} showToast={showToast} courseInfo={courseInfo} />}
       {tab === 'setup' && <SetupTab tournaments={tournaments} selected={selected} onReload={loadTournaments} onSelect={setSelId} onSave={saveTournament} showToast={showToast} />}
 
       {toast && (
@@ -617,8 +617,13 @@ function statusStyle(st) {
 
 // Add / edit one person.
 function PersonModal({ person, tournament, people, onClose, onSaved, showToast, committees, shifts }) {
-  const [d, setD] = useState(person || { name: '', role: 'Volunteer', committee: '', shift: '', phone: '', email: '', org: '', shirt: '', emergencyName: '', emergencyPhone: '', notes: '' })
+  const [d, setD] = useState(person || { name: '', role: 'Volunteer', committee: '', shift: '', phone: '', email: '', org: '', shirt: '', emergencyName: '', emergencyPhone: '', notes: '', title: '', years: '', photo: '' })
   const [busy, setBusy] = useState(false)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const uploadPhoto = async (files) => {
+    setPhotoBusy(true)
+    try { if (files[0]) { const src = await compressImage(files[0], 600, 0.82); setD((x) => ({ ...x, photo: src })) } } catch (e) { console.error(e) } finally { setPhotoBusy(false) }
+  }
 
   const save = async () => {
     if (!d.name.trim()) { showToast('Name is required'); return }
@@ -649,6 +654,23 @@ function PersonModal({ person, tournament, people, onClose, onSaved, showToast, 
           <Field label="Email"><input value={d.email} onChange={(e) => setD({ ...d, email: e.target.value })} className={inputCls} inputMode="email" /></Field>
         </div>
         <Field label="Organization / club"><input value={d.org} onChange={(e) => setD({ ...d, org: e.target.value })} className={inputCls} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Title (for Meet the Team)"><input value={d.title || ''} onChange={(e) => setD({ ...d, title: e.target.value })} className={inputCls} placeholder="e.g. Blue Course Assistant" /></Field>
+          <Field label="Years of service"><input type="number" value={d.years ?? ''} onChange={(e) => setD({ ...d, years: e.target.value })} className={inputCls} inputMode="numeric" placeholder="e.g. 4" /></Field>
+        </div>
+        <div>
+          <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Headshot (for Meet the Team)</label>
+          <div className="flex items-center gap-3">
+            {d.photo ? (
+              <div className="relative">
+                <img src={d.photo} alt="" className="w-16 h-16 rounded-lg object-cover border border-slate-200" />
+                <button onClick={() => setD({ ...d, photo: '' })} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500" aria-label="Remove headshot"><X size={13} /></button>
+              </div>
+            ) : (
+              <PhotoAdder onAdd={uploadPhoto} busy={photoBusy} label="Add headshot" multiple={false} />
+            )}
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Emergency contact"><input value={d.emergencyName} onChange={(e) => setD({ ...d, emergencyName: e.target.value })} className={inputCls} /></Field>
           <Field label="Emergency phone"><input value={d.emergencyPhone} onChange={(e) => setD({ ...d, emergencyPhone: e.target.value })} className={inputCls} inputMode="tel" /></Field>
@@ -1023,11 +1045,13 @@ function waitImgs(el) {
 // under .mag). Used for both the browser print and the downloadable PDF: a
 // colour cover, a Contents page, then each section as a numbered article with a
 // lead photo, drop cap, and a photo gallery.
-function buildHandbookHTML(handbook, tournament, clubNameRaw) {
+function buildHandbookHTML(handbook, tournament, clubNameRaw, people = []) {
   const sections = handbook.sections || []
   const logo = handbook.logo || ''
   const sponsors = (handbook.sponsors || []).filter((s) => s && s.src)
   const schedule = (handbook.schedule || []).filter((d) => d && (d.day || (d.rows || []).length))
+  const holes = (handbook.holes || []).filter((h) => h && (h.num || h.desc || h.img))
+  const auto = handbook.autoPages || {}
   const accent = handbook.theme?.color || FOREST
   const coverPhoto = handbook.coverPhoto || ''
   const clubName = esc(clubNameRaw || '')
@@ -1095,6 +1119,46 @@ function buildHandbookHTML(handbook, tournament, clubNameRaw) {
   </div></section>` : ''
   if (groups.length) tocEntries.push({ label: 'Sponsorships', num: null })
 
+  // ── Hole-by-Hole ──
+  const holesPage = holes.length ? `<section class="holes">${railTab('Hole-by-Hole')}<div class="article-main">
+    <div class="art-head"><h2 class="art-title">Hole-by-Hole</h2></div>
+    ${holes.map((h) => `<div class="hole">${h.img ? `<img class="hole-img" src="${h.img}">` : ''}<div class="hole-body"><div class="hole-h">Hole ${esc(String(h.num || ''))}${h.par ? ` — Par ${esc(String(h.par))}` : ''}${h.yards ? ` · ${esc(String(h.yards))} yds` : ''}</div><div class="hole-desc">${esc(h.desc || '').replace(/\n/g, '<br>')}</div></div></div>`).join('')}
+  </div></section>` : ''
+  if (holes.length) tocEntries.push({ label: 'Hole-by-Hole', num: null })
+
+  // ── Meet the Team (crew/staff with a headshot or title) ──
+  const team = people.filter((p) => ['Crew', 'Team Lead', 'Staff'].includes(p.role) && (p.photo || p.title || p.name))
+  const meetTeamPage = (auto.meetTeam && team.length) ? `<section class="team">${railTab('Meet the Team')}<div class="article-main">
+    <div class="art-head"><h2 class="art-title">Meet the Team</h2></div>
+    <div class="team-grid">${team.map((p) => `<div class="team-card">${p.photo ? `<img class="team-photo" src="${p.photo}">` : `<div class="team-photo team-ph"></div>`}<div class="team-name">${esc(p.name)}</div>${p.title ? `<div class="team-title">${esc(p.title)}</div>` : ''}${p.phone ? `<div class="team-phone">${esc(p.phone)}</div>` : ''}</div>`).join('')}</div>
+  </div></section>` : ''
+  if (auto.meetTeam && team.length) tocEntries.push({ label: 'Meet the Team', num: null })
+
+  // ── Volunteer directory (name · club · email) ──
+  const dirPeople = [...people].sort((a, b) => String(a.name).localeCompare(String(b.name)))
+  const directoryPage = (auto.directory && dirPeople.length) ? `<section class="dir">${railTab('Volunteer Directory')}<div class="article-main">
+    <div class="art-head"><h2 class="art-title">Championship Volunteer Directory</h2></div>
+    <div class="dir-grid">${dirPeople.map((p) => `<div class="dir-entry"><div class="dir-name">${esc(p.name)}</div>${p.org ? `<div class="dir-org">${esc(p.org)}</div>` : ''}${p.email ? `<div class="dir-email">${esc(p.email)}</div>` : ''}</div>`).join('')}</div>
+  </div></section>` : ''
+  if (auto.directory && dirPeople.length) tocEntries.push({ label: 'Volunteer Directory', num: null })
+
+  // ── Years of service (people with a years value, most first) ──
+  const yearsPeople = people.filter((p) => Number(p.years) > 0).sort((a, b) => Number(b.years) - Number(a.years))
+  const yearsPage = (auto.yearsOfService && yearsPeople.length) ? `<section class="years">${railTab('Years of Service')}<div class="article-main">
+    <div class="art-head"><h2 class="art-title">Years of Service</h2></div>
+    <div class="years-grid">${yearsPeople.map((p) => `<div class="years-entry"><div class="years-name">${esc(p.name)}</div><div class="years-num">${esc(String(p.years))} year${Number(p.years) === 1 ? '' : 's'}</div></div>`).join('')}</div>
+  </div></section>` : ''
+  if (auto.yearsOfService && yearsPeople.length) tocEntries.push({ label: 'Years of Service', num: null })
+
+  // ── Thank You Volunteers (name cloud) ──
+  const names = people.map((p) => p.name).filter(Boolean)
+  const thankYouPage = (auto.thankYou && names.length) ? `<section class="thankyou" style="background:${accent}">
+    <div class="ty-cloud">${names.map((n, i) => `<span class="ty-name" style="opacity:${0.5 + ((i * 37) % 50) / 100}">${esc(n)}</span>`).join(' ')}</div>
+    <h2 class="ty-h">THANK YOU VOLUNTEERS!</h2>
+    <div class="ty-msg">${esc(handbook.thankYouMessage || `From all of us at ${clubNameRaw || 'the club'} — thank you for volunteering. Your efforts and attention to detail are crucial to our success.`)}</div>
+  </section>` : ''
+  if (auto.thankYou && names.length) tocEntries.push({ label: 'Thank You', num: null })
+
   // ── Table of contents ──
   const toc = tocEntries.length >= 3 ? `<section class="toc">${railTab('Contents')}<div class="article-main"><h2 class="toc-h">Contents</h2>${tocEntries.map((e) => `<div class="toc-row"><span class="toc-num">${e.num || '•'}</span><span class="toc-title">${esc(e.label)}</span></div>`).join('')}</div></section>` : ''
 
@@ -1123,8 +1187,9 @@ function buildHandbookHTML(handbook, tournament, clubNameRaw) {
     .mag .cover-meta { color: rgba(255,255,255,0.85); font-size: 13px; margin-top: 24px; }
     /* Side-tab layout shared by articles, schedule, sponsors, TOC */
     .mag .article, .mag .sched, .mag .sponsors, .mag .toc { display: flex; gap: 0; margin-bottom: 26px; page-break-inside: auto; }
-    .mag .toc, .mag .sched, .mag .sponsors { break-before: page; page-break-before: always; }
+    .mag .toc, .mag .sched, .mag .sponsors, .mag .holes, .mag .team, .mag .dir, .mag .years { break-before: page; page-break-before: always; }
     .mag .toc { break-after: page; page-break-after: always; }
+    .mag .holes, .mag .team, .mag .dir, .mag .years { display: flex; gap: 0; margin-bottom: 26px; }
     .mag .rail { flex: 0 0 0.5in; background: ${accent}; border-radius: 5px 0 0 5px; display: flex; align-items: center; justify-content: center; }
     .mag .rail-label { writing-mode: vertical-rl; transform: rotate(180deg); color: #fff; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; font-size: 12px; padding: 12px 0; white-space: nowrap; }
     .mag .article-main { flex: 1 1 auto; min-width: 0; padding: 2px 0 8px 16px; }
@@ -1163,6 +1228,37 @@ function buildHandbookHTML(handbook, tournament, clubNameRaw) {
     .mag .sponsor-plate { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; display: flex; align-items: center; justify-content: center; }
     .mag .sponsor-plate img { max-width: 100%; max-height: 100%; object-fit: contain; }
     .mag .sponsor-name { font-size: 11px; color: #555; margin-top: 5px; }
+    /* Hole-by-hole */
+    .mag .hole { break-inside: avoid; page-break-inside: avoid; display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #eef2f0; }
+    .mag .hole-img { width: 2.4in; height: auto; border-radius: 6px; flex: 0 0 auto; }
+    .mag .hole-body { flex: 1; min-width: 0; }
+    .mag .hole-h { font-size: 16px; font-weight: bold; color: ${accent}; margin-bottom: 4px; }
+    .mag .hole-desc { font-size: 12.5px; line-height: 1.55; text-align: justify; }
+    /* Meet the team */
+    .mag .team-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .mag .team-card { break-inside: avoid; text-align: center; }
+    .mag .team-photo { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; border: 1px solid #e5e7eb; }
+    .mag .team-ph { background: #e8edea; }
+    .mag .team-name { font-size: 12px; font-weight: bold; color: ${accent}; margin-top: 5px; }
+    .mag .team-title { font-size: 10.5px; font-style: italic; color: #556; }
+    .mag .team-phone { font-size: 10.5px; color: #778; }
+    /* Directory */
+    .mag .dir-grid { columns: 3; column-gap: 0.3in; }
+    .mag .dir-entry { break-inside: avoid; margin-bottom: 10px; }
+    .mag .dir-name { font-size: 12.5px; font-weight: bold; color: #1a2420; }
+    .mag .dir-org { font-size: 11px; font-style: italic; color: #667; }
+    .mag .dir-email { font-size: 10.5px; color: #778; word-break: break-all; }
+    /* Years of service */
+    .mag .years-grid { columns: 2; column-gap: 0.4in; }
+    .mag .years-entry { break-inside: avoid; margin-bottom: 9px; }
+    .mag .years-name { font-size: 13px; font-weight: bold; color: #1a2420; }
+    .mag .years-num { font-size: 11px; color: #778; }
+    /* Thank you cloud */
+    .mag .thankyou { break-before: page; page-break-before: always; min-height: 9.6in; color: #fff; padding: 0.7in; display: flex; flex-direction: column; justify-content: center; }
+    .mag .ty-h { font-size: 54px; font-weight: bold; line-height: 1; margin: 18px 0; letter-spacing: -1px; }
+    .mag .ty-msg { font-size: 15px; line-height: 1.5; max-width: 6in; opacity: 0.95; }
+    .mag .ty-cloud { line-height: 1.7; }
+    .mag .ty-name { font-size: 15px; color: #fff; margin-right: 8px; white-space: nowrap; }
     .mag .foot { text-align: center; color: #94a3a0; font-size: 10px; margin-top: 22px; }
     .mag .backcover { break-before: page; page-break-before: always; min-height: 9.6in; color: #fff; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.8in; }
     .mag .bc-logo { max-height: 1.1in; max-width: 55%; margin: 0 auto 22px; display: block; object-fit: contain; }
@@ -1174,7 +1270,7 @@ function buildHandbookHTML(handbook, tournament, clubNameRaw) {
     .mag .bc-name { color: rgba(255,255,255,0.7); font-size: 12px; margin-top: 34px; letter-spacing: 2px; text-transform: uppercase; }
   </style>`
 
-  return `${style}<div class="mag">${cover}${toc}${arts}${schedulePage}${sponsorsPage}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div>${backCover}</div>`
+  return `${style}<div class="mag">${cover}${toc}${arts}${schedulePage}${holesPage}${sponsorsPage}${meetTeamPage}${directoryPage}${yearsPage}${thankYouPage}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div>${backCover}</div>`
 }
 
 // Hex colour → rgba() string with the given alpha (for photo overlays).
@@ -1198,12 +1294,15 @@ function PhotoAdder({ onAdd, busy, label = 'Add photo', multiple = true }) {
   )
 }
 
-function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
+function HandbookTab({ tournament, people = [], onSave, showToast, courseInfo }) {
   const [sections, setSections] = useState(tournament.data?.handbook?.sections || [])
   const [logo, setLogo] = useState(tournament.data?.handbook?.logo || '')
   const [sponsors, setSponsors] = useState(tournament.data?.handbook?.sponsors || [])
   const [backCover, setBackCover] = useState(tournament.data?.handbook?.backCover || {})
   const [schedule, setSchedule] = useState(tournament.data?.handbook?.schedule || [])
+  const [holes, setHoles] = useState(tournament.data?.handbook?.holes || [])
+  const [autoPages, setAutoPages] = useState(tournament.data?.handbook?.autoPages || {})
+  const [thankYouMessage, setThankYouMessage] = useState(tournament.data?.handbook?.thankYouMessage || '')
   const [themeColor, setThemeColor] = useState(tournament.data?.handbook?.theme?.color || FOREST)
   const [coverPhoto, setCoverPhoto] = useState(tournament.data?.handbook?.coverPhoto || '')
   const [dirty, setDirty] = useState(false)
@@ -1214,7 +1313,8 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
   useEffect(() => {
     const hb = tournament.data?.handbook || {}
     setSections(hb.sections || []); setLogo(hb.logo || ''); setSponsors(hb.sponsors || []); setBackCover(hb.backCover || {})
-    setSchedule(hb.schedule || []); setThemeColor(hb.theme?.color || FOREST); setCoverPhoto(hb.coverPhoto || ''); setDirty(false)
+    setSchedule(hb.schedule || []); setHoles(hb.holes || []); setAutoPages(hb.autoPages || {}); setThankYouMessage(hb.thankYouMessage || '')
+    setThemeColor(hb.theme?.color || FOREST); setCoverPhoto(hb.coverPhoto || ''); setDirty(false)
   }, [tournament.id])
 
   const STARTERS = [
@@ -1279,6 +1379,13 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
   const setRow = (di, ri, patch) => { setSchedule((arr) => arr.map((d, i) => (i === di ? { ...d, rows: (d.rows || []).map((r, k) => (k === ri ? { ...r, ...patch } : r)) } : d))); setDirty(true) }
   const removeRow = (di, ri) => { setSchedule((arr) => arr.map((d, i) => (i === di ? { ...d, rows: (d.rows || []).filter((_, k) => k !== ri) } : d))); setDirty(true) }
 
+  // Hole-by-hole handlers.
+  const addHole = () => { setHoles((arr) => [...arr, { num: String(arr.length + 1), par: '', yards: '', img: '', desc: '' }]); setDirty(true) }
+  const setHole = (i, patch) => { setHoles((arr) => arr.map((h, j) => (j === i ? { ...h, ...patch } : h))); setDirty(true) }
+  const removeHole = (i) => { setHoles((arr) => arr.filter((_, j) => j !== i)); setDirty(true) }
+  const uploadHoleImg = async (i, files) => { setImgBusy(true); try { if (files[0]) setHole(i, { img: await compressImage(files[0], 1000, 0.8) }) } catch (e) { console.error(e) } finally { setImgBusy(false) } }
+  const toggleAuto = (k) => { setAutoPages((a) => ({ ...a, [k]: !a[k] })); setDirty(true) }
+
   const handbookData = () => ({
     sections: sections.map((s) => ({ title: (s.title || '').trim(), body: s.body || '', images: (s.images || []).filter((im) => im && im.src), ...(s.fullPage ? { fullPage: true } : {}) }))
       .filter((s) => s.title || s.body || s.images.length),
@@ -1287,6 +1394,9 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
     theme: { color: themeColor || FOREST },
     sponsors: sponsors.filter((sp) => sp && sp.src).map((sp) => ({ src: sp.src, name: (sp.name || '').trim(), tier: sp.tier || 'Gold' })),
     schedule: schedule.map((d) => ({ day: (d.day || '').trim(), rows: (d.rows || []).map((r) => ({ time: (r.time || '').trim(), activity: (r.activity || '').trim() })).filter((r) => r.time || r.activity) })).filter((d) => d.day || d.rows.length),
+    holes: holes.map((h) => ({ num: (String(h.num || '')).trim(), par: (String(h.par || '')).trim(), yards: (String(h.yards || '')).trim(), img: h.img || '', desc: (h.desc || '').trim() })).filter((h) => h.num || h.desc || h.img),
+    autoPages: { thankYou: !!autoPages.thankYou, directory: !!autoPages.directory, yearsOfService: !!autoPages.yearsOfService, meetTeam: !!autoPages.meetTeam },
+    thankYouMessage: (thankYouMessage || '').trim(),
     backCover: {
       photo: backCover.photo || '',
       message: (backCover.message || '').trim(),
@@ -1301,7 +1411,7 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
   }
 
   const print = () => {
-    printHTML(buildHandbookHTML(handbookData(), tournament, courseInfo.clubName || ''))
+    printHTML(buildHandbookHTML(handbookData(), tournament, courseInfo.clubName || '', people))
     showToast('Tip: turn on "Background graphics" in the print dialog for the colour cover')
   }
 
@@ -1314,7 +1424,7 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
       const html2pdf = (await import('html2pdf.js')).default
       holder = document.createElement('div')
       Object.assign(holder.style, { position: 'absolute', left: '-10000px', top: '0', width: '816px', background: '#fff' })
-      holder.innerHTML = buildHandbookHTML(handbookData(), tournament, courseInfo.clubName || '')
+      holder.innerHTML = buildHandbookHTML(handbookData(), tournament, courseInfo.clubName || '', people)
       document.body.appendChild(holder)
       await waitImgs(holder)
       await html2pdf().set({
@@ -1330,13 +1440,16 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
     finally { if (holder) holder.remove(); setPdfBusy(false) }
   }
 
+  const hasContent = sections.length || schedule.length || holes.length || sponsors.length || logo || coverPhoto ||
+    autoPages.thankYou || autoPages.directory || autoPages.yearsOfService || autoPages.meetTeam
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
         {sections.length === 0 && <button onClick={addStarters} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}><Plus size={14} /> Start with a template</button>}
         <button onClick={add} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST }}><Plus size={14} /> Add section</button>
-        <button onClick={print} disabled={sections.length === 0} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-40" style={{ color: FOREST, borderColor: '#E2E8F0' }}><Printer size={14} /> Print</button>
-        <button onClick={downloadPdf} disabled={sections.length === 0 || pdfBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-40" style={{ color: FOREST, borderColor: '#E2E8F0' }}><Download size={14} /> {pdfBusy ? 'Building…' : 'Download PDF'}</button>
+        <button onClick={print} disabled={!hasContent} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-40" style={{ color: FOREST, borderColor: '#E2E8F0' }}><Printer size={14} /> Print</button>
+        <button onClick={downloadPdf} disabled={!hasContent || pdfBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-40" style={{ color: FOREST, borderColor: '#E2E8F0' }}><Download size={14} /> {pdfBusy ? 'Building…' : 'Download PDF'}</button>
         <a href={`${origin}/handbook?t=${tournament.id}`} target="_blank" rel="noopener noreferrer" className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#E2E8F0' }}><BookOpen size={14} /> Preview</a>
       </div>
 
@@ -1472,6 +1585,59 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
             </div>
           ))}
           <button onClick={addDay} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST }}><Plus size={14} /> Add day</button>
+        </div>
+      </Card>
+
+      {/* Auto pages from the roster */}
+      <Card>
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Roster Pages (automatic)</p>
+        <p className="font-body text-xs text-slate-500 mb-3">These pages build themselves from your roster ({people.length} on it now) — no retyping. They appear in Print &amp; PDF; the public phone link leaves them off to keep contact details private.</p>
+        <div className="space-y-2">
+          {[['thankYou', 'Thank You Volunteers', 'A big name-cloud thank-you page.'], ['directory', 'Volunteer Directory', 'Everyone with their club & email.'], ['yearsOfService', 'Years of Service', 'Anyone with a "years of service" set, ranked.'], ['meetTeam', 'Meet the Team', 'Crew/staff with a headshot, title & phone.']].map(([k, label, desc]) => (
+            <label key={k} className="flex items-start gap-2.5 rounded-xl border border-slate-100 px-3 py-2.5 cursor-pointer">
+              <input type="checkbox" checked={!!autoPages[k]} onChange={() => toggleAuto(k)} className="mt-0.5" />
+              <span><span className="font-body text-sm font-bold text-slate-900">{label}</span><span className="font-body text-[11px] text-slate-400 block">{desc}</span></span>
+            </label>
+          ))}
+        </div>
+        {autoPages.thankYou && (
+          <div className="mt-3">
+            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Thank-you message</label>
+            <textarea value={thankYouMessage} onChange={(e) => { setThankYouMessage(e.target.value); setDirty(true) }} rows={2} className={inputCls} style={{ resize: 'vertical' }} placeholder={`From all of us at ${courseInfo.clubName || 'the club'} — thank you for volunteering…`} />
+          </div>
+        )}
+      </Card>
+
+      {/* Hole-by-hole */}
+      <Card>
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Hole-by-Hole</p>
+        <p className="font-body text-xs text-slate-500 mb-3">A page walking each hole — number, par, yardage, a diagram/photo, and a description. Leave empty to skip.</p>
+        <div className="space-y-3">
+          {holes.map((h, i) => (
+            <div key={i} className="rounded-xl border border-slate-100 p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <input value={h.num || ''} onChange={(e) => setHole(i, { num: e.target.value })} placeholder="#" className="w-14 text-sm font-bold font-body border border-slate-200 rounded-lg px-2 py-1.5 bg-white" />
+                <input value={h.par || ''} onChange={(e) => setHole(i, { par: e.target.value })} placeholder="Par" className="w-16 text-[12px] font-body border border-slate-200 rounded-lg px-2 py-1.5 bg-white" />
+                <input value={h.yards || ''} onChange={(e) => setHole(i, { yards: e.target.value })} placeholder="Yards" className="w-20 text-[12px] font-body border border-slate-200 rounded-lg px-2 py-1.5 bg-white" />
+                <span className="flex-1" />
+                <button onClick={() => removeHole(i)} className="text-red-400 p-1.5"><Trash2 size={15} /></button>
+              </div>
+              <div className="flex gap-3 items-start">
+                <div className="shrink-0">
+                  {h.img ? (
+                    <div className="relative">
+                      <img src={h.img} alt="" className="w-24 h-24 object-cover rounded-lg border border-slate-200" />
+                      <button onClick={() => setHole(i, { img: '' })} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500" aria-label="Remove"><X size={13} /></button>
+                    </div>
+                  ) : (
+                    <PhotoAdder onAdd={(files) => uploadHoleImg(i, files)} busy={imgBusy} label="Diagram" multiple={false} />
+                  )}
+                </div>
+                <textarea value={h.desc || ''} onChange={(e) => setHole(i, { desc: e.target.value })} rows={3} className={`${inputCls} flex-1`} style={{ resize: 'vertical' }} placeholder="How this hole plays…" />
+              </div>
+            </div>
+          ))}
+          <button onClick={addHole} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST }}><Plus size={14} /> Add hole</button>
         </div>
       </Card>
 
