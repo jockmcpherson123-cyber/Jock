@@ -1305,6 +1305,8 @@ function HandbookTab({ tournament, people = [], onSave, showToast, courseInfo })
   const [thankYouMessage, setThankYouMessage] = useState(tournament.data?.handbook?.thankYouMessage || '')
   const [themeColor, setThemeColor] = useState(tournament.data?.handbook?.theme?.color || FOREST)
   const [coverPhoto, setCoverPhoto] = useState(tournament.data?.handbook?.coverPhoto || '')
+  const [showPreview, setShowPreview] = useState(false)
+  const [previewHtml, setPreviewHtml] = useState('')
   const [dirty, setDirty] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [imgBusy, setImgBusy] = useState(false)
@@ -1443,6 +1445,18 @@ function HandbookTab({ tournament, people = [], onSave, showToast, courseInfo })
   const hasContent = sections.length || schedule.length || holes.length || sponsors.length || logo || coverPhoto ||
     autoPages.thankYou || autoPages.directory || autoPages.yearsOfService || autoPages.meetTeam
 
+  // Live preview: rebuild the booklet HTML (debounced) whenever anything changes.
+  useEffect(() => {
+    if (!showPreview) return
+    const id = setTimeout(() => {
+      try { setPreviewHtml(buildHandbookHTML(handbookData(), tournament, courseInfo.clubName || '', people)) } catch (e) { console.error(e) }
+    }, 350)
+    return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPreview, sections, logo, sponsors, backCover, schedule, holes, autoPages, thankYouMessage, themeColor, coverPhoto, people, tournament])
+
+  const previewDoc = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{margin:0;background:#e8ece9}.pg{max-width:816px;margin:16px auto;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,0.18)}</style></head><body><div class="pg">${previewHtml}</div></body></html>`
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
@@ -1450,8 +1464,19 @@ function HandbookTab({ tournament, people = [], onSave, showToast, courseInfo })
         <button onClick={add} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST }}><Plus size={14} /> Add section</button>
         <button onClick={print} disabled={!hasContent} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-40" style={{ color: FOREST, borderColor: '#E2E8F0' }}><Printer size={14} /> Print</button>
         <button onClick={downloadPdf} disabled={!hasContent || pdfBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-40" style={{ color: FOREST, borderColor: '#E2E8F0' }}><Download size={14} /> {pdfBusy ? 'Building…' : 'Download PDF'}</button>
-        <a href={`${origin}/handbook?t=${tournament.id}`} target="_blank" rel="noopener noreferrer" className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#E2E8F0' }}><BookOpen size={14} /> Preview</a>
+        <button onClick={() => setShowPreview((v) => !v)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={showPreview ? { backgroundColor: FOREST, color: 'white' } : { color: FOREST, border: '1px solid #E2E8F0' }}><BookOpen size={14} /> {showPreview ? 'Hide preview' : 'Live preview'}</button>
+        <a href={`${origin}/handbook?t=${tournament.id}`} target="_blank" rel="noopener noreferrer" className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#E2E8F0' }}><Link2 size={14} /> Phone view</a>
       </div>
+
+      {showPreview && (
+        <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-100">
+          <div className="flex items-center justify-between px-3 py-2 bg-white border-b border-slate-100">
+            <p className="font-body text-[11px] font-bold text-slate-500 uppercase tracking-wide">Live preview — how it prints</p>
+            <span className="font-body text-[10px] text-slate-400">Updates as you edit</span>
+          </div>
+          <iframe title="Handbook preview" srcDoc={previewDoc} className="w-full block" style={{ height: '75vh', border: 0, backgroundColor: '#e8ece9' }} />
+        </div>
+      )}
 
       {/* Branding & sponsors */}
       <Card>
