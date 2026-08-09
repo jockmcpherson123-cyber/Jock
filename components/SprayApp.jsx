@@ -1622,8 +1622,8 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
               const rateNum = parseFloat(p.rate)
               const overLimit = labelMax && rateNum && rateNum > labelMax
-              const underLimit = labelMin && rateNum && rateNum < labelMin
-              const outOfRange = overLimit || underLimit
+              // Only flag going OVER the label rate — under-rate is intentional often.
+              const outOfRange = overLimit
               return (
                 <div key={p.id} className="border rounded-xl p-3" style={{ borderColor: outOfRange ? '#FCA5A5' : '#E2E8F0' }}>
                   <div className="flex items-center gap-2 mb-2">
@@ -1677,9 +1677,6 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
 
                       {overLimit && (
                         <p className="font-body text-[11px] font-semibold text-red-600 mb-2 flex items-center gap-1">⚠ Over label maximum — limit is {labelMax} {p.basis}</p>
-                      )}
-                      {underLimit && (
-                        <p className="font-body text-[11px] font-semibold text-red-600 mb-2 flex items-center gap-1">⚠ Under label minimum — minimum is {labelMin} {p.basis}</p>
                       )}
                       {grassConflicts(prodInfo, area).length > 0 && (
                         <p className="font-body text-[11px] font-semibold text-red-600 mb-2 rounded-lg px-2 py-1.5" style={{ backgroundColor: '#FEF2F2' }}>
@@ -2303,8 +2300,8 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                 const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
                 const rateNum = parseFloat(p.rate)
                 const overLimit = labelMax && rateNum && rateNum > labelMax
-                const underLimit = labelMin && rateNum && rateNum < labelMin
-                const outOfRange = overLimit || underLimit
+                // Only flag going OVER the label rate — under-rate is intentional often.
+                const outOfRange = overLimit
                 const stock = prodInfo?.stock ?? null
                 const insufficient = stock !== null && total !== null && stock < total
                 const checked = curChecks.includes(p.id)
@@ -2319,7 +2316,6 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
                       <p className="text-sm font-semibold text-slate-800 flex items-center gap-1.5 flex-wrap">
                         {p.product}
                         {overLimit && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">OVER</span>}
-                        {underLimit && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">UNDER</span>}
                       </p>
                       <p className="text-[11px] text-slate-400">
                         {p.rate} {p.basis}{insufficient ? ` · only ${stock} ${unit} in stock` : ''}
