@@ -37,7 +37,7 @@ export async function GET(request) {
   }
   if (searchParams.get('handbook')) {
     const hb = data.data?.handbook || {}
-    out.handbook = { sections: hb.sections || [], logo: hb.logo || '', sponsors: hb.sponsors || [], backCover: hb.backCover || {} }
+    out.handbook = { sections: hb.sections || [], logo: hb.logo || '', coverPhoto: hb.coverPhoto || '', theme: hb.theme || {}, sponsors: hb.sponsors || [], schedule: hb.schedule || [], backCover: hb.backCover || {} }
   }
   return Response.json(out)
 }

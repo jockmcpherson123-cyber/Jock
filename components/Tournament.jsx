@@ -26,6 +26,18 @@ const FOREST = '#16291F'
 const FERN = '#3A6B4A'
 const GOLD = '#C9A84C'
 
+// Sponsor tiers (biggest → smallest), like a championship program.
+const SPONSOR_TIERS = ['Platinum', 'Gold', 'Silver', 'Bronze', 'Industry Partner']
+// Brand-colour presets for the handbook (name → hex). First is the app default.
+const BRAND_COLORS = [
+  { name: 'Congressional Green', hex: '#16291F' },
+  { name: 'Championship Navy', hex: '#1C3A6E' },
+  { name: 'Royal Blue', hex: '#1D4ED8' },
+  { name: 'Maroon', hex: '#7A1F2B' },
+  { name: 'Charcoal', hex: '#26303A' },
+  { name: 'Forest Teal', hex: '#0F5257' },
+]
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
 // ── Small shared UI ───────────────────────────────────────────────────────────
@@ -1015,13 +1027,20 @@ function buildHandbookHTML(handbook, tournament, clubNameRaw) {
   const sections = handbook.sections || []
   const logo = handbook.logo || ''
   const sponsors = (handbook.sponsors || []).filter((s) => s && s.src)
+  const schedule = (handbook.schedule || []).filter((d) => d && (d.day || (d.rows || []).length))
+  const accent = handbook.theme?.color || FOREST
+  const coverPhoto = handbook.coverPhoto || ''
   const clubName = esc(clubNameRaw || '')
-  const num = (i) => String(i + 1).padStart(2, '0')
   const paras = (body) => String(body || '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
     .map((p, idx) => `<p${idx === 0 ? ' class="lead"' : ''}>${esc(p).replace(/\n/g, '<br>')}</p>`).join('')
   const figs = (images, cls) => (images || []).map((im) => `<figure class="${cls}"><img src="${im.src}">${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ''}</figure>`).join('')
+  const railTab = (label) => `<div class="rail"><span class="rail-label">${esc(label)}</span></div>`
 
-  const cover = `<section class="cover"><div class="cover-inner">
+  // ── Cover (optional full-bleed photo behind an accent tint) ──
+  const coverBg = coverPhoto
+    ? `background-image:linear-gradient(${hexA(accent, 0.78)},${hexA(accent, 0.92)}), url('${coverPhoto}');background-size:cover;background-position:center;`
+    : `background:${accent};`
+  const cover = `<section class="cover" style="${coverBg}"><div class="cover-inner">
     ${logo ? `<img class="cover-logo" src="${logo}">` : ''}
     <div class="eyebrow">${clubName}</div>
     <div class="cover-rule"></div>
@@ -1030,14 +1049,59 @@ function buildHandbookHTML(handbook, tournament, clubNameRaw) {
     <div class="cover-meta">${esc([fmtRange(tournament.startDate, tournament.endDate), tournament.location].filter(Boolean).join('   ·   '))}</div>
   </div></section>`
 
-  const sponsorsPage = sponsors.length ? `<section class="sponsors">
-    <h2 class="sponsors-h">With Thanks to Our Sponsors</h2>
-    <div class="sponsor-grid">${sponsors.map((s) => `<div class="sponsor"><div class="sponsor-plate"><img src="${s.src}"></div>${s.name ? `<div class="sponsor-name">${esc(s.name)}</div>` : ''}</div>`).join('')}</div>
-  </section>` : ''
+  // ── Sections: text "articles" (with a side tab) or full-page photos ──
+  let artNo = 0
+  const tocEntries = []
+  const arts = sections.map((s) => {
+    if (s.fullPage) {
+      const img = (s.images || [])[0]
+      tocEntries.push({ label: s.title, num: null })
+      const bg = img ? `background-image:linear-gradient(rgba(15,25,20,0.15),rgba(15,25,20,0.6)), url('${img.src}');` : `background:${accent};`
+      return `<section class="fullpage" style="${bg}"><div class="fp-caption"><div class="fp-title">${esc(s.title)}</div>${s.body ? `<div class="fp-sub">${esc(s.body)}</div>` : ''}</div></section>`
+    }
+    artNo += 1
+    const nn = String(artNo).padStart(2, '0')
+    tocEntries.push({ label: s.title, num: nn })
+    const imgs = s.images || []
+    const lead = imgs[0] ? figs([imgs[0]], 'lead-fig') : ''
+    const gallery = imgs.length > 1 ? `<div class="gallery">${figs(imgs.slice(1), '')}</div>` : ''
+    return `<section class="article">${railTab(s.title)}<div class="article-main">
+      <div class="art-head"><span class="art-num">${nn}</span><h2 class="art-title">${esc(s.title)}</h2></div>
+      ${lead}
+      <div class="art-body">${paras(s.body)}</div>
+      ${gallery}
+    </div></section>`
+  }).join('')
 
+  // ── Schedule page ──
+  const schedulePage = schedule.length ? `<section class="sched">${railTab('Schedule')}<div class="article-main">
+    <div class="art-head"><h2 class="art-title">Schedule</h2></div>
+    ${schedule.map((d) => `<div class="sched-day">
+      <div class="sched-day-h">${esc(d.day || '')}</div>
+      ${(d.rows || []).filter((r) => r && (r.time || r.activity)).map((r) => `<div class="sched-row"><div class="sched-time">${esc(r.time || '')}</div><div class="sched-act">${esc(r.activity || '')}</div></div>`).join('')}
+    </div>`).join('')}
+  </div></section>` : ''
+  if (schedule.length) tocEntries.push({ label: 'Schedule', num: null })
+
+  // ── Tiered sponsors ──
+  const tierMeta = { Platinum: { h: '1.5in', cols: 2 }, Gold: { h: '1.25in', cols: 2 }, Silver: { h: '1.05in', cols: 3 }, Bronze: { h: '0.9in', cols: 4 }, 'Industry Partner': { h: '0.78in', cols: 5 } }
+  const groups = [...SPONSOR_TIERS.map((t) => ({ tier: t, list: sponsors.filter((s) => s.tier === t) })), { tier: 'Sponsors', list: sponsors.filter((s) => !SPONSOR_TIERS.includes(s.tier)) }].filter((g) => g.list.length)
+  const sponsorsPage = groups.length ? `<section class="sponsors">${railTab('Sponsorships')}<div class="article-main">
+    <div class="art-head"><h2 class="art-title">With Thanks to Our Sponsors</h2></div>
+    ${groups.map((g) => { const m = tierMeta[g.tier] || { h: '1in', cols: 3 }; return `<div class="tier">
+      <div class="tier-h">${esc(g.tier)}</div>
+      <div class="tier-grid" style="grid-template-columns:repeat(${m.cols},1fr)">${g.list.map((s) => `<div class="sponsor"><div class="sponsor-plate" style="height:${m.h}"><img src="${s.src}"></div>${s.name ? `<div class="sponsor-name">${esc(s.name)}</div>` : ''}</div>`).join('')}</div>
+    </div>` }).join('')}
+  </div></section>` : ''
+  if (groups.length) tocEntries.push({ label: 'Sponsorships', num: null })
+
+  // ── Table of contents ──
+  const toc = tocEntries.length >= 3 ? `<section class="toc">${railTab('Contents')}<div class="article-main"><h2 class="toc-h">Contents</h2>${tocEntries.map((e) => `<div class="toc-row"><span class="toc-num">${e.num || '•'}</span><span class="toc-title">${esc(e.label)}</span></div>`).join('')}</div></section>` : ''
+
+  // ── Back cover ──
   const bc = handbook.backCover || {}
   const hasBack = bc.photo || bc.message || bc.presentedByLogo || bc.presentedByText || logo
-  const bcStyle = bc.photo ? `background-image:linear-gradient(rgba(15,29,21,0.72),rgba(15,29,21,0.88)), url('${bc.photo}');background-size:cover;background-position:center;` : ''
+  const bcStyle = bc.photo ? `background-image:linear-gradient(${hexA(accent, 0.72)},${hexA(accent, 0.9)}), url('${bc.photo}');background-size:cover;background-position:center;` : `background:${accent};`
   const backCover = hasBack ? `<section class="backcover" style="${bcStyle}"><div class="bc-inner">
     ${logo ? `<img class="bc-logo" src="${logo}">` : ''}
     <div class="bc-msg">${esc(bc.message || 'Thank you for volunteering.')}</div>
@@ -1045,59 +1109,62 @@ function buildHandbookHTML(handbook, tournament, clubNameRaw) {
     <div class="bc-name">${esc(tournament.name)}</div>
   </div></section>` : ''
 
-  const toc = sections.length >= 3 ? `<section class="toc"><h2 class="toc-h">Contents</h2>${sections.map((s, i) => `<div class="toc-row"><span class="toc-num">${num(i)}</span><span class="toc-title">${esc(s.title)}</span></div>`).join('')}</section>` : ''
-
-  const arts = sections.map((s, i) => {
-    const imgs = s.images || []
-    const lead = imgs[0] ? figs([imgs[0]], 'lead-fig') : ''
-    const gallery = imgs.length > 1 ? `<div class="gallery">${figs(imgs.slice(1), '')}</div>` : ''
-    return `<section class="article">
-      <div class="art-head"><span class="art-num">${num(i)}</span><h2 class="art-title">${esc(s.title)}</h2></div>
-      ${lead}
-      <div class="art-body">${paras(s.body)}</div>
-      ${gallery}
-    </section>`
-  }).join('')
-
   const style = `<style>
     @page { margin: 0.5in; }
     .mag * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
     .mag { font-family: Georgia, 'Times New Roman', serif; color: #1a2420; }
-    .mag .cover { min-height: 9.6in; background: ${FOREST}; color: #fff; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.7in; break-after: page; page-break-after: always; }
-    .mag .cover-inner { border: 2px solid ${GOLD}; padding: 0.7in 0.5in; width: 100%; }
+    .mag .cover { min-height: 9.6in; color: #fff; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.7in; break-after: page; page-break-after: always; }
+    .mag .cover-inner { border: 2px solid ${GOLD}; padding: 0.7in 0.5in; width: 100%; background: ${coverPhoto ? 'rgba(0,0,0,0.12)' : 'transparent'}; }
     .mag .cover-logo { max-height: 1.3in; max-width: 60%; margin: 0 auto 16px; display: block; object-fit: contain; }
     .mag .eyebrow { color: ${GOLD}; letter-spacing: 5px; text-transform: uppercase; font-size: 12px; font-weight: bold; }
     .mag .cover-rule { width: 64px; height: 3px; background: ${GOLD}; margin: 18px auto; }
     .mag .cover-title { font-size: 42px; line-height: 1.08; margin: 8px 0; font-weight: bold; }
     .mag .cover-sub { color: ${GOLD}; letter-spacing: 4px; text-transform: uppercase; font-size: 14px; margin-top: 12px; }
-    .mag .cover-meta { color: rgba(255,255,255,0.78); font-size: 13px; margin-top: 24px; }
-    .mag .toc { break-after: page; page-break-after: always; padding-top: 0.2in; }
-    .mag .toc-h { font-size: 26px; color: ${FOREST}; border-bottom: 3px solid ${GOLD}; padding-bottom: 8px; }
+    .mag .cover-meta { color: rgba(255,255,255,0.85); font-size: 13px; margin-top: 24px; }
+    /* Side-tab layout shared by articles, schedule, sponsors, TOC */
+    .mag .article, .mag .sched, .mag .sponsors, .mag .toc { display: flex; gap: 0; margin-bottom: 26px; page-break-inside: auto; }
+    .mag .toc, .mag .sched, .mag .sponsors { break-before: page; page-break-before: always; }
+    .mag .toc { break-after: page; page-break-after: always; }
+    .mag .rail { flex: 0 0 0.5in; background: ${accent}; border-radius: 5px 0 0 5px; display: flex; align-items: center; justify-content: center; }
+    .mag .rail-label { writing-mode: vertical-rl; transform: rotate(180deg); color: #fff; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; font-size: 12px; padding: 12px 0; white-space: nowrap; }
+    .mag .article-main { flex: 1 1 auto; min-width: 0; padding: 2px 0 8px 16px; }
+    .mag .toc-h { font-size: 26px; color: ${accent}; border-bottom: 3px solid ${GOLD}; padding-bottom: 8px; }
     .mag .toc-row { display: flex; align-items: baseline; gap: 14px; padding: 9px 0; border-bottom: 1px dotted #c3d0c8; }
     .mag .toc-num { color: ${GOLD}; font-weight: bold; font-size: 15px; width: 30px; }
     .mag .toc-title { font-size: 16px; color: #1a2420; }
-    .mag .article { margin-bottom: 26px; page-break-inside: auto; }
     .mag .art-head { break-after: avoid; page-break-after: avoid; border-bottom: 2px solid ${GOLD}; margin-bottom: 12px; padding-bottom: 5px; display: flex; align-items: baseline; gap: 12px; }
     .mag .art-num { font-size: 30px; font-weight: bold; color: ${GOLD}; line-height: 1; }
-    .mag .art-title { font-size: 22px; color: ${FOREST}; font-weight: bold; margin: 0; }
+    .mag .art-title { font-size: 22px; color: ${accent}; font-weight: bold; margin: 0; }
     .mag .art-body { font-size: 13px; line-height: 1.6; text-align: justify; }
     .mag .art-body p { margin: 0 0 9px; }
-    .mag .art-body p.lead::first-letter { font-size: 46px; font-weight: bold; color: ${FERN}; float: left; line-height: 0.82; padding: 5px 8px 0 0; }
+    .mag .art-body p.lead::first-letter { font-size: 46px; font-weight: bold; color: ${accent}; float: left; line-height: 0.82; padding: 5px 8px 0 0; }
     .mag figure { margin: 0 0 12px; break-inside: avoid; page-break-inside: avoid; }
     .mag figure img { width: 100%; height: auto; display: block; border-radius: 4px; }
     .mag figcaption { font-style: italic; color: ${FERN}; font-size: 11px; margin-top: 4px; }
     .mag .lead-fig { margin-bottom: 14px; }
     .mag .gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
     .mag .gallery figure { margin: 0; }
-    .mag .sponsors { break-before: page; page-break-before: always; padding-top: 0.3in; text-align: center; }
-    .mag .sponsors-h { font-size: 24px; color: ${FOREST}; margin-bottom: 22px; }
-    .mag .sponsor-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; align-items: center; }
+    /* Full-page photo section */
+    .mag .fullpage { break-before: page; page-break-before: always; break-after: page; page-break-after: always; height: 9.6in; background-size: cover; background-position: center; border-radius: 6px; overflow: hidden; display: flex; align-items: flex-end; }
+    .mag .fp-caption { width: 100%; color: #fff; padding: 0.5in 0.4in 0.4in; background: linear-gradient(transparent, rgba(0,0,0,0.55)); }
+    .mag .fp-title { font-size: 30px; font-weight: bold; }
+    .mag .fp-sub { font-size: 14px; margin-top: 4px; opacity: 0.9; }
+    /* Schedule */
+    .mag .sched-day { break-inside: avoid; margin-bottom: 14px; }
+    .mag .sched-day-h { font-size: 16px; font-weight: bold; color: ${accent}; text-align: center; margin: 6px 0 8px; }
+    .mag .sched-row { display: flex; gap: 12px; padding: 5px 0; border-bottom: 1px dotted #d5ddd8; }
+    .mag .sched-time { flex: 0 0 1.4in; text-align: right; font-weight: bold; font-size: 12px; color: #334; }
+    .mag .sched-act { flex: 1; font-size: 12.5px; }
+    /* Sponsors (tiered) */
+    .mag .tier { break-inside: avoid; margin-bottom: 16px; text-align: center; }
+    .mag .tier-h { font-size: 13px; font-weight: bold; letter-spacing: 3px; text-transform: uppercase; color: ${accent}; margin-bottom: 8px; }
+    .mag .tier-grid { display: grid; gap: 14px; align-items: center; }
     .mag .sponsor { break-inside: avoid; page-break-inside: avoid; }
-    .mag .sponsor-plate { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; height: 1.2in; display: flex; align-items: center; justify-content: center; }
+    .mag .sponsor-plate { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; display: flex; align-items: center; justify-content: center; }
     .mag .sponsor-plate img { max-width: 100%; max-height: 100%; object-fit: contain; }
-    .mag .sponsor-name { font-size: 11px; color: #555; margin-top: 6px; }
+    .mag .sponsor-name { font-size: 11px; color: #555; margin-top: 5px; }
     .mag .foot { text-align: center; color: #94a3a0; font-size: 10px; margin-top: 22px; }
-    .mag .backcover { break-before: page; page-break-before: always; min-height: 9.6in; background: ${FOREST}; color: #fff; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.8in; }
+    .mag .backcover { break-before: page; page-break-before: always; min-height: 9.6in; color: #fff; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.8in; }
     .mag .bc-logo { max-height: 1.1in; max-width: 55%; margin: 0 auto 22px; display: block; object-fit: contain; }
     .mag .bc-msg { font-size: 26px; line-height: 1.35; max-width: 6in; margin: 0 auto; }
     .mag .bc-presented { margin-top: 36px; }
@@ -1107,7 +1174,17 @@ function buildHandbookHTML(handbook, tournament, clubNameRaw) {
     .mag .bc-name { color: rgba(255,255,255,0.7); font-size: 12px; margin-top: 34px; letter-spacing: 2px; text-transform: uppercase; }
   </style>`
 
-  return `${style}<div class="mag">${cover}${toc}${arts}${sponsorsPage}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div>${backCover}</div>`
+  return `${style}<div class="mag">${cover}${toc}${arts}${schedulePage}${sponsorsPage}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div>${backCover}</div>`
+}
+
+// Hex colour → rgba() string with the given alpha (for photo overlays).
+function hexA(hex, a) {
+  const h = String(hex || '#16291F').replace('#', '')
+  const n = h.length === 3 ? h.split('').map((c) => c + c).join('') : h
+  const r = parseInt(n.slice(0, 2), 16) || 0
+  const g = parseInt(n.slice(2, 4), 16) || 0
+  const b = parseInt(n.slice(4, 6), 16) || 0
+  return `rgba(${r},${g},${b},${a})`
 }
 
 // Hidden file-input button for adding photos to a handbook section.
@@ -1126,6 +1203,9 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
   const [logo, setLogo] = useState(tournament.data?.handbook?.logo || '')
   const [sponsors, setSponsors] = useState(tournament.data?.handbook?.sponsors || [])
   const [backCover, setBackCover] = useState(tournament.data?.handbook?.backCover || {})
+  const [schedule, setSchedule] = useState(tournament.data?.handbook?.schedule || [])
+  const [themeColor, setThemeColor] = useState(tournament.data?.handbook?.theme?.color || FOREST)
+  const [coverPhoto, setCoverPhoto] = useState(tournament.data?.handbook?.coverPhoto || '')
   const [dirty, setDirty] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [imgBusy, setImgBusy] = useState(false)
@@ -1133,7 +1213,8 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
 
   useEffect(() => {
     const hb = tournament.data?.handbook || {}
-    setSections(hb.sections || []); setLogo(hb.logo || ''); setSponsors(hb.sponsors || []); setBackCover(hb.backCover || {}); setDirty(false)
+    setSections(hb.sections || []); setLogo(hb.logo || ''); setSponsors(hb.sponsors || []); setBackCover(hb.backCover || {})
+    setSchedule(hb.schedule || []); setThemeColor(hb.theme?.color || FOREST); setCoverPhoto(hb.coverPhoto || ''); setDirty(false)
   }, [tournament.id])
 
   const STARTERS = [
@@ -1168,31 +1249,44 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
   }
   const removeImage = (i, idx) => { setSections((arr) => arr.map((s, j) => (j === i ? { ...s, images: (s.images || []).filter((_, k) => k !== idx) } : s))); setDirty(true) }
   const setCaption = (i, idx, caption) => { setSections((arr) => arr.map((s, j) => (j === i ? { ...s, images: (s.images || []).map((im, k) => (k === idx ? { ...im, caption } : im)) } : s))); setDirty(true) }
+  const toggleFullPage = (i) => { setSections((arr) => arr.map((s, j) => (j === i ? { ...s, fullPage: !s.fullPage } : s))); setDirty(true) }
 
   const uploadLogo = async (files) => {
     setImgBusy(true)
     try { if (files[0]) { setLogo(await compressLogo(files[0])); setDirty(true) } } catch (e) { console.error(e) } finally { setImgBusy(false) }
   }
+  const uploadCover = async (files) => { setImgBusy(true); try { if (files[0]) { setCoverPhoto(await compressImage(files[0], 1600, 0.75)); setDirty(true) } } catch (e) { console.error(e) } finally { setImgBusy(false) } }
   const addSponsors = async (files) => {
     setImgBusy(true)
     try {
       const added = []
-      for (const f of files) { try { added.push({ src: await compressLogo(f), name: '' }) } catch (e) { console.error(e) } }
+      for (const f of files) { try { added.push({ src: await compressLogo(f), name: '', tier: 'Gold' }) } catch (e) { console.error(e) } }
       if (added.length) { setSponsors((arr) => [...arr, ...added]); setDirty(true) }
     } finally { setImgBusy(false) }
   }
   const removeSponsor = (idx) => { setSponsors((arr) => arr.filter((_, k) => k !== idx)); setDirty(true) }
-  const setSponsorName = (idx, name) => { setSponsors((arr) => arr.map((sp, k) => (k === idx ? { ...sp, name } : sp))); setDirty(true) }
+  const setSponsorField = (idx, patch) => { setSponsors((arr) => arr.map((sp, k) => (k === idx ? { ...sp, ...patch } : sp))); setDirty(true) }
 
   const setBc = (patch) => { setBackCover((b) => ({ ...b, ...patch })); setDirty(true) }
   const uploadBcPhoto = async (files) => { setImgBusy(true); try { if (files[0]) setBc({ photo: await compressImage(files[0], 1600, 0.75) }) } catch (e) { console.error(e) } finally { setImgBusy(false) } }
   const uploadBcPresented = async (files) => { setImgBusy(true); try { if (files[0]) setBc({ presentedByLogo: await compressLogo(files[0]) }) } catch (e) { console.error(e) } finally { setImgBusy(false) } }
 
+  // Schedule handlers.
+  const addDay = () => { setSchedule((arr) => [...arr, { day: 'New day', rows: [{ time: '', activity: '' }] }]); setDirty(true) }
+  const setDay = (di, patch) => { setSchedule((arr) => arr.map((d, i) => (i === di ? { ...d, ...patch } : d))); setDirty(true) }
+  const removeDay = (di) => { setSchedule((arr) => arr.filter((_, i) => i !== di)); setDirty(true) }
+  const addRow = (di) => { setSchedule((arr) => arr.map((d, i) => (i === di ? { ...d, rows: [...(d.rows || []), { time: '', activity: '' }] } : d))); setDirty(true) }
+  const setRow = (di, ri, patch) => { setSchedule((arr) => arr.map((d, i) => (i === di ? { ...d, rows: (d.rows || []).map((r, k) => (k === ri ? { ...r, ...patch } : r)) } : d))); setDirty(true) }
+  const removeRow = (di, ri) => { setSchedule((arr) => arr.map((d, i) => (i === di ? { ...d, rows: (d.rows || []).filter((_, k) => k !== ri) } : d))); setDirty(true) }
+
   const handbookData = () => ({
-    sections: sections.map((s) => ({ title: (s.title || '').trim(), body: s.body || '', images: (s.images || []).filter((im) => im && im.src) }))
+    sections: sections.map((s) => ({ title: (s.title || '').trim(), body: s.body || '', images: (s.images || []).filter((im) => im && im.src), ...(s.fullPage ? { fullPage: true } : {}) }))
       .filter((s) => s.title || s.body || s.images.length),
     logo: logo || '',
-    sponsors: sponsors.filter((sp) => sp && sp.src).map((sp) => ({ src: sp.src, name: (sp.name || '').trim() })),
+    coverPhoto: coverPhoto || '',
+    theme: { color: themeColor || FOREST },
+    sponsors: sponsors.filter((sp) => sp && sp.src).map((sp) => ({ src: sp.src, name: (sp.name || '').trim(), tier: sp.tier || 'Gold' })),
+    schedule: schedule.map((d) => ({ day: (d.day || '').trim(), rows: (d.rows || []).map((r) => ({ time: (r.time || '').trim(), activity: (r.activity || '').trim() })).filter((r) => r.time || r.activity) })).filter((d) => d.day || d.rows.length),
     backCover: {
       photo: backCover.photo || '',
       message: (backCover.message || '').trim(),
@@ -1249,13 +1343,26 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
       {/* Branding & sponsors */}
       <Card>
         <p className="font-display text-base font-semibold text-slate-900 mb-1">Branding & Sponsors</p>
-        <p className="font-body text-xs text-slate-500 mb-3">Your club logo prints on the cover. Sponsor logos get their own “Thank You to Our Sponsors” page. Transparent PNG logos look best.</p>
+        <p className="font-body text-xs text-slate-500 mb-3">Set the booklet's brand colour, cover, club logo and sponsors. Transparent PNG logos look best.</p>
+
+        {/* Brand colour */}
+        <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Brand colour</label>
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {BRAND_COLORS.map((c) => (
+            <button key={c.hex} onClick={() => { setThemeColor(c.hex); setDirty(true) }} title={c.name} className="w-8 h-8 rounded-full border-2 transition" style={{ backgroundColor: c.hex, borderColor: themeColor === c.hex ? GOLD : 'transparent', boxShadow: themeColor === c.hex ? '0 0 0 2px white inset' : 'none' }} aria-label={c.name} />
+          ))}
+          <label className="flex items-center gap-1.5 ml-1 font-body text-[11px] text-slate-500">
+            Custom
+            <input type="color" value={themeColor} onChange={(e) => { setThemeColor(e.target.value); setDirty(true) }} className="w-8 h-8 rounded border border-slate-200 bg-white p-0.5" />
+          </label>
+        </div>
+
         <div className="flex flex-wrap gap-8">
           <div>
             <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Club logo (cover)</label>
             {logo ? (
               <div className="relative w-40">
-                <div className="rounded-lg border border-slate-200 p-2 flex items-center justify-center" style={{ backgroundColor: FOREST, height: 88 }}>
+                <div className="rounded-lg border border-slate-200 p-2 flex items-center justify-center" style={{ backgroundColor: themeColor, height: 88 }}>
                   <img src={logo} alt="Club logo" className="max-h-full max-w-full object-contain" />
                 </div>
                 <button onClick={() => { setLogo(''); setDirty(true) }} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500" aria-label="Remove logo"><X size={13} /></button>
@@ -1263,25 +1370,41 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
             ) : (
               <PhotoAdder onAdd={uploadLogo} busy={imgBusy} label="Add logo" multiple={false} />
             )}
-            {logo && <p className="font-body text-[10px] text-slate-400 mt-1 w-40">Shown on the dark cover — use a white or light logo so it stands out.</p>}
+            {logo && <p className="font-body text-[10px] text-slate-400 mt-1 w-40">Use a white or light logo so it stands out on the cover.</p>}
           </div>
 
-          <div className="flex-1 min-w-[220px]">
-            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Sponsor logos</label>
-            <div className="flex flex-wrap gap-3 items-start">
-              {sponsors.map((sp, idx) => (
-                <div key={idx} className="w-28">
-                  <div className="relative">
-                    <div className="rounded-lg border border-slate-200 bg-white p-2 flex items-center justify-center" style={{ height: 64 }}>
-                      <img src={sp.src} alt="" className="max-h-full max-w-full object-contain" />
-                    </div>
-                    <button onClick={() => removeSponsor(idx)} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500" aria-label="Remove sponsor"><X size={13} /></button>
+          <div>
+            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Cover photo (optional)</label>
+            {coverPhoto ? (
+              <div className="relative w-40">
+                <img src={coverPhoto} alt="Cover" className="w-40 h-24 object-cover rounded-lg border border-slate-200" />
+                <button onClick={() => { setCoverPhoto(''); setDirty(true) }} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500" aria-label="Remove cover photo"><X size={13} /></button>
+              </div>
+            ) : (
+              <PhotoAdder onAdd={uploadCover} busy={imgBusy} label="Add cover photo" multiple={false} />
+            )}
+            <p className="font-body text-[10px] text-slate-400 mt-1 w-40">A course or trophy shot behind the title, tinted in your brand colour.</p>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Sponsor logos</label>
+          <div className="flex flex-wrap gap-3 items-start">
+            {sponsors.map((sp, idx) => (
+              <div key={idx} className="w-32">
+                <div className="relative">
+                  <div className="rounded-lg border border-slate-200 bg-white p-2 flex items-center justify-center" style={{ height: 64 }}>
+                    <img src={sp.src} alt="" className="max-h-full max-w-full object-contain" />
                   </div>
-                  <input value={sp.name || ''} onChange={(e) => setSponsorName(idx, e.target.value)} placeholder="Sponsor name" className="w-28 mt-1 text-[11px] font-body border border-slate-200 rounded px-1.5 py-1 outline-none" />
+                  <button onClick={() => removeSponsor(idx)} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500" aria-label="Remove sponsor"><X size={13} /></button>
                 </div>
-              ))}
-              <div className="pt-0.5"><PhotoAdder onAdd={addSponsors} busy={imgBusy} label="Add sponsor" /></div>
-            </div>
+                <input value={sp.name || ''} onChange={(e) => setSponsorField(idx, { name: e.target.value })} placeholder="Sponsor name" className="w-32 mt-1 text-[11px] font-body border border-slate-200 rounded px-1.5 py-1 outline-none" />
+                <select value={sp.tier || 'Gold'} onChange={(e) => setSponsorField(idx, { tier: e.target.value })} className="w-32 mt-1 text-[11px] font-body border border-slate-200 rounded px-1 py-1 bg-white">
+                  {SPONSOR_TIERS.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            ))}
+            <div className="pt-0.5"><PhotoAdder onAdd={addSponsors} busy={imgBusy} label="Add sponsor" /></div>
           </div>
         </div>
       </Card>
@@ -1325,19 +1448,49 @@ function HandbookTab({ tournament, onSave, showToast, courseInfo }) {
         </div>
       </Card>
 
+      {/* Schedule */}
+      <Card>
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Schedule</p>
+        <p className="font-body text-xs text-slate-500 mb-3">A day-by-day timeline (times + activities) that prints on its own page. Leave empty to skip it.</p>
+        <div className="space-y-3">
+          {schedule.map((d, di) => (
+            <div key={di} className="rounded-xl border border-slate-100 p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <input value={d.day || ''} onChange={(e) => setDay(di, { day: e.target.value })} placeholder="Day (e.g. Sunday, June 19)" className="flex-1 font-body text-sm font-bold border-b border-slate-100 pb-1 outline-none" />
+                <button onClick={() => removeDay(di)} className="text-red-400 p-1.5"><Trash2 size={15} /></button>
+              </div>
+              <div className="space-y-1.5">
+                {(d.rows || []).map((r, ri) => (
+                  <div key={ri} className="flex items-center gap-2">
+                    <input value={r.time || ''} onChange={(e) => setRow(di, ri, { time: e.target.value })} placeholder="3:30 – 4 AM" className="w-28 shrink-0 text-[12px] font-body border border-slate-200 rounded-lg px-2 py-1.5 bg-white" />
+                    <input value={r.activity || ''} onChange={(e) => setRow(di, ri, { activity: e.target.value })} placeholder="Activity" className="flex-1 min-w-0 text-[12px] font-body border border-slate-200 rounded-lg px-2 py-1.5 bg-white" />
+                    <button onClick={() => removeRow(di, ri)} className="text-slate-300 hover:text-red-500 p-1 shrink-0"><X size={14} /></button>
+                  </div>
+                ))}
+                <button onClick={() => addRow(di)} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-full" style={{ color: FERN, border: '1px solid #E2E8F0' }}><Plus size={12} className="inline" /> Add time</button>
+              </div>
+            </div>
+          ))}
+          <button onClick={addDay} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST }}><Plus size={14} /> Add day</button>
+        </div>
+      </Card>
+
       {sections.length === 0 ? (
         <Card><p className="font-body text-sm text-slate-400 text-center py-6">No handbook yet. Start with a template or add your own sections. Volunteers can read it on their phones from the handbook link (in Setup).</p></Card>
       ) : (
         <div className="space-y-3">
           {sections.map((s, i) => (
-            <Card key={i}>
+            <Card key={i} style={s.fullPage ? { borderColor: GOLD, borderWidth: 1 } : undefined}>
               <div className="flex items-center gap-2 mb-2">
                 <input value={s.title} onChange={(e) => set(i, { title: e.target.value })} className="flex-1 font-display text-base font-semibold text-slate-900 border-b border-slate-100 pb-1 outline-none" />
+                <button onClick={() => toggleFullPage(i)} title="Print this as a full-page photo" className="font-body text-[10px] font-bold px-2.5 py-1.5 rounded-full shrink-0" style={s.fullPage ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: '#F1F5F9', color: '#64748B' }}>Full-page photo</button>
                 <button onClick={() => move(i, -1)} disabled={i === 0} className="p-1.5 rounded-lg disabled:opacity-25" style={{ color: FERN }}><ChevronUp size={16} /></button>
                 <button onClick={() => move(i, 1)} disabled={i === sections.length - 1} className="p-1.5 rounded-lg disabled:opacity-25" style={{ color: FERN }}><ChevronDown size={16} /></button>
                 <button onClick={() => remove(i)} className="text-red-400 p-1.5"><Trash2 size={15} /></button>
               </div>
-              <textarea value={s.body} onChange={(e) => set(i, { body: e.target.value })} rows={4} className={inputCls} style={{ resize: 'vertical' }} placeholder="Write this section…" />
+              {s.fullPage
+                ? <p className="font-body text-[11px] text-slate-500 mb-2">This section prints as a <b>full-page photo</b> using the first photo below, with the title (and any text) overlaid at the bottom.</p>
+                : <textarea value={s.body} onChange={(e) => set(i, { body: e.target.value })} rows={4} className={inputCls} style={{ resize: 'vertical' }} placeholder="Write this section…" />}
               <div className="mt-3">
                 <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Photos</label>
                 <div className="flex flex-wrap gap-3 items-start">
