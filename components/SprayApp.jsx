@@ -337,6 +337,8 @@ function SprayOpsModule({ user }) {
   const [toast, setToast] = useState(null)
   const [dismissLic, setDismissLic] = useState(false)
   const [onboardDismissed, setOnboardDismissed] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState(null) // sheet awaiting a delayed delete (undo window)
+  const deleteTimerRef = useRef(null)
 
   const showToast = (msg) => {
     setToast(msg)
@@ -436,15 +438,34 @@ function SprayOpsModule({ user }) {
     showToast(`Imported ${n} historical spray${n !== 1 ? 's' : ''}`)
   }
 
-  async function removeSheet(sheet) {
-    setSheets((prev) => prev.filter((s) => s.id !== sheet.id))
-    if (activeSheet?.id === sheet.id) { setActiveSheet(null); setRoute('list') }
-    try {
-      await db.deleteSheet(sheet.id)
-      showToast('Spray sheet deleted')
-    } catch (e) {
+  // Actually remove the row from the database (called after the undo window).
+  function commitDelete(sheet) {
+    db.deleteSheet(sheet.id).catch((e) => {
       console.error(e)
       showToast('Could not delete — check your connection')
+      setSheets((prev) => (prev.some((s) => s.id === sheet.id) ? prev : [...prev, sheet]))
+    })
+  }
+
+  // Delete a sheet with a short UNDO window: it disappears immediately, but the
+  // database delete is held for a few seconds so it can be brought right back.
+  function removeSheet(sheet) {
+    // If another delete is still pending, commit it now before starting a new one.
+    if (deleteTimerRef.current) { clearTimeout(deleteTimerRef.current); deleteTimerRef.current = null; if (pendingDelete) commitDelete(pendingDelete) }
+    setSheets((prev) => prev.filter((s) => s.id !== sheet.id))
+    if (activeSheet?.id === sheet.id) { setActiveSheet(null); setRoute('list') }
+    setPendingDelete(sheet)
+    deleteTimerRef.current = setTimeout(() => { commitDelete(sheet); setPendingDelete(null); deleteTimerRef.current = null }, 6000)
+  }
+
+  // Bring a just-deleted sheet back (within the undo window).
+  function undoDelete() {
+    if (deleteTimerRef.current) { clearTimeout(deleteTimerRef.current); deleteTimerRef.current = null }
+    if (pendingDelete) {
+      const sheet = pendingDelete
+      setSheets((prev) => (prev.some((s) => s.id === sheet.id) ? prev : [...prev, sheet]))
+      setPendingDelete(null)
+      showToast('Spray sheet restored')
     }
   }
 
@@ -629,6 +650,13 @@ function SprayOpsModule({ user }) {
         </div>
       )}
 
+      {pendingDelete && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 text-white pl-4 pr-2 py-2 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: INK }}>
+          <span>Sheet deleted — <b>{pendingDelete.area}</b></span>
+          <button onClick={undoDelete} className="font-bold px-3 py-1.5 rounded-full" style={{ backgroundColor: GOLD, color: FOREST }}>Undo</button>
+        </div>
+      )}
+
       {manage && !onboardDismissed && !courseInfo?.onboarded && (
         <OnboardingWizard
           courseInfo={courseInfo}
@@ -721,6 +749,7 @@ function SprayOpsModule({ user }) {
             manage={manage} approve={canApprove(user.role)}
             onBack={() => setRoute(manage ? 'dashboard' : 'tospray')}
             onEdit={() => setRoute('edit')}
+            onDelete={() => removeSheet(activeSheet)}
             onApprove={approveSheet}
             onLogSpray={async (updated, opts = {}) => {
               try {
@@ -2091,7 +2120,8 @@ function SignaturePad({ value, onChange }) {
 }
 
 // ── SHEET VIEWER ──────────────────────────────────────────────────────────
-function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, directorPins = {}, location, courseInfo, manage, approve }) {
+function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, directorPins = {}, location, courseInfo, manage, approve }) {
+  const [confirmDel, setConfirmDel] = useState(false)
   const [sig, setSig] = useState('')
   const [dirPin, setDirPin] = useState('')
   const [dirSig, setDirSig] = useState('')
@@ -2215,8 +2245,27 @@ function SheetViewer({ sheet, onBack, onEdit, onApprove, onLogSpray, onRemoteShe
           {manage && (
             <button onClick={onEdit} className="font-body text-sm font-medium" style={{ color: FERN }}>Edit</button>
           )}
+          {manage && onDelete && (
+            <button onClick={() => setConfirmDel(true)} className="font-body text-sm font-medium text-red-500">Delete</button>
+          )}
         </div>
       </div>
+
+      {confirmDel && (
+        <div className="no-print fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setConfirmDel(false)}>
+          <div className="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle size={18} className="text-red-500" />
+              <p className="font-display text-base font-bold text-slate-900">Delete this spray sheet?</p>
+            </div>
+            <p className="font-body text-sm text-slate-500 mb-4"><b>{sheet.area}</b> · {fmtDate(sheet.date)}. You'll get a few seconds to undo.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmDel(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+              <button onClick={() => { setConfirmDel(false); onDelete() }} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: '#DC2626' }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
 
 
       <div className="no-print">
