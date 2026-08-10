@@ -1015,6 +1015,14 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
   return (
     <div className="pt-6 space-y-6">
+      {manage && (
+        <div className="flex justify-end -mb-2">
+          <a href="/command" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#E2E8F0', backgroundColor: 'white' }} title="Open the wide Command Center on a monitor or shop TV">
+            <BarChart3 size={13} /> Command Center ↗
+          </a>
+        </div>
+      )}
+
       {/* Morning briefing — spray window + needs-attention at a glance */}
       {manage && (
         <SprayWindowStrip current={wx.current} today={wx.todayWindow} hasLocation={hasLocation} attention={attention} onGoWeather={onGoWeather} />
