@@ -247,7 +247,7 @@ export default function SprayApp({ user }) {
     <ErrorBoundary>
       {/* Module switcher — always visible, sits above everything */}
       <div style={{ backgroundColor: '#0F1D15' }} className="text-white">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-1">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-1">
           <button
             onClick={() => setModule('spray')}
             className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
@@ -676,7 +676,7 @@ function SprayOpsModule({ user }) {
         if (alerts.length === 0) return null
         const anyExpired = alerts.some((a) => a.level === 'expired')
         return (
-          <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-4">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-4">
             <div className="rounded-2xl border-2 p-3" style={anyExpired ? { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' } : { backgroundColor: '#FEF3DD', borderColor: '#FDE9C8' }}>
               <div className="flex items-start gap-2">
                 <AlertTriangle size={18} className="shrink-0 mt-0.5" style={{ color: anyExpired ? '#B91C1C' : '#92660D' }} />
@@ -700,7 +700,7 @@ function SprayOpsModule({ user }) {
         )
       })()}
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-24">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-24">
         {route === 'dashboard' && (
           <Dashboard
             sheets={sheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
@@ -819,7 +819,7 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
 
   return (
     <div style={{ backgroundColor: FOREST }} className="text-white">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-4">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-4">
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo?.clubName || 'Golf Club'}</p>
@@ -1107,6 +1107,8 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
         <StatCard icon={<AlertTriangle size={16} />} label="Low Stock" value={lowStock.length} accent={lowStock.length > 0 ? '#DC2626' : FERN} />
       </div>
 
+      {/* Insight cards — laid two-across on wide screens so there's less scrolling */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
       {/* Disease protection — how much fungicide cover is left, per area */}
       {manage && diseaseRows.some((r) => r.last) && (
         <DiseaseProtectionCard rows={diseaseRows} heatOn={heatOn} onToggleHeat={toggleHeat} heatAvailable={wx.breakdownTemps.length > 0} />
@@ -1157,6 +1159,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
           </div>
         </section>
       )}
+      </div>
 
       {pending.length > 0 && (
         <section>
@@ -5407,7 +5410,7 @@ function WhiteboardModule({ user }) {
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
       <div style={{ backgroundColor: FOREST }} className="text-white">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-4 flex items-center gap-3">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-4 flex items-center gap-3">
           <button onClick={() => setDrawer(true)} className="md:hidden w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }} aria-label="Open menu"><Menu size={18} /></button>
           <div className="min-w-0">
             <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo.clubName || 'Golf Club'}</p>
@@ -5444,7 +5447,7 @@ function WhiteboardModule({ user }) {
         </div>
       )}
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-24 pt-5 md:flex md:gap-6">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-24 pt-5 md:flex md:gap-6">
         <aside className="hidden md:block w-52 shrink-0">
           <div className="bg-white rounded-2xl border border-black/5 p-2 shadow-sm sticky top-4"><Nav /></div>
         </aside>
@@ -6165,7 +6168,7 @@ function TurfPerformanceModule() {
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
       <div style={{ backgroundColor: FOREST }} className="text-white">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-4">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-4">
           <div className="mb-4">
             <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{turf.courseInfo?.clubName || 'Golf Club'}</p>
             <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
@@ -6180,7 +6183,7 @@ function TurfPerformanceModule() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-24 pt-6">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-24 pt-6">
         {route === 'dashboard' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} clippings={clippings} soilTests={soilTests} practices={practices} speeds={speeds} hasLocation={turf.location?.lat != null} onGo={setRoute} />
