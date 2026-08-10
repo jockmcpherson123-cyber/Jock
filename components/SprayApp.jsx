@@ -1077,21 +1077,9 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
             </section>
           )}
 
-          <section>
-            <div className="flex items-center justify-between mb-3">
-              <SectionHeader title="Recent Sheets" noMargin />
-              <button onClick={onSeeAll} className="font-body text-xs font-semibold flex items-center gap-0.5" style={{ color: FERN }}>
-                See all <ChevronRight size={13} />
-              </button>
-            </div>
-            {sheets.length === 0 ? (
-              <EmptyState onNew={onNew} manage={manage} />
-            ) : (
-              <div className="space-y-2">
-                {sheets.slice(0, 6).map((s) => <SheetRow key={s.id} sheet={s} onClick={() => onOpen(s)} />)}
-              </div>
-            )}
-          </section>
+          {sheets.length === 0 && (
+            <EmptyState onNew={onNew} manage={manage} />
+          )}
         </div>
 
         {/* ── SIDEBAR — quick-glance boxes ────────────────────────────── */}
@@ -1271,6 +1259,16 @@ function DiseaseProtectionCard({ rows, heatOn, onToggleHeat, heatAvailable }) {
               <p className="font-body text-[10px] mt-0.5 truncate" style={{ color: INK_3 }}>
                 Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)} · {r.mode === 'temp' ? `${r.window}-day label, heat-adjusted` : `${r.window}-day window`}
               </p>
+              {r.diseases?.length > 0 && (
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  <span className="font-body text-[9px] font-bold uppercase tracking-wide shrink-0" style={{ color: r.status === 'expired' ? '#C0392B' : FERN }}>
+                    {r.status === 'expired' ? 'Was covering' : 'Covers'}
+                  </span>
+                  {r.diseases.map((d, i) => (
+                    <span key={i} className="font-body text-[10px] font-semibold px-1.5 py-0.5 rounded" style={r.status === 'expired' ? { backgroundColor: '#FBECEA', color: '#9B3B2E' } : { backgroundColor: '#E8F3EC', color: FERN }}>{d}</span>
+                  ))}
+                </div>
+              )}
               <p className="font-body text-[10px] font-semibold mt-0.5 truncate" style={{ color: r.status === 'expired' ? '#B91C1C' : r.status === 'soon' ? '#92660D' : FERN }}>
                 {r.status === 'expired' ? 'Reapply now — cover expired' : `Reapply by ~${fmtDate(date)} (${r.remaining}d${r.mode === 'temp' ? ', heat-adj' : ''})`}
               </p>
