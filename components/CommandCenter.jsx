@@ -200,6 +200,14 @@ export default function CommandCenter() {
                     <span className="font-body text-[11px] font-bold" style={{ color: covColor(r.status) }}>{r.status === 'expired' ? 'Exposed' : `${r.remaining ?? '—'}d left`}</span>
                   </div>
                   <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: '#E6EBE7' }}><div className="h-full rounded-full" style={{ width: `${Math.max(3, r.pct)}%`, backgroundColor: covColor(r.status) }} /></div>
+                  {r.diseases?.length > 0 && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                      <span className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: r.status === 'expired' ? '#C0392B' : FERN }}>{r.status === 'expired' ? 'Was covering' : 'Covers'}</span>
+                      {r.diseases.map((d, i) => (
+                        <span key={i} className="font-body text-[11px] font-semibold px-1.5 py-0.5 rounded" style={r.status === 'expired' ? { backgroundColor: '#FBECEA', color: '#9B3B2E' } : { backgroundColor: '#E8F3EC', color: FERN }}>{d}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
