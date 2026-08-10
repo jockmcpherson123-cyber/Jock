@@ -3777,7 +3777,7 @@ function Reports({ sheets, products, areas, courseInfo = {} }) {
       </div>
 
       <div className="flex gap-2 mt-4 mb-1 overflow-x-auto pb-1">
-        {[['npk', 'Nutrients'], ['cost', 'Cost'], ['impact', 'Impact (EIQ)'], ['rotation', 'Rotation'], ['usage', 'Product Usage'], ['history', 'Spray History'], ['since', 'Days Since']].map(([k, l]) => (
+        {[['npk', 'Nutrients'], ['nitrogen', 'Nitrogen vs Target'], ['reorder', 'Reorder'], ['cost', 'Cost'], ['impact', 'Impact (EIQ)'], ['rotation', 'Rotation'], ['usage', 'Product Usage'], ['history', 'Spray History'], ['since', 'Days Since']].map(([k, l]) => (
           <button key={k} onClick={() => setReport(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap transition" style={report === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
@@ -3801,6 +3801,8 @@ function Reports({ sheets, products, areas, courseInfo = {} }) {
         </div>
       </div>
 
+      {report === 'nitrogen' && <NitrogenReport sheets={sheets} products={products} areas={areas} />}
+      {report === 'reorder' && <ReorderReport sheets={sheets} products={products} areas={areas} />}
       {report === 'cost' && <CostReport sheets={sheets} products={products} areas={areas} />}
       {report === 'impact' && <ImpactReport sheets={sheets} products={products} areas={areas} />}
       {report === 'rotation' && <RotationReport sheets={sheets} products={products} />}
@@ -3894,6 +3896,131 @@ function Reports({ sheets, products, areas, courseInfo = {} }) {
         </div>
       )}
       </>)}
+    </div>
+  )
+}
+
+// ── NITROGEN vs TARGET ──────────────────────────────────────────────────────
+// Per area, the nitrogen applied so far this season (lbs N / 1,000 sq ft) against
+// a season target derived from that area's grasses (suggestedAnnualN). A spoon-
+// feeding gauge: how much of the year's nitrogen budget you've put down, and how
+// much is left.
+function NitrogenReport({ sheets, products, areas }) {
+  const npkData = aggregateNPK(sheets, products, areas)
+  const byArea = {}
+  npkData.forEach((r) => {
+    if (!byArea[r.area]) byArea[r.area] = { area: r.area, n: 0, sqft: r.sqft }
+    byArea[r.area].n += r.n
+  })
+  const rows = Object.values(byArea).map((a) => {
+    const perM = a.sqft > 0 ? Math.round((a.n / (a.sqft / 1000)) * 100) / 100 : null
+    const grasses = (areas[a.area]?.grasses) || []
+    const target = suggestedAnnualN(grasses).n || null
+    const pct = perM != null && target ? Math.round((perM / target) * 100) : null
+    return { area: a.area, appliedM: perM, target, pct, remaining: perM != null && target ? Math.round((target - perM) * 100) / 100 : null }
+  }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1))
+
+  const exportCSV = () => {
+    const out = [['Area', 'N applied (lb/M)', 'Season target (lb/M)', '% of target', 'Remaining (lb/M)']]
+    rows.forEach((r) => out.push([r.area, r.appliedM ?? '', r.target ?? '', r.pct ?? '', r.remaining ?? '']))
+    downloadCSV(out, `Nitrogen_vs_Target_${localDateISO()}.csv`)
+  }
+
+  const barColor = (pct) => (pct == null ? '#CBD5E1' : pct > 110 ? '#DC2626' : pct >= 85 ? '#16A34A' : pct >= 50 ? '#CA8A04' : '#3A6B4A')
+
+  return (
+    <div className="mt-3">
+      <div className="flex justify-end mb-2">
+        <button onClick={exportCSV} className="font-body text-[11px] font-bold px-3 py-2 rounded-full border" style={{ color: FOREST, borderColor: '#E2E8F0' }}>Export CSV</button>
+      </div>
+      {rows.length === 0 ? (
+        <Card><p className="font-body text-sm text-slate-400 text-center py-6">No fertilizer sprays counted yet.</p></Card>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((r) => (
+            <div key={r.area} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="font-body text-sm font-bold text-slate-900">{r.area}</p>
+                <p className="font-body text-xs text-slate-500">
+                  {r.appliedM != null ? <><b style={{ color: FOREST }}>{r.appliedM}</b> of {r.target ? `${r.target}` : '—'} lb N/M{r.pct != null ? ` · ${r.pct}%` : ''}</> : 'No area size / grass set'}
+                </p>
+              </div>
+              <div className="h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: '#EEF2F0' }}>
+                <div className="h-full rounded-full" style={{ width: `${Math.min(100, r.pct || 0)}%`, backgroundColor: barColor(r.pct) }} />
+              </div>
+              {r.remaining != null && (
+                <p className="font-body text-[11px] mt-1" style={{ color: r.remaining < 0 ? '#DC2626' : '#64748B' }}>
+                  {r.remaining < 0 ? `${Math.abs(r.remaining)} lb N/M over target` : `${r.remaining} lb N/M left this season`}
+                </p>
+              )}
+            </div>
+          ))}
+          <p className="font-body text-[11px] text-slate-400 mt-1">Targets come from each area's grasses (Settings → Areas). Set area size and grasses to get a target.</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── REORDER LIST ────────────────────────────────────────────────────────────
+// Products at or below their low-stock level, with how much you've used this
+// season and a suggested order quantity (par = twice the low-stock level).
+function ReorderReport({ sheets, products, areas }) {
+  const [showAll, setShowAll] = useState(false)
+  const usage = productUsage(sheets, products, areas)
+  const usedByName = {}
+  usage.forEach((u) => { usedByName[u.name] = u })
+
+  const rows = products
+    .map((p) => {
+      const stock = Number(p.stock) || 0
+      const low = Number(p.lowStockThreshold) || 0
+      const par = low > 0 ? low * 2 : 0
+      const suggest = par > 0 ? Math.max(0, Math.round((par - stock) * 10) / 10) : 0
+      const cases = (p.ozPerCase > 0 && suggest > 0) ? Math.ceil(suggest / p.ozPerCase) : null
+      const u = usedByName[p.name]
+      return { name: p.name, type: p.type, unit: p.unit || u?.unit || 'oz', stock, low, suggest, cases, used: u ? u.total : 0, usedUnit: u?.unit || p.unit || '', needs: low > 0 && stock <= low }
+    })
+    .filter((r) => r.low > 0)
+    .sort((a, b) => (b.needs - a.needs) || (a.stock - a.low) - (b.stock - b.low) || a.name.localeCompare(b.name))
+
+  const needing = rows.filter((r) => r.needs)
+  const shown = showAll ? rows : needing
+
+  const exportCSV = () => {
+    const out = [['Product', 'Type', 'On hand', 'Low-stock level', 'Suggested order', 'Cases (if known)', 'Used this season', 'Unit']]
+    shown.forEach((r) => out.push([r.name, r.type, r.stock, r.low, r.suggest, r.cases ?? '', r.used, r.unit]))
+    downloadCSV(out, `Reorder_List_${localDateISO()}.csv`)
+  }
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <p className="font-body text-xs text-slate-500">{needing.length} product{needing.length !== 1 ? 's' : ''} at or below low-stock.</p>
+        <div className="flex gap-2 shrink-0">
+          <button onClick={() => setShowAll((v) => !v)} className="font-body text-[11px] font-bold px-3 py-2 rounded-full border" style={{ color: '#64748B', borderColor: '#E2E8F0' }}>{showAll ? 'Only low' : 'Show all tracked'}</button>
+          <button onClick={exportCSV} disabled={shown.length === 0} className="font-body text-[11px] font-bold px-3 py-2 rounded-full border disabled:opacity-40" style={{ color: FOREST, borderColor: '#E2E8F0' }}>Export CSV</button>
+        </div>
+      </div>
+      {shown.length === 0 ? (
+        <Card><p className="font-body text-sm text-slate-400 text-center py-6">{rows.length === 0 ? 'Set a low-stock level on products (Chemical Library) to build a reorder list.' : 'Nothing low right now — you\'re stocked up.'}</p></Card>
+      ) : (
+        <div className="space-y-2">
+          {shown.map((r) => (
+            <div key={r.name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3" style={r.needs ? { borderColor: '#FCA5A5' } : undefined}>
+              <div className="min-w-0 flex-1">
+                <p className="font-body text-sm font-bold text-slate-900 truncate">{r.name} {r.needs && <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1" style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}>LOW</span>}</p>
+                <p className="font-body text-[11px] text-slate-400">On hand {r.stock} · low at {r.low} · used {Math.round(r.used * 10) / 10} {r.usedUnit} this season</p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className="font-body text-sm font-bold" style={{ color: r.suggest > 0 ? FOREST : '#94A3B8' }}>{r.suggest > 0 ? `+${r.suggest} ${r.unit}` : '—'}</p>
+                {r.cases != null && <p className="font-body text-[10px] text-slate-400">≈ {r.cases} case{r.cases !== 1 ? 's' : ''}</p>}
+              </div>
+            </div>
+          ))}
+          <p className="font-body text-[11px] text-slate-400 mt-1">Suggested order tops each item back up to twice its low-stock level. Cases show when a product has "Oz/Case" set.</p>
+        </div>
+      )}
     </div>
   )
 }
