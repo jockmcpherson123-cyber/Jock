@@ -1604,7 +1604,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   const productTargets = [...new Set((s.products || []).flatMap((p) => splitTargets(p.target)))]
 
   return (
-    <div className="pt-6 pb-10 max-w-4xl mx-auto">
+    <div className="pt-6 pb-10 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-5">
         <button onClick={onCancel} className="font-body text-sm font-medium text-slate-400">Cancel</button>
         <h2 className="font-display text-lg font-semibold text-slate-900">{sheet.status === 'pending' && sheet.directorSig === '' ? 'Spray Sheet' : 'Edit Sheet'}</h2>
@@ -2271,7 +2271,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
   }
 
   return (
-    <div className="pt-6 pb-10 max-w-2xl mx-auto">
+    <div className="pt-6 pb-10 max-w-7xl mx-auto">
       <div className="no-print flex items-center justify-between mb-5">
         <button onClick={onBack} className="font-body text-sm font-medium text-slate-400">← Back</button>
         <div className="flex items-center gap-3">
@@ -2309,7 +2309,11 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
         <h2 className="font-display text-2xl font-semibold text-slate-900 mb-1">{sheet.area}</h2>
         <p className="font-body text-sm text-slate-400 mb-5">{fmtDate(sheet.date)}</p>
 
-        <div className="space-y-4">
+        {/* Wide two-column layout — specs & products fill the broad left side,
+            the shorter reference/approval cards sit off to the right. */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+          {/* Left — the wide working area: specs, weather, products */}
+          <div className="lg:col-span-2 space-y-4">
           <Card>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-3 gap-x-4 font-body text-sm">
               <Row label="Date" value={sheet.date || '—'} />
@@ -2481,7 +2485,10 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
               </>
             )}
           </Card>
+          </div>
 
+          {/* Right — reference & sign-off cards, stacked beside the products */}
+          <div className="space-y-4">
           {/* Safety notice — carried over from the paper sheet */}
           <Card>
             <p className="font-body text-[11px] font-bold uppercase tracking-wide text-red-500 mb-1">Before you spray</p>
@@ -2668,6 +2675,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
               )}
             </Card>
           )}
+          </div>
         </div>
       </div>
     </div>
