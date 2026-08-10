@@ -560,9 +560,11 @@ function SprayOpsModule({ user }) {
     showToast('Approved — stock deducted, now live on all iPads')
   }
 
-  function newSheet() {
+  function newSheet(presetArea) {
     const areaKeys = Object.keys(areas)
-    const firstArea = areaKeys[0]
+    // Preset the area when the Advisor (or anywhere) starts a sheet for a
+    // specific area; otherwise default to the first area.
+    const firstArea = (typeof presetArea === 'string' && areas[presetArea]) ? presetArea : areaKeys[0]
     setActiveSheet({
       id: crypto.randomUUID(),
       sheetType: firstArea || 'Spray Sheet',
@@ -989,11 +991,55 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   if (pgrAlerts > 0) attention.push({ label: `${pgrAlerts} PGR reapply due`, tone: 'warn' })
   if (lowStock.length > 0) attention.push({ label: `${lowStock.length} product${lowStock.length > 1 ? 's' : ''} low on stock`, tone: 'bad' })
 
+  // ── Spray Advisor — merge fungicide cover, PGR timing and due program apps
+  // into one ranked, per-area "what needs attention" list with a one-tap sheet.
+  const advisor = manage ? (() => {
+    const byArea = {}
+    const add = (area, reason, sev) => {
+      if (!area) return
+      if (!byArea[area]) byArea[area] = { area, reasons: [], sev: 0 }
+      if (!byArea[area].reasons.includes(reason)) byArea[area].reasons.push(reason)
+      byArea[area].sev = Math.max(byArea[area].sev, sev)
+    }
+    diseaseRows.forEach((r) => {
+      if (r.status === 'expired') add(r.area, 'Fungicide cover gone', 3)
+      else if (r.status === 'soon') add(r.area, r.remaining != null ? `Fungicide cover low (~${r.remaining}d)` : 'Fungicide cover low', 2)
+    })
+    pgrRows.forEach((r) => {
+      if (r.status === 'due') add(r.area, 'PGR reapply due', 3)
+      else if (r.status === 'soon') add(r.area, 'PGR reapply soon', 2)
+    })
+    upcomingGroups.forEach((g) => add(g.area, `${g.items.length} planned app${g.items.length > 1 ? 's' : ''} due ${fmtDate(g.date)}`, 2))
+    return Object.values(byArea).sort((a, b) => b.sev - a.sev || a.area.localeCompare(b.area))
+  })() : []
+
   return (
     <div className="pt-6 space-y-6">
       {/* Morning briefing — spray window + needs-attention at a glance */}
       {manage && (
         <SprayWindowStrip current={wx.current} today={wx.todayWindow} hasLocation={hasLocation} attention={attention} onGoWeather={onGoWeather} />
+      )}
+
+      {/* Spray Advisor — per-area, what needs attention, with a one-tap sheet */}
+      {manage && advisor.length > 0 && (
+        <div className="paper-card p-4">
+          <p className="eyebrow mb-2 flex items-center gap-1.5"><Sparkles size={13} style={{ color: GOLD }} /> Spray Advisor — needs attention</p>
+          <div className="space-y-2">
+            {advisor.map((a) => (
+              <div key={a.area} className="flex items-center gap-3 rounded-[10px] px-3 py-2.5" style={{ backgroundColor: a.sev >= 3 ? '#FEF2F2' : '#FBF7EC', border: `1px solid ${a.sev >= 3 ? '#FBD3D3' : '#EFE3C0'}` }}>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-sm font-bold" style={{ color: FOREST }}>{a.area}</p>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {a.reasons.map((r, i) => (
+                      <span key={i} className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-md" style={{ backgroundColor: 'white', color: a.sev >= 3 ? '#B91C1C' : '#92660D', border: '1px solid rgba(0,0,0,0.06)' }}>{r}</span>
+                    ))}
+                  </div>
+                </div>
+                <button onClick={() => onNew(a.area)} className="font-body text-[11px] font-bold px-3 py-2 rounded-full text-white shrink-0" style={{ backgroundColor: FOREST }}>Start sheet</button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Rainfall year-to-date tile — taps through to the full tracker */}
