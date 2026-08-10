@@ -5,9 +5,9 @@
 // iPad — a grid of glanceable widgets you scan across, in the spirit of a farm
 // overview screen. Loads its own data and refreshes on a timer.
 import { useState, useEffect, useCallback } from 'react'
-import { Wind, Droplet, CloudRain, Sprout, Gauge, ClipboardList, ShieldCheck, AlertTriangle, Thermometer, Camera, RefreshCw } from 'lucide-react'
+import { Wind, Droplet, CloudRain, Sprout, Gauge, ClipboardList, ShieldCheck, AlertTriangle, Thermometer, Camera, RefreshCw, Sun, CloudSun, Cloud, CloudDrizzle, CloudSnow, CloudFog, CloudLightning } from 'lucide-react'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, fetchBreakdownTemps, sprayWindow, buildRainYear, gddSince } from '@/lib/weather'
+import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, fetchBreakdownTemps, sprayWindow, buildRainYear, gddSince, weatherCodeInfo } from '@/lib/weather'
 import { protectionByArea } from '@/lib/disease'
 import { suppressionMap } from '@/lib/pgr'
 import { sheetApplied } from '@/lib/applied'
@@ -18,6 +18,17 @@ const FERN = '#3A6B4A'
 const GOLD = '#C9A84C'
 const BG = '#EEF1EE'
 const SPRAY = { good: { bg: '#E8F3EC', fg: FERN, label: 'Favourable' }, caution: { bg: '#FEF3DD', fg: '#92660D', label: 'Marginal' }, poor: { bg: '#FEE2E2', fg: '#DC2626', label: 'Hold' } }
+// Little weather picture per forecast day, keyed by weatherCodeInfo().
+const CC_WX_ICON = {
+  sun: { Icon: Sun, color: '#E0A82E' },
+  partly: { Icon: CloudSun, color: '#D9A441' },
+  cloud: { Icon: Cloud, color: '#7C8B93' },
+  fog: { Icon: CloudFog, color: '#8A97A0' },
+  drizzle: { Icon: CloudDrizzle, color: '#4E86B4' },
+  rain: { Icon: CloudRain, color: '#3A6187' },
+  snow: { Icon: CloudSnow, color: '#6FA0C4' },
+  storm: { Icon: CloudLightning, color: '#7B5EA7' },
+}
 const fmtDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })
 const fmtDate = (d) => { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) } catch { return d } }
 
@@ -161,15 +172,21 @@ export default function CommandCenter() {
         <Widget title="7-Day Forecast" icon={CloudRain} span={2}>
           {forecast7.length ? (
             <div className="flex justify-between gap-1">
-              {forecast7.map((d) => (
-                <div key={d.date} className="flex-1 text-center min-w-0">
-                  <p className="font-body text-[11px] font-bold text-slate-400 uppercase">{fmtDay(d.date)}</p>
-                  <p className="font-display text-lg font-bold" style={{ color: FOREST }}>{Math.round(d.tMax)}°</p>
-                  <p className="font-body text-[11px] text-slate-400">{Math.round(d.tMin)}°</p>
-                  <p className="font-body text-[10px] mt-0.5" style={{ color: '#3A6187' }}>{d.precip}"</p>
-                  <span className="inline-block mt-1 w-2.5 h-2.5 rounded-full" style={{ backgroundColor: SPRAY[d.spray.level].fg }} title={SPRAY[d.spray.level].label} />
-                </div>
-              ))}
+              {forecast7.map((d) => {
+                const info = weatherCodeInfo(d.code)
+                const wi = CC_WX_ICON[info.key] || CC_WX_ICON.cloud
+                const WI = wi.Icon
+                return (
+                  <div key={d.date} className="flex-1 text-center min-w-0">
+                    <p className="font-body text-[11px] font-bold text-slate-400 uppercase">{fmtDay(d.date)}</p>
+                    <WI size={24} className="mx-auto my-1" style={{ color: wi.color }} />
+                    <p className="font-display text-lg font-bold" style={{ color: FOREST }}>{Math.round(d.tMax)}°</p>
+                    <p className="font-body text-[11px] text-slate-400">{Math.round(d.tMin)}°</p>
+                    <p className="font-body text-[10px] mt-0.5" style={{ color: '#3A6187' }}>{d.precip}"</p>
+                    <span className="inline-block mt-1 w-2.5 h-2.5 rounded-full" style={{ backgroundColor: SPRAY[d.spray.level].fg }} title={SPRAY[d.spray.level].label} />
+                  </div>
+                )
+              })}
             </div>
           ) : <Empty text="Waiting on weather…" />}
         </Widget>

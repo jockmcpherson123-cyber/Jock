@@ -15,6 +15,7 @@ import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, ChevronUp, ChevronDown, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
   Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target, Scissors, Gauge, Trophy,
+  Sun, CloudSun, CloudDrizzle, CloudSnow, CloudFog, CloudLightning,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -22,7 +23,7 @@ import {
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder, mixRank } from '@/lib/defaults'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate, buildRainYear } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate, buildRainYear, weatherCodeInfo } from '@/lib/weather'
 import { protectionByArea, protectionAlertCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
@@ -1084,6 +1085,11 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
         {/* ── SIDEBAR — quick-glance boxes ────────────────────────────── */}
         <div className="space-y-4">
+          {/* 5-day forecast — a normal weather strip with little sun/cloud pics */}
+          {manage && hasLocation && wx.forecast.length > 0 && (
+            <ForecastStrip forecast={wx.forecast} today={today} onGoWeather={onGoWeather} />
+          )}
+
           {/* Rain — a little year-to-date box; taps through to the full tracker */}
           {manage && hasLocation && wx.season.length > 0 && (() => {
             const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today)
@@ -1211,6 +1217,56 @@ function SprayWindowStrip({ current, today, hasLocation, attention = [], onGoWea
         </div>
       )}
     </div>
+  )
+}
+
+// A little weather picture for a forecast day — sun, cloud, rain, etc. — mapped
+// from the WMO code the weather service returns (via weatherCodeInfo).
+const WX_ICON = {
+  sun: { Icon: Sun, color: '#E0A82E' },
+  partly: { Icon: CloudSun, color: '#D9A441' },
+  cloud: { Icon: Cloud, color: '#7C8B93' },
+  fog: { Icon: CloudFog, color: '#8A97A0' },
+  drizzle: { Icon: CloudDrizzle, color: '#4E86B4' },
+  rain: { Icon: CloudRain, color: '#3A6187' },
+  snow: { Icon: CloudSnow, color: '#6FA0C4' },
+  storm: { Icon: CloudLightning, color: '#7B5EA7' },
+}
+function WeatherIcon({ k, size = 22 }) {
+  const w = WX_ICON[k] || WX_ICON.cloud
+  const I = w.Icon
+  return <I size={size} style={{ color: w.color }} />
+}
+
+// Compact 5-day forecast — a normal weather strip (little sun/cloud pictures +
+// high/low) for the dashboard sidebar. Deliberately light on detail; the full
+// numbers live on the Weather screen.
+function ForecastStrip({ forecast = [], today, onGoWeather }) {
+  const days = (forecast || []).filter((d) => d.date >= today).slice(0, 5)
+  if (days.length === 0) return null
+  return (
+    <button onClick={onGoWeather} className="w-full paper-card p-3.5 text-left transition">
+      <div className="flex items-center justify-between mb-2.5">
+        <p className="eyebrow flex items-center gap-1.5"><CloudSun size={12} style={{ color: '#D9A441' }} /> 5-Day Forecast</p>
+        <ChevronRight size={13} style={{ color: INK_3 }} />
+      </div>
+      <div className="flex items-stretch justify-between gap-1">
+        {days.map((d, i) => {
+          const info = weatherCodeInfo(d.code)
+          const label = i === 0 ? 'Today' : new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })
+          const wet = d.precipProb != null && d.precipProb >= 30
+          return (
+            <div key={d.date} className="flex flex-col items-center gap-1 flex-1 min-w-0" title={info.label}>
+              <span className="font-body text-[10px] font-bold" style={{ color: i === 0 ? FOREST : INK_3 }}>{label}</span>
+              <WeatherIcon k={info.key} size={22} />
+              <span className="font-body text-[13px] font-bold tnum leading-none" style={{ color: FOREST }}>{d.tMax != null ? `${Math.round(d.tMax)}°` : '—'}</span>
+              <span className="font-body text-[10px] tnum leading-none" style={{ color: INK_3 }}>{d.tMin != null ? `${Math.round(d.tMin)}°` : ''}</span>
+              <span className="font-body text-[9px] font-semibold tnum leading-none" style={{ color: wet ? '#3A6187' : 'transparent' }}>{wet ? `${d.precipProb}%` : '0'}</span>
+            </div>
+          )
+        })}
+      </div>
+    </button>
   )
 }
 
