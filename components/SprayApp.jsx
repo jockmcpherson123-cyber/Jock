@@ -3072,6 +3072,33 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
     XLSX.utils.book_append_sheet(wb, ws, 'Chemical Library')
     XLSX.writeFile(wb, 'chemical-library-template.xlsx')
   }
+  // Export the whole library to Excel — same columns as the template, so it
+  // round-trips back through Import. Good for backups and sending an order list.
+  const exportLibrary = async () => {
+    const XLSX = await import('xlsx')
+    const headers = [
+      'Name', 'Type', 'Mixing Order', 'Active Ingredient', 'Active %', 'Manufacturer',
+      'Chemical Group', 'Rotate After (days)', 'Spray Interval (days)', 'EIQ', 'Signal Word', 'REI (hrs)',
+      'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A',
+      'Stock', 'Low Stock', 'Fert Form', 'N', 'P', 'K', 'N lbs/gal', 'P lbs/gal', 'K lbs/gal',
+      'Case Size', 'Oz/Case', 'Cost/Case', 'Label link', 'SDS link', 'Avoid Grasses',
+    ]
+    const blank = (v) => (v == null ? '' : v)
+    const rows = [...products]
+      .sort((a, b) => String(a.type || '').localeCompare(String(b.type || '')) || String(a.name || '').localeCompare(String(b.name || '')))
+      .map((p) => [
+        p.name || '', p.type || '', FORMULATION_LABEL[effectiveFormulation(p)] || '', p.activeIngredient || '', blank(p.activePct), p.manufacturer || '',
+        p.moaGroup || '', blank(p.rotationDays), blank(p.sprayInterval), blank(p.eiq), p.signalWord || '', blank(p.rei),
+        blank(p.rate), p.basis || '', p.unit || '', blank(p.labelMinM), blank(p.labelMaxM), blank(p.labelMinA), blank(p.labelMaxA),
+        blank(p.stock), blank(p.lowStockThreshold), p.fertForm || '', blank(p.n), blank(p.p), blank(p.k), blank(p.nPerGal), blank(p.pPerGal), blank(p.kPerGal),
+        p.caseSize || '', blank(p.ozPerCase), blank(p.costPerCase), p.labelUrl || '', p.sdsUrl || '',
+        Array.isArray(p.avoidGrasses) ? p.avoidGrasses.join(', ') : (p.avoidGrasses || ''),
+      ])
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Chemical Library')
+    XLSX.writeFile(wb, `chemical-library-${localDateISO()}.xlsx`)
+  }
   const confirmImport = async () => {
     if (!importPreview?.products?.length) return
     setImporting(true)
@@ -3143,6 +3170,11 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
           <button onClick={pickFile} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
             <CloudUpload size={14} /> Import Excel
           </button>
+          {products.length > 0 && (
+            <button onClick={exportLibrary} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#E2E8F0', backgroundColor: 'white' }}>
+              <CloudUpload size={14} className="rotate-180" /> Export Excel
+            </button>
+          )}
           <button onClick={startNew} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
             <Plus size={14} /> Add Product
           </button>
