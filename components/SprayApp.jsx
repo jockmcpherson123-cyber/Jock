@@ -24,7 +24,7 @@ import {
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder, mixRank } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate, buildRainYear, weatherCodeInfo } from '@/lib/weather'
-import { diseaseCoverageByArea, coverageGapCount } from '@/lib/disease'
+import { fungicideLogByArea } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
@@ -906,19 +906,9 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
     return () => { cancelled = true }
   }, [hasLocation, location?.lat, location?.lng, today])
 
-  // ── Disease protection (fungicide cover remaining, per area). A per-device
-  // toggle (default on) switches between heat-adjusted breakdown and plain days.
-  const [heatOn, setHeatOn] = useState(() => {
-    if (typeof window === 'undefined') return true
-    try { const v = window.localStorage.getItem('heatAdjustProtection'); return v === null ? true : v === '1' } catch { return true }
-  })
-  const toggleHeat = () => setHeatOn((v) => {
-    const nv = !v
-    try { window.localStorage.setItem('heatAdjustProtection', nv ? '1' : '0') } catch { /* ignore */ }
-    return nv
-  })
-  const coverage = manage ? diseaseCoverageByArea(sheets, products, areas, undefined, heatOn ? wx.breakdownTemps : null) : []
-  const diseaseAlerts = coverageGapCount(coverage)
+  // ── Recent fungicide sprays, per area — a plain record of what went down and
+  // what it covers, newest first (the superintendent judges coverage himself).
+  const fungLog = manage ? fungicideLogByArea(sheets, products) : []
 
   // ── Soil-temp application timing — nudge when a window opens (toggle, per device).
   const soilNow = currentSoilTemp(wx.breakdownTemps)
@@ -988,7 +978,6 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
   const attention = []
   if (pending.length > 0) attention.push({ label: `${pending.length} awaiting approval`, tone: 'warn' })
-  if (diseaseAlerts > 0) attention.push({ label: `${diseaseAlerts} disease${diseaseAlerts > 1 ? 's' : ''} exposed or running out`, tone: 'bad' })
   if (pgrAlerts > 0) attention.push({ label: `${pgrAlerts} PGR reapply due`, tone: 'warn' })
   if (lowStock.length > 0) attention.push({ label: `${lowStock.length} product${lowStock.length > 1 ? 's' : ''} low on stock`, tone: 'bad' })
 
@@ -1031,9 +1020,9 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
           {/* Insight cards — two-across on very wide screens so there's less scrolling */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-            {/* Disease coverage — per disease, per area: what's covered & for how long */}
-            {manage && coverage.length > 0 && (
-              <DiseaseCoverageCard areas={coverage} heatOn={heatOn} onToggleHeat={toggleHeat} heatAvailable={wx.breakdownTemps.length > 0} />
+            {/* Recent fungicide sprays — a plain record of what went down & covers */}
+            {manage && fungLog.length > 0 && (
+              <FungicideLogCard areas={fungLog} />
             )}
 
             {/* PGR reapply timing — GDD since each area's last growth-reg spray */}
@@ -1270,67 +1259,45 @@ function ForecastStrip({ forecast = [], today, onGoWeather }) {
   )
 }
 
-// Per-disease coverage — one status line per disease, per area. Reads like a
-// checklist: "Dollar Spot — Protected — Secure, 9d left". Each disease is
-// tracked on its OWN residual, so an earlier product still covering something
-// the last tank didn't isn't dropped. Worst (exposed) diseases float to the top.
-const DIS_STYLE = {
-  expired: { row: '#FEF2F2', dot: '#DC2626', fg: '#B91C1C', label: 'Exposed' },
-  soon: { row: '#FEF7EC', dot: '#D97706', fg: '#92660D', label: 'Running out' },
-  ok: { row: '#F0F6F1', dot: FERN, fg: FERN, label: 'Protected' },
+// Recent fungicide sprays — a plain record, per area, newest first: what went
+// down, when (and how long ago), and the diseases those products typically
+// control. No status/countdown — the superintendent reads the history and
+// judges coverage himself.
+function agoLabel(since) {
+  if (since == null) return ''
+  if (since <= 0) return 'today'
+  if (since === 1) return 'yesterday'
+  return `${since} days ago`
 }
-function DiseaseCoverageCard({ areas, heatOn, onToggleHeat, heatAvailable }) {
-  const heatAdjusted = areas.some((a) => a.diseases.some((d) => d.mode === 'temp'))
-  const areaChip = (a) => {
-    if (a.counts.expired > 0) return { text: `${a.counts.expired} exposed`, ...DIS_STYLE.expired }
-    if (a.counts.soon > 0) return { text: `${a.counts.soon} running out`, ...DIS_STYLE.soon }
-    return { text: 'All protected', ...DIS_STYLE.ok }
-  }
+function FungicideLogCard({ areas }) {
   return (
     <section>
-      <div className="flex items-end justify-between gap-2 mb-3">
-        <SectionHeader title="Disease Coverage" subtitle="Each disease tracked on its own — the most recent spray still protecting it, and how long it lasts" noMargin />
-        {onToggleHeat && heatAvailable && (
-          <button onClick={onToggleHeat} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-md flex items-center gap-1.5 shrink-0 transition" style={heatOn ? { backgroundColor: '#FEF3DD', color: '#92660D' } : { backgroundColor: PAPER, color: INK_3, border: `1px solid ${HAIR}` }} title="Use cover up faster in heat">
-            <Thermometer size={12} /> Heat {heatOn ? 'on' : 'off'}
-          </button>
-        )}
-      </div>
+      <SectionHeader title="Recent Fungicide Sprays" subtitle="What you've put down lately, by area — and the diseases each spray typically covers" />
       <div className="paper-card p-4 space-y-4">
-        {areas.map((a) => {
-          const chip = areaChip(a)
-          return (
-            <div key={a.area}>
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <span className="font-body text-sm font-bold truncate" style={{ color: FOREST }}>{a.area}</span>
-                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded shrink-0" style={{ backgroundColor: chip.row, color: chip.fg }}>{chip.text}</span>
-              </div>
-              <div className="space-y-1">
-                {a.diseases.map((d) => {
-                  const st = DIS_STYLE[d.status] || DIS_STYLE.ok
-                  return (
-                    <div key={d.disease} className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5" style={{ backgroundColor: st.row }}>
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: st.dot }} />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-body text-[13px] font-semibold leading-tight truncate" style={{ color: FOREST }}>{d.disease}</p>
-                        <p className="font-body text-[10px] leading-tight truncate" style={{ color: INK_3 }}>{d.product} · {fmtDate(d.date)}</p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="font-body text-[11px] font-bold leading-tight" style={{ color: st.fg }}>{st.label}</p>
-                        <p className="font-body text-[10px] leading-tight tnum" style={{ color: INK_3 }}>
-                          {d.status === 'expired' ? 'reapply now' : `${d.remaining}d left${d.mode === 'temp' ? ' · heat' : ''}`}
-                        </p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+        {areas.map((a) => (
+          <div key={a.area}>
+            <p className="font-body text-sm font-bold mb-1.5" style={{ color: FOREST }}>{a.area}</p>
+            <div className="space-y-2">
+              {a.sprays.map((s) => (
+                <div key={s.date} className="rounded-lg px-3 py-2" style={{ backgroundColor: PAPER_2 }}>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="font-body text-[13px] font-semibold leading-tight" style={{ color: FOREST }}>{s.products.join(', ')}</p>
+                    <span className="font-body text-[11px] tnum shrink-0" style={{ color: INK_3 }}>{fmtDate(s.date)} · {agoLabel(s.since)}</span>
+                  </div>
+                  {s.diseases.length > 0 && (
+                    <p className="font-body text-[11px] leading-snug mt-1" style={{ color: FERN }}>
+                      <span className="font-bold uppercase tracking-wide text-[9px]" style={{ color: INK_3 }}>Covers </span>
+                      {s.diseases.join(' · ')}
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
-          )
-        })}
+          </div>
+        ))}
       </div>
       <p className="font-body text-[10px] mt-1.5" style={{ color: INK_3 }}>
-        Coverage is worked out from each fungicide&apos;s disease spectrum and spray interval (set in the Chemical Library){heatAdjusted ? ', used up faster on hot days by soil temperature' : ''}. Guidance, not a lab test.
+        Diseases shown are the typical targets for each product (from the Chemical Library) — a memory aid, not a lab test.
       </p>
     </section>
   )
