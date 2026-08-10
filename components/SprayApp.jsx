@@ -248,7 +248,7 @@ export default function SprayApp({ user }) {
     <ErrorBoundary>
       {/* Module switcher — always visible, sits above everything */}
       <div style={{ backgroundColor: '#0F1D15' }} className="text-white">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-1">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-1">
           <button
             onClick={() => setModule('spray')}
             className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
@@ -677,7 +677,7 @@ function SprayOpsModule({ user }) {
         if (alerts.length === 0) return null
         const anyExpired = alerts.some((a) => a.level === 'expired')
         return (
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-4">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
             <div className="rounded-2xl border-2 p-3" style={anyExpired ? { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' } : { backgroundColor: '#FEF3DD', borderColor: '#FDE9C8' }}>
               <div className="flex items-start gap-2">
                 <AlertTriangle size={18} className="shrink-0 mt-0.5" style={{ color: anyExpired ? '#B91C1C' : '#92660D' }} />
@@ -701,7 +701,7 @@ function SprayOpsModule({ user }) {
         )
       })()}
 
-      <div className={`${route === 'dashboard' ? 'max-w-7xl' : 'max-w-6xl'} mx-auto px-4 sm:px-6 pb-24`}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-24">
         {route === 'dashboard' && (
           <Dashboard
             sheets={sheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
@@ -820,7 +820,7 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
 
   return (
     <div style={{ backgroundColor: FOREST }} className="text-white">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-4">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4">
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo?.clubName || 'Golf Club'}</p>
@@ -1604,7 +1604,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   const productTargets = [...new Set((s.products || []).flatMap((p) => splitTargets(p.target)))]
 
   return (
-    <div className="pt-6 pb-10 max-w-6xl mx-auto">
+    <div className="pt-6 pb-10 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-5">
         <button onClick={onCancel} className="font-body text-sm font-medium text-slate-400">Cancel</button>
         <h2 className="font-display text-lg font-semibold text-slate-900">{sheet.status === 'pending' && sheet.directorSig === '' ? 'Spray Sheet' : 'Edit Sheet'}</h2>
@@ -2526,53 +2526,45 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
             )}
           </Card>
 
-          <Card>
-            <FieldLabel>Approval &amp; Distribution</FieldLabel>
-            <div className="mt-3 space-y-3">
-              <FlowStep done label="Spray sheet created" sub={`by ${sheet.operator || 'Superintendent'}`} icon={<Check size={13} />} />
-              <FlowStep done={sheet.status === 'approved'} active={sheet.status === 'pending'}
-                label={sheet.status === 'approved' ? 'Approved by Director' : 'Awaiting Director approval'}
-                sub={sheet.status === 'approved' ? `${sheet.directorSig} · ${new Date(sheet.directorDate).toLocaleString()}` : 'Sent to your boss for sign-off'}
-                icon={<ShieldCheck size={13} />} />
-              <FlowStep done={sheet.status === 'approved'}
-                label="Live on all iPads"
-                sub={sheet.status === 'approved' ? 'Synced to the cloud — visible to every device now' : 'Will sync automatically once approved'}
-                icon={<Cloud size={13} />} />
-            </div>
-
-            {sheet.status === 'pending' && approve && (
-              <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
-                <Select value={sig} onChange={(v) => { setSig(v); setPinError('') }} options={directors} placeholder="Select director to approve..." />
-                {sig && (
-                  <>
-                    <div>
-                      <FieldLabel>Approval PIN {directorPins[sig] ? '' : '(none set — add one in Settings → People)'}</FieldLabel>
-                      <input type="password" inputMode="numeric" value={dirPin} onChange={(e) => { setDirPin(e.target.value.replace(/\D/g, '').slice(0, 8)); setPinError('') }} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tracking-widest" placeholder="Enter your PIN" />
-                      {pinError && <p className="font-body text-[11px] text-red-500 mt-1">{pinError}</p>}
-                    </div>
-                    <div>
-                      <FieldLabel>Director signature</FieldLabel>
-                      <SignaturePad value={dirSig} onChange={setDirSig} />
-                    </div>
-                  </>
-                )}
-                <button onClick={doApprove} disabled={!sig || !dirSig || (directorPins[sig] && !dirPin)} className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
-                  <CloudUpload size={15} /> Approve &amp; Push to iPads
-                </button>
-              </div>
-            )}
-            {sheet.status === 'approved' && sheet.directorSignature && (
-              <div className="mt-4 pt-4 border-t border-slate-100">
-                <p className="font-body text-[11px] text-slate-400 mb-1">Director signature — {sheet.directorSig}</p>
-                <img src={sheet.directorSignature} alt="Director signature" className="h-12 rounded border border-slate-100 bg-white" />
-              </div>
-            )}
-            {sheet.status === 'pending' && !approve && (
-              <p className="mt-4 pt-4 border-t border-slate-100 font-body text-xs text-slate-400">
-                Only the Director of Grounds can approve. This sheet is waiting for sign-off.
-              </p>
-            )}
-          </Card>
+          {/* Approval — only shown when there's actually something to do or show
+              (the status is already on the pill up top, so no step-timeline). */}
+          {(sheet.status === 'pending' || (sheet.status === 'approved' && sheet.directorSignature)) && (
+            <Card>
+              {sheet.status === 'pending' && approve && (
+                <div className="space-y-2">
+                  <FieldLabel noMargin>Approve this sheet</FieldLabel>
+                  <Select value={sig} onChange={(v) => { setSig(v); setPinError('') }} options={directors} placeholder="Select director to approve..." />
+                  {sig && (
+                    <>
+                      <div>
+                        <FieldLabel>Approval PIN {directorPins[sig] ? '' : '(none set — add one in Settings → People)'}</FieldLabel>
+                        <input type="password" inputMode="numeric" value={dirPin} onChange={(e) => { setDirPin(e.target.value.replace(/\D/g, '').slice(0, 8)); setPinError('') }} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tracking-widest" placeholder="Enter your PIN" />
+                        {pinError && <p className="font-body text-[11px] text-red-500 mt-1">{pinError}</p>}
+                      </div>
+                      <div>
+                        <FieldLabel>Director signature</FieldLabel>
+                        <SignaturePad value={dirSig} onChange={setDirSig} />
+                      </div>
+                    </>
+                  )}
+                  <button onClick={doApprove} disabled={!sig || !dirSig || (directorPins[sig] && !dirPin)} className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
+                    <CloudUpload size={15} /> Approve &amp; Push to iPads
+                  </button>
+                </div>
+              )}
+              {sheet.status === 'approved' && sheet.directorSignature && (
+                <div>
+                  <p className="font-body text-[11px] text-slate-400 mb-1">Director signature — {sheet.directorSig}</p>
+                  <img src={sheet.directorSignature} alt="Director signature" className="h-12 rounded border border-slate-100 bg-white" />
+                </div>
+              )}
+              {sheet.status === 'pending' && !approve && (
+                <p className="font-body text-xs text-slate-400">
+                  Only the Director of Grounds can approve. This sheet is waiting for sign-off.
+                </p>
+              )}
+            </Card>
+          )}
 
           {/* Field log — appears once approved; where the crew records the spray */}
           {sheet.status === 'approved' && (
@@ -5398,7 +5390,7 @@ function WhiteboardModule({ user }) {
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
       <div style={{ backgroundColor: FOREST }} className="text-white">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-4 flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4 flex items-center gap-3">
           <button onClick={() => setDrawer(true)} className="md:hidden w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }} aria-label="Open menu"><Menu size={18} /></button>
           <div className="min-w-0">
             <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo.clubName || 'Golf Club'}</p>
@@ -5435,7 +5427,7 @@ function WhiteboardModule({ user }) {
         </div>
       )}
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-24 pt-5 md:flex md:gap-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-24 pt-5 md:flex md:gap-6">
         <aside className="hidden md:block w-52 shrink-0">
           <div className="bg-white rounded-2xl border border-black/5 p-2 shadow-sm sticky top-4"><Nav /></div>
         </aside>
@@ -6156,7 +6148,7 @@ function TurfPerformanceModule() {
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
       <div style={{ backgroundColor: FOREST }} className="text-white">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4">
           <div className="mb-4">
             <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{turf.courseInfo?.clubName || 'Golf Club'}</p>
             <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
@@ -6171,7 +6163,7 @@ function TurfPerformanceModule() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-24 pt-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-24 pt-6">
         {route === 'dashboard' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} clippings={clippings} soilTests={soilTests} practices={practices} speeds={speeds} hasLocation={turf.location?.lat != null} onGo={setRoute} />
