@@ -700,7 +700,7 @@ function SprayOpsModule({ user }) {
         )
       })()}
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-24">
+      <div className={`${route === 'dashboard' ? 'max-w-7xl' : 'max-w-6xl'} mx-auto px-4 sm:px-6 pb-24`}>
         {route === 'dashboard' && (
           <Dashboard
             sheets={sheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
@@ -991,28 +991,6 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   if (pgrAlerts > 0) attention.push({ label: `${pgrAlerts} PGR reapply due`, tone: 'warn' })
   if (lowStock.length > 0) attention.push({ label: `${lowStock.length} product${lowStock.length > 1 ? 's' : ''} low on stock`, tone: 'bad' })
 
-  // ── Spray Advisor — merge fungicide cover, PGR timing and due program apps
-  // into one ranked, per-area "what needs attention" list with a one-tap sheet.
-  const advisor = manage ? (() => {
-    const byArea = {}
-    const add = (area, reason, sev) => {
-      if (!area) return
-      if (!byArea[area]) byArea[area] = { area, reasons: [], sev: 0 }
-      if (!byArea[area].reasons.includes(reason)) byArea[area].reasons.push(reason)
-      byArea[area].sev = Math.max(byArea[area].sev, sev)
-    }
-    diseaseRows.forEach((r) => {
-      if (r.status === 'expired') add(r.area, 'Fungicide cover gone', 3)
-      else if (r.status === 'soon') add(r.area, r.remaining != null ? `Fungicide cover low (~${r.remaining}d)` : 'Fungicide cover low', 2)
-    })
-    pgrRows.forEach((r) => {
-      if (r.status === 'due') add(r.area, 'PGR reapply due', 3)
-      else if (r.status === 'soon') add(r.area, 'PGR reapply soon', 2)
-    })
-    upcomingGroups.forEach((g) => add(g.area, `${g.items.length} planned app${g.items.length > 1 ? 's' : ''} due ${fmtDate(g.date)}`, 2))
-    return Object.values(byArea).sort((a, b) => b.sev - a.sev || a.area.localeCompare(b.area))
-  })() : []
-
   return (
     <div className="pt-6 space-y-6">
       {manage && (
@@ -1023,83 +1001,12 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
         </div>
       )}
 
-      {/* Morning briefing — spray window + needs-attention at a glance */}
+      {/* Morning briefing — spray window + needs-attention at a glance (full width) */}
       {manage && (
         <SprayWindowStrip current={wx.current} today={wx.todayWindow} hasLocation={hasLocation} attention={attention} onGoWeather={onGoWeather} />
       )}
 
-      {/* Spray Advisor — per-area, what needs attention, with a one-tap sheet */}
-      {manage && advisor.length > 0 && (
-        <div className="paper-card p-4">
-          <p className="eyebrow mb-2 flex items-center gap-1.5"><Sparkles size={13} style={{ color: GOLD }} /> Spray Advisor — needs attention</p>
-          <div className="space-y-2">
-            {advisor.map((a) => (
-              <div key={a.area} className="flex items-center gap-3 rounded-[10px] px-3 py-2.5" style={{ backgroundColor: a.sev >= 3 ? '#FEF2F2' : '#FBF7EC', border: `1px solid ${a.sev >= 3 ? '#FBD3D3' : '#EFE3C0'}` }}>
-                <div className="min-w-0 flex-1">
-                  <p className="font-body text-sm font-bold" style={{ color: FOREST }}>{a.area}</p>
-                  <div className="flex flex-wrap gap-1.5 mt-1">
-                    {a.reasons.map((r, i) => (
-                      <span key={i} className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-md" style={{ backgroundColor: 'white', color: a.sev >= 3 ? '#B91C1C' : '#92660D', border: '1px solid rgba(0,0,0,0.06)' }}>{r}</span>
-                    ))}
-                  </div>
-                </div>
-                <button onClick={() => onNew(a.area)} className="font-body text-[11px] font-bold px-3 py-2 rounded-full text-white shrink-0" style={{ backgroundColor: FOREST }}>Start sheet</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Rainfall year-to-date tile — taps through to the full tracker */}
-      {manage && hasLocation && wx.season.length > 0 && (() => {
-        const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today)
-        return (
-          <button onClick={onGoWeather} className="w-full paper-card p-4 flex items-center justify-between gap-3 transition">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8EEF6' }}>
-                <CloudRain size={18} style={{ color: '#3A6187' }} />
-              </div>
-              <div className="text-left min-w-0">
-                <p className="eyebrow">Rain · {rain.year}</p>
-                <p className="font-display text-lg font-bold leading-tight tnum" style={{ color: FOREST }}>{rain.ytd.toFixed(2)}" <span className="font-body text-[11px] font-semibold" style={{ color: INK_3 }}>year to date</span></p>
-              </div>
-            </div>
-            <div className="text-right shrink-0">
-              <p className="font-body text-sm font-bold tnum" style={{ color: INK_2 }}>{rain.last30.toFixed(2)}"</p>
-              <p className="font-body text-[10px]" style={{ color: INK_3 }}>last 30 days ›</p>
-            </div>
-          </button>
-        )
-      })()}
-
-      {/* Soil-temp timing nudge — a window is open based on current soil temp */}
-      {manage && timingNudge && openWins.length > 0 && (
-        <div className="rounded-[10px] p-4" style={{ backgroundColor: '#EEF4EF', border: `1px solid #CFE0D5` }}>
-          <div className="flex items-start justify-between gap-2 mb-1.5">
-            <p className="font-body text-sm font-bold flex items-center gap-1.5" style={{ color: FERN }}>
-              <Sprout size={15} /> Soil temp <span className="tnum">{soilNow}°F</span> — good timing now
-            </p>
-            <button onClick={toggleTimingNudge} className="font-body text-[10px] font-bold shrink-0" style={{ color: INK_3 }} title="Turn off this nudge">Hide</button>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {openWins.map((w) => (
-              <span key={w.id} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-md" style={{ backgroundColor: PAPER, color: FERN, border: `1px solid #DCE8E0` }}>{w.label}</span>
-            ))}
-          </div>
-          <p className="font-body text-[10px] mt-2" style={{ color: INK_3 }}>Based on your current 2&quot; soil temperature. See Turf → Timing for the full list.</p>
-        </div>
-      )}
-
-      {/* Calendar — upcoming (planned) and past (actual) sprays at a glance */}
-      <SprayCalendar
-        sheets={sheets}
-        products={products}
-        programApps={manage ? programApps : []}
-        onOpenSheet={onOpen}
-        onCreateFromProgram={manage ? onCreateFromProgram : undefined}
-      />
-
-      {/* Stats cluster — one connected instrument panel, hairline between cells */}
+      {/* Stats cluster — one connected instrument panel, scans across full width */}
       <div className="paper-card stat-cluster grid grid-cols-4 overflow-hidden">
         <StatCard icon={<ClipboardList size={16} />} label="Pending Approval" value={pending.length} accent={pending.length > 0 ? '#B45309' : FERN} />
         <StatCard icon={<ShieldCheck size={16} />} label="Approved" value={approved.length} accent={FERN} />
@@ -1107,84 +1014,141 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
         <StatCard icon={<AlertTriangle size={16} />} label="Low Stock" value={lowStock.length} accent={lowStock.length > 0 ? '#DC2626' : FERN} />
       </div>
 
-      {/* Insight cards — laid two-across on wide screens so there's less scrolling */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-      {/* Disease protection — how much fungicide cover is left, per area */}
-      {manage && diseaseRows.some((r) => r.last) && (
-        <DiseaseProtectionCard rows={diseaseRows} heatOn={heatOn} onToggleHeat={toggleHeat} heatAvailable={wx.breakdownTemps.length > 0} />
-      )}
+      {/* Wide split — the day's work in a broad main column, quick-glance boxes
+          off to the side so information scans across instead of down. */}
+      <div className="lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start space-y-6 lg:space-y-0">
+        {/* ── MAIN column ─────────────────────────────────────────────── */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Calendar — upcoming (planned) and past (actual) sprays at a glance */}
+          <SprayCalendar
+            sheets={sheets}
+            products={products}
+            programApps={manage ? programApps : []}
+            onOpenSheet={onOpen}
+            onCreateFromProgram={manage ? onCreateFromProgram : undefined}
+          />
 
-      {/* PGR reapply timing — GDD since each area's last growth-reg spray */}
-      {manage && pgrRows.length > 0 && (
-        <PgrTimingCard rows={pgrRows} target={PGR_TARGET} />
-      )}
+          {/* Insight cards — two-across on very wide screens so there's less scrolling */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+            {/* Disease protection — how much fungicide cover is left, per area */}
+            {manage && diseaseRows.some((r) => r.last) && (
+              <DiseaseProtectionCard rows={diseaseRows} heatOn={heatOn} onToggleHeat={toggleHeat} heatAvailable={wx.breakdownTemps.length > 0} />
+            )}
 
-      {/* From the Program — turn the plan into spray sheets */}
-      {manage && upcomingGroups.length > 0 && (
-        <section>
-          <SectionHeader title="From the Program" subtitle="Planned in the next 7 days — tap to start a spray sheet" />
-          <div className="space-y-2">
-            {upcomingGroups.map((g) => (
-              <div key={`${g.date}|${g.area}`} className="paper-card p-4 flex items-center justify-between gap-3" style={{ borderColor: '#E8CE92' }}>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-body text-[11px] font-bold flex items-center gap-1 tnum" style={{ color: '#92660D' }}>
-                      <Calendar size={11} />{new Date(g.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                    </span>
-                    <span className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{g.area}</span>
+            {/* PGR reapply timing — GDD since each area's last growth-reg spray */}
+            {manage && pgrRows.length > 0 && (
+              <PgrTimingCard rows={pgrRows} target={PGR_TARGET} />
+            )}
+          </div>
+
+          {/* From the Program — turn the plan into spray sheets */}
+          {manage && upcomingGroups.length > 0 && (
+            <section>
+              <SectionHeader title="From the Program" subtitle="Planned in the next 7 days — tap to start a spray sheet" />
+              <div className="space-y-2">
+                {upcomingGroups.map((g) => (
+                  <div key={`${g.date}|${g.area}`} className="paper-card p-4 flex items-center justify-between gap-3" style={{ borderColor: '#E8CE92' }}>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-body text-[11px] font-bold flex items-center gap-1 tnum" style={{ color: '#92660D' }}>
+                          <Calendar size={11} />{new Date(g.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                        </span>
+                        <span className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{g.area}</span>
+                      </div>
+                      <p className="font-body text-[11px] truncate" style={{ color: INK_3 }}>
+                        {g.items.map((a) => a.product).join(', ')}
+                      </p>
+                    </div>
+                    <button onClick={() => onCreateFromProgram(g.items)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white shrink-0 flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
+                      <Plus size={13} /> Create sheet
+                    </button>
                   </div>
-                  <p className="font-body text-[11px] truncate" style={{ color: INK_3 }}>
-                    {g.items.map((a) => a.product).join(', ')}
-                  </p>
-                </div>
-                <button onClick={() => onCreateFromProgram(g.items)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white shrink-0 flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
-                  <Plus size={13} /> Create sheet
-                </button>
+                ))}
               </div>
-            ))}
-          </div>
-        </section>
-      )}
+            </section>
+          )}
 
-      {manage && lowStock.length > 0 && (
-        <section>
-          <SectionHeader title="Low Stock" subtitle="Running low — order soon" />
-          <div className="paper-card overflow-hidden" style={{ borderColor: '#E9C9C2' }}>
-            {lowStock.map((p, i) => (
-              <div key={p.name} className="flex items-center justify-between px-4 py-3" style={i !== 0 ? { borderTop: `1px solid ${HAIR}` } : undefined}>
-                <span className="font-body text-sm" style={{ color: INK_2 }}>{p.name}</span>
-                <span className="font-body text-xs font-bold tnum" style={{ color: '#C0392B' }}>{p.stock} {p.unit} left</span>
+          {pending.length > 0 && (
+            <section>
+              <SectionHeader title="Awaiting Approval" subtitle="Sent to the Director — not yet live on iPads" />
+              <div className="space-y-2">
+                {pending.map((s) => <SheetRow key={s.id} sheet={s} onClick={() => onOpen(s)} highlight />)}
               </div>
-            ))}
-          </div>
-        </section>
-      )}
-      </div>
+            </section>
+          )}
 
-      {pending.length > 0 && (
-        <section>
-          <SectionHeader title="Awaiting Approval" subtitle="Sent to the Director — not yet live on iPads" />
-          <div className="space-y-2">
-            {pending.map((s) => <SheetRow key={s.id} sheet={s} onClick={() => onOpen(s)} highlight />)}
-          </div>
-        </section>
-      )}
-
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <SectionHeader title="Recent Sheets" noMargin />
-          <button onClick={onSeeAll} className="font-body text-xs font-semibold flex items-center gap-0.5" style={{ color: FERN }}>
-            See all <ChevronRight size={13} />
-          </button>
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <SectionHeader title="Recent Sheets" noMargin />
+              <button onClick={onSeeAll} className="font-body text-xs font-semibold flex items-center gap-0.5" style={{ color: FERN }}>
+                See all <ChevronRight size={13} />
+              </button>
+            </div>
+            {sheets.length === 0 ? (
+              <EmptyState onNew={onNew} manage={manage} />
+            ) : (
+              <div className="space-y-2">
+                {sheets.slice(0, 6).map((s) => <SheetRow key={s.id} sheet={s} onClick={() => onOpen(s)} />)}
+              </div>
+            )}
+          </section>
         </div>
-        {sheets.length === 0 ? (
-          <EmptyState onNew={onNew} manage={manage} />
-        ) : (
-          <div className="space-y-2">
-            {sheets.slice(0, 6).map((s) => <SheetRow key={s.id} sheet={s} onClick={() => onOpen(s)} />)}
-          </div>
-        )}
-      </section>
+
+        {/* ── SIDEBAR — quick-glance boxes ────────────────────────────── */}
+        <div className="space-y-4">
+          {/* Rain — a little year-to-date box; taps through to the full tracker */}
+          {manage && hasLocation && wx.season.length > 0 && (() => {
+            const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today)
+            return (
+              <button onClick={onGoWeather} className="w-full paper-card p-4 text-left transition">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8EEF6' }}>
+                    <CloudRain size={16} style={{ color: '#3A6187' }} />
+                  </div>
+                  <p className="eyebrow">Rain · {rain.year}</p>
+                </div>
+                <p className="font-display text-2xl font-bold leading-none tnum" style={{ color: FOREST }}>{rain.ytd.toFixed(2)}"</p>
+                <p className="font-body text-[11px] mt-0.5" style={{ color: INK_3 }}>year to date</p>
+                <div className="mt-2.5 pt-2.5 flex items-center justify-between" style={{ borderTop: `1px solid ${HAIR}` }}>
+                  <span className="font-body text-[11px]" style={{ color: INK_3 }}>Last 30 days ›</span>
+                  <span className="font-body text-sm font-bold tnum" style={{ color: INK_2 }}>{rain.last30.toFixed(2)}"</span>
+                </div>
+              </button>
+            )
+          })()}
+
+          {/* Soil-temp timing nudge — a window is open based on current soil temp */}
+          {manage && timingNudge && openWins.length > 0 && (
+            <div className="rounded-[10px] p-4" style={{ backgroundColor: '#EEF4EF', border: `1px solid #CFE0D5` }}>
+              <div className="flex items-start justify-between gap-2 mb-1.5">
+                <p className="font-body text-sm font-bold flex items-center gap-1.5" style={{ color: FERN }}>
+                  <Sprout size={15} /> Soil <span className="tnum">{soilNow}°F</span> — good timing
+                </p>
+                <button onClick={toggleTimingNudge} className="font-body text-[10px] font-bold shrink-0" style={{ color: INK_3 }} title="Turn off this nudge">Hide</button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {openWins.map((w) => (
+                  <span key={w.id} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-md" style={{ backgroundColor: PAPER, color: FERN, border: `1px solid #DCE8E0` }}>{w.label}</span>
+                ))}
+              </div>
+              <p className="font-body text-[10px] mt-2" style={{ color: INK_3 }}>Based on your current 2&quot; soil temperature. See Turf → Timing for the full list.</p>
+            </div>
+          )}
+
+          {/* Low stock — running low, order soon */}
+          {manage && lowStock.length > 0 && (
+            <div className="paper-card overflow-hidden" style={{ borderColor: '#E9C9C2' }}>
+              <p className="eyebrow px-4 pt-3.5 pb-1 flex items-center gap-1.5" style={{ color: '#C0392B' }}><AlertTriangle size={12} /> Low Stock</p>
+              {lowStock.map((p) => (
+                <div key={p.name} className="flex items-center justify-between px-4 py-2.5" style={{ borderTop: `1px solid ${HAIR}` }}>
+                  <span className="font-body text-sm truncate mr-2" style={{ color: INK_2 }}>{p.name}</span>
+                  <span className="font-body text-xs font-bold tnum shrink-0" style={{ color: '#C0392B' }}>{p.stock} {p.unit} left</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
