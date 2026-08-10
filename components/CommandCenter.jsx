@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Wind, Droplet, CloudRain, Sprout, Gauge, ClipboardList, ShieldCheck, AlertTriangle, Thermometer, Camera, RefreshCw, Sun, CloudSun, Cloud, CloudDrizzle, CloudSnow, CloudFog, CloudLightning } from 'lucide-react'
 import * as db from '@/lib/db'
 import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, fetchBreakdownTemps, sprayWindow, buildRainYear, gddSince, weatherCodeInfo } from '@/lib/weather'
-import { protectionByArea } from '@/lib/disease'
+import { diseaseCoverageByArea } from '@/lib/disease'
 import { suppressionMap } from '@/lib/pgr'
 import { sheetApplied } from '@/lib/applied'
 import { localDateISO } from '@/lib/dates'
@@ -75,7 +75,7 @@ export default function CommandCenter() {
   const forecast7 = (wx.forecast || []).filter((d) => d.date >= today).slice(0, 7).map((d) => ({ ...d, spray: sprayWindow(d) }))
   const todaySpray = forecast7[0]?.spray || null
 
-  const disease = protectionByArea(sheets, products, areas, undefined, wx.breakdownTemps.length ? wx.breakdownTemps : null).filter((r) => r.last)
+  const coverage = diseaseCoverageByArea(sheets, products, areas, undefined, wx.breakdownTemps.length ? wx.breakdownTemps : null)
 
   // PGR reapply per area (GDD since last suppression, only areas running a PGR).
   const pgr = (() => {
@@ -118,7 +118,7 @@ export default function CommandCenter() {
   const advisor = (() => {
     const byArea = {}
     const add = (area, reason, sev) => { if (!area) return; if (!byArea[area]) byArea[area] = { area, reasons: [], sev: 0 }; if (!byArea[area].reasons.includes(reason)) byArea[area].reasons.push(reason); byArea[area].sev = Math.max(byArea[area].sev, sev) }
-    disease.forEach((r) => { if (r.status === 'expired') add(r.area, 'Cover gone', 3); else if (r.status === 'soon') add(r.area, 'Cover low', 2) })
+    coverage.forEach((a) => { if (a.counts.expired > 0) add(a.area, `${a.counts.expired} disease${a.counts.expired > 1 ? 's' : ''} exposed`, 3); else if (a.counts.soon > 0) add(a.area, `${a.counts.soon} running out`, 2) })
     pgr.forEach((r) => { if (r.status === 'due') add(r.area, 'PGR due', 3); else if (r.status === 'soon') add(r.area, 'PGR soon', 2) })
     return Object.values(byArea).sort((a, b) => b.sev - a.sev).slice(0, 6)
   })()
@@ -206,27 +206,30 @@ export default function CommandCenter() {
           ) : <Empty text="All areas covered — nothing pressing." good />}
         </Widget>
 
-        {/* Disease cover */}
-        <Widget title="Fungicide Cover" icon={ShieldCheck} span={2}>
-          {disease.length ? (
-            <div className="space-y-2">
-              {disease.slice(0, 6).map((r) => (
-                <div key={r.area}>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="font-body text-[13px] font-semibold text-slate-700 truncate">{r.area}</span>
-                    <span className="font-body text-[11px] font-bold" style={{ color: covColor(r.status) }}>{r.status === 'expired' ? 'Exposed' : `${r.remaining ?? '—'}d left`}</span>
-                  </div>
-                  <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: '#E6EBE7' }}><div className="h-full rounded-full" style={{ width: `${Math.max(3, r.pct)}%`, backgroundColor: covColor(r.status) }} /></div>
-                  {r.diseases?.length > 0 && (
-                    <div className="mt-1 flex flex-wrap items-center gap-1">
-                      <span className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: r.status === 'expired' ? '#C0392B' : FERN }}>{r.status === 'expired' ? 'Was covering' : 'Covers'}</span>
-                      {r.diseases.map((d, i) => (
-                        <span key={i} className="font-body text-[11px] font-semibold px-1.5 py-0.5 rounded" style={r.status === 'expired' ? { backgroundColor: '#FBECEA', color: '#9B3B2E' } : { backgroundColor: '#E8F3EC', color: FERN }}>{d}</span>
+        {/* Disease coverage — each disease tracked on its own residual, per area */}
+        <Widget title="Disease Coverage" icon={ShieldCheck} span={2}>
+          {coverage.length ? (
+            <div className="space-y-3">
+              {coverage.slice(0, 6).map((a) => {
+                const chip = a.counts.expired > 0 ? { t: `${a.counts.expired} exposed`, c: '#DC2626' } : a.counts.soon > 0 ? { t: `${a.counts.soon} running out`, c: '#CA8A04' } : { t: 'All protected', c: FERN }
+                return (
+                  <div key={a.area}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-body text-[13px] font-bold text-slate-700 truncate">{a.area}</span>
+                      <span className="font-body text-[11px] font-bold" style={{ color: chip.c }}>{chip.t}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {a.diseases.map((d) => (
+                        <div key={d.disease} className="flex items-center gap-2 rounded-md px-2 py-1" style={{ backgroundColor: d.status === 'expired' ? '#FEF2F2' : d.status === 'soon' ? '#FEF7EC' : '#F0F6F1' }}>
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: covColor(d.status) }} />
+                          <span className="font-body text-[12px] font-semibold text-slate-700 flex-1 truncate">{d.disease}</span>
+                          <span className="font-body text-[11px] font-bold tnum shrink-0" style={{ color: covColor(d.status) }}>{d.status === 'expired' ? 'reapply' : `${d.remaining}d`}</span>
+                        </div>
                       ))}
                     </div>
-                  )}
-                </div>
-              ))}
+                  </div>
+                )
+              })}
             </div>
           ) : <Empty text="No fungicide sprays logged yet." />}
         </Widget>

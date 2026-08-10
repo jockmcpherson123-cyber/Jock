@@ -24,7 +24,7 @@ import {
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder, mixRank } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate, buildRainYear, weatherCodeInfo } from '@/lib/weather'
-import { protectionByArea, protectionAlertCount } from '@/lib/disease'
+import { diseaseCoverageByArea, coverageGapCount } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
@@ -917,8 +917,8 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
     try { window.localStorage.setItem('heatAdjustProtection', nv ? '1' : '0') } catch { /* ignore */ }
     return nv
   })
-  const diseaseRows = manage ? protectionByArea(sheets, products, areas, undefined, heatOn ? wx.breakdownTemps : null) : []
-  const diseaseAlerts = protectionAlertCount(diseaseRows)
+  const coverage = manage ? diseaseCoverageByArea(sheets, products, areas, undefined, heatOn ? wx.breakdownTemps : null) : []
+  const diseaseAlerts = coverageGapCount(coverage)
 
   // ── Soil-temp application timing — nudge when a window opens (toggle, per device).
   const soilNow = currentSoilTemp(wx.breakdownTemps)
@@ -988,7 +988,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
   const attention = []
   if (pending.length > 0) attention.push({ label: `${pending.length} awaiting approval`, tone: 'warn' })
-  if (diseaseAlerts > 0) attention.push({ label: `${diseaseAlerts} area${diseaseAlerts > 1 ? 's' : ''} low on fungicide cover`, tone: 'bad' })
+  if (diseaseAlerts > 0) attention.push({ label: `${diseaseAlerts} disease${diseaseAlerts > 1 ? 's' : ''} exposed or running out`, tone: 'bad' })
   if (pgrAlerts > 0) attention.push({ label: `${pgrAlerts} PGR reapply due`, tone: 'warn' })
   if (lowStock.length > 0) attention.push({ label: `${lowStock.length} product${lowStock.length > 1 ? 's' : ''} low on stock`, tone: 'bad' })
 
@@ -1031,9 +1031,9 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
           {/* Insight cards — two-across on very wide screens so there's less scrolling */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-            {/* Disease protection — how much fungicide cover is left, per area */}
-            {manage && diseaseRows.some((r) => r.last) && (
-              <DiseaseProtectionCard rows={diseaseRows} heatOn={heatOn} onToggleHeat={toggleHeat} heatAvailable={wx.breakdownTemps.length > 0} />
+            {/* Disease coverage — per disease, per area: what's covered & for how long */}
+            {manage && coverage.length > 0 && (
+              <DiseaseCoverageCard areas={coverage} heatOn={heatOn} onToggleHeat={toggleHeat} heatAvailable={wx.breakdownTemps.length > 0} />
             )}
 
             {/* PGR reapply timing — GDD since each area's last growth-reg spray */}
@@ -1270,72 +1270,67 @@ function ForecastStrip({ forecast = [], today, onGoWeather }) {
   )
 }
 
-// Disease protection — a shrinking bar per area showing how much fungicide cover
-// remains from the last spray. Leads with whatever is exposed or nearly so.
-const PROT_STYLE = {
-  expired: { bg: '#FEE2E2', fg: '#B91C1C', bar: '#DC2626', label: 'Exposed' },
-  soon: { bg: '#FEF3DD', fg: '#92660D', bar: '#D97706', label: 'Running out' },
-  ok: { bg: '#E8F3EC', fg: FERN, bar: FERN, label: 'Protected' },
+// Per-disease coverage — one status line per disease, per area. Reads like a
+// checklist: "Dollar Spot — Protected — Secure, 9d left". Each disease is
+// tracked on its OWN residual, so an earlier product still covering something
+// the last tank didn't isn't dropped. Worst (exposed) diseases float to the top.
+const DIS_STYLE = {
+  expired: { row: '#FEF2F2', dot: '#DC2626', fg: '#B91C1C', label: 'Exposed' },
+  soon: { row: '#FEF7EC', dot: '#D97706', fg: '#92660D', label: 'Running out' },
+  ok: { row: '#F0F6F1', dot: FERN, fg: FERN, label: 'Protected' },
 }
-function DiseaseProtectionCard({ rows, heatOn, onToggleHeat, heatAvailable }) {
-  const shown = rows.filter((r) => r.last)
-  const heatAdjusted = shown.some((r) => r.mode === 'temp')
-  // Projected reapply date = today + the days of cover left (heat-adjusted in temp
-  // mode), so this card counts FORWARD to the next spray like Growth-Reg timing.
-  const reapplyDate = (r) => {
-    if (r.status === 'expired' || r.remaining == null || r.remaining <= 0) return null
-    const d = new Date(); d.setDate(d.getDate() + r.remaining)
-    return d.toISOString().slice(0, 10)
+function DiseaseCoverageCard({ areas, heatOn, onToggleHeat, heatAvailable }) {
+  const heatAdjusted = areas.some((a) => a.diseases.some((d) => d.mode === 'temp'))
+  const areaChip = (a) => {
+    if (a.counts.expired > 0) return { text: `${a.counts.expired} exposed`, ...DIS_STYLE.expired }
+    if (a.counts.soon > 0) return { text: `${a.counts.soon} running out`, ...DIS_STYLE.soon }
+    return { text: 'All protected', ...DIS_STYLE.ok }
   }
   return (
     <section>
       <div className="flex items-end justify-between gap-2 mb-3">
-        <SectionHeader title="Disease Protection" subtitle="How far each area is through its fungicide window — fills up as it's time to reapply" noMargin />
-        {onToggleHeat && (
-          <button onClick={onToggleHeat} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-md flex items-center gap-1.5 shrink-0 transition" style={heatOn ? { backgroundColor: '#FEF3DD', color: '#92660D' } : { backgroundColor: PAPER, color: INK_3, border: `1px solid ${HAIR}` }} title="Use the window up faster in heat">
+        <SectionHeader title="Disease Coverage" subtitle="Each disease tracked on its own — the most recent spray still protecting it, and how long it lasts" noMargin />
+        {onToggleHeat && heatAvailable && (
+          <button onClick={onToggleHeat} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-md flex items-center gap-1.5 shrink-0 transition" style={heatOn ? { backgroundColor: '#FEF3DD', color: '#92660D' } : { backgroundColor: PAPER, color: INK_3, border: `1px solid ${HAIR}` }} title="Use cover up faster in heat">
             <Thermometer size={12} /> Heat {heatOn ? 'on' : 'off'}
           </button>
         )}
       </div>
-      <div className="paper-card p-4 space-y-3">
-        {shown.map((r) => {
-          const st = PROT_STYLE[r.status] || PROT_STYLE.ok
-          // Forward bar: fills as the window is used up (0% just-sprayed → 100% due).
-          const usedPct = r.status === 'expired' ? 100 : Math.max(4, Math.min(100, Math.round(100 - r.pct)))
-          const date = reapplyDate(r)
+      <div className="paper-card p-4 space-y-4">
+        {areas.map((a) => {
+          const chip = areaChip(a)
           return (
-            <div key={r.area}>
-              <div className="flex items-center justify-between mb-1 gap-2">
-                <span className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{r.area}</span>
-                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>{st.label}</span>
+            <div key={a.area}>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <span className="font-body text-sm font-bold truncate" style={{ color: FOREST }}>{a.area}</span>
+                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded shrink-0" style={{ backgroundColor: chip.row, color: chip.fg }}>{chip.text}</span>
               </div>
-              <div className="h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: PAPER_2 }}>
-                <div className="h-full rounded-full transition-all" style={{ width: `${usedPct}%`, backgroundColor: st.bar }} />
+              <div className="space-y-1">
+                {a.diseases.map((d) => {
+                  const st = DIS_STYLE[d.status] || DIS_STYLE.ok
+                  return (
+                    <div key={d.disease} className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5" style={{ backgroundColor: st.row }}>
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: st.dot }} />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-body text-[13px] font-semibold leading-tight truncate" style={{ color: FOREST }}>{d.disease}</p>
+                        <p className="font-body text-[10px] leading-tight truncate" style={{ color: INK_3 }}>{d.product} · {fmtDate(d.date)}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="font-body text-[11px] font-bold leading-tight" style={{ color: st.fg }}>{st.label}</p>
+                        <p className="font-body text-[10px] leading-tight tnum" style={{ color: INK_3 }}>
+                          {d.status === 'expired' ? 'reapply now' : `${d.remaining}d left${d.mode === 'temp' ? ' · heat' : ''}`}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
-              <p className="font-body text-[10px] mt-0.5 truncate" style={{ color: INK_3 }}>
-                Last: {r.last.products.join(', ')} · {fmtDate(r.last.date)} · {r.mode === 'temp' ? `${r.window}-day label, heat-adjusted` : `${r.window}-day window`}
-              </p>
-              {r.diseases?.length > 0 && (
-                <div className="mt-1 flex flex-wrap items-center gap-1">
-                  <span className="font-body text-[9px] font-bold uppercase tracking-wide shrink-0" style={{ color: r.status === 'expired' ? '#C0392B' : FERN }}>
-                    {r.status === 'expired' ? 'Was covering' : 'Covers'}
-                  </span>
-                  {r.diseases.map((d, i) => (
-                    <span key={i} className="font-body text-[10px] font-semibold px-1.5 py-0.5 rounded" style={r.status === 'expired' ? { backgroundColor: '#FBECEA', color: '#9B3B2E' } : { backgroundColor: '#E8F3EC', color: FERN }}>{d}</span>
-                  ))}
-                </div>
-              )}
-              <p className="font-body text-[10px] font-semibold mt-0.5 truncate" style={{ color: r.status === 'expired' ? '#B91C1C' : r.status === 'soon' ? '#92660D' : FERN }}>
-                {r.status === 'expired' ? 'Reapply now — cover expired' : `Reapply by ~${fmtDate(date)} (${r.remaining}d${r.mode === 'temp' ? ', heat-adj' : ''})`}
-              </p>
             </div>
           )
         })}
       </div>
       <p className="font-body text-[10px] mt-1.5" style={{ color: INK_3 }}>
-        {heatAdjusted
-          ? 'The bar fills up faster in heat — warm days use up fungicide cover quicker (by soil temperature), not just calendar days. Guidance, not a lab test.'
-          : "Window comes from each fungicide's spray interval (set in Chemical Library). Contact products protect ~7–14 days; systemics longer."}
+        Coverage is worked out from each fungicide&apos;s disease spectrum and spray interval (set in the Chemical Library){heatAdjusted ? ', used up faster on hot days by soil temperature' : ''}. Guidance, not a lab test.
       </p>
     </section>
   )
