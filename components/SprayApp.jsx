@@ -6095,6 +6095,7 @@ function TurfPerformanceModule() {
   const [practices, setPractices] = useState([])
   const [soilTests, setSoilTests] = useState([])
   const [speeds, setSpeeds] = useState([])
+  const [scouting, setScouting] = useState([])
   const [soilSeries, setSoilSeries] = useState([])
   const [loadingTurf, setLoadingTurf] = useState(true)
 
@@ -6102,7 +6103,7 @@ function TurfPerformanceModule() {
     (async () => {
       setLoadingTurf(true)
       try {
-        const [settings, sheets, products, clips, pracs, soils, spds] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts(), db.fetchClippings().catch(() => []), db.fetchCulturalPractices().catch(() => []), db.fetchSoilTests().catch(() => []), db.fetchGreensSpeeds().catch(() => [])])
+        const [settings, sheets, products, clips, pracs, soils, spds, scts] = await Promise.all([db.fetchSettings(), db.fetchSheets(), db.fetchProducts(), db.fetchClippings().catch(() => []), db.fetchCulturalPractices().catch(() => []), db.fetchSoilTests().catch(() => []), db.fetchGreensSpeeds().catch(() => []), db.fetchScouting().catch(() => [])])
         // Prefer the grasses actually on site (from onboarding) for the pickers;
         // fall back to the full library when the club hasn't selected any yet.
         const siteGrasses = settings.courseInfo?.siteGrasses || []
@@ -6112,6 +6113,7 @@ function TurfPerformanceModule() {
         setPractices(pracs)
         setSoilTests(soils)
         setSpeeds(spds)
+        setScouting(scts)
         if (settings.location?.lat != null) {
           const { lat, lng } = settings.location
           // Season archive + forecast merged: the archive lags a few days and has
@@ -6142,6 +6144,9 @@ function TurfPerformanceModule() {
   async function reloadSpeeds() {
     try { setSpeeds(await db.fetchGreensSpeeds()) } catch (e) { console.error(e) }
   }
+  async function reloadScouting() {
+    try { setScouting(await db.fetchScouting()) } catch (e) { console.error(e) }
+  }
   // Save a patch onto courseInfo (e.g. tuned PGR curve targets) and persist.
   async function saveTurfCourse(patch) {
     const next = { ...(turf.courseInfo || {}), ...patch }
@@ -6158,7 +6163,7 @@ function TurfPerformanceModule() {
             <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
           </div>
           <div className="flex gap-1 font-body text-sm overflow-x-auto">
-            {[['dashboard', 'Dashboard'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['knowledge', 'Reference']].map(([key, label]) => (
+            {[['dashboard', 'Dashboard'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['scouting', 'Scouting'], ['knowledge', 'Reference']].map(([key, label]) => (
               <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
                 {label}
               </button>
@@ -6206,7 +6211,125 @@ function TurfPerformanceModule() {
               onAddMany={async (list) => { await db.addGreensSpeeds(list); await reloadSpeeds() }}
               onDelete={async (id) => { await db.deleteGreensSpeed(id); await reloadSpeeds() }} />
         )}
+        {route === 'scouting' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <ScoutingTab scouting={scouting} areas={turf.areas} courseInfo={turf.courseInfo}
+              onAdd={async (s) => { await db.addScouting(s); await reloadScouting() }}
+              onDelete={async (id) => { await db.deleteScouting(id); await reloadScouting() }} />
+        )}
       </div>
+    </div>
+  )
+}
+
+// ── SCOUTING LOG ────────────────────────────────────────────────────────────
+// Snap and tag what you find on the course — disease, weeds, insects, wear —
+// with a photo, area, date and notes. Builds a searchable scouting history.
+const SCOUT_KINDS = ['Disease', 'Weed', 'Insect', 'Wear', 'Nutrient', 'Other']
+const SCOUT_KIND_STYLE = {
+  Disease: { bg: '#FDE7E4', fg: '#B23A2E' }, Weed: { bg: '#E4EFE5', fg: '#2E7D46' },
+  Insect: { bg: '#FEF3DD', fg: '#92660D' }, Wear: { bg: '#EEF2F7', fg: '#475569' },
+  Nutrient: { bg: '#E8EEF6', fg: '#3A6187' }, Other: { bg: '#F1F5F9', fg: '#64748B' },
+}
+function ScoutingTab({ scouting = [], areas = {}, courseInfo = {}, onAdd, onDelete }) {
+  const areaKeys = Object.keys(areas)
+  const [form, setForm] = useState({ area: areaKeys[0] || '', date: localDateISO(), kind: 'Disease', target: '', severity: '', notes: '', photo: '' })
+  const [busy, setBusy] = useState(false)
+  const [filter, setFilter] = useState('All')
+  const fileRef = useRef(null)
+
+  const pickPhoto = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    try {
+      // Reuse the same client-side downscale/compress the handbook uses.
+      const reader = new FileReader()
+      reader.onload = () => {
+        const img = new window.Image()
+        img.onload = () => {
+          const scale = Math.min(1, 1400 / img.width)
+          const w = Math.round(img.width * scale), h = Math.round(img.height * scale)
+          const c = document.createElement('canvas'); c.width = w; c.height = h
+          c.getContext('2d').drawImage(img, 0, 0, w, h)
+          setForm((f) => ({ ...f, photo: c.toDataURL('image/jpeg', 0.72) }))
+        }
+        img.src = reader.result
+      }
+      reader.readAsDataURL(file)
+    } catch (err) { console.error(err) }
+  }
+
+  const save = async () => {
+    if (!form.area && areaKeys.length) { /* allow blank if no areas */ }
+    setBusy(true)
+    try { await onAdd(form); setForm({ area: form.area, date: localDateISO(), kind: form.kind, target: '', severity: '', notes: '', photo: '' }) }
+    catch (e) { console.error(e) }
+    setBusy(false)
+  }
+
+  const list = filter === 'All' ? scouting : scouting.filter((s) => s.kind === filter)
+
+  return (
+    <div className="pt-2 pb-10">
+      <SectionHeader title="Scouting" subtitle="Photo-log what you find — disease, weeds, insects, wear — by area and date" />
+
+      <Card className="mt-2">
+        <p className="font-display text-base font-semibold text-slate-900 mb-3">Log an observation</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div><FieldLabel>Area</FieldLabel><Select value={form.area} onChange={(v) => setForm({ ...form, area: v })} options={areaKeys} placeholder="Area…" /></div>
+          <div><FieldLabel>Date</FieldLabel><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body bg-white" /></div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <div><FieldLabel>Type</FieldLabel><SearchSelect value={form.kind} options={SCOUT_KINDS} onPick={(v) => setForm({ ...form, kind: v })} sort={false} /></div>
+          <div><FieldLabel>Severity</FieldLabel><SearchSelect value={form.severity} options={['', 'Low', 'Moderate', 'High']} onPick={(v) => setForm({ ...form, severity: v })} sort={false} /></div>
+        </div>
+        <div className="mt-3"><FieldLabel>What is it? (e.g. Dollar Spot, Poa Annua)</FieldLabel><input value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body bg-white" /></div>
+        <div className="mt-3"><FieldLabel>Notes</FieldLabel><textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body bg-white" style={{ resize: 'vertical' }} /></div>
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={pickPhoto} className="hidden" />
+        <div className="mt-3 flex items-center gap-3">
+          {form.photo ? (
+            <div className="relative">
+              <img src={form.photo} alt="" className="w-20 h-20 rounded-lg object-cover border border-slate-200" />
+              <button onClick={() => setForm({ ...form, photo: '' })} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-red-500"><X size={13} /></button>
+            </div>
+          ) : (
+            <button onClick={() => fileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2.5 rounded-xl border flex items-center gap-1.5" style={{ color: FERN, borderColor: '#E2E8F0' }}><ImageIcon size={14} /> Add photo</button>
+          )}
+          <button onClick={save} disabled={busy} className="ml-auto font-body text-sm font-bold px-5 py-2.5 rounded-full text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Log it'}</button>
+        </div>
+      </Card>
+
+      <div className="flex gap-1.5 overflow-x-auto pb-1 mt-4">
+        {['All', ...SCOUT_KINDS].map((k) => (
+          <button key={k} onClick={() => setFilter(k)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={filter === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid #E2E8F0' }}>{k}</button>
+        ))}
+      </div>
+
+      {list.length === 0 ? (
+        <Card><p className="font-body text-sm text-slate-400 text-center py-8">No observations yet. Snap a photo of anything you spot on the course.</p></Card>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {list.map((s) => {
+            const st = SCOUT_KIND_STYLE[s.kind] || SCOUT_KIND_STYLE.Other
+            return (
+              <div key={s.id} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+                {s.photo && <img src={s.photo} alt="" className="w-full h-44 object-cover" />}
+                <div className="p-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: st.bg, color: st.fg }}>{s.kind}</span>
+                    {s.target && <span className="font-body text-sm font-bold text-slate-900">{s.target}</span>}
+                    {s.severity && <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F9', color: '#64748B' }}>{s.severity}</span>}
+                    <button onClick={() => onDelete(s.id)} className="ml-auto text-slate-300 hover:text-red-500 shrink-0"><Trash2 size={15} /></button>
+                  </div>
+                  <p className="font-body text-[11px] text-slate-400 mt-1">{[s.area, fmtDate(s.date)].filter(Boolean).join(' · ')}</p>
+                  {s.notes && <p className="font-body text-[13px] text-slate-600 mt-1.5 whitespace-pre-wrap">{s.notes}</p>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
