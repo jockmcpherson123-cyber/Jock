@@ -13,6 +13,7 @@ import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
 import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
 import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGGER_MODES, GDD_BASES, statusRank, coverageDays, isoAddDays } from '@/lib/triggers'
 import { suppressionMap } from '@/lib/pgr'
+import { sheetApplied } from '@/lib/applied'
 import { localDateISO } from '@/lib/dates'
 import { diseasesForProduct } from '@/lib/fungicides'
 import { DEFAULT_TARGETS, sortByMixOrder } from '@/lib/defaults'
@@ -756,9 +757,14 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const todayIso = isoLocal(_today)
   const in7Iso = isoLocal(_in7)
   const ago30Iso = isoLocal(_ago30)
+  // Once the spray for a planned application has actually been signed off
+  // (its linked sheet is approved/completed/logged), it drops off the "to do"
+  // lists — it's done, not something still coming up or overdue.
+  const doneSheetIds = new Set((sheets || []).filter((s) => sheetApplied(s)).map((s) => s.id))
+  const isEventComplete = (ev) => (ev.items || []).some((i) => i.linkedSheetId && doneSheetIds.has(i.linkedSheetId))
   // Only surface RECENTLY-missed sprays (last 30 days) — not a whole past season.
-  const overdueEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate < todayIso && a.plannedDate >= ago30Iso).sort((a, b) => dateKey(b).localeCompare(dateKey(a)))).slice(0, 3)
-  const thisWeekEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate >= todayIso && a.plannedDate <= in7Iso))
+  const overdueEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate < todayIso && a.plannedDate >= ago30Iso).sort((a, b) => dateKey(b).localeCompare(dateKey(a)))).filter((ev) => !isEventComplete(ev)).slice(0, 3)
+  const thisWeekEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate >= todayIso && a.plannedDate <= in7Iso)).filter((ev) => !isEventComplete(ev))
   const offYearCount = activeProgram ? apps.filter((a) => a.plannedDate && a.plannedDate.slice(0, 4) !== String(activeProgram.year)).length : 0
 
   // Early-order totals for the whole season (respects the area filter).

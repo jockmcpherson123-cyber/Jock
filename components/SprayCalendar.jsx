@@ -10,6 +10,8 @@ import { rotationWarnings } from '@/lib/calc'
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
 const GOLD = '#C9A84C'
+const DONE = '#2C7A7B' // teal — a spray that's actually been done (signed/logged)
+const PENDING = '#D97706'
 // Clubhouse × Instrument restyle tokens (mirror globals.css / SprayApp.jsx)
 const PAPER = '#F9F8F5'
 const HAIR = '#E2E0DB'
@@ -114,12 +116,12 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
             const dayPlanned = programByDate[c.key] || []
 
             // Build de-duplicated area labels for the day: actual sprays first
-            // (green approved / amber pending), then planned (gold).
+            // (teal sprayed / green approved / amber pending), then planned (gold).
             const labels = []
             const seen = new Set()
             daySheets.forEach((s) => {
               const a = shortArea(s.area)
-              if (a && !seen.has(a)) { seen.add(a); labels.push({ area: a, color: s.status === 'approved' ? FERN : '#D97706' }) }
+              if (a && !seen.has(a)) { seen.add(a); labels.push({ area: a, color: s.completed ? DONE : s.status === 'approved' ? FERN : PENDING }) }
             })
             dayPlanned.forEach((a) => {
               const nm = shortArea(a.area)
@@ -155,10 +157,11 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
         </div>
 
         {/* Legend */}
-        <div className="flex items-center gap-4 px-4 py-2 font-body text-[10px]" style={{ borderTop: `1px solid ${HAIR}`, color: INK_3 }}>
+        <div className="flex items-center gap-3.5 px-4 py-2 font-body text-[10px] flex-wrap" style={{ borderTop: `1px solid ${HAIR}`, color: INK_3 }}>
           <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: GOLD }} /> Planned</span>
-          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#D97706' }} /> Pending</span>
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: PENDING }} /> Pending</span>
           <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: FERN }} /> Approved</span>
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: DONE }} /> Sprayed</span>
         </div>
       </div>
 
@@ -188,8 +191,8 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
                           <RotateCw size={9} /> Rotation
                         </span>
                       )}
-                      <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wide" style={s.status === 'approved' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEF3DD', color: '#92660D' }}>
-                        {s.status}
+                      <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wide" style={s.completed ? { backgroundColor: '#E0F0F0', color: DONE } : s.status === 'approved' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEF3DD', color: '#92660D' }}>
+                        {s.completed ? 'sprayed' : s.status}
                       </span>
                     </div>
                   </div>
