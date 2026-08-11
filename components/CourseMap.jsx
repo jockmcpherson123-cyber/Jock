@@ -441,7 +441,7 @@ export default function CourseMap({ user, manage }) {
 
   // ── UI ──────────────────────────────────────────────────────────────────────
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-24">
+    <div className="w-full px-3 sm:px-4 pt-3 pb-4">
       <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
         <div className="flex items-center gap-2">
           <MapPin size={20} style={{ color: FERN }} />
@@ -496,7 +496,7 @@ export default function CourseMap({ user, manage }) {
             </div>
           )}
           <div className="relative">
-            <div ref={mainRef} className="w-full rounded-2xl overflow-hidden border border-black/10" style={{ height: '70vh', minHeight: 420, backgroundColor: '#0b1e12', cursor: addMode || moveMode ? 'crosshair' : '' }} />
+            <div ref={mainRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: 'calc(100vh - 150px)', minHeight: 460, backgroundColor: '#0b1e12', cursor: addMode || moveMode ? 'crosshair' : '' }} />
             {/* Floating controls */}
             <div className="absolute z-[500] top-3 right-3 flex flex-col gap-2">
               <button onClick={recenter} title="Center on me" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: FOREST }}><Navigation size={17} /></button>
@@ -536,7 +536,7 @@ export default function CourseMap({ user, manage }) {
             <div className="rounded-xl px-4 py-3 font-body text-[13px]" style={{ backgroundColor: '#EEF4EF', border: '1px solid #CFE0D5', color: FERN }}>
               <b>1.</b> Pinch-zoom and tap the exact head on the drawing. <b>2.</b> Walk to it, stand your phone on it, and press <b>Capture GPS</b>. Repeat at 8–12 heads spread around the course.
             </div>
-            <div ref={drawRef} className="w-full rounded-2xl overflow-hidden border border-black/10" style={{ height: '62vh', minHeight: 380, backgroundColor: '#20302a' }} />
+            <div ref={drawRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: 'calc(100vh - 210px)', minHeight: 420, backgroundColor: '#20302a' }} />
           </div>
 
           <div className="space-y-3">
