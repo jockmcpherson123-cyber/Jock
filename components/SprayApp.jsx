@@ -6016,6 +6016,7 @@ function WhiteboardInsights() {
             {tile('Hours logged', hours)}
           </div>
 
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
             <p className="font-body font-semibold text-sm text-slate-900 mb-1">Time by job</p>
             <p className="font-body text-[10px] text-slate-400 mb-3">How often each job runs, and its average time when minutes are logged.</p>
@@ -6045,6 +6046,7 @@ function WhiteboardInsights() {
                 </div>
               ))}
             </div>
+          </div>
           </div>
         </div>
       )}
