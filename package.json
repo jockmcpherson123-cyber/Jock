@@ -13,6 +13,8 @@
     "@supabase/supabase-js": "^2.110.7",
     "html2pdf.js": "^0.14.0",
     "jsqr": "^1.4.0",
+    "leaflet": "^1.9.4",
+    "leaflet-imageoverlay-rotated": "^0.2.1",
     "lucide-react": "^1.25.0",
     "next": "16.2.10",
     "qrcode": "^1.5.4",

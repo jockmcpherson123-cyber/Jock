@@ -44,6 +44,7 @@ import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import Tournament from '@/components/Tournament'
+import CourseMap from '@/components/CourseMap'
 import SprayCalendar from '@/components/SprayCalendar'
 import Weather from '@/components/Weather'
 
@@ -277,6 +278,13 @@ export default function SprayApp({ user }) {
           >
             <BookOpen size={12} /> Playbook
           </button>
+          <button
+            onClick={() => setModule('map')}
+            className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
+            style={module === 'map' ? { backgroundColor: GOLD, color: FOREST } : { color: 'rgba(255,255,255,0.5)' }}
+          >
+            <MapPin size={12} /> Course Map
+          </button>
           {canManage(user.role) && (
             <button
               onClick={() => setModule('tournament')}
@@ -304,6 +312,7 @@ export default function SprayApp({ user }) {
         : module === 'turf' ? <TurfPerformanceModule />
         : module === 'playbook' ? <PlaybookModule user={user} manage={canManage(user.role)} />
         : module === 'tournament' ? <Tournament />
+        : module === 'map' ? <CourseMap user={user} manage={canManage(user.role)} />
         : <WhiteboardModule user={user} />}
     </ErrorBoundary>
   )
