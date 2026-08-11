@@ -1514,7 +1514,7 @@ function SheetList({ sheets, onOpen, onNew, onDelete, onImportHistory, manage, v
           {variant === 'tospray' ? 'Nothing to spray right now — all caught up.' : variant === 'records' ? 'No completed sprays yet.' : 'No sheets match this filter.'}
         </div>
       ) : (
-        <div className="space-y-2 mt-3">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 mt-3 items-start">
           {filtered.map((s) => (
             <div key={s.id} className="flex items-stretch gap-2">
               <div className="flex-1 min-w-0"><SheetRow sheet={s} onClick={() => onOpen(s)} /></div>
@@ -3557,7 +3557,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
         </div>
       )}
 
-      <div className="space-y-2">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 items-start">
         {filtered.map((p) => (
           <div key={p.name} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
