@@ -3699,7 +3699,7 @@ function Inventory({ products, deliveries, onAddDelivery }) {
       </div>
 
       <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Stock on Hand</p>
-      <div className="space-y-2 mb-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 mb-6 items-start">
         {filtered.map((p) => {
           const low = p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold
           return (
@@ -3973,7 +3973,7 @@ function NitrogenReport({ sheets, products, areas }) {
       {rows.length === 0 ? (
         <Card><p className="font-body text-sm text-slate-400 text-center py-6">No fertilizer sprays counted yet.</p></Card>
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 items-start">
           {rows.map((r) => (
             <div key={r.area} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
               <div className="flex items-center justify-between mb-1.5">
@@ -4825,7 +4825,7 @@ function NameListEditor({ title, items, onSave, accent, presets }) {
 
 function PeopleSettings({ operators, directors, applicatorLicenses = {}, directorPins = {}, onSave }) {
   return (
-    <div className="space-y-4">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
       <ApplicatorsEditor operators={operators} licenses={applicatorLicenses} onSave={onSave} />
       <DirectorsEditor directors={directors} pins={directorPins} onSave={onSave} />
     </div>
@@ -5182,7 +5182,7 @@ function AreasSettings({ areas, grassTypes = [], soilTypes = [], onSave }) {
         </Card>
       )}
 
-      <div className="space-y-2 mt-4">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 mt-4 items-start">
         {Object.entries(areas).map(([name, a]) => (
           <div key={name} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
