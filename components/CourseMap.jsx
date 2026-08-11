@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import 'leaflet/dist/leaflet.css'
 import { MapPin, Crosshair, Navigation, Layers, Check, X, Trash2, Loader2, Plus, Camera, Eye, EyeOff, Droplet } from 'lucide-react'
 import * as db from '@/lib/db'
-import { fitSimilarity, fitResiduals, imageCornerLatLngs, metresToFeet } from '@/lib/geocalib'
+import { fitSimilarity, fitResiduals, imageCornerLatLngs, metresToFeet, pixelToLatLng } from '@/lib/geocalib'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -102,7 +102,12 @@ export default function CourseMap({ user, manage }) {
   const [selected, setSelected] = useState(null) // feature being edited
   const [confirmDel, setConfirmDel] = useState(false)
 
+  // Vector pipe network (our own crisp overlay, pulled from the PDF)
+  const [pipes, setPipes] = useState(null)
+  const [showPipes, setShowPipes] = useState(true)
+
   const LRef = useRef(null)
+  const pipeLayerRef = useRef(null)
   const featLayerRef = useRef(null)
   const placeRef = useRef(null)
   const addModeRef = useRef(false)
@@ -159,6 +164,15 @@ export default function CourseMap({ user, manage }) {
     let cancelled = false
     ;(async () => {
       try { const f = await db.fetchIrrigation(); if (!cancelled) setFeatures(f) } catch (e) { console.error(e) }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // Load the vector pipe network (behind the login)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try { const res = await fetch('/api/course-pipes'); if (res.ok) { const j = await res.json(); if (!cancelled) setPipes(j) } } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
   }, [])
@@ -221,6 +235,24 @@ export default function CourseMap({ user, manage }) {
     map.on('click', handler)
     return () => { map.off('click', handler) }
   }, [mapTick])
+
+  // Draw the vector pipe network — crisp at any zoom, coloured by pipe size,
+  // placed with the same calibration transform as the raster overlay.
+  useEffect(() => {
+    const L = LRef.current, map = mainMap.current
+    if (!L || !map || mode !== 'map') return
+    if (pipeLayerRef.current) { pipeLayerRef.current.remove(); pipeLayerRef.current = null }
+    if (!transform || !pipes?.lines?.length || !showPipes) return
+    const H = pipes.imageH || IMAGE_H
+    const group = L.layerGroup()
+    pipes.lines.forEach((ln) => {
+      const latlngs = ln.p.map(([px, py]) => { const { lat, lng } = pixelToLatLng(px, py, transform, H); return [lat, lng] })
+      L.polyline(latlngs, { color: ln.c, weight: 2.5, opacity: 0.95 }).addTo(group)
+    })
+    group.addTo(map)
+    pipeLayerRef.current = group
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pipes, transform, mode, mapTick, showPipes])
 
   // Draw the editable irrigation markers (crisp vectors, draggable for managers)
   useEffect(() => {
@@ -393,6 +425,9 @@ export default function CourseMap({ user, manage }) {
             <div className="absolute z-[500] top-3 right-3 flex flex-col gap-2">
               <button onClick={recenter} title="Center on me" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: FOREST }}><Navigation size={17} /></button>
               <button onClick={() => setShowFeatures((v) => !v)} title={showFeatures ? 'Hide heads' : 'Show heads'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showFeatures ? FERN : '#94A3B8' }}>{showFeatures ? <Eye size={17} /> : <EyeOff size={17} />}</button>
+              {pipes?.lines?.length > 0 && (
+                <button onClick={() => setShowPipes((v) => !v)} title={showPipes ? 'Hide pipes' : 'Show pipes'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showPipes ? '#2563EB' : '#94A3B8' }}><Layers size={17} /></button>
+              )}
             </div>
             {/* Add-head controls (managers) */}
             {manage && (

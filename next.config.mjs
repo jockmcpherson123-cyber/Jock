@@ -4,6 +4,7 @@ const nextConfig = {
   // function that serves it (it lives outside /public on purpose).
   outputFileTracingIncludes: {
     '/api/course-overlay': ['./assets/course/**'],
+    '/api/course-pipes': ['./assets/course/**'],
   },
 }
 
