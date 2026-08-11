@@ -120,14 +120,19 @@ export default function CourseMap({ user, manage }) {
   const fit = useMemo(() => fitResiduals(points, transform, IMAGE_H), [points, transform])
 
   // ── Load Leaflet (browser only) + the rotated-overlay plugin ────────────────
+  // The plugin is loaded best-effort: if it fails, the base map, pipes and heads
+  // still work (only the rotated raster overlay would be missing), and we never
+  // get stuck on the loading screen.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const mod = await import('leaflet')
-      const L = mod.default || mod
-      window.L = L // the rotated plugin augments the global L
-      await import('leaflet-imageoverlay-rotated')
-      if (!cancelled) { LRef.current = L; setReady(true) }
+      try {
+        const mod = await import('leaflet')
+        const L = mod.default || mod
+        window.L = L // the rotated plugin augments the global L
+        try { await import('leaflet-imageoverlay-rotated') } catch (e) { console.error('rotated-overlay plugin failed to load', e) }
+        if (!cancelled) { LRef.current = L; setReady(true) }
+      } catch (e) { console.error('Leaflet failed to load', e) }
     })()
     return () => { cancelled = true }
   }, [])
@@ -202,11 +207,17 @@ export default function CourseMap({ user, manage }) {
     if (overlayRef.current) { overlayRef.current.remove(); overlayRef.current = null }
     if (!transform) return
     const c = imageCornerLatLngs(transform, IMAGE_W, IMAGE_H)
-    const ov = L.imageOverlay.rotated(OVERLAY_URL, c.topLeft, c.topRight, c.bottomLeft, { opacity, interactive: false })
-    ov.addTo(map)
-    overlayRef.current = ov
     const bottomRight = [c.topRight[0] + (c.bottomLeft[0] - c.topLeft[0]), c.topRight[1] + (c.bottomLeft[1] - c.topLeft[1])]
-    map.fitBounds([c.topLeft, c.topRight, c.bottomLeft, bottomRight], { padding: [20, 20] })
+    // The rotated overlay needs the plugin; if it didn't load, skip it (pipes
+    // still give a crisp layer) but still frame the map on the course.
+    if (typeof L.imageOverlay?.rotated === 'function') {
+      try {
+        const ov = L.imageOverlay.rotated(OVERLAY_URL, c.topLeft, c.topRight, c.bottomLeft, { opacity, interactive: false })
+        ov.addTo(map)
+        overlayRef.current = ov
+      } catch (e) { console.error('overlay place failed', e) }
+    }
+    try { map.fitBounds([c.topLeft, c.topRight, c.bottomLeft, bottomRight], { padding: [20, 20] }) } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transform, mode, mapTick])
 
@@ -245,12 +256,16 @@ export default function CourseMap({ user, manage }) {
     if (!transform || !pipes?.lines?.length || !showPipes) return
     const H = pipes.imageH || IMAGE_H
     const group = L.layerGroup()
-    pipes.lines.forEach((ln) => {
-      const latlngs = ln.p.map(([px, py]) => { const { lat, lng } = pixelToLatLng(px, py, transform, H); return [lat, lng] })
-      L.polyline(latlngs, { color: ln.c, weight: 2.5, opacity: 0.95 }).addTo(group)
-    })
-    group.addTo(map)
-    pipeLayerRef.current = group
+    try {
+      pipes.lines.forEach((ln) => {
+        const latlngs = ln.p
+          .map(([px, py]) => { const { lat, lng } = pixelToLatLng(px, py, transform, H); return [lat, lng] })
+          .filter(([la, lo]) => Number.isFinite(la) && Number.isFinite(lo))
+        if (latlngs.length >= 2) L.polyline(latlngs, { color: ln.c, weight: 2.5, opacity: 0.95 }).addTo(group)
+      })
+      group.addTo(map)
+      pipeLayerRef.current = group
+    } catch (e) { console.error('pipe render failed', e) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipes, transform, mode, mapTick, showPipes])
 
