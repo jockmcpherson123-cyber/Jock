@@ -20,8 +20,8 @@ const FERN = '#3A6B4A'
 const GOLD = '#C9A84C'
 
 // The overlay image's pixel size (from the rasterised PDF) and where to fetch it.
-const IMAGE_W = 3345
-const IMAGE_H = 4698
+const IMAGE_W = 5017
+const IMAGE_H = 7047
 const OVERLAY_URL = '/api/course-overlay'
 // Fallback map centre if the club location isn't set — Congressional CC.
 const FALLBACK = { lat: 38.9803, lng: -77.1636 }
