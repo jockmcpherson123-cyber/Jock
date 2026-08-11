@@ -99,8 +99,12 @@ export default function CourseMap({ user, manage }) {
   const [features, setFeatures] = useState([])
   const [showFeatures, setShowFeatures] = useState(true)
   const [addMode, setAddMode] = useState(false)
+  const [moveMode, setMoveMode] = useState(false) // relocate the selected head by tapping
   const [selected, setSelected] = useState(null) // feature being edited
   const [confirmDel, setConfirmDel] = useState(false)
+  const [importing, setImporting] = useState(null) // {done,total} while bulk-importing
+  const moveRef = useRef(false)
+  useEffect(() => { moveRef.current = moveMode }, [moveMode])
 
   // Vector pipe network (our own crisp overlay, pulled from the PDF)
   const [pipes, setPipes] = useState(null)
@@ -189,7 +193,7 @@ export default function CourseMap({ user, manage }) {
   useEffect(() => {
     if (!ready || mode !== 'map' || !mainRef.current) return
     const L = LRef.current
-    const map = L.map(mainRef.current, { center, zoom: 17, zoomControl: true, attributionControl: true })
+    const map = L.map(mainRef.current, { center, zoom: 17, zoomControl: true, attributionControl: true, preferCanvas: true })
     map.attributionControl.setPrefix('')
     L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, attribution: SAT_ATTR }).addTo(map)
     mainMap.current = map
@@ -242,7 +246,10 @@ export default function CourseMap({ user, manage }) {
   useEffect(() => {
     const map = mainMap.current
     if (!map) return
-    const handler = (e) => { if (addModeRef.current) placeRef.current?.(e.latlng) }
+    const handler = (e) => {
+      if (moveRef.current) { placeRef.current?.(e.latlng, 'relocate'); return }
+      if (addModeRef.current) placeRef.current?.(e.latlng)
+    }
     map.on('click', handler)
     return () => { map.off('click', handler) }
   }, [mapTick])
@@ -269,35 +276,41 @@ export default function CourseMap({ user, manage }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipes, transform, mode, mapTick, showPipes])
 
-  // Draw the editable irrigation markers (crisp vectors, draggable for managers)
+  // Draw the editable irrigation markers as fast canvas circles (handles the
+  // thousands of heads smoothly). Tap one to edit; move via the edit panel.
   useEffect(() => {
     const L = LRef.current, map = mainMap.current
     if (!L || !map || mode !== 'map') return
     if (featLayerRef.current) { featLayerRef.current.remove(); featLayerRef.current = null }
     if (!showFeatures) return
     const group = L.layerGroup().addTo(map)
+    const sel = selected?.id
     features.forEach((f) => {
       const color = featureColor(f)
-      const ring = f.status === 'repair' ? 'box-shadow:0 0 0 3px rgba(220,38,38,.35);' : ''
-      const m = L.marker([f.lat, f.lng], {
-        draggable: !!manage,
-        icon: L.divIcon({ className: '', html: `<div style="background:${color};border:2px solid #fff;border-radius:9999px;width:16px;height:16px;${ring}box-shadow:0 1px 3px rgba(0,0,0,.5)"></div>`, iconSize: [16, 16], iconAnchor: [8, 8] }),
+      const isValve = f.kind !== 'head'
+      const cm = L.circleMarker([f.lat, f.lng], {
+        radius: isValve ? 6 : 4,
+        color: f.id === sel ? GOLD : '#ffffff',
+        weight: f.id === sel ? 3 : 1.2,
+        fillColor: color,
+        fillOpacity: 0.95,
       })
-      m.on('click', () => setSelected(f))
-      if (manage) m.on('dragend', async (e) => {
-        const ll = e.target.getLatLng()
-        try { const up = await db.updateIrrigationFeature(f.id, { lat: ll.lat, lng: ll.lng }); setFeatures((prev) => prev.map((x) => (x.id === f.id ? up : x))) }
-        catch (err) { console.error(err); setMsg('Could not move that head — try again.') }
-      })
-      m.addTo(group)
+      cm.on('click', (e) => { if (e.originalEvent) e.originalEvent.stopPropagation?.(); setSelected(f) })
+      cm.addTo(group)
     })
     featLayerRef.current = group
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [features, showFeatures, mode, mapTick, manage])
+  }, [features, showFeatures, mode, mapTick, selected])
 
-  // Place a new feature at a location (from a map tap or from GPS)
+  // Place a new feature — or, in move mode, relocate the selected one — from a
+  // map tap or from GPS.
   placeRef.current = async (latlng, source = 'manual') => {
     if (!manage) return
+    if (source === 'relocate' && selected) {
+      try { const up = await db.updateIrrigationFeature(selected.id, { lat: latlng.lat, lng: latlng.lng }); setFeatures((prev) => prev.map((x) => (x.id === up.id ? up : x))); setSelected(up); setMoveMode(false) }
+      catch (e) { console.error(e); setMsg('Could not move that — try again.') }
+      return
+    }
     try {
       const f = await db.addIrrigationFeature({ kind: 'head', lat: latlng.lat, lng: latlng.lng, status: 'ok', source })
       setFeatures((prev) => [...prev, f])
@@ -306,6 +319,35 @@ export default function CourseMap({ user, manage }) {
     } catch (e) { console.error(e); setMsg('Could not add that head — is the phase21 table set up?') }
   }
   const addAtGps = () => { if (gps) placeRef.current({ lat: gps.lat, lng: gps.lng }, 'gps'); else setMsg('No GPS fix yet.') }
+
+  // One-time: import every head/valve from the as-built, placed with the
+  // calibration transform. Turns the 2,600+ symbols into editable objects.
+  async function importFromAsBuilt() {
+    if (!manage) return
+    if (!transform) { setMsg('Calibrate the map first, then import.'); return }
+    try {
+      const res = await fetch('/api/course-heads')
+      if (!res.ok) throw new Error('no heads file')
+      const j = await res.json()
+      const H = j.imageH || IMAGE_H
+      const rows = (j.heads || []).map((h) => {
+        const { lat, lng } = pixelToLatLng(h.x, h.y, transform, H)
+        return { kind: h.k || 'head', lat, lng, status: 'ok', source: 'import' }
+      }).filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng))
+      if (rows.length === 0) { setMsg('No heads found to import.'); return }
+      setImporting({ done: 0, total: rows.length })
+      // Insert in batches so we can show progress
+      let done = 0
+      for (let i = 0; i < rows.length; i += 500) {
+        const chunk = rows.slice(i, i + 500)
+        await db.addIrrigationFeatures(chunk)
+        done += chunk.length; setImporting({ done, total: rows.length })
+      }
+      const fresh = await db.fetchIrrigation(); setFeatures(fresh)
+      setMsg(`Imported ${rows.length} objects from the as-built. Nudge any that are off, and re-type valves as needed.`)
+    } catch (e) { console.error(e); setMsg('Import failed — make sure phase21.sql is run and the map is calibrated.') }
+    finally { setImporting(null) }
+  }
 
   async function saveSelected(patch) {
     if (!selected) return
@@ -428,14 +470,28 @@ export default function CourseMap({ user, manage }) {
               The irrigation overlay isn&apos;t placed on the map yet. {manage ? <>Tap <b>Calibrate</b>, then walk the course dropping points on known heads to lock it in.</> : 'Ask the superintendent to calibrate it.'}
             </div>
           )}
+          {manage && transform && features.length === 0 && (
+            <div className="rounded-xl px-4 py-3 font-body text-[13px] flex items-center justify-between gap-3 flex-wrap" style={{ backgroundColor: '#EEF4EF', border: '1px solid #CFE0D5', color: FERN }}>
+              <span><b>Jump-start it:</b> auto-place every head &amp; valve from the as-built (~2,600) — then just nudge and re-type as needed. Beats mapping it by hand.</span>
+              <button onClick={importFromAsBuilt} disabled={!!importing} className="font-body text-[12px] font-bold px-3.5 py-2 rounded-full text-white shrink-0 disabled:opacity-60" style={{ backgroundColor: FOREST }}>
+                {importing ? `Importing ${importing.done}/${importing.total}…` : 'Import from as-built'}
+              </button>
+            </div>
+          )}
           {addMode && (
             <div className="rounded-xl px-4 py-2.5 font-body text-[13px] flex items-center justify-between gap-2" style={{ backgroundColor: '#EAF2FB', border: '1px solid #BBD3F0', color: '#1E3A5F' }}>
               <span><b>Adding a head:</b> tap the map where it is, or use <b>At my GPS</b> while standing on it.</span>
               <button onClick={() => setAddMode(false)} className="font-body text-[11px] font-bold shrink-0">Cancel</button>
             </div>
           )}
+          {moveMode && selected && (
+            <div className="rounded-xl px-4 py-2.5 font-body text-[13px] flex items-center justify-between gap-2" style={{ backgroundColor: '#FBF6E7', border: '1px solid #EFE0B0', color: '#7A5B12' }}>
+              <span><b>Moving this {KIND_LABEL[selected.kind] || 'object'}:</b> tap the map where it should be.</span>
+              <button onClick={() => setMoveMode(false)} className="font-body text-[11px] font-bold shrink-0">Cancel</button>
+            </div>
+          )}
           <div className="relative">
-            <div ref={mainRef} className="w-full rounded-2xl overflow-hidden border border-black/10" style={{ height: '70vh', minHeight: 420, backgroundColor: '#0b1e12', cursor: addMode ? 'crosshair' : '' }} />
+            <div ref={mainRef} className="w-full rounded-2xl overflow-hidden border border-black/10" style={{ height: '70vh', minHeight: 420, backgroundColor: '#0b1e12', cursor: addMode || moveMode ? 'crosshair' : '' }} />
             {/* Floating controls */}
             <div className="absolute z-[500] top-3 right-3 flex flex-col gap-2">
               <button onClick={recenter} title="Center on me" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: FOREST }}><Navigation size={17} /></button>
@@ -518,8 +574,8 @@ export default function CourseMap({ user, manage }) {
         </div>
       )}
 
-      {/* Edit an irrigation object */}
-      {selected && (
+      {/* Edit an irrigation object (hidden while relocating so the map is tappable) */}
+      {selected && !moveMode && (
         <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => { setSelected(null); setConfirmDel(false) }}>
           <div className="bg-white rounded-2xl w-full sm:max-w-md shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #EEF0EC' }}>
@@ -577,10 +633,11 @@ export default function CourseMap({ user, manage }) {
                     {selected.photo && <img src={selected.photo} alt="" className="rounded-lg w-full mt-1 mb-1" />}
                     <input type="file" accept="image/*" capture="environment" onChange={(e) => onPhoto(e.target.files?.[0])} className="font-body text-[12px] mt-1" />
                   </div>
-                  <p className="font-body text-[10px] text-slate-400">Drag the marker on the map to move it. Changes save automatically.</p>
-                  <div className="pt-1">
+                  <p className="font-body text-[10px] text-slate-400">Changes save automatically.</p>
+                  <div className="pt-1 flex items-center gap-2 flex-wrap">
+                    <button onClick={() => setMoveMode(true)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: FOREST, border: '1px solid #E2E8F0' }}><Navigation size={13} /> Move on map</button>
                     {!confirmDel ? (
-                      <button onClick={() => setConfirmDel(true)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: '#B91C1C', border: '1px solid #F3C6C6' }}><Trash2 size={13} /> Delete this object</button>
+                      <button onClick={() => setConfirmDel(true)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: '#B91C1C', border: '1px solid #F3C6C6' }}><Trash2 size={13} /> Delete</button>
                     ) : (
                       <div className="flex items-center gap-2">
                         <span className="font-body text-[12px] text-slate-500">Delete?</span>
