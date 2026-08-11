@@ -283,7 +283,7 @@ export default function SprayApp({ user }) {
             className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
             style={module === 'map' ? { backgroundColor: GOLD, color: FOREST } : { color: 'rgba(255,255,255,0.5)' }}
           >
-            <MapPin size={12} /> Course Map
+            <MapPin size={12} /> Irrigation
           </button>
           {canManage(user.role) && (
             <button

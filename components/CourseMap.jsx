@@ -243,7 +243,7 @@ export default function CourseMap({ user, manage }) {
       <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
         <div className="flex items-center gap-2">
           <MapPin size={20} style={{ color: FERN }} />
-          <h1 className="font-display text-xl font-semibold" style={{ color: FOREST }}>Course Map</h1>
+          <h1 className="font-display text-xl font-semibold" style={{ color: FOREST }}>Irrigation</h1>
           {!transform && <span className="font-body text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#FEF3DD', color: '#92660D' }}>Not calibrated yet</span>}
         </div>
         {manage && (
