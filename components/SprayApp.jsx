@@ -4042,7 +4042,7 @@ function ReorderReport({ sheets, products, areas }) {
       {shown.length === 0 ? (
         <Card><p className="font-body text-sm text-slate-400 text-center py-6">{rows.length === 0 ? 'Set a low-stock level on products (Chemical Library) to build a reorder list.' : 'Nothing low right now — you\'re stocked up.'}</p></Card>
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 items-start">
           {shown.map((r) => (
             <div key={r.name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3" style={r.needs ? { borderColor: '#FCA5A5' } : undefined}>
               <div className="min-w-0 flex-1">
