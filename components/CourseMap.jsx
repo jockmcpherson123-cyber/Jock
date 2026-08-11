@@ -307,7 +307,7 @@ export default function CourseMap({ user, manage }) {
   placeRef.current = async (latlng, source = 'manual') => {
     if (!manage) return
     if (source === 'relocate' && selected) {
-      try { const up = await db.updateIrrigationFeature(selected.id, { lat: latlng.lat, lng: latlng.lng }); setFeatures((prev) => prev.map((x) => (x.id === up.id ? up : x))); setSelected(up); setMoveMode(false) }
+      try { const up = await db.updateIrrigationFeature(selected.id, { lat: latlng.lat, lng: latlng.lng, source: 'manual' }); setFeatures((prev) => prev.map((x) => (x.id === up.id ? up : x))); setSelected(up); setMoveMode(false) }
       catch (e) { console.error(e); setMsg('Could not move that — try again.') }
       return
     }
@@ -336,7 +336,9 @@ export default function CourseMap({ user, manage }) {
       }).filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng))
       if (rows.length === 0) { setMsg('No heads found to import.'); return }
       setImporting({ done: 0, total: rows.length })
-      // Insert in batches so we can show progress
+      // Refresh cleanly: drop the previously auto-imported points (keeps any you
+      // placed or hand-edited, which are marked 'manual'), then insert fresh.
+      await db.clearImportedIrrigation()
       let done = 0
       for (let i = 0; i < rows.length; i += 500) {
         const chunk = rows.slice(i, i + 500)
@@ -344,7 +346,7 @@ export default function CourseMap({ user, manage }) {
         done += chunk.length; setImporting({ done, total: rows.length })
       }
       const fresh = await db.fetchIrrigation(); setFeatures(fresh)
-      setMsg(`Imported ${rows.length} objects from the as-built. Nudge any that are off, and re-type valves as needed.`)
+      setMsg(`Imported ${rows.length} objects from the as-built (${(j.heads || []).filter((h) => h.k === 'valve').length} valves). Nudge any that are off, and re-type as needed.`)
     } catch (e) { console.error(e); setMsg('Import failed — make sure phase21.sql is run and the map is calibrated.') }
     finally { setImporting(null) }
   }
@@ -352,7 +354,7 @@ export default function CourseMap({ user, manage }) {
   async function saveSelected(patch) {
     if (!selected) return
     try {
-      const up = await db.updateIrrigationFeature(selected.id, patch)
+      const up = await db.updateIrrigationFeature(selected.id, { ...patch, source: 'manual' })
       setFeatures((prev) => prev.map((x) => (x.id === up.id ? up : x)))
       setSelected(up)
     } catch (e) { console.error(e); setMsg('Could not save changes.') }
@@ -470,11 +472,14 @@ export default function CourseMap({ user, manage }) {
               The irrigation overlay isn&apos;t placed on the map yet. {manage ? <>Tap <b>Calibrate</b>, then walk the course dropping points on known heads to lock it in.</> : 'Ask the superintendent to calibrate it.'}
             </div>
           )}
-          {manage && transform && features.length === 0 && (
+          {manage && transform && (
             <div className="rounded-xl px-4 py-3 font-body text-[13px] flex items-center justify-between gap-3 flex-wrap" style={{ backgroundColor: '#EEF4EF', border: '1px solid #CFE0D5', color: FERN }}>
-              <span><b>Jump-start it:</b> auto-place every head &amp; valve from the as-built (~2,600) — then just nudge and re-type as needed. Beats mapping it by hand.</span>
+              <span>{features.length === 0
+                ? <><b>Jump-start it:</b> auto-place every head &amp; valve from the as-built (~3,100) — then just nudge and re-type. Beats mapping it by hand.</>
+                : <><b>Refresh from as-built:</b> re-imports ~3,100 heads/valves, keeping anything you&apos;ve placed or hand-edited.</>}
+              </span>
               <button onClick={importFromAsBuilt} disabled={!!importing} className="font-body text-[12px] font-bold px-3.5 py-2 rounded-full text-white shrink-0 disabled:opacity-60" style={{ backgroundColor: FOREST }}>
-                {importing ? `Importing ${importing.done}/${importing.total}…` : 'Import from as-built'}
+                {importing ? `Importing ${importing.done}/${importing.total}…` : features.length === 0 ? 'Import from as-built' : 'Refresh from as-built'}
               </button>
             </div>
           )}
