@@ -11,8 +11,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import 'leaflet/dist/leaflet.css'
-import { MapPin, Crosshair, Navigation, Layers, Check, X, Trash2, Loader2, Plus, Camera, Eye, EyeOff, Droplet } from 'lucide-react'
+import { MapPin, Crosshair, Navigation, Layers, Check, X, Trash2, Loader2, Plus, Camera, Eye, EyeOff, Droplet, Compass } from 'lucide-react'
 import * as db from '@/lib/db'
+import ArcTool from '@/components/ArcTool'
 import { fitSimilarity, fitResiduals, imageCornerLatLngs, metresToFeet, pixelToLatLng } from '@/lib/geocalib'
 
 const FOREST = '#16291F'
@@ -102,6 +103,7 @@ export default function CourseMap({ user, manage }) {
   const [moveMode, setMoveMode] = useState(false) // relocate the selected head by tapping
   const [selected, setSelected] = useState(null) // feature being edited
   const [confirmDel, setConfirmDel] = useState(false)
+  const [arcOpen, setArcOpen] = useState(false)
   const [importing, setImporting] = useState(null) // {done,total} while bulk-importing
   const moveRef = useRef(false)
   useEffect(() => { moveRef.current = moveMode }, [moveMode])
@@ -680,6 +682,15 @@ export default function CourseMap({ user, manage }) {
                     {selected.photo && <img src={selected.photo} alt="" className="rounded-lg w-full mt-1 mb-1" />}
                     <input type="file" accept="image/*" capture="environment" onChange={(e) => onPhoto(e.target.files?.[0])} className="font-body text-[12px] mt-1" />
                   </div>
+                  {/* Arc + radius readout, and the on-head compass tool */}
+                  <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ backgroundColor: '#F6F8F6' }}>
+                    <Compass size={15} style={{ color: FERN }} />
+                    <span className="font-body text-[12px]" style={{ color: FOREST }}>
+                      {selected.arc != null ? <><b>{Math.round(selected.arc)}°</b> arc</> : <span className="text-slate-400">No arc set</span>}
+                      {selected.radius != null ? ` · ${selected.radius} ft` : ''}
+                    </span>
+                    <button onClick={() => setArcOpen(true)} className="ml-auto font-body text-[11px] font-bold px-2.5 py-1.5 rounded-full text-white" style={{ backgroundColor: FERN }}>Measure arc</button>
+                  </div>
                   <p className="font-body text-[10px] text-slate-400">Changes save automatically.</p>
                   <div className="pt-1 flex items-center gap-2 flex-wrap">
                     <button onClick={() => setMoveMode(true)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: FOREST, border: '1px solid #E2E8F0' }}><Navigation size={13} /> Move on map</button>
@@ -698,6 +709,10 @@ export default function CourseMap({ user, manage }) {
             </div>
           </div>
         </div>
+      )}
+
+      {arcOpen && selected && (
+        <ArcTool feature={selected} onClose={() => setArcOpen(false)} onSave={async (vals) => { await saveSelected(vals); setArcOpen(false) }} />
       )}
     </div>
   )
