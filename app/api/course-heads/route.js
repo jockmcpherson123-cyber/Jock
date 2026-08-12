@@ -15,7 +15,7 @@ export async function GET() {
     const buf = fs.readFileSync(p)
     return new Response(new Uint8Array(buf), {
       status: 200,
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, max-age=86400' },
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     })
   } catch {
     return new Response('{"heads":[]}', { status: 404, headers: { 'Content-Type': 'application/json' } })

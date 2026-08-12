@@ -40,7 +40,7 @@ const featureColor = (f) => (STATUS[f.status]?.color || '#2563EB')
 // on top) and line weight. Bigger pipe = heavier line, so the mainline reads
 // clearly over the dense laterals.
 const PIPE_RANK = { '1.5" poly': 0, '2" HDPE': 1, '3" HDPE': 2, '4" HDPE': 3, '6" HDPE': 4, '8" HDPE': 5, '10"+ HDPE': 6, '14"+ HDPE': 7, '16" HDPE': 8 }
-const pipeWeight = (cls) => [1, 1.1, 1.5, 1.9, 2.4, 2.9, 3.4, 3.9, 4.3][PIPE_RANK[cls] ?? 1]
+const pipeWeight = (cls) => [1.6, 1.8, 2.4, 3.0, 3.8, 4.6, 5.4, 6.2, 7.0][PIPE_RANK[cls] ?? 1]
 const pipeOpacity = (cls) => ((PIPE_RANK[cls] ?? 1) >= 4 ? 0.95 : 0.6)
 // Legend rows for the on-map key (only the classes that actually appear are shown).
 const PIPE_LEGEND = [
@@ -116,6 +116,8 @@ export default function CourseMap({ user, manage }) {
   // Editable irrigation objects
   const [features, setFeatures] = useState([])
   const [showFeatures, setShowFeatures] = useState(true)
+  const [labelsOn, setLabelsOn] = useState(true) // show head numbers when zoomed in
+  const labelLayerRef = useRef(null)
   const [addMode, setAddMode] = useState(false)
   const [moveMode, setMoveMode] = useState(false) // relocate the selected head by tapping
   const [selected, setSelected] = useState(null) // feature being edited
@@ -253,6 +255,8 @@ export default function CourseMap({ user, manage }) {
 
   // ── Main satellite map (created once per entry into map mode) ───────────────
   const [mapTick, setMapTick] = useState(0)
+  const [mapZoom, setMapZoom] = useState(17)   // drives marker size + when labels show
+  const [viewTick, setViewTick] = useState(0)  // bumps on pan/zoom so labels re-fit to view
   useEffect(() => {
     if (!ready || mode !== 'map' || !mapNode) return
     const L = LRef.current
@@ -261,6 +265,8 @@ export default function CourseMap({ user, manage }) {
     const c0 = (Number.isFinite(center[0]) && Number.isFinite(center[1])) ? center : [FALLBACK.lat, FALLBACK.lng]
     const map = L.map(el, { center: c0, zoom: 17, zoomControl: true, attributionControl: true, preferCanvas: true })
     map.attributionControl.setPrefix('')
+    map.on('zoomend', () => setMapZoom(map.getZoom()))
+    map.on('moveend', () => setViewTick((t) => t + 1))
     const tl = L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, attribution: SAT_ATTR, crossOrigin: true })
     let errs = 0, loaded = false
     tl.on('load', () => { loaded = true; setDiag((d) => ({ ...d, tiles: 'ok' })) })
@@ -380,7 +386,7 @@ export default function CourseMap({ user, manage }) {
         pts.forEach(([px, py]) => {
           const { lat, lng } = pixelToLatLng(px, py, transform, H)
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
-          L.circleMarker([lat, lng], { radius: 1.6, color, weight: 0, fillColor: color, fillOpacity: 0.9, interactive: false }).addTo(group)
+          L.circleMarker([lat, lng], { radius: 2.4, color, weight: 0, fillColor: color, fillOpacity: 0.9, interactive: false }).addTo(group)
         })
       })
       group.addTo(map)
@@ -399,6 +405,9 @@ export default function CourseMap({ user, manage }) {
     const group = L.layerGroup().addTo(map)
     const sel = selected?.id
     try {
+      // Grow the dots as you zoom in so they read like the as-built (but stay
+      // visible at the course-overview zoom too).
+      const headR = Math.max(3.5, (mapZoom - 13) * 1.7)
       features.forEach((f) => {
         if (!Number.isFinite(f.lat) || !Number.isFinite(f.lng)) return
         const sym = f.symbol ? symbolById(f.symbol) : null
@@ -407,9 +416,9 @@ export default function CourseMap({ user, manage }) {
         const statusRing = f.status === 'repair' ? '#DC2626' : f.status === 'replaced' ? '#6B7280' : null
         const isValve = f.kind !== 'head'
         const cm = L.circleMarker([f.lat, f.lng], {
-          radius: isValve ? 6 : 4,
+          radius: isValve ? headR * 1.35 : headR,
           color: f.id === sel ? GOLD : (statusRing || (sym ? sym.stroke : '#ffffff')),
-          weight: f.id === sel ? 3 : (statusRing ? 2.4 : 1.2),
+          weight: f.id === sel ? 3 : (statusRing ? 2.4 : 1.4),
           fillColor: fill,
           fillOpacity: 0.95,
         })
@@ -419,7 +428,32 @@ export default function CourseMap({ user, manage }) {
     } catch (e) { console.error('feature render failed', e) }
     featLayerRef.current = group
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [features, showFeatures, mode, mapTick, selected])
+  }, [features, showFeatures, mode, mapTick, selected, mapZoom])
+
+  // Head-number labels (R25, G3…). Only when zoomed in and only for what's on
+  // screen, so 2,000+ labels never bog the map down. Rendered as light divIcons.
+  useEffect(() => {
+    const L = LRef.current, map = mainMap.current
+    if (!L || !map || mode !== 'map') return
+    if (labelLayerRef.current) { labelLayerRef.current.remove(); labelLayerRef.current = null }
+    if (!labelsOn || !showFeatures || mapZoom < 18) return
+    let bounds
+    try { bounds = map.getBounds().pad(0.1) } catch { return }
+    const inView = features.filter((f) => f.label && Number.isFinite(f.lat) && Number.isFinite(f.lng) && bounds.contains([f.lat, f.lng]))
+    if (inView.length === 0 || inView.length > 600) return // too many = zoom in more
+    const group = L.layerGroup()
+    const fs = Math.round(Math.max(9, (mapZoom - 15) * 4))
+    inView.forEach((f) => {
+      const m = L.marker([f.lat, f.lng], {
+        interactive: false, keyboard: false,
+        icon: L.divIcon({ className: '', html: `<div style="white-space:nowrap;font:700 ${fs}px Arial,sans-serif;color:#fff;text-shadow:0 0 2px #000,0 0 2px #000,1px 1px 2px #000">${f.label}</div>`, iconSize: [0, 0], iconAnchor: [-4, fs / 2] }),
+      })
+      m.addTo(group)
+    })
+    group.addTo(map)
+    labelLayerRef.current = group
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [features, showFeatures, labelsOn, mode, mapTick, mapZoom, viewTick])
 
   // Place a new feature — or, in move mode, relocate the selected one — from a
   // map tap or from GPS.
@@ -451,13 +485,13 @@ export default function CourseMap({ user, manage }) {
     if (!manage) return
     if (!transform) { setMsg('Calibrate the map first, then import.'); return }
     try {
-      const res = await fetch('/api/course-heads')
+      const res = await fetch('/api/course-heads', { cache: 'no-store' })
       if (!res.ok) throw new Error('no heads file')
       const j = await res.json()
       const H = j.imageH || IMAGE_H
       const rows = (j.heads || []).map((h) => {
         const { lat, lng } = pixelToLatLng(h.x, h.y, transform, H)
-        return { kind: h.k || 'head', lat, lng, status: 'ok', source: 'import' }
+        return { kind: h.k || 'head', lat, lng, status: 'ok', source: 'import', label: h.label || '' }
       }).filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng))
       if (rows.length === 0) { setMsg('No heads found to import.'); return }
       setImporting({ done: 0, total: rows.length })
@@ -681,6 +715,7 @@ export default function CourseMap({ user, manage }) {
             <div className="absolute z-[500] top-3 right-3 flex flex-col gap-2">
               <button onClick={recenter} title="Center on me" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: FOREST }}><Navigation size={17} /></button>
               <button onClick={() => setShowFeatures((v) => !v)} title={showFeatures ? 'Hide heads' : 'Show heads'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showFeatures ? FERN : '#94A3B8' }}>{showFeatures ? <Eye size={17} /> : <EyeOff size={17} />}</button>
+              <button onClick={() => setLabelsOn((v) => !v)} title={labelsOn ? 'Hide head numbers' : 'Show head numbers'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center font-body text-[11px] font-bold" style={{ color: labelsOn ? FERN : '#94A3B8' }}>R#</button>
               {pipes?.lines?.length > 0 && (
                 <button onClick={() => setShowPipes((v) => !v)} title={showPipes ? 'Hide pipes' : 'Show pipes'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showPipes ? '#2563EB' : '#94A3B8' }}><Layers size={17} /></button>
               )}
