@@ -87,7 +87,7 @@ export default function CourseMap({ user, manage }) {
   const [courseInfo, setCourseInfo] = useState({})
   const [location, setLocation] = useState(null)
   const [points, setPoints] = useState([])      // GCP pairs
-  const [opacity, setOpacity] = useState(0.7)
+  const [opacity, setOpacity] = useState(0) // PDF raster overlay off by default — the vectors are the map now
   const [mode, setMode] = useState('map')        // 'map' | 'calibrate'
   const [gps, setGps] = useState(null)           // live location
   const [pending, setPending] = useState(null)   // {px,py} tapped on drawing
@@ -294,11 +294,15 @@ export default function CourseMap({ user, manage }) {
     const H = pipes.imageH || IMAGE_H
     const group = L.layerGroup()
     try {
-      pipes.lines.forEach((ln) => {
+      // Laterals/outlines first (thin grey, underneath), then the coloured mains.
+      const ordered = pipes.lines.slice().sort((a, b) => (a.k === 'lat' ? 0 : 1) - (b.k === 'lat' ? 0 : 1))
+      ordered.forEach((ln) => {
         const latlngs = ln.p
           .map(([px, py]) => { const { lat, lng } = pixelToLatLng(px, py, transform, H); return [lat, lng] })
           .filter(([la, lo]) => Number.isFinite(la) && Number.isFinite(lo))
-        if (latlngs.length >= 2) L.polyline(latlngs, { color: ln.c, weight: 2.5, opacity: 0.95 }).addTo(group)
+        if (latlngs.length < 2) return
+        const isMain = ln.k === 'main'
+        L.polyline(latlngs, { color: ln.c, weight: isMain ? 2.6 : 1, opacity: isMain ? 0.95 : 0.5, interactive: false }).addTo(group)
       })
       group.addTo(map)
       pipeLayerRef.current = group
@@ -558,11 +562,11 @@ export default function CourseMap({ user, manage }) {
               <div className="absolute z-[500] bottom-3 left-3 right-3 sm:right-auto sm:w-72 bg-white/95 backdrop-blur rounded-xl shadow p-3">
                 <div className="flex items-center gap-2 mb-1.5">
                   <Layers size={14} style={{ color: FERN }} />
-                  <span className="font-body text-[12px] font-bold" style={{ color: FOREST }}>Irrigation overlay</span>
+                  <span className="font-body text-[12px] font-bold" style={{ color: FOREST }}>PDF overlay <span className="font-normal text-slate-400">(reference)</span></span>
                   <span className="font-body text-[11px] ml-auto tabular-nums text-slate-500">{Math.round(opacity * 100)}%</span>
                 </div>
                 <input type="range" min="0" max="1" step="0.05" value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} className="w-full" />
-                {avgFt != null && <p className="font-body text-[10px] text-slate-400 mt-1">Fit: ~{avgFt} ft average from {points.length} points{gps?.acc ? ` · GPS ±${Math.round(gps.acc)} m` : ''}</p>}
+                <p className="font-body text-[10px] text-slate-400 mt-1">Off by default — the digital lines &amp; heads are the map. Slide up to check against the original.{avgFt != null ? ` · Fit ~${avgFt} ft` : ''}</p>
               </div>
             )}
           </div>
