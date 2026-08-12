@@ -326,14 +326,24 @@ export default function CourseMap({ user, manage }) {
     const H = pipes.imageH || IMAGE_H
     const group = L.layerGroup()
     try {
-      // Draw smallest pipe first so the bigger mains sit crisply on top.
-      const ordered = pipes.lines.slice().sort((a, b) => (PIPE_RANK[a.cls] ?? 1) - (PIPE_RANK[b.cls] ?? 1))
-      ordered.forEach((ln) => {
+      // Group every run by pipe size and draw each size as ONE multi-polyline.
+      // ~9 layers instead of ~19k keeps the map fast (thousands of separate
+      // layers choke Leaflet, which also stalled the heads drawn afterwards).
+      const byClass = new Map()
+      pipes.lines.forEach((ln) => {
         const latlngs = ln.p
           .map(([px, py]) => { const { lat, lng } = pixelToLatLng(px, py, transform, H); return [lat, lng] })
           .filter(([la, lo]) => Number.isFinite(la) && Number.isFinite(lo))
         if (latlngs.length < 2) return
-        L.polyline(latlngs, { color: ln.c, weight: pipeWeight(ln.cls), opacity: pipeOpacity(ln.cls), interactive: false }).addTo(group)
+        const key = ln.cls || '2" HDPE'
+        if (!byClass.has(key)) byClass.set(key, { color: ln.c, segs: [] })
+        byClass.get(key).segs.push(latlngs)
+      })
+      // Smallest pipe first so the bigger mains sit crisply on top.
+      const keys = Array.from(byClass.keys()).sort((a, b) => (PIPE_RANK[a] ?? 1) - (PIPE_RANK[b] ?? 1))
+      keys.forEach((key) => {
+        const { color, segs } = byClass.get(key)
+        L.polyline(segs, { color, weight: pipeWeight(key), opacity: pipeOpacity(key), interactive: false }).addTo(group)
       })
       group.addTo(map)
       pipeLayerRef.current = group
