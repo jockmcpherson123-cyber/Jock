@@ -131,6 +131,9 @@ export default function CourseMap({ user, manage }) {
   const [wires, setWires] = useState(null)
   const [showWires, setShowWires] = useState(false)
   const [showLegend, setShowLegend] = useState(false)
+  // Calibration method: 'photo' = line the drawing up on the satellite photo
+  // (inch-accurate, no GPS); 'gps' = stand on each head and capture GPS.
+  const [calMode, setCalMode] = useState('photo')
 
   // On-screen diagnostics (no console needed): container size + tile status
   const [diag, setDiag] = useState({ w: 0, h: 0, tiles: 'waiting', err: 0 })
@@ -158,6 +161,10 @@ export default function CourseMap({ user, manage }) {
   useEffect(() => { addModeRef.current = addMode }, [addMode])
   const mainRef = useRef(null), mainMap = useRef(null), overlayRef = useRef(null), locRef = useRef(null), accRef = useRef(null)
   const drawRef = useRef(null), drawMap = useRef(null), drawPinRef = useRef(null), drawGcpRef = useRef(null)
+  // Satellite pairing map (photo calibration) + a ref so its click handler reads
+  // the live pending pixel without re-creating the map.
+  const pairRef = useRef(null), pairMap = useRef(null), pairGcpRef = useRef(null)
+  const pendingRef = useRef(null)
 
   // Fitted transform + how good the fit is — recomputed whenever points change.
   const transform = useMemo(() => fitSimilarity(points, IMAGE_H), [points])
@@ -484,10 +491,10 @@ export default function CourseMap({ user, manage }) {
       setPending({ px, py })
     })
     drawMap.current = map
-    setTimeout(() => map.invalidateSize(), 100)
+    ;[60, 200, 500].forEach((t) => setTimeout(() => { try { map.invalidateSize() } catch { /* ignore */ } }, t))
     return () => { map.remove(); drawMap.current = null; drawPinRef.current = null; drawGcpRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, mode])
+  }, [ready, mode, calMode])
 
   // Draw existing GCP markers + the pending pin on the calibration pane
   useEffect(() => {
@@ -505,6 +512,35 @@ export default function CourseMap({ user, manage }) {
     }
   }, [points, pending, mode])
 
+  // ── Satellite pairing map (photo calibration) ───────────────────────────────
+  // A live satellite map you tap to say "the head I just marked on the drawing
+  // is HERE on the ground." No GPS — registers the drawing to the aerial photo.
+  useEffect(() => {
+    if (!ready || mode !== 'calibrate' || calMode !== 'photo' || !pairRef.current) return
+    const L = LRef.current
+    // Start centred on the course: use the current fit if we have one, else the club.
+    let center = [FALLBACK.lat, FALLBACK.lng]
+    if (transform) { const c = imageCornerLatLngs(transform, IMAGE_W, IMAGE_H); center = [(c.topLeft[0] + c.bottomLeft[0]) / 2, (c.topLeft[1] + c.topRight[1]) / 2] }
+    const map = L.map(pairRef.current, { center, zoom: 18, zoomControl: true, attributionControl: false, preferCanvas: true })
+    L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, crossOrigin: true }).addTo(map)
+    map.on('click', (e) => addPhotoPoint(e.latlng))
+    pairMap.current = map
+    ;[60, 200, 500, 1000].forEach((t) => setTimeout(() => { try { map.invalidateSize() } catch { /* ignore */ } }, t))
+    return () => { map.remove(); pairMap.current = null; pairGcpRef.current = null }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, mode, calMode])
+
+  // Show the placed points on the satellite map (numbered), so you can see the
+  // pairs building up and spot any that landed in the wrong place.
+  useEffect(() => {
+    const L = LRef.current, map = pairMap.current
+    if (!L || !map) return
+    if (pairGcpRef.current) pairGcpRef.current.forEach((m) => m.remove())
+    pairGcpRef.current = points.filter((p) => p.lat != null).map((p, i) => L.marker([p.lat, p.lng], {
+      icon: L.divIcon({ className: '', html: `<div style="background:${FERN};color:#fff;border:2px solid #fff;border-radius:9999px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font:700 11px sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.4)">${i + 1}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] }),
+    }).addTo(map))
+  }, [points, mode, calMode])
+
   // ── Capture the GPS for the pending drawing point ───────────────────────────
   async function doCapture() {
     if (!pending) { setMsg('First tap the head on the drawing above.'); return }
@@ -521,7 +557,22 @@ export default function CourseMap({ user, manage }) {
     }
   }
 
+  // Keep a ref of the pending pixel so the satellite map's click handler (bound
+  // once) always sees the latest tapped head.
+  useEffect(() => { pendingRef.current = pending }, [pending])
+
+  // Photo pairing: the head is already marked on the drawing (pending px,py);
+  // this records where the same head sits on the satellite photo (lat,lng).
+  const addPhotoPoint = (latlng) => {
+    const pend = pendingRef.current
+    if (!pend) { setMsg('First tap the head on the drawing (left), then tap the same head on the photo.'); return }
+    setPoints((prev) => [...prev, { px: pend.px, py: pend.py, lat: latlng.lat, lng: latlng.lng }])
+    setPending(null)
+    setMsg(`Point ${points.length + 1} placed on the photo.`)
+  }
+
   const removePoint = (i) => setPoints((prev) => prev.filter((_, k) => k !== i))
+  const clearPoints = () => { if (typeof window === 'undefined' || window.confirm('Remove all calibration points and start fresh?')) { setPoints([]); setPending(null) } }
 
   async function saveCalibration() {
     setSaving(true)
@@ -683,51 +734,105 @@ export default function CourseMap({ user, manage }) {
         </div>
       ) : (
         // ── Calibrate mode ──────────────────────────────────────────────────────
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-          <div className="lg:col-span-2 space-y-2">
-            <div className="rounded-xl px-4 py-3 font-body text-[13px]" style={{ backgroundColor: '#EEF4EF', border: '1px solid #CFE0D5', color: FERN }}>
-              <b>1.</b> Pinch-zoom and tap the exact head on the drawing. <b>2.</b> Walk to it, stand your phone on it, and press <b>Capture GPS</b>. Repeat at 8–12 heads spread around the course.
-            </div>
-            <div ref={drawRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: 'calc(100vh - 210px)', minHeight: 420, backgroundColor: '#20302a' }} />
+        <div className="space-y-3">
+          {/* Method: line up on the photo (inch-accurate, no GPS) vs walk with GPS */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => { setCalMode('photo'); setPending(null) }} className="font-body text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={calMode === 'photo' ? { backgroundColor: FOREST, color: '#fff' } : { color: FOREST, border: '1px solid #E2E8F0' }}><MapPin size={13} /> Line up on photo</button>
+            <button onClick={() => { setCalMode('gps'); setPending(null) }} className="font-body text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={calMode === 'gps' ? { backgroundColor: FOREST, color: '#fff' } : { color: FOREST, border: '1px solid #E2E8F0' }}><Crosshair size={13} /> Walk with GPS</button>
+            <span className="font-body text-[11px] text-slate-400">{calMode === 'photo' ? 'Most accurate — line the drawing up on the aerial, no GPS needed.' : 'Stand on each head and capture GPS (±10–15 ft on an iPad).'}</span>
           </div>
 
-          <div className="space-y-3">
-            <div className="paper-card p-4">
-              <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Capture a point</p>
-              <div className="rounded-lg px-3 py-2 mb-2 font-body text-[12px]" style={{ backgroundColor: pending ? '#FBF6E7' : '#F1F5F9', color: pending ? '#92660D' : '#64748B' }}>
-                {pending ? <>Head marked on drawing at ({Math.round(pending.px)}, {Math.round(pending.py)}). Now stand on it.</> : 'Tap the head on the drawing to mark it.'}
+          {calMode === 'photo' ? (
+            <>
+              <div className="rounded-xl px-4 py-3 font-body text-[13px]" style={{ backgroundColor: '#EEF4EF', border: '1px solid #CFE0D5', color: FERN }}>
+                <b>1.</b> Pinch-zoom and tap a head on the <b>drawing</b> (left). <b>2.</b> Tap the <b>same head</b> on the <b>satellite photo</b> (right). Repeat at 6–10 spread to the far corners, then <b>Save</b>. Pick things you can spot on the photo — green edges, isolated heads, yardage plates.
               </div>
-              <button onClick={doCapture} disabled={!pending || !!capturing} className="w-full py-2.5 rounded-xl font-body text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: FOREST }}>
-                {capturing ? <><Loader2 size={15} className="animate-spin" /> Averaging… {capturing.n} reads{capturing.acc ? ` (±${capturing.acc} m)` : ''}</> : <><Crosshair size={15} /> Capture GPS here</>}
-              </button>
-              {gps && <p className="font-body text-[10px] text-slate-400 mt-1.5">Live GPS: {gps.lat.toFixed(5)}, {gps.lng.toFixed(5)}{gps.acc ? ` · ±${Math.round(gps.acc)} m` : ''}</p>}
-            </div>
-
-            <div className="paper-card p-4">
-              <div className="flex items-center justify-between mb-2">
-                <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">Points ({points.length})</p>
-                {avgFt != null && <span className="font-body text-[11px] font-bold" style={{ color: avgFt <= 15 ? FERN : avgFt <= 30 ? '#92660D' : '#B91C1C' }}>avg ~{avgFt} ft</span>}
-              </div>
-              {points.length === 0 ? (
-                <p className="font-body text-[12px] text-slate-400">No points yet. You need at least 2 to place the overlay; 8–12 spread out is best.</p>
-              ) : (
-                <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                  {fit.residuals.map((p, i) => (
-                    <div key={i} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5" style={{ backgroundColor: '#F6F8F6' }}>
-                      <span className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center font-body text-[10px] font-bold text-white" style={{ backgroundColor: FERN }}>{i + 1}</span>
-                      <span className="font-body text-[11px] text-slate-500 flex-1 truncate tabular-nums">{p.lat.toFixed(5)}, {p.lng.toFixed(5)}</span>
-                      {p.errorM != null && <span className="font-body text-[10px] font-bold tabular-nums" style={{ color: metresToFeet(p.errorM) <= 20 ? FERN : '#B91C1C' }}>{Math.round(metresToFeet(p.errorM))}ft</span>}
-                      <button onClick={() => removePoint(i)} className="text-slate-300 hover:text-red-500 shrink-0"><Trash2 size={13} /></button>
-                    </div>
-                  ))}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+                <div>
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Drawing — tap a head</p>
+                  <div ref={drawRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: 'calc(100vh - 330px)', minHeight: 340, backgroundColor: '#20302a' }} />
                 </div>
-              )}
-              <button onClick={saveCalibration} disabled={points.length < 2 || saving} className="w-full mt-3 py-2.5 rounded-xl font-body text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: points.length < 2 ? '#94A3B8' : FERN }}>
-                {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Save &amp; place overlay
-              </button>
-              <p className="font-body text-[10px] text-slate-400 mt-2">Points that show a big error (red) usually had a bad GPS moment — delete and recapture. Spread points to the far corners for the best fit.</p>
+                <div>
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: pending ? '#92660D' : '#94A3B8' }}>Photo — {pending ? 'now tap the SAME head' : 'tap the head here next'}</p>
+                  <div ref={pairRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: 'calc(100vh - 330px)', minHeight: 340, backgroundColor: '#0b1e12' }} />
+                </div>
+              </div>
+              <div className="paper-card p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">Points ({points.length})</p>
+                  <div className="flex items-center gap-2">
+                    {avgFt != null && <span className="font-body text-[11px] font-bold" style={{ color: avgFt <= 15 ? FERN : avgFt <= 30 ? '#92660D' : '#B91C1C' }}>fit ~{avgFt} ft</span>}
+                    {points.length > 0 && <button onClick={clearPoints} className="font-body text-[10px] font-bold text-slate-400 hover:text-red-500">Clear all</button>}
+                  </div>
+                </div>
+                {points.length === 0 ? (
+                  <p className="font-body text-[12px] text-slate-400">No points yet. You need at least 2; 6–10 spread out is best.</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                    {fit.residuals.map((p, i) => (
+                      <div key={i} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5" style={{ backgroundColor: '#F6F8F6' }}>
+                        <span className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center font-body text-[10px] font-bold text-white" style={{ backgroundColor: FERN }}>{i + 1}</span>
+                        <span className="font-body text-[11px] text-slate-500 flex-1 truncate tabular-nums">{p.lat.toFixed(5)}, {p.lng.toFixed(5)}</span>
+                        {p.errorM != null && <span className="font-body text-[10px] font-bold tabular-nums" style={{ color: metresToFeet(p.errorM) <= 20 ? FERN : '#B91C1C' }}>{Math.round(metresToFeet(p.errorM))}ft</span>}
+                        <button onClick={() => removePoint(i)} className="text-slate-300 hover:text-red-500 shrink-0"><Trash2 size={13} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button onClick={saveCalibration} disabled={points.length < 2 || saving} className="w-full mt-3 py-2.5 rounded-xl font-body text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: points.length < 2 ? '#94A3B8' : FERN }}>
+                  {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Save &amp; place overlay
+                </button>
+                <p className="font-body text-[10px] text-slate-400 mt-2">A point with a big red number landed in the wrong spot — delete it and redo. Spread points to the far corners for the best fit.</p>
+              </div>
+            </>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+              <div className="lg:col-span-2 space-y-2">
+                <div className="rounded-xl px-4 py-3 font-body text-[13px]" style={{ backgroundColor: '#EEF4EF', border: '1px solid #CFE0D5', color: FERN }}>
+                  <b>1.</b> Pinch-zoom and tap the exact head on the drawing. <b>2.</b> Walk to it, stand your phone on it, and press <b>Capture GPS</b>. Repeat at 8–12 heads spread around the course.
+                </div>
+                <div ref={drawRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: 'calc(100vh - 210px)', minHeight: 420, backgroundColor: '#20302a' }} />
+              </div>
+
+              <div className="space-y-3">
+                <div className="paper-card p-4">
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Capture a point</p>
+                  <div className="rounded-lg px-3 py-2 mb-2 font-body text-[12px]" style={{ backgroundColor: pending ? '#FBF6E7' : '#F1F5F9', color: pending ? '#92660D' : '#64748B' }}>
+                    {pending ? <>Head marked on drawing at ({Math.round(pending.px)}, {Math.round(pending.py)}). Now stand on it.</> : 'Tap the head on the drawing to mark it.'}
+                  </div>
+                  <button onClick={doCapture} disabled={!pending || !!capturing} className="w-full py-2.5 rounded-xl font-body text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: FOREST }}>
+                    {capturing ? <><Loader2 size={15} className="animate-spin" /> Averaging… {capturing.n} reads{capturing.acc ? ` (±${capturing.acc} m)` : ''}</> : <><Crosshair size={15} /> Capture GPS here</>}
+                  </button>
+                  {gps && <p className="font-body text-[10px] text-slate-400 mt-1.5">Live GPS: {gps.lat.toFixed(5)}, {gps.lng.toFixed(5)}{gps.acc ? ` · ±${Math.round(gps.acc)} m` : ''}</p>}
+                </div>
+
+                <div className="paper-card p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">Points ({points.length})</p>
+                    {avgFt != null && <span className="font-body text-[11px] font-bold" style={{ color: avgFt <= 15 ? FERN : avgFt <= 30 ? '#92660D' : '#B91C1C' }}>avg ~{avgFt} ft</span>}
+                  </div>
+                  {points.length === 0 ? (
+                    <p className="font-body text-[12px] text-slate-400">No points yet. You need at least 2 to place the overlay; 8–12 spread out is best.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                      {fit.residuals.map((p, i) => (
+                        <div key={i} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5" style={{ backgroundColor: '#F6F8F6' }}>
+                          <span className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center font-body text-[10px] font-bold text-white" style={{ backgroundColor: FERN }}>{i + 1}</span>
+                          <span className="font-body text-[11px] text-slate-500 flex-1 truncate tabular-nums">{p.lat.toFixed(5)}, {p.lng.toFixed(5)}</span>
+                          {p.errorM != null && <span className="font-body text-[10px] font-bold tabular-nums" style={{ color: metresToFeet(p.errorM) <= 20 ? FERN : '#B91C1C' }}>{Math.round(metresToFeet(p.errorM))}ft</span>}
+                          <button onClick={() => removePoint(i)} className="text-slate-300 hover:text-red-500 shrink-0"><Trash2 size={13} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button onClick={saveCalibration} disabled={points.length < 2 || saving} className="w-full mt-3 py-2.5 rounded-xl font-body text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: points.length < 2 ? '#94A3B8' : FERN }}>
+                    {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Save &amp; place overlay
+                  </button>
+                  <p className="font-body text-[10px] text-slate-400 mt-2">Points that show a big error (red) usually had a bad GPS moment — delete and recapture. Spread points to the far corners for the best fit.</p>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
