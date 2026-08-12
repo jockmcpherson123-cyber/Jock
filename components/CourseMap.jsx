@@ -110,6 +110,9 @@ export default function CourseMap({ user, manage }) {
   const [pipes, setPipes] = useState(null)
   const [showPipes, setShowPipes] = useState(true)
 
+  // On-screen diagnostics (no console needed): container size + tile status
+  const [diag, setDiag] = useState({ w: 0, h: 0, tiles: 'waiting', err: 0 })
+
   const LRef = useRef(null)
   const pipeLayerRef = useRef(null)
   const featLayerRef = useRef(null)
@@ -191,22 +194,44 @@ export default function CourseMap({ user, manage }) {
   // ── Main satellite map (created once per entry into map mode) ───────────────
   const [mapTick, setMapTick] = useState(0)
   useEffect(() => {
-    if (!ready || mode !== 'map' || !mainRef.current) return
+    if (!ready || mode !== 'map') return
     const L = LRef.current
-    const c0 = (Number.isFinite(center[0]) && Number.isFinite(center[1])) ? center : [FALLBACK.lat, FALLBACK.lng]
-    const map = L.map(mainRef.current, { center: c0, zoom: 17, zoomControl: true, attributionControl: true, preferCanvas: true })
-    map.attributionControl.setPrefix('')
-    L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, attribution: SAT_ATTR }).addTo(map)
-    mainMap.current = map
-    // Force Leaflet to (re)measure the container — the #1 cause of a blank map is
-    // it reading a 0/º size before the layout settles.
-    const inval = () => { try { map.invalidateSize(false) } catch { /* ignore */ } }
-    requestAnimationFrame(inval)
-    ;[120, 400, 1000].forEach((t) => setTimeout(inval, t))
-    let ro = null
-    try { ro = new ResizeObserver(inval); ro.observe(mainRef.current) } catch { /* ignore */ }
-    setMapTick((t) => t + 1) // signal the overlay/location effects that the map exists
-    return () => { if (ro) ro.disconnect(); map.remove(); mainMap.current = null; overlayRef.current = null; locRef.current = null; accRef.current = null }
+    const el = mainRef.current
+    if (!el) return
+    let map = null, ro = null, cancelled = false, tries = 0
+
+    const create = () => {
+      if (cancelled || map) return
+      const c0 = (Number.isFinite(center[0]) && Number.isFinite(center[1])) ? center : [FALLBACK.lat, FALLBACK.lng]
+      map = L.map(el, { center: c0, zoom: 17, zoomControl: true, attributionControl: true, preferCanvas: true })
+      map.attributionControl.setPrefix('')
+      const tl = L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, attribution: SAT_ATTR, crossOrigin: true })
+      let errs = 0, loaded = false
+      tl.on('load', () => { loaded = true; setDiag((d) => ({ ...d, tiles: 'ok' })) })
+      tl.on('tileerror', () => { errs += 1; setDiag((d) => ({ ...d, err: errs, tiles: 'error' }))
+        // If the imagery host is blocked, fall back to OpenStreetMap so it's not blank.
+        if (errs === 6 && !loaded) { try { map.removeLayer(tl); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map); setDiag((d) => ({ ...d, tiles: 'osm-fallback' })) } catch { /* ignore */ } } })
+      tl.addTo(map)
+      mainMap.current = map
+      const inval = () => { try { map.invalidateSize(false) } catch { /* ignore */ } }
+      map.whenReady(() => { inval(); setMapTick((t) => t + 1) })
+      ;[0, 150, 400, 900, 1600].forEach((t) => setTimeout(inval, t))
+      try { ro = new ResizeObserver(inval); ro.observe(el) } catch { /* ignore */ }
+    }
+
+    // Wait until the container actually has a size — creating a Leaflet map in a
+    // 0-height box is the classic "blank map" bug.
+    const waitForSize = () => {
+      if (cancelled) return
+      const w = el.clientWidth, h = el.clientHeight
+      setDiag((d) => ({ ...d, w, h }))
+      if (w > 60 && h > 60) create()
+      else if (tries++ < 90) requestAnimationFrame(waitForSize)
+      else create() // give up waiting and try anyway
+    }
+    waitForSize()
+
+    return () => { cancelled = true; if (ro) ro.disconnect(); if (map) map.remove(); mainMap.current = null; overlayRef.current = null; locRef.current = null; accRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, mode])
 
@@ -525,6 +550,10 @@ export default function CourseMap({ user, manage }) {
             {/* Count chip */}
             <div className="absolute z-[500] bottom-3 right-3 bg-white/95 rounded-full shadow px-3 py-1.5 font-body text-[11px] font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
               <Droplet size={12} style={{ color: '#2563EB' }} /> {features.length} object{features.length !== 1 ? 's' : ''}
+            </div>
+            {/* Diagnostic badge — tells us why a map might be blank (read this to me) */}
+            <div className="absolute z-[500] top-3 left-1/2 -translate-x-1/2 bg-black/70 text-white rounded-full px-3 py-1 font-body text-[11px] tabular-nums">
+              map {diag.w}×{diag.h} · tiles {diag.tiles}{diag.err ? ` (${diag.err} err)` : ''} · {transform ? 'calibrated' : 'no-cal'} · {features.length} pins
             </div>
             {transform && (
               <div className="absolute z-[500] bottom-3 left-3 right-3 sm:right-auto sm:w-72 bg-white/95 backdrop-blur rounded-xl shadow p-3">
