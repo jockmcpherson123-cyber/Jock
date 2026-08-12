@@ -617,9 +617,13 @@ export default function CourseMap({ user, manage }) {
                 <button onClick={() => setShowLegend((v) => !v)} title="Legend" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showLegend ? FOREST : '#94A3B8' }}><List size={17} /></button>
               )}
             </div>
-            {/* Legend panel */}
+            {/* Status readout — shows what actually loaded onto the map. */}
+            <div className="absolute z-[500] bottom-2 left-2 px-2 py-1 rounded-md font-body text-[10px] tabular-nums" style={{ backgroundColor: 'rgba(255,255,255,0.9)', color: '#334155', border: '1px solid #E2E8E4' }}>
+              Pipes {pipes?.lines?.length ?? '—'} · Heads {features.length} · Wires {wires?.colors ? Object.values(wires.colors).reduce((n, a) => n + a.length, 0) : '—'} · Map {transform ? 'set' : 'not set'}
+            </div>
+            {/* Legend panel (bottom-right so it never sits under the add-head buttons) */}
             {showLegend && (
-              <div className="absolute z-[500] top-3 left-3 bg-white/95 rounded-xl shadow-lg px-3 py-2.5 max-w-[220px]" style={{ border: '1px solid #E2E8E4' }}>
+              <div className="absolute z-[600] bottom-9 right-3 bg-white/95 rounded-xl shadow-lg px-3 py-2.5 max-w-[220px]" style={{ border: '1px solid #E2E8E4' }}>
                 <div className="flex items-center justify-between mb-1.5">
                   <p className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: FOREST }}>Map key</p>
                   <button onClick={() => setShowLegend(false)} className="text-slate-400"><X size={13} /></button>
