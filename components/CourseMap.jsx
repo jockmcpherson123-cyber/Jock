@@ -618,7 +618,7 @@ export default function CourseMap({ user, manage }) {
               )}
             </div>
             {/* Status readout — shows what actually loaded onto the map. */}
-            <div className="absolute z-[500] bottom-2 left-2 px-2 py-1 rounded-md font-body text-[10px] tabular-nums" style={{ backgroundColor: 'rgba(255,255,255,0.9)', color: '#334155', border: '1px solid #E2E8E4' }}>
+            <div className="absolute z-[600] top-2 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-md font-body text-[11px] font-bold tabular-nums whitespace-nowrap shadow" style={{ backgroundColor: 'rgba(255,255,255,0.95)', color: '#334155', border: '1px solid #E2E8E4' }}>
               Pipes {pipes?.lines?.length ?? '—'} · Heads {features.length} · Wires {wires?.colors ? Object.values(wires.colors).reduce((n, a) => n + a.length, 0) : '—'} · Map {transform ? 'set' : 'not set'}
             </div>
             {/* Legend panel (bottom-right so it never sits under the add-head buttons) */}
