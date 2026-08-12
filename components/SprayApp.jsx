@@ -28,6 +28,8 @@ import { fungicideLogByArea } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
+import { FERT_AREAS, fertArea } from '@/lib/fertAreas'
+import { computeFert, parseAnalysis, fmtNum } from '@/lib/fert'
 import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget, diseasesForProduct } from '@/lib/fungicides'
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { modelForProduct, regulationStatus, suppressionAt, combinedSuppression, surfaceCol, withTargets, PGR_MODELS, PHASE_STYLE } from '@/lib/pgrmodel'
@@ -808,6 +810,7 @@ function SprayOpsModule({ user }) {
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
         {route === 'program' && manage && <AnnualProgram areas={areas} products={products} sheets={sheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
+        {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
           <SettingsPage
             areas={areas} operators={operators} directors={directors} targets={targets}
@@ -821,11 +824,208 @@ function SprayOpsModule({ user }) {
   )
 }
 
+// ── FERTILIZER SHEETS ─────────────────────────────────────────────────────
+// Granular fert applications, per area — the digital version of the club's
+// Excel fert sheets. Pick an area (its per-section square footage is built in),
+// a product + rate + bag size, and it works out lbs, bags and cost per section.
+function FertSheets({ manage, courseInfo }) {
+  const [sheets, setSheets] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [active, setActive] = useState(null) // sheet object being viewed/edited
+  const [toast, setToast] = useState(null)
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(null), 2400) }
+
+  useEffect(() => { (async () => {
+    try { setSheets(await db.fetchFertSheets()) } catch (e) { console.error(e) } finally { setLoading(false) }
+  })() }, [])
+
+  const blank = () => {
+    const a = FERT_AREAS[0]
+    return { area: a.area, product: '', analysis: { n: 0, p: 0, k: 0 }, rate: 4, bag: a.bag, adjustPct: a.adjustPct, pricePerBag: 0, applicator: '', appDate: new Date().toISOString().slice(0, 10), status: 'planned', notes: '', sections: a.sections.map((s) => ({ ...s, actual: '' })) }
+  }
+
+  async function save(sheet) {
+    try {
+      const saved = sheet.id ? await db.updateFertSheet(sheet.id, sheet) : await db.addFertSheet(sheet)
+      setSheets((prev) => sheet.id ? prev.map((x) => x.id === saved.id ? saved : x) : [saved, ...prev])
+      setActive(saved); flash('Fert sheet saved')
+      return saved
+    } catch (e) { console.error(e); flash('Could not save — is the phase25 table set up?') }
+  }
+  async function remove(id) {
+    try { await db.deleteFertSheet(id); setSheets((prev) => prev.filter((x) => x.id !== id)); setActive(null); flash('Deleted') }
+    catch (e) { console.error(e); flash('Could not delete') }
+  }
+
+  if (loading) return <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 text-center font-body text-sm text-slate-400"><Loader2 className="animate-spin inline mr-2" size={16} /> Loading fert sheets…</div>
+
+  if (active) return <FertEditor sheet={active} manage={manage} courseInfo={courseInfo} onSave={save} onDelete={remove} onBack={() => setActive(null)} toast={toast} />
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+      {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[1000] px-4 py-2 rounded-full text-white font-body text-sm shadow-lg" style={{ backgroundColor: FOREST }}>{toast}</div>}
+      <div className="flex items-center justify-between mb-4">
+        <SectionHeader title="Fertilizer Sheets" subtitle="Granular fert applications by area — lbs, bags and cost worked out per section" noMargin />
+        {manage && <button onClick={() => setActive(blank())} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={14} /> New fert sheet</button>}
+      </div>
+      {sheets.length === 0 ? (
+        <div className="paper-card p-10 text-center">
+          <Sprout className="mx-auto mb-3" size={28} style={{ color: HAIR }} />
+          <p className="font-body text-sm mb-1" style={{ color: INK_3 }}>No fert sheets yet.</p>
+          <p className="font-body text-xs mb-4" style={{ color: INK_3 }}>Start one for any area — the square footage of every green/tee/hole is already built in.</p>
+          {manage && <button onClick={() => setActive(blank())} className="font-body text-xs font-semibold px-4 py-2 rounded-full text-white" style={{ backgroundColor: FOREST }}>Create your first fert sheet</button>}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+          {sheets.map((s) => {
+            const c = computeFert(s)
+            return (
+              <button key={s.id} onClick={() => setActive(s)} className="paper-card p-4 text-left hover:shadow-md transition">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-display text-base font-bold" style={{ color: FOREST }}>{s.area}</p>
+                  <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={s.status === 'complete' ? { backgroundColor: '#DCFCE7', color: '#166534' } : { backgroundColor: '#EEF4EF', color: FERN }}>{s.status === 'complete' ? 'Complete' : 'Planned'}</span>
+                </div>
+                <p className="font-body text-[13px] text-slate-600 mt-0.5">{s.product || 'No product set'}{s.analysis?.n != null && (s.analysis.n || s.analysis.p || s.analysis.k) ? ` · ${s.analysis.n}-${s.analysis.p}-${s.analysis.k}` : ''}</p>
+                <div className="flex items-center gap-4 mt-2 font-body text-[12px] text-slate-500">
+                  <span><b style={{ color: FOREST }}>{fmtNum(c.totalBags, 1)}</b> bags</span>
+                  <span><b style={{ color: FOREST }}>{fmtNum(c.totalLbs, 0)}</b> lbs</span>
+                  <span>{s.rate} lb/M</span>
+                  {c.cost > 0 && <span>${fmtNum(c.cost, 0)}</span>}
+                  {s.appDate && <span className="ml-auto">{fmtDate ? fmtDate(s.appDate) : s.appDate}</span>}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FertEditor({ sheet, manage, courseInfo, onSave, onDelete, onBack, toast }) {
+  const [s, setS] = useState(sheet)
+  const [saving, setSaving] = useState(false)
+  const [confirmDel, setConfirmDel] = useState(false)
+  useEffect(() => { setS(sheet) }, [sheet])
+  const c = computeFert(s)
+  const set = (patch) => setS((p) => ({ ...p, ...patch }))
+  const setSection = (i, patch) => setS((p) => ({ ...p, sections: p.sections.map((x, k) => k === i ? { ...x, ...patch } : x) }))
+  // Switching area reloads that area's built-in sections + bag/adjust defaults.
+  const pickArea = (name) => {
+    const a = fertArea(name); if (!a) return set({ area: name })
+    set({ area: name, bag: a.bag, adjustPct: a.adjustPct, sections: a.sections.map((x) => ({ ...x, actual: '' })) })
+  }
+  const onAnalysis = (v) => { const p = parseAnalysis(v); set(p ? { product: s.product, analysis: p, _npkStr: v } : { _npkStr: v }) }
+
+  async function doSave() { setSaving(true); await onSave(s); setSaving(false) }
+  function printSheet() {
+    const rows = c.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class=n>${fmtNum(r.sqft, 0)}</td><td class=n>${fmtNum(r.lbs, 1)}</td><td class=n>${fmtNum(r.bags, 2)}</td><td class=n>${fmtNum(r.cumBags, 2)}</td><td></td></tr>`).join('')
+    const w = window.open('', '_blank'); if (!w) return
+    w.document.write(`<html><head><title>${esc(s.area)} Fert Sheet</title><style>body{font-family:Georgia,serif;padding:24px;color:#16291F}h1{font-size:18px}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left}.n{text-align:right}.meta{font-size:12px;margin:2px 0}tfoot td{font-weight:bold;background:#f3f3f3}</style></head><body>
+      <h1>${esc(s.area)} — Fertility Application</h1>
+      <p class=meta><b>Product:</b> ${esc(s.product)} ${s.analysis?.n != null ? `(${s.analysis.n}-${s.analysis.p}-${s.analysis.k})` : ''} &nbsp; <b>Rate:</b> ${s.rate} lb/1,000 ft² &nbsp; <b>Bag:</b> ${s.bag} lb</p>
+      <p class=meta><b>Applicator:</b> ${esc(s.applicator)} &nbsp; <b>Date:</b> ${esc(s.appDate)} &nbsp; <b>Overlap adj:</b> ${s.adjustPct}%</p>
+      <table><thead><tr><th>Section</th><th class=n>Sq ft</th><th class=n>Lbs product</th><th class=n>Bags</th><th class=n>Running bags</th><th>Actual used</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td>Total</td><td class=n>${fmtNum(c.totalSqft, 0)}</td><td class=n>${fmtNum(c.totalLbs, 1)}</td><td class=n>${fmtNum(c.totalBags, 2)}</td><td class=n></td><td></td></tr></tfoot></table>
+      <p class=meta style="margin-top:8px">N ${fmtNum(c.nPerM, 2)} · P ${fmtNum(c.pPerM, 2)} · K ${fmtNum(c.kPerM, 2)} lb/1,000 ft² &nbsp; | &nbsp; Season total: N ${fmtNum(c.totalN, 0)} · P ${fmtNum(c.totalP, 0)} · K ${fmtNum(c.totalK, 0)} lb${c.cost > 0 ? ` &nbsp; | &nbsp; Cost: $${fmtNum(c.cost, 0)}` : ''}</p>
+      </body></html>`)
+    w.document.close(); w.focus(); setTimeout(() => w.print(), 300)
+  }
+  const esc = (x) => String(x ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]))
+  const inp = 'w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body'
+  const lbl = 'font-body text-[10px] font-bold uppercase tracking-wide text-slate-400'
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+      {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[1000] px-4 py-2 rounded-full text-white font-body text-sm shadow-lg" style={{ backgroundColor: FOREST }}>{toast}</div>}
+      <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+        <button onClick={onBack} className="font-body text-xs font-semibold flex items-center gap-1" style={{ color: FERN }}>← All fert sheets</button>
+        <div className="flex items-center gap-2">
+          <button onClick={printSheet} className="font-body text-xs font-bold px-3 py-1.5 rounded-full" style={{ color: FOREST, border: '1px solid #E2E8F0' }}>Print</button>
+          {manage && s.id && (s.status !== 'complete'
+            ? <button onClick={async () => { setSaving(true); await onSave({ ...s, status: 'complete' }); setSaving(false) }} className="font-body text-xs font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FERN }}>Mark complete</button>
+            : <button onClick={async () => { setSaving(true); await onSave({ ...s, status: 'planned' }); setSaving(false) }} className="font-body text-xs font-bold px-3 py-1.5 rounded-full" style={{ color: FOREST, border: '1px solid #E2E8F0' }}>Reopen</button>)}
+          {manage && <button onClick={doSave} disabled={saving} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full text-white flex items-center gap-1.5 disabled:opacity-60" style={{ backgroundColor: FOREST }}>{saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Save</button>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+        {/* Left: the setup */}
+        <div className="paper-card p-4 space-y-3">
+          <div><label className={lbl}>Area</label>
+            <select value={s.area} disabled={!manage} onChange={(e) => pickArea(e.target.value)} className={inp + ' bg-white'}>
+              {FERT_AREAS.map((a) => <option key={a.area} value={a.area}>{a.area}</option>)}
+              {!FERT_AREAS.some((a) => a.area === s.area) && <option value={s.area}>{s.area}</option>}
+            </select>
+          </div>
+          <div><label className={lbl}>Product</label><input value={s.product} disabled={!manage} onChange={(e) => set({ product: e.target.value })} className={inp} placeholder="e.g. Harrells 24-6-6 Polyon" /></div>
+          <div className="grid grid-cols-2 gap-2">
+            <div><label className={lbl}>Analysis N-P-K</label><input value={s._npkStr ?? (s.analysis?.n != null && (s.analysis.n || s.analysis.p || s.analysis.k) ? `${s.analysis.n}-${s.analysis.p}-${s.analysis.k}` : '')} disabled={!manage} onChange={(e) => onAnalysis(e.target.value)} className={inp} placeholder="24-6-6" /></div>
+            <div><label className={lbl}>Rate (lb/1,000 ft²)</label><input value={s.rate} disabled={!manage} inputMode="decimal" onChange={(e) => set({ rate: e.target.value.replace(/[^\d.]/g, '') })} className={inp} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div><label className={lbl}>Bag size (lb)</label><input value={s.bag} disabled={!manage} inputMode="decimal" onChange={(e) => set({ bag: e.target.value.replace(/[^\d.]/g, '') })} className={inp} /></div>
+            <div><label className={lbl}>Overlap adj (%)</label><input value={s.adjustPct} disabled={!manage} inputMode="decimal" onChange={(e) => set({ adjustPct: e.target.value.replace(/[^\d.]/g, '') })} className={inp} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div><label className={lbl}>Price / bag ($)</label><input value={s.pricePerBag} disabled={!manage} inputMode="decimal" onChange={(e) => set({ pricePerBag: e.target.value.replace(/[^\d.]/g, '') })} className={inp} /></div>
+            <div><label className={lbl}>Date</label><input type="date" value={s.appDate || ''} disabled={!manage} onChange={(e) => set({ appDate: e.target.value })} className={inp} /></div>
+          </div>
+          <div><label className={lbl}>Applicator</label><input value={s.applicator} onChange={(e) => set({ applicator: e.target.value })} className={inp} placeholder="Name" /></div>
+          <div><label className={lbl}>Notes</label><textarea value={s.notes} onChange={(e) => set({ notes: e.target.value })} rows={2} className={inp} /></div>
+          {manage && s.id && (!confirmDel
+            ? <button onClick={() => setConfirmDel(true)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: '#B91C1C', border: '1px solid #F3C6C6' }}><Trash2 size={13} /> Delete sheet</button>
+            : <div className="flex items-center gap-2"><span className="font-body text-[12px] text-slate-500">Delete?</span><button onClick={() => onDelete(s.id)} className="font-body text-xs font-bold px-3 py-2 rounded-full text-white" style={{ backgroundColor: '#DC2626' }}>Yes</button><button onClick={() => setConfirmDel(false)} className="font-body text-xs font-bold px-3 py-2 rounded-full text-slate-500 border border-slate-200">Keep</button></div>)}
+        </div>
+
+        {/* Right: the computed table + totals */}
+        <div className="lg:col-span-2 space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="paper-card p-3"><p className={lbl}>Total bags</p><p className="font-display text-xl font-bold" style={{ color: FOREST }}>{fmtNum(c.totalBags, 1)}</p></div>
+            <div className="paper-card p-3"><p className={lbl}>Total product</p><p className="font-display text-xl font-bold" style={{ color: FOREST }}>{fmtNum(c.totalLbs, 0)} <span className="text-sm font-body">lb</span></p></div>
+            <div className="paper-card p-3"><p className={lbl}>N · P · K /M</p><p className="font-display text-base font-bold" style={{ color: FOREST }}>{fmtNum(c.nPerM, 2)}·{fmtNum(c.pPerM, 2)}·{fmtNum(c.kPerM, 2)}</p></div>
+            <div className="paper-card p-3"><p className={lbl}>Cost</p><p className="font-display text-xl font-bold" style={{ color: FOREST }}>{c.cost > 0 ? '$' + fmtNum(c.cost, 0) : '—'}</p></div>
+          </div>
+          <div className="paper-card overflow-x-auto">
+            <table className="w-full text-sm font-body" style={{ minWidth: 560 }}>
+              <thead><tr style={{ borderBottom: '1px solid #EEF0EC' }}>
+                {['Section', 'Sq ft', 'Lbs product', 'Bags', 'Running bags', 'Actual used'].map((h, i) => <th key={h} className={`px-3 py-2 ${i ? 'text-right' : 'text-left'}`} style={{ color: INK_2, fontWeight: 700, fontSize: 11 }}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {c.rows.map((r, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #F3F5F2' }}>
+                    <td className="px-3 py-1.5" style={{ color: FOREST }}>{r.name}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{fmtNum(r.sqft, 0)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{fmtNum(r.lbs, 1)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums font-bold" style={{ color: FOREST }}>{fmtNum(r.bags, 2)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">{fmtNum(r.cumBags, 2)}</td>
+                    <td className="px-2 py-1 text-right"><input value={r.actual ?? ''} onChange={(e) => setSection(i, { actual: e.target.value.replace(/[^\d.]/g, '') })} className="w-16 border border-slate-200 rounded px-1.5 py-1 text-right text-[13px] tabular-nums" placeholder="—" /></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr style={{ borderTop: '2px solid #EEF0EC' }}>
+                <td className="px-3 py-2 font-bold" style={{ color: FOREST }}>Total</td>
+                <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: FOREST }}>{fmtNum(c.totalSqft, 0)}</td>
+                <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: FOREST }}>{fmtNum(c.totalLbs, 1)}</td>
+                <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: FOREST }}>{fmtNum(c.totalBags, 2)}</td>
+                <td></td>
+                <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: FOREST }}>{c.totalActualBags ? fmtNum(c.totalActualBags, 2) : ''}</td>
+              </tr></tfoot>
+            </table>
+          </div>
+          <p className="font-body text-[11px] text-slate-400">Square footage for every section is built in from the club sheets — edit any value and the lbs/bags update live. Overlap adjustment adds a % to the area (greens use 5%).</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── TOP NAV ───────────────────────────────────────────────────────────────
 function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
   const items = manage
-    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['program', 'Annual Program'], ['weather', 'Weather'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
-    : [['tospray', 'To Spray'], ['records', 'Records'], ['inventory', 'Inventory'], ['documents', 'Labels & SDS'], ['weather', 'Weather']]
+    ? [['dashboard', 'Dashboard'], ['list', 'All Sheets'], ['fert', 'Fert Sheets'], ['program', 'Annual Program'], ['weather', 'Weather'], ['reports', 'Reports'], ['chemicals', 'Chemical Library'], ['settings', 'Settings']]
+    : [['tospray', 'To Spray'], ['records', 'Records'], ['fert', 'Fert Sheets'], ['inventory', 'Inventory'], ['documents', 'Labels & SDS'], ['weather', 'Weather']]
 
   return (
     <div style={{ backgroundColor: FOREST }} className="text-white">
