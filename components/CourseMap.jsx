@@ -11,10 +11,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import 'leaflet/dist/leaflet.css'
-import { MapPin, Crosshair, Navigation, Layers, Check, X, Trash2, Loader2, Plus, Camera, Eye, EyeOff, Droplet, Compass, Zap, List } from 'lucide-react'
+import { MapPin, Crosshair, Navigation, Layers, Check, X, Trash2, Loader2, Plus, Camera, Eye, EyeOff, Droplet, Compass, Zap, List, Stamp } from 'lucide-react'
 import * as db from '@/lib/db'
 import ArcTool from '@/components/ArcTool'
 import { fitSimilarity, fitResiduals, imageCornerLatLngs, metresToFeet, pixelToLatLng } from '@/lib/geocalib'
+import { SYMBOL_GROUPS, PIPE_ITEMS, symbolById, symbolColor, symbolSvg } from '@/lib/irrigationSymbols'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -123,6 +124,13 @@ export default function CourseMap({ user, manage }) {
   const [importing, setImporting] = useState(null) // {done,total} while bulk-importing
   const moveRef = useRef(false)
   useEffect(() => { moveRef.current = moveMode }, [moveMode])
+  // Symbol "stamp" palette: pick a legend symbol, then tap the map to drop it.
+  const [stampSym, setStampSym] = useState(null) // symbol id being stamped
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [paletteMode, setPaletteMode] = useState('stamp') // 'stamp' new, or 'assign' to selected
+  const [legendFull, setLegendFull] = useState(false) // full PDF-style legend modal
+  const stampRef = useRef(null)
+  useEffect(() => { stampRef.current = stampSym }, [stampSym])
 
   // Vector pipe network (our own crisp overlay, pulled from the PDF)
   const [pipes, setPipes] = useState(null)
@@ -130,7 +138,6 @@ export default function CourseMap({ user, manage }) {
   // Control-wire loops (dotted colour paths from the blue as-built)
   const [wires, setWires] = useState(null)
   const [showWires, setShowWires] = useState(false)
-  const [showLegend, setShowLegend] = useState(false)
   // Calibration method: 'photo' = line the drawing up on the satellite photo
   // (inch-accurate, no GPS); 'gps' = stand on each head and capture GPS.
   const [calMode, setCalMode] = useState('photo')
@@ -317,6 +324,7 @@ export default function CourseMap({ user, manage }) {
     if (!map) return
     const handler = (e) => {
       if (moveRef.current) { placeRef.current?.(e.latlng, 'relocate'); return }
+      if (stampRef.current) { placeRef.current?.(e.latlng, 'manual', stampRef.current); return }
       if (addModeRef.current) placeRef.current?.(e.latlng)
     }
     map.on('click', handler)
@@ -393,13 +401,16 @@ export default function CourseMap({ user, manage }) {
     try {
       features.forEach((f) => {
         if (!Number.isFinite(f.lat) || !Number.isFinite(f.lng)) return
-        const color = featureColor(f)
+        const sym = f.symbol ? symbolById(f.symbol) : null
+        const fill = sym ? sym.fill : featureColor(f)
+        // Repair/replaced get a coloured ring so status still reads at a glance.
+        const statusRing = f.status === 'repair' ? '#DC2626' : f.status === 'replaced' ? '#6B7280' : null
         const isValve = f.kind !== 'head'
         const cm = L.circleMarker([f.lat, f.lng], {
           radius: isValve ? 6 : 4,
-          color: f.id === sel ? GOLD : '#ffffff',
-          weight: f.id === sel ? 3 : 1.2,
-          fillColor: color,
+          color: f.id === sel ? GOLD : (statusRing || (sym ? sym.stroke : '#ffffff')),
+          weight: f.id === sel ? 3 : (statusRing ? 2.4 : 1.2),
+          fillColor: fill,
           fillOpacity: 0.95,
         })
         cm.on('click', (e) => { if (e.originalEvent) e.originalEvent.stopPropagation?.(); setSelected(f) })
@@ -412,7 +423,7 @@ export default function CourseMap({ user, manage }) {
 
   // Place a new feature — or, in move mode, relocate the selected one — from a
   // map tap or from GPS.
-  placeRef.current = async (latlng, source = 'manual') => {
+  placeRef.current = async (latlng, source = 'manual', symId = null) => {
     if (!manage) return
     if (source === 'relocate' && selected) {
       try { const up = await db.updateIrrigationFeature(selected.id, { lat: latlng.lat, lng: latlng.lng, source: 'manual' }); setFeatures((prev) => prev.map((x) => (x.id === up.id ? up : x))); setSelected(up); setMoveMode(false) }
@@ -420,11 +431,17 @@ export default function CourseMap({ user, manage }) {
       return
     }
     try {
-      const f = await db.addIrrigationFeature({ kind: 'head', lat: latlng.lat, lng: latlng.lng, status: 'ok', source })
+      const sym = symId ? symbolById(symId) : null
+      const f = await db.addIrrigationFeature({ kind: sym?.kind || 'head', symbol: symId || '', lat: latlng.lat, lng: latlng.lng, status: 'ok', source })
       setFeatures((prev) => [...prev, f])
-      setSelected(f)
-      setAddMode(false)
-    } catch (e) { console.error(e); setMsg('Could not add that head — is the phase21 table set up?') }
+      if (symId) {
+        // Stamping: keep the tool armed so several of the same can be dropped fast.
+        setMsg(`Placed ${sym?.label || 'symbol'} — tap again to place another, or Done to stop.`)
+      } else {
+        setSelected(f)
+        setAddMode(false)
+      }
+    } catch (e) { console.error(e); setMsg('Could not add that — is the phase21 table set up?') }
   }
   const addAtGps = () => { if (gps) placeRef.current({ lat: gps.lat, lng: gps.lng }, 'gps'); else setMsg('No GPS fix yet.') }
 
@@ -650,6 +667,12 @@ export default function CourseMap({ user, manage }) {
               <button onClick={() => setMoveMode(false)} className="font-body text-[11px] font-bold shrink-0">Cancel</button>
             </div>
           )}
+          {stampSym && (
+            <div className="rounded-xl px-4 py-2.5 font-body text-[13px] flex items-center justify-between gap-2" style={{ backgroundColor: '#F3EEFB', border: '1px solid #D9C9F0', color: '#4A2C7A' }}>
+              <span className="flex items-center gap-2"><span dangerouslySetInnerHTML={{ __html: symbolSvg(symbolById(stampSym), 18) }} /><b>Stamping {symbolById(stampSym)?.label}:</b> tap the map to drop it — as many as you like.</span>
+              <button onClick={() => setStampSym(null)} className="font-body text-[11px] font-bold shrink-0 px-2.5 py-1 rounded-full text-white" style={{ backgroundColor: '#6D28D9' }}>Done</button>
+            </div>
+          )}
           </div>
 
           <div className="relative" key="map-wrap">
@@ -664,50 +687,15 @@ export default function CourseMap({ user, manage }) {
               {wires?.colors && Object.keys(wires.colors).length > 0 && (
                 <button onClick={() => setShowWires((v) => !v)} title={showWires ? 'Hide wire loops' : 'Show wire loops'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showWires ? '#C724FF' : '#94A3B8' }}><Zap size={17} /></button>
               )}
-              {(pipes?.lines?.length > 0 || (wires?.colors && Object.keys(wires.colors).length > 0)) && (
-                <button onClick={() => setShowLegend((v) => !v)} title="Legend" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showLegend ? FOREST : '#94A3B8' }}><List size={17} /></button>
+              {manage && (
+                <button onClick={() => { setPaletteMode('stamp'); setPaletteOpen(true) }} title="Symbol palette — stamp heads, valves, couplers" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: stampSym ? '#6D28D9' : FOREST }}><Stamp size={17} /></button>
               )}
+              <button onClick={() => setLegendFull(true)} title="Legend" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: FOREST }}><List size={17} /></button>
             </div>
             {/* Status readout — shows what actually loaded onto the map. */}
             <div className="absolute z-[600] top-2 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-md font-body text-[11px] font-bold tabular-nums whitespace-nowrap shadow" style={{ backgroundColor: 'rgba(255,255,255,0.95)', color: '#334155', border: '1px solid #E2E8E4' }}>
               Pipes {pipes?.lines?.length ?? '—'} · Heads {features.length} · Wires {wires?.colors ? Object.values(wires.colors).reduce((n, a) => n + a.length, 0) : '—'} · Map {transform ? 'set' : 'not set'}
             </div>
-            {/* Legend panel (bottom-right so it never sits under the add-head buttons) */}
-            {showLegend && (
-              <div className="absolute z-[600] bottom-9 right-3 bg-white/95 rounded-xl shadow-lg px-3 py-2.5 max-w-[220px]" style={{ border: '1px solid #E2E8E4' }}>
-                <div className="flex items-center justify-between mb-1.5">
-                  <p className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: FOREST }}>Map key</p>
-                  <button onClick={() => setShowLegend(false)} className="text-slate-400"><X size={13} /></button>
-                </div>
-                {showPipes && (
-                  <div className="mb-2">
-                    <p className="font-body text-[10px] font-bold text-slate-400 mb-1">Pipe (HDPE)</p>
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-                      {PIPE_LEGEND.filter(([cls]) => pipes?.lines?.some((l) => l.cls === cls)).map(([cls, col]) => (
-                        <div key={cls} className="flex items-center gap-1.5">
-                          <span style={{ display: 'inline-block', width: 14, height: 0, borderTop: `${Math.max(2, pipeWeight(cls))}px solid ${col}` }} />
-                          <span className="font-body text-[10px] text-slate-600">{cls.replace(' HDPE', '')}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {showWires && wires?.colors && (
-                  <div>
-                    <p className="font-body text-[10px] font-bold text-slate-400 mb-1">Control wire</p>
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-                      {WIRE_LEGEND.filter(([col]) => wires.colors[col]?.length).map(([col, label]) => (
-                        <div key={col} className="flex items-center gap-1.5">
-                          <span style={{ display: 'inline-block', width: 14, borderTop: `2px dotted ${col}` }} />
-                          <span className="font-body text-[10px] text-slate-600">{label.replace('Wire loop ', '')}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {!showPipes && !showWires && <p className="font-body text-[10px] text-slate-400">Turn on pipes or wires to see the key.</p>}
-              </div>
-            )}
             {/* Add-head controls (managers) */}
             {manage && (
               <div className="absolute z-[500] top-3 left-3 flex flex-col gap-2">
@@ -858,9 +846,18 @@ export default function CourseMap({ user, manage }) {
                 </div>
               ) : (
                 <>
+                  <div>
+                    <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Symbol (from legend)</label>
+                    <button onClick={() => { setPaletteMode('assign'); setPaletteOpen(true) }} className="w-full mt-1 flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left" style={{ backgroundColor: '#F6F8F6', border: '1px solid #E2E8F0' }}>
+                      {selected.symbol && symbolById(selected.symbol)
+                        ? <><span dangerouslySetInnerHTML={{ __html: symbolSvg(symbolById(selected.symbol), 24) }} /><span className="font-body text-[13px] font-bold" style={{ color: FOREST }}>{symbolById(selected.symbol).label}</span></>
+                        : <span className="font-body text-[13px] text-slate-500">Choose the exact symbol…</span>}
+                      <span className="ml-auto font-body text-[11px] font-bold" style={{ color: FERN }}>Change</span>
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Type</label>
+                      <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Category</label>
                       <select defaultValue={selected.kind} onChange={(e) => saveSelected({ kind: e.target.value })} className="w-full border border-slate-200 rounded-xl px-2.5 py-2 text-sm font-body bg-white">
                         {KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
@@ -926,6 +923,93 @@ export default function CourseMap({ user, manage }) {
 
       {arcOpen && selected && (
         <ArcTool feature={selected} onClose={() => setArcOpen(false)} onSave={async (vals) => { await saveSelected(vals); setArcOpen(false) }} />
+      )}
+
+      {/* Symbol stamp palette — pick a symbol, then tap the map to drop it. */}
+      {paletteOpen && (
+        <div className="fixed inset-0 z-[1100] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setPaletteOpen(false)}>
+          <div className="bg-white rounded-2xl w-full sm:max-w-lg shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-white" style={{ borderBottom: '1px solid #EEF0EC' }}>
+              <div className="flex items-center gap-2"><Stamp size={18} style={{ color: FERN }} /><p className="font-display text-base font-bold" style={{ color: FOREST }}>Symbol palette</p></div>
+              <button onClick={() => setPaletteOpen(false)} className="text-slate-400"><X size={18} /></button>
+            </div>
+            <div className="p-4">
+              <p className="font-body text-[12px] text-slate-500 mb-3">{paletteMode === 'assign'
+                ? <>Pick what this object is — it&apos;ll take that icon&apos;s colour and label on the map.</>
+                : <>Tap a symbol, then tap the map to drop it. It keeps that symbol armed so you can place a whole run, then hit <b>Done</b>.</>}</p>
+              {SYMBOL_GROUPS.map((g) => (
+                <div key={g.key} className="mb-4">
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">{g.label}</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {g.items.map((it) => (
+                      <button key={it.id} onClick={() => { if (paletteMode === 'assign' && selected) { saveSelected({ symbol: it.id, kind: it.kind }); setPaletteOpen(false) } else { setStampSym(it.id); setPaletteOpen(false); setAddMode(false); setMoveMode(false) } }} className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors" style={{ backgroundColor: stampSym === it.id ? '#F3EEFB' : '#F6F8F6', border: `1px solid ${stampSym === it.id ? '#C9B3EC' : 'transparent'}` }}>
+                        <span className="shrink-0" dangerouslySetInnerHTML={{ __html: symbolSvg(it, 26) }} />
+                        <span className="min-w-0">
+                          <span className="font-body text-[12px] font-bold block truncate" style={{ color: FOREST }}>{it.label}</span>
+                          {it.spec && <span className="font-body text-[10px] text-slate-400 block truncate">{it.spec}</span>}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full legend — the same list as the as-built drawing. */}
+      {legendFull && (
+        <div className="fixed inset-0 z-[1100] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setLegendFull(false)}>
+          <div className="bg-white rounded-2xl w-full sm:max-w-lg shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-white" style={{ borderBottom: '1px solid #EEF0EC' }}>
+              <div className="flex items-center gap-2"><List size={18} style={{ color: FERN }} /><p className="font-display text-base font-bold" style={{ color: FOREST }}>Legend</p></div>
+              <button onClick={() => setLegendFull(false)} className="text-slate-400"><X size={18} /></button>
+            </div>
+            <div className="p-4">
+              {SYMBOL_GROUPS.map((g) => (
+                <div key={g.key} className="mb-4">
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">{g.label}</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                    {g.items.map((it) => (
+                      <div key={it.id} className="flex items-center gap-2.5 py-0.5">
+                        <span className="shrink-0" dangerouslySetInnerHTML={{ __html: symbolSvg(it, 22) }} />
+                        <span className="min-w-0">
+                          <span className="font-body text-[12px] block truncate" style={{ color: FOREST }}>{it.label}</span>
+                          {it.spec && <span className="font-body text-[10px] text-slate-400 block truncate">{it.spec}</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <div className="mb-3">
+                <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Pipe</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                  {PIPE_ITEMS.map((p) => (
+                    <div key={p.cls} className="flex items-center gap-2.5 py-0.5">
+                      <span style={{ display: 'inline-block', width: 22, borderTop: `3px solid ${p.color}` }} />
+                      <span className="font-body text-[12px]" style={{ color: FOREST }}>{p.cls}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {wires?.colors && (
+                <div>
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Control wire</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                    {WIRE_LEGEND.filter(([col]) => wires.colors[col]?.length).map(([col, label]) => (
+                      <div key={col} className="flex items-center gap-2.5 py-0.5">
+                        <span style={{ display: 'inline-block', width: 22, borderTop: `2px dotted ${col}` }} />
+                        <span className="font-body text-[12px]" style={{ color: FOREST }}>{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
