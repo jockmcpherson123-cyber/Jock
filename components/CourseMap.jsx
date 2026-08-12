@@ -221,7 +221,7 @@ export default function CourseMap({ user, manage }) {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      try { const res = await fetch('/api/course-pipes'); if (res.ok) { const j = await res.json(); if (!cancelled) setPipes(j) } } catch { /* ignore */ }
+      try { const res = await fetch('/api/course-pipes', { cache: 'no-store' }); if (res.ok) { const j = await res.json(); if (!cancelled) setPipes(j) } } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
   }, [])
@@ -230,7 +230,7 @@ export default function CourseMap({ user, manage }) {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      try { const res = await fetch('/api/course-wires'); if (res.ok) { const j = await res.json(); if (!cancelled) setWires(j) } } catch { /* ignore */ }
+      try { const res = await fetch('/api/course-wires', { cache: 'no-store' }); if (res.ok) { const j = await res.json(); if (!cancelled) setWires(j) } } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
   }, [])
