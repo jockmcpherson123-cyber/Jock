@@ -193,13 +193,20 @@ export default function CourseMap({ user, manage }) {
   useEffect(() => {
     if (!ready || mode !== 'map' || !mainRef.current) return
     const L = LRef.current
-    const map = L.map(mainRef.current, { center, zoom: 17, zoomControl: true, attributionControl: true, preferCanvas: true })
+    const c0 = (Number.isFinite(center[0]) && Number.isFinite(center[1])) ? center : [FALLBACK.lat, FALLBACK.lng]
+    const map = L.map(mainRef.current, { center: c0, zoom: 17, zoomControl: true, attributionControl: true, preferCanvas: true })
     map.attributionControl.setPrefix('')
     L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, attribution: SAT_ATTR }).addTo(map)
     mainMap.current = map
-    setTimeout(() => map.invalidateSize(), 100)
+    // Force Leaflet to (re)measure the container — the #1 cause of a blank map is
+    // it reading a 0/º size before the layout settles.
+    const inval = () => { try { map.invalidateSize(false) } catch { /* ignore */ } }
+    requestAnimationFrame(inval)
+    ;[120, 400, 1000].forEach((t) => setTimeout(inval, t))
+    let ro = null
+    try { ro = new ResizeObserver(inval); ro.observe(mainRef.current) } catch { /* ignore */ }
     setMapTick((t) => t + 1) // signal the overlay/location effects that the map exists
-    return () => { map.remove(); mainMap.current = null; overlayRef.current = null; locRef.current = null; accRef.current = null }
+    return () => { if (ro) ro.disconnect(); map.remove(); mainMap.current = null; overlayRef.current = null; locRef.current = null; accRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, mode])
 
@@ -285,19 +292,22 @@ export default function CourseMap({ user, manage }) {
     if (!showFeatures) return
     const group = L.layerGroup().addTo(map)
     const sel = selected?.id
-    features.forEach((f) => {
-      const color = featureColor(f)
-      const isValve = f.kind !== 'head'
-      const cm = L.circleMarker([f.lat, f.lng], {
-        radius: isValve ? 6 : 4,
-        color: f.id === sel ? GOLD : '#ffffff',
-        weight: f.id === sel ? 3 : 1.2,
-        fillColor: color,
-        fillOpacity: 0.95,
+    try {
+      features.forEach((f) => {
+        if (!Number.isFinite(f.lat) || !Number.isFinite(f.lng)) return
+        const color = featureColor(f)
+        const isValve = f.kind !== 'head'
+        const cm = L.circleMarker([f.lat, f.lng], {
+          radius: isValve ? 6 : 4,
+          color: f.id === sel ? GOLD : '#ffffff',
+          weight: f.id === sel ? 3 : 1.2,
+          fillColor: color,
+          fillOpacity: 0.95,
+        })
+        cm.on('click', (e) => { if (e.originalEvent) e.originalEvent.stopPropagation?.(); setSelected(f) })
+        cm.addTo(group)
       })
-      cm.on('click', (e) => { if (e.originalEvent) e.originalEvent.stopPropagation?.(); setSelected(f) })
-      cm.addTo(group)
-    })
+    } catch (e) { console.error('feature render failed', e) }
     featLayerRef.current = group
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [features, showFeatures, mode, mapTick, selected])
