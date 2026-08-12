@@ -584,7 +584,7 @@ export default function CourseMap({ user, manage }) {
       const H = j.imageH || IMAGE_H
       const rows = (j.heads || []).map((h) => {
         const { lat, lng } = pixelToLatLng(h.x, h.y, transform, H)
-        return { kind: h.k || 'head', lat, lng, status: 'ok', source: 'import', label: h.label || '' }
+        return { kind: h.k || 'head', lat, lng, status: 'ok', source: 'import', label: h.label || '', symbol: h.symbol || '' }
       }).filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng))
       if (rows.length === 0) { setMsg('No heads found to import.'); return }
       setImporting({ done: 0, total: rows.length })
