@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import 'leaflet/dist/leaflet.css'
-import { MapPin, Crosshair, Navigation, Layers, Check, X, Trash2, Loader2, Plus, Camera, Eye, EyeOff, Droplet, Compass } from 'lucide-react'
+import { MapPin, Crosshair, Navigation, Layers, Check, X, Trash2, Loader2, Plus, Camera, Eye, EyeOff, Droplet, Compass, Zap, List } from 'lucide-react'
 import * as db from '@/lib/db'
 import ArcTool from '@/components/ArcTool'
 import { fitSimilarity, fitResiduals, imageCornerLatLngs, metresToFeet, pixelToLatLng } from '@/lib/geocalib'
@@ -34,6 +34,22 @@ const KINDS = [['head', 'Head'], ['valve', 'Valve'], ['quick_coupler', 'Quick co
 const KIND_LABEL = Object.fromEntries(KINDS)
 const STATUS = { ok: { label: 'Working', color: '#2563EB' }, repair: { label: 'Needs repair', color: '#DC2626' }, replaced: { label: 'Replaced', color: '#6B7280' } }
 const featureColor = (f) => (STATUS[f.status]?.color || '#2563EB')
+
+// Pipe size classes (from the as-built legend) → draw order (thin first, mains
+// on top) and line weight. Bigger pipe = heavier line, so the mainline reads
+// clearly over the dense laterals.
+const PIPE_RANK = { '1.5" poly': 0, '2" HDPE': 1, '3" HDPE': 2, '4" HDPE': 3, '6" HDPE': 4, '8" HDPE': 5, '10"+ HDPE': 6, '14"+ HDPE': 7, '16" HDPE': 8 }
+const pipeWeight = (cls) => [1, 1.1, 1.5, 1.9, 2.4, 2.9, 3.4, 3.9, 4.3][PIPE_RANK[cls] ?? 1]
+const pipeOpacity = (cls) => ((PIPE_RANK[cls] ?? 1) >= 4 ? 0.95 : 0.6)
+// Legend rows for the on-map key (only the classes that actually appear are shown).
+const PIPE_LEGEND = [
+  ['1.5" poly', '#e83bd0'], ['2" HDPE', '#1e1e1e'], ['3" HDPE', '#12b2c6'], ['4" HDPE', '#57a0ea'],
+  ['6" HDPE', '#2170e0'], ['8" HDPE', '#1a3fd0'], ['10"+ HDPE', '#0e2aa8'], ['14"+ HDPE', '#3d13a2'], ['16" HDPE', '#5a12c4'],
+]
+// Control-wire loops — one colour per satellite/controller (from the blue as-built).
+const WIRE_LEGEND = [
+  ['#e11d1d', 'Wire loop A'], ['#1a8cff', 'Wire loop B'], ['#b0a800', 'Wire loop C'], ['#c824ff', 'Wire loop D'], ['#ff00bf', 'Wire loop E'],
+]
 
 // Compress a photo to a small data URL (same idea as the scouting log) so it
 // stores inline without a separate file service.
@@ -111,6 +127,10 @@ export default function CourseMap({ user, manage }) {
   // Vector pipe network (our own crisp overlay, pulled from the PDF)
   const [pipes, setPipes] = useState(null)
   const [showPipes, setShowPipes] = useState(true)
+  // Control-wire loops (dotted colour paths from the blue as-built)
+  const [wires, setWires] = useState(null)
+  const [showWires, setShowWires] = useState(false)
+  const [showLegend, setShowLegend] = useState(false)
 
   // On-screen diagnostics (no console needed): container size + tile status
   const [diag, setDiag] = useState({ w: 0, h: 0, tiles: 'waiting', err: 0 })
@@ -131,6 +151,7 @@ export default function CourseMap({ user, manage }) {
 
   const LRef = useRef(null)
   const pipeLayerRef = useRef(null)
+  const wireLayerRef = useRef(null)
   const featLayerRef = useRef(null)
   const placeRef = useRef(null)
   const addModeRef = useRef(false)
@@ -201,6 +222,15 @@ export default function CourseMap({ user, manage }) {
     let cancelled = false
     ;(async () => {
       try { const res = await fetch('/api/course-pipes'); if (res.ok) { const j = await res.json(); if (!cancelled) setPipes(j) } } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // Load the control-wire loops (behind the login)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try { const res = await fetch('/api/course-wires'); if (res.ok) { const j = await res.json(); if (!cancelled) setWires(j) } } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
   }, [])
@@ -296,21 +326,43 @@ export default function CourseMap({ user, manage }) {
     const H = pipes.imageH || IMAGE_H
     const group = L.layerGroup()
     try {
-      // Laterals/outlines first (thin grey, underneath), then the coloured mains.
-      const ordered = pipes.lines.slice().sort((a, b) => (a.k === 'lat' ? 0 : 1) - (b.k === 'lat' ? 0 : 1))
+      // Draw smallest pipe first so the bigger mains sit crisply on top.
+      const ordered = pipes.lines.slice().sort((a, b) => (PIPE_RANK[a.cls] ?? 1) - (PIPE_RANK[b.cls] ?? 1))
       ordered.forEach((ln) => {
         const latlngs = ln.p
           .map(([px, py]) => { const { lat, lng } = pixelToLatLng(px, py, transform, H); return [lat, lng] })
           .filter(([la, lo]) => Number.isFinite(la) && Number.isFinite(lo))
         if (latlngs.length < 2) return
-        const isMain = ln.k === 'main'
-        L.polyline(latlngs, { color: ln.c, weight: isMain ? 2.6 : 1, opacity: isMain ? 0.95 : 0.5, interactive: false }).addTo(group)
+        L.polyline(latlngs, { color: ln.c, weight: pipeWeight(ln.cls), opacity: pipeOpacity(ln.cls), interactive: false }).addTo(group)
       })
       group.addTo(map)
       pipeLayerRef.current = group
     } catch (e) { console.error('pipe render failed', e) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipes, transform, mode, mapTick, showPipes])
+
+  // Draw the control-wire loops as small colour dots (reproduces the dotted
+  // wire paths), one colour per satellite/controller. Canvas keeps ~19k dots fast.
+  useEffect(() => {
+    const L = LRef.current, map = mainMap.current
+    if (!L || !map || mode !== 'map') return
+    if (wireLayerRef.current) { wireLayerRef.current.remove(); wireLayerRef.current = null }
+    if (!transform || !wires?.colors || !showWires) return
+    const H = wires.imageH || IMAGE_H
+    const group = L.layerGroup()
+    try {
+      Object.entries(wires.colors).forEach(([color, pts]) => {
+        pts.forEach(([px, py]) => {
+          const { lat, lng } = pixelToLatLng(px, py, transform, H)
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+          L.circleMarker([lat, lng], { radius: 1.6, color, weight: 0, fillColor: color, fillOpacity: 0.9, interactive: false }).addTo(group)
+        })
+      })
+      group.addTo(map)
+      wireLayerRef.current = group
+    } catch (e) { console.error('wire render failed', e) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wires, transform, mode, mapTick, showWires])
 
   // Draw the editable irrigation markers as fast canvas circles (handles the
   // thousands of heads smoothly). Tap one to edit; move via the edit panel.
@@ -548,7 +600,49 @@ export default function CourseMap({ user, manage }) {
               {pipes?.lines?.length > 0 && (
                 <button onClick={() => setShowPipes((v) => !v)} title={showPipes ? 'Hide pipes' : 'Show pipes'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showPipes ? '#2563EB' : '#94A3B8' }}><Layers size={17} /></button>
               )}
+              {wires?.colors && Object.keys(wires.colors).length > 0 && (
+                <button onClick={() => setShowWires((v) => !v)} title={showWires ? 'Hide wire loops' : 'Show wire loops'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showWires ? '#C724FF' : '#94A3B8' }}><Zap size={17} /></button>
+              )}
+              {(pipes?.lines?.length > 0 || (wires?.colors && Object.keys(wires.colors).length > 0)) && (
+                <button onClick={() => setShowLegend((v) => !v)} title="Legend" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showLegend ? FOREST : '#94A3B8' }}><List size={17} /></button>
+              )}
             </div>
+            {/* Legend panel */}
+            {showLegend && (
+              <div className="absolute z-[500] top-3 left-3 bg-white/95 rounded-xl shadow-lg px-3 py-2.5 max-w-[220px]" style={{ border: '1px solid #E2E8E4' }}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: FOREST }}>Map key</p>
+                  <button onClick={() => setShowLegend(false)} className="text-slate-400"><X size={13} /></button>
+                </div>
+                {showPipes && (
+                  <div className="mb-2">
+                    <p className="font-body text-[10px] font-bold text-slate-400 mb-1">Pipe (HDPE)</p>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                      {PIPE_LEGEND.filter(([cls]) => pipes?.lines?.some((l) => l.cls === cls)).map(([cls, col]) => (
+                        <div key={cls} className="flex items-center gap-1.5">
+                          <span style={{ display: 'inline-block', width: 14, height: 0, borderTop: `${Math.max(2, pipeWeight(cls))}px solid ${col}` }} />
+                          <span className="font-body text-[10px] text-slate-600">{cls.replace(' HDPE', '')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {showWires && wires?.colors && (
+                  <div>
+                    <p className="font-body text-[10px] font-bold text-slate-400 mb-1">Control wire</p>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                      {WIRE_LEGEND.filter(([col]) => wires.colors[col]?.length).map(([col, label]) => (
+                        <div key={col} className="flex items-center gap-1.5">
+                          <span style={{ display: 'inline-block', width: 14, borderTop: `2px dotted ${col}` }} />
+                          <span className="font-body text-[10px] text-slate-600">{label.replace('Wire loop ', '')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {!showPipes && !showWires && <p className="font-body text-[10px] text-slate-400">Turn on pipes or wires to see the key.</p>}
+              </div>
+            )}
             {/* Add-head controls (managers) */}
             {manage && (
               <div className="absolute z-[500] top-3 left-3 flex flex-col gap-2">

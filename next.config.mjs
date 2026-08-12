@@ -5,6 +5,7 @@ const nextConfig = {
   outputFileTracingIncludes: {
     '/api/course-overlay': ['./assets/course/**'],
     '/api/course-pipes': ['./assets/course/**'],
+    '/api/course-wires': ['./assets/course/**'],
     '/api/course-heads': ['./assets/course/**'],
   },
 }
