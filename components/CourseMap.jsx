@@ -495,6 +495,9 @@ export default function CourseMap({ user, manage }) {
         <div className="paper-card p-10 text-center font-body text-sm text-slate-400 flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> Loading map…</div>
       ) : mode === 'map' ? (
         <div className="space-y-3">
+          {/* Banners live in one always-present container so the map wrapper below
+              is never remounted (a remount detaches Leaflet → blank 0x0 map). */}
+          <div className="space-y-3 empty:hidden">
           {!transform && (
             <div className="rounded-xl px-4 py-3 font-body text-[13px]" style={{ backgroundColor: '#FFFDF6', border: `1px solid ${GOLD}`, color: '#7A5B12' }}>
               The irrigation overlay isn&apos;t placed on the map yet. {manage ? <>Tap <b>Calibrate</b>, then walk the course dropping points on known heads to lock it in.</> : 'Ask the superintendent to calibrate it.'}
@@ -523,7 +526,9 @@ export default function CourseMap({ user, manage }) {
               <button onClick={() => setMoveMode(false)} className="font-body text-[11px] font-bold shrink-0">Cancel</button>
             </div>
           )}
-          <div className="relative">
+          </div>
+
+          <div className="relative" key="map-wrap">
             <div ref={mainRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: mapPxH, minHeight: 460, backgroundColor: '#0b1e12', cursor: addMode || moveMode ? 'crosshair' : '' }} />
             {/* Floating controls */}
             <div className="absolute z-[500] top-3 right-3 flex flex-col gap-2">
