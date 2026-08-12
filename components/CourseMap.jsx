@@ -108,6 +108,11 @@ export default function CourseMap({ user, manage }) {
   const [opacity, setOpacity] = useState(0) // PDF raster overlay off by default — the vectors are the map now
   const [mode, setMode] = useState('map')        // 'map' | 'calibrate'
   const [gps, setGps] = useState(null)           // live location
+  const [heading, setHeading] = useState(null)   // phone compass heading (deg)
+  const [headingOn, setHeadingOn] = useState(false)
+  const headingRef = useRef(null)
+  const [onTarget, setOnTarget] = useState(false) // standing on the selected object
+  const targetRingRef = useRef(null)
   const [pending, setPending] = useState(null)   // {px,py} tapped on drawing
   const [capturing, setCapturing] = useState(null) // {n, acc} while averaging
   const [msg, setMsg] = useState(null)
@@ -118,11 +123,13 @@ export default function CourseMap({ user, manage }) {
   const [showFeatures, setShowFeatures] = useState(true)
   const [labelsOn, setLabelsOn] = useState(true) // show head numbers when zoomed in
   const labelLayerRef = useRef(null)
+  const shapeLayerRef = useRef(null)
   const [addMode, setAddMode] = useState(false)
   const [moveMode, setMoveMode] = useState(false) // relocate the selected head by tapping
   const [selected, setSelected] = useState(null) // feature being edited
   const [confirmDel, setConfirmDel] = useState(false)
   const [arcOpen, setArcOpen] = useState(false)
+  const [navMode, setNavMode] = useState(false) // walking to the selected object (modal hidden)
   const [importing, setImporting] = useState(null) // {done,total} while bulk-importing
   const moveRef = useRef(false)
   useEffect(() => { moveRef.current = moveMode }, [moveMode])
@@ -224,6 +231,34 @@ export default function CourseMap({ user, manage }) {
     return () => navigator.geolocation.clearWatch(id)
   }, [])
 
+  // ── Phone compass heading (for the direction arrow on the you-are-here dot) ──
+  useEffect(() => {
+    if (!headingOn || typeof window === 'undefined') return
+    const onOrient = (e) => {
+      let h = null
+      if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) h = e.webkitCompassHeading
+      else if (typeof e.alpha === 'number') h = (360 - e.alpha) % 360
+      if (h == null) return
+      // Only push a state change on a meaningful move, so we don't re-render 60×/s.
+      if (headingRef.current == null || Math.abs(((h - headingRef.current + 540) % 360) - 180) > 2) { headingRef.current = h; setHeading(h) }
+    }
+    window.addEventListener('deviceorientationabsolute', onOrient, true)
+    window.addEventListener('deviceorientation', onOrient, true)
+    return () => { window.removeEventListener('deviceorientationabsolute', onOrient, true); window.removeEventListener('deviceorientation', onOrient, true) }
+  }, [headingOn])
+
+  const enableHeading = async () => {
+    if (headingOn) return
+    try {
+      const DOE = typeof window !== 'undefined' ? window.DeviceOrientationEvent : null
+      if (DOE && typeof DOE.requestPermission === 'function') {
+        const r = await DOE.requestPermission()
+        if (r !== 'granted') return
+      }
+      setHeadingOn(true)
+    } catch { /* no compass */ }
+  }
+
   // Load the editable irrigation objects
   useEffect(() => {
     let cancelled = false
@@ -310,19 +345,41 @@ export default function CourseMap({ user, manage }) {
   // Keep overlay opacity live
   useEffect(() => { if (overlayRef.current) overlayRef.current.setOpacity(opacity) }, [opacity])
 
-  // Live location marker on the main map
+  // Live location marker — a blue dot with a direction arrow (phone compass) so
+  // you can tell which way you're facing and walk the right way.
+  const locIcon = (h) => {
+    const arrow = h == null ? '' : `<div style="position:absolute;inset:0;transform:rotate(${Math.round(h)}deg)"><div style="position:absolute;top:-3px;left:50%;margin-left:-8px;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:14px solid #2563EB;filter:drop-shadow(0 0 1px #fff)"></div></div>`
+    return LRef.current.divIcon({ className: '', iconSize: [44, 44], iconAnchor: [22, 22], html: `<div style="position:relative;width:44px;height:44px">${arrow}<div style="position:absolute;top:22px;left:22px;transform:translate(-50%,-50%);width:18px;height:18px;border-radius:50%;background:#2563EB;border:3px solid #fff;box-shadow:0 0 5px rgba(0,0,0,.45)"></div></div>` })
+  }
   useEffect(() => {
     const L = LRef.current, map = mainMap.current
     if (!L || !map || !gps) return
     const ll = [gps.lat, gps.lng]
     if (!locRef.current) {
       accRef.current = L.circle(ll, { radius: gps.acc || 8, color: '#2563EB', weight: 1, fillColor: '#2563EB', fillOpacity: 0.12 }).addTo(map)
-      locRef.current = L.circleMarker(ll, { radius: 7, color: '#fff', weight: 2, fillColor: '#2563EB', fillOpacity: 1 }).addTo(map)
+      locRef.current = L.marker(ll, { icon: locIcon(heading), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map)
     } else {
-      locRef.current.setLatLng(ll); accRef.current.setLatLng(ll).setRadius(gps.acc || 8)
+      locRef.current.setLatLng(ll).setIcon(locIcon(heading)); accRef.current.setLatLng(ll).setRadius(gps.acc || 8)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gps, mode, mapTick])
+  }, [gps, heading, mode, mapTick])
+
+  // "On target" — when you're standing on the selected object, ring it green so
+  // you know you've arrived. Uses the live GPS distance to the selected feature.
+  useEffect(() => {
+    const L = LRef.current, map = mainMap.current
+    if (!L || !map) return
+    if (targetRingRef.current) { targetRingRef.current.remove(); targetRingRef.current = null }
+    if (!gps || !selected || !Number.isFinite(selected.lat)) { if (onTarget) setOnTarget(false); return }
+    let dist = Infinity
+    try { dist = map.distance([gps.lat, gps.lng], [selected.lat, selected.lng]) } catch { /* ignore */ }
+    const near = dist <= 3 // metres (~10 ft)
+    if (near !== onTarget) setOnTarget(near)
+    if (near) {
+      targetRingRef.current = L.circleMarker([selected.lat, selected.lng], { radius: Math.max(12, (mapZoom - 13) * 2.4), color: '#16A34A', weight: 4, fillColor: '#22C55E', fillOpacity: 0.25 }).addTo(map)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gps, selected, mode, mapTick, mapZoom])
 
   // Tap-to-place a new head when in Add mode (reads a ref to avoid stale state)
   useEffect(() => {
@@ -429,6 +486,42 @@ export default function CourseMap({ user, manage }) {
     featLayerRef.current = group
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [features, showFeatures, mode, mapTick, selected, mapZoom])
+
+  // Exact as-built shapes (triangles for quick couplers, squares/half-circles,
+  // etc.) drawn over the dots — but only for what's on screen when zoomed in, so
+  // the thousands of markers stay fast. Uses the assigned symbol, else a sensible
+  // default per kind so couplers/valves still read as their real shape.
+  useEffect(() => {
+    const L = LRef.current, map = mainMap.current
+    if (!L || !map || mode !== 'map') return
+    if (shapeLayerRef.current) { shapeLayerRef.current.remove(); shapeLayerRef.current = null }
+    if (!showFeatures || mapZoom < 18) return
+    const featSym = (f) => {
+      if (f.symbol) return symbolById(f.symbol)
+      if (f.kind === 'quick_coupler') return symbolById('qc-1')
+      if (f.kind === 'valve') return symbolById('ev-2')
+      if (f.kind === 'controller') return symbolById('ground-assy')
+      return null // plain heads already read as coloured circles
+    }
+    let bounds
+    try { bounds = map.getBounds().pad(0.1) } catch { return }
+    const inView = features.filter((f) => Number.isFinite(f.lat) && Number.isFinite(f.lng) && bounds.contains([f.lat, f.lng]) && featSym(f))
+    if (inView.length === 0 || inView.length > 600) return
+    const px = Math.round(Math.max(14, (mapZoom - 13) * 4.4))
+    const group = L.layerGroup()
+    inView.forEach((f) => {
+      const s = featSym(f)
+      const m = L.marker([f.lat, f.lng], {
+        icon: L.divIcon({ className: '', html: symbolSvg(s, px), iconSize: [px, px], iconAnchor: [px / 2, px / 2] }),
+        interactive: true, keyboard: false,
+      })
+      m.on('click', (e) => { if (e.originalEvent) e.originalEvent.stopPropagation?.(); setSelected(f) })
+      m.addTo(group)
+    })
+    group.addTo(map)
+    shapeLayerRef.current = group
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [features, showFeatures, mode, mapTick, mapZoom, viewTick])
 
   // Head-number labels (R25, G3…). Only when zoomed in and only for what's on
   // screen, so 2,000+ labels never bog the map down. Rendered as light divIcons.
@@ -640,7 +733,14 @@ export default function CourseMap({ user, manage }) {
   }
 
   const avgFt = fit.avgErrorM != null ? Math.round(metresToFeet(fit.avgErrorM)) : null
-  const recenter = () => { if (mainMap.current && gps) mainMap.current.setView([gps.lat, gps.lng], 19) }
+  // Straight-line distance (ft) from you to the object you're walking to.
+  const navDistFt = (gps && selected && Number.isFinite(selected.lat)) ? (() => {
+    const Rft = 20925524.9, toRad = (d) => d * Math.PI / 180
+    const dLat = toRad(selected.lat - gps.lat), dLng = toRad(selected.lng - gps.lng)
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(gps.lat)) * Math.cos(toRad(selected.lat)) * Math.sin(dLng / 2) ** 2
+    return Math.round(2 * Rft * Math.asin(Math.min(1, Math.sqrt(a))))
+  })() : null
+  const recenter = () => { enableHeading(); if (mainMap.current && gps) mainMap.current.setView([gps.lat, gps.lng], 19) }
 
   // ── UI ──────────────────────────────────────────────────────────────────────
   return (
@@ -673,6 +773,20 @@ export default function CourseMap({ user, manage }) {
           {/* Banners live in one always-present container so the map wrapper below
               is never remounted (a remount detaches Leaflet → blank 0x0 map). */}
           <div className="space-y-3 empty:hidden">
+          {navMode && selected && (
+            <div className="rounded-xl px-4 py-2.5 font-body text-[13px] flex items-center justify-between gap-2" style={onTarget ? { backgroundColor: '#DCFCE7', border: '1px solid #86EFAC', color: '#166534' } : { backgroundColor: '#EAF2FB', border: '1px solid #BBD3F0', color: '#1E3A5F' }}>
+              <span className="flex items-center gap-2 min-w-0">
+                <Navigation size={15} className="shrink-0" />
+                <span className="truncate">{onTarget
+                  ? <><b>You&apos;re on {selected.label || KIND_LABEL[selected.kind]}!</b> Green ring = you&apos;re within ~10 ft.</>
+                  : <><b>Walking to {selected.label || KIND_LABEL[selected.kind]}</b>{navDistFt != null ? ` · ${navDistFt} ft away` : ''} — follow the blue arrow.</>}</span>
+              </span>
+              <span className="flex items-center gap-1.5 shrink-0">
+                <button onClick={() => setNavMode(false)} className="font-body text-[11px] font-bold px-2 py-1 rounded-full" style={{ backgroundColor: '#fff', color: FOREST }}>Details</button>
+                <button onClick={() => { setNavMode(false); setSelected(null) }} className="font-body text-[11px] font-bold px-2 py-1 rounded-full text-white" style={{ backgroundColor: FERN }}>Done</button>
+              </span>
+            </div>
+          )}
           {!transform && (
             <div className="rounded-xl px-4 py-3 font-body text-[13px]" style={{ backgroundColor: '#FFFDF6', border: `1px solid ${GOLD}`, color: '#7A5B12' }}>
               The irrigation overlay isn&apos;t placed on the map yet. {manage ? <>Tap <b>Calibrate</b>, then walk the course dropping points on known heads to lock it in.</> : 'Ask the superintendent to calibrate it.'}
@@ -859,16 +973,19 @@ export default function CourseMap({ user, manage }) {
         </div>
       )}
 
-      {/* Edit an irrigation object (hidden while relocating so the map is tappable) */}
-      {selected && !moveMode && (
+      {/* Edit an irrigation object (hidden while relocating or navigating to it) */}
+      {selected && !moveMode && !navMode && (
         <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => { setSelected(null); setConfirmDel(false) }}>
           <div className="bg-white rounded-2xl w-full sm:max-w-md shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #EEF0EC' }}>
               <div className="flex items-center gap-2">
-                <span className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: featureColor(selected) }} />
-                <p className="font-display text-base font-bold" style={{ color: FOREST }}>{manage ? 'Edit' : ''} {KIND_LABEL[selected.kind] || 'Object'}</p>
+                <span className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: selected.symbol ? symbolColor(selected.symbol) : featureColor(selected) }} />
+                <p className="font-display text-base font-bold" style={{ color: FOREST }}>{selected.label ? selected.label : (manage ? 'Edit ' : '') + (KIND_LABEL[selected.kind] || 'Object')}</p>
               </div>
-              <button onClick={() => { setSelected(null); setConfirmDel(false) }} className="text-slate-400"><X size={18} /></button>
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => { setNavMode(true); enableHeading(); if (mainMap.current) mainMap.current.setView([selected.lat, selected.lng], Math.max(19, mapZoom)) }} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-full text-white flex items-center gap-1" style={{ backgroundColor: FERN }}><Navigation size={13} /> Walk to it</button>
+                <button onClick={() => { setSelected(null); setConfirmDel(false) }} className="text-slate-400"><X size={18} /></button>
+              </div>
             </div>
             <div className="p-4 space-y-3">
               {!manage ? (
