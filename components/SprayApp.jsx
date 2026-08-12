@@ -330,6 +330,7 @@ function SprayOpsModule({ user }) {
   const [route, setRoute] = useState(canManage(user.role) ? 'dashboard' : 'tospray')
   const [sheets, setSheets] = useState([])
   const [products, setProducts] = useState([])
+  const [fertSheets, setFertSheets] = useState([])
   const [activeSheet, setActiveSheet] = useState(null)
   const [deliveries, setDeliveries] = useState([])
   const [programApps, setProgramApps] = useState([]) // applications of the current program
@@ -365,15 +366,17 @@ function SprayOpsModule({ user }) {
   async function loadAll() {
     setLoading(true)
     try {
-      const [s, p, d, settings, progs] = await Promise.all([
+      const [s, p, d, settings, progs, ferts] = await Promise.all([
         db.fetchSheets(),
         db.fetchProducts(),
         db.fetchDeliveries(),
         db.fetchSettings(),
         db.fetchPrograms(),
+        db.fetchFertSheets().catch(() => []),
       ])
       setSheets(s)
       setProducts(p)
+      setFertSheets(ferts || [])
       setDeliveries(d)
       setAreas(settings.areas)
       setOperators(settings.operators)
@@ -809,7 +812,7 @@ function SprayOpsModule({ user }) {
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
         {route === 'program' && manage && <AnnualProgram areas={areas} products={products} sheets={sheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
-        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
+        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} />}
         {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
           <SettingsPage
@@ -910,6 +913,8 @@ function FertEditor({ sheet, manage, courseInfo, onSave, onDelete, onBack, toast
   const c = computeFert(s)
   const set = (patch) => setS((p) => ({ ...p, ...patch }))
   const setSection = (i, patch) => setS((p) => ({ ...p, sections: p.sections.map((x, k) => k === i ? { ...x, ...patch } : x) }))
+  const addSection = () => setS((p) => ({ ...p, sections: [...p.sections, { name: '', sqft: '', actual: '' }] }))
+  const removeSection = (i) => setS((p) => ({ ...p, sections: p.sections.filter((_, k) => k !== i) }))
   // Switching area reloads that area's built-in sections + bag/adjust defaults.
   const pickArea = (name) => {
     const a = fertArea(name); if (!a) return set({ area: name })
@@ -995,14 +1000,15 @@ function FertEditor({ sheet, manage, courseInfo, onSave, onDelete, onBack, toast
               <tbody>
                 {c.rows.map((r, i) => (
                   <tr key={i} style={{ borderBottom: '1px solid #F3F5F2' }}>
-                    <td className="px-3 py-1.5" style={{ color: FOREST }}>{r.name}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{fmtNum(r.sqft, 0)}</td>
+                    <td className="px-3 py-1.5" style={{ color: FOREST }}>{manage ? <input value={s.sections[i]?.name ?? ''} onChange={(e) => setSection(i, { name: e.target.value })} className="w-full border-0 bg-transparent focus:bg-slate-50 rounded px-1 py-0.5 text-[13px]" style={{ color: FOREST }} /> : r.name}</td>
+                    <td className="px-2 py-1 text-right">{manage ? <input value={s.sections[i]?.sqft ?? ''} inputMode="numeric" onChange={(e) => setSection(i, { sqft: e.target.value.replace(/[^\d.]/g, '') })} className="w-20 border border-slate-200 rounded px-1.5 py-1 text-right text-[13px] tabular-nums" /> : <span className="tabular-nums text-slate-500">{fmtNum(r.sqft, 0)}</span>}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{fmtNum(r.lbs, 1)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums font-bold" style={{ color: FOREST }}>{fmtNum(r.bags, 2)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">{fmtNum(r.cumBags, 2)}</td>
-                    <td className="px-2 py-1 text-right"><input value={r.actual ?? ''} onChange={(e) => setSection(i, { actual: e.target.value.replace(/[^\d.]/g, '') })} className="w-16 border border-slate-200 rounded px-1.5 py-1 text-right text-[13px] tabular-nums" placeholder="—" /></td>
+                    <td className="px-2 py-1 text-right whitespace-nowrap"><input value={r.actual ?? ''} onChange={(e) => setSection(i, { actual: e.target.value.replace(/[^\d.]/g, '') })} className="w-16 border border-slate-200 rounded px-1.5 py-1 text-right text-[13px] tabular-nums" placeholder="—" />{manage && <button onClick={() => removeSection(i)} className="ml-1.5 text-slate-300 hover:text-red-500 align-middle"><X size={13} /></button>}</td>
                   </tr>
                 ))}
+                {manage && <tr><td colSpan={6} className="px-3 py-2"><button onClick={addSection} className="font-body text-[12px] font-bold flex items-center gap-1" style={{ color: FERN }}><Plus size={13} /> Add section</button></td></tr>}
               </tbody>
               <tfoot><tr style={{ borderTop: '2px solid #EEF0EC' }}>
                 <td className="px-3 py-2 font-bold" style={{ color: FOREST }}>Total</td>
@@ -3947,7 +3953,7 @@ function Inventory({ products, deliveries, onAddDelivery }) {
 }
 
 // ── REPORTS ───────────────────────────────────────────────────────────────
-function Reports({ sheets, products, areas, courseInfo = {} }) {
+function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [] }) {
   const [view, setView] = useState('byArea')
   const [report, setReport] = useState('npk') // 'npk' | 'rotation'
   const npkData = aggregateNPK(sheets, products, areas)
@@ -4047,7 +4053,7 @@ function Reports({ sheets, products, areas, courseInfo = {} }) {
         </div>
       </div>
 
-      {report === 'nitrogen' && <NitrogenReport sheets={sheets} products={products} areas={areas} />}
+      {report === 'nitrogen' && <NitrogenReport sheets={sheets} products={products} areas={areas} fertSheets={fertSheets} />}
       {report === 'reorder' && <ReorderReport sheets={sheets} products={products} areas={areas} />}
       {report === 'cost' && <CostReport sheets={sheets} products={products} areas={areas} />}
       {report === 'impact' && <ImpactReport sheets={sheets} products={products} areas={areas} />}
@@ -4151,24 +4157,34 @@ function Reports({ sheets, products, areas, courseInfo = {} }) {
 // a season target derived from that area's grasses (suggestedAnnualN). A spoon-
 // feeding gauge: how much of the year's nitrogen budget you've put down, and how
 // much is left.
-function NitrogenReport({ sheets, products, areas }) {
+function NitrogenReport({ sheets, products, areas, fertSheets = [] }) {
   const npkData = aggregateNPK(sheets, products, areas)
-  const byArea = {}
+  // Spray-derived N per 1,000 sq ft, per area.
+  const sprayByArea = {}
   npkData.forEach((r) => {
-    if (!byArea[r.area]) byArea[r.area] = { area: r.area, n: 0, sqft: r.sqft }
-    byArea[r.area].n += r.n
+    if (!sprayByArea[r.area]) sprayByArea[r.area] = { n: 0, sqft: r.sqft }
+    sprayByArea[r.area].n += r.n
   })
-  const rows = Object.values(byArea).map((a) => {
-    const perM = a.sqft > 0 ? Math.round((a.n / (a.sqft / 1000)) * 100) / 100 : null
-    const grasses = (areas[a.area]?.grasses) || []
+  const sprayM = {}
+  Object.entries(sprayByArea).forEach(([area, a]) => { sprayM[area] = a.sqft > 0 ? a.n / (a.sqft / 1000) : null })
+  // Granular fert N per 1,000 sq ft, per area (applied uniformly, so its lb N/M
+  // is rate × N% — add it straight onto the spray total). Counts completed sheets.
+  const fertM = {}
+  ;(fertSheets || []).filter((f) => f.status === 'complete').forEach((f) => { const c = computeFert(f); fertM[f.area] = (fertM[f.area] || 0) + c.nPerM })
+  const allAreas = [...new Set([...Object.keys(sprayM), ...Object.keys(fertM)])]
+
+  const rows = allAreas.map((area) => {
+    const sp = sprayM[area]; const fe = fertM[area] || 0
+    const perM = (sp != null || fe) ? Math.round(((sp || 0) + fe) * 100) / 100 : null
+    const grasses = (areas[area]?.grasses) || []
     const target = suggestedAnnualN(grasses).n || null
     const pct = perM != null && target ? Math.round((perM / target) * 100) : null
-    return { area: a.area, appliedM: perM, target, pct, remaining: perM != null && target ? Math.round((target - perM) * 100) / 100 : null }
+    return { area, appliedM: perM, fertM: Math.round(fe * 100) / 100, target, pct, remaining: perM != null && target ? Math.round((target - perM) * 100) / 100 : null }
   }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1))
 
   const exportCSV = () => {
-    const out = [['Area', 'N applied (lb/M)', 'Season target (lb/M)', '% of target', 'Remaining (lb/M)']]
-    rows.forEach((r) => out.push([r.area, r.appliedM ?? '', r.target ?? '', r.pct ?? '', r.remaining ?? '']))
+    const out = [['Area', 'N applied (lb/M)', 'of which granular fert (lb/M)', 'Season target (lb/M)', '% of target', 'Remaining (lb/M)']]
+    rows.forEach((r) => out.push([r.area, r.appliedM ?? '', r.fertM ?? '', r.target ?? '', r.pct ?? '', r.remaining ?? '']))
     downloadCSV(out, `Nitrogen_vs_Target_${localDateISO()}.csv`)
   }
 
@@ -4188,7 +4204,7 @@ function NitrogenReport({ sheets, products, areas }) {
               <div className="flex items-center justify-between mb-1.5">
                 <p className="font-body text-sm font-bold text-slate-900">{r.area}</p>
                 <p className="font-body text-xs text-slate-500">
-                  {r.appliedM != null ? <><b style={{ color: FOREST }}>{r.appliedM}</b> of {r.target ? `${r.target}` : '—'} lb N/M{r.pct != null ? ` · ${r.pct}%` : ''}</> : 'No area size / grass set'}
+                  {r.appliedM != null ? <><b style={{ color: FOREST }}>{r.appliedM}</b> of {r.target ? `${r.target}` : '—'} lb N/M{r.pct != null ? ` · ${r.pct}%` : ''}{r.fertM > 0 ? <span className="text-slate-400"> (incl. {r.fertM} granular)</span> : ''}</> : 'No area size / grass set'}
                 </p>
               </div>
               <div className="h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: '#EEF2F0' }}>
