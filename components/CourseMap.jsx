@@ -15,7 +15,7 @@ import { MapPin, Crosshair, Navigation, Layers, Check, X, Trash2, Loader2, Plus,
 import * as db from '@/lib/db'
 import ArcTool from '@/components/ArcTool'
 import { fitSimilarity, fitResiduals, imageCornerLatLngs, metresToFeet, pixelToLatLng } from '@/lib/geocalib'
-import { SYMBOL_GROUPS, PIPE_ITEMS, symbolById, symbolColor, symbolSvg } from '@/lib/irrigationSymbols'
+import { SYMBOL_GROUPS, PIPE_ITEMS, symbolById, symbolColor, symbolSvg, isPartCircle } from '@/lib/irrigationSymbols'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -512,7 +512,7 @@ export default function CourseMap({ user, manage }) {
     inView.forEach((f) => {
       const s = featSym(f)
       const m = L.marker([f.lat, f.lng], {
-        icon: L.divIcon({ className: '', html: symbolSvg(s, px), iconSize: [px, px], iconAnchor: [px / 2, px / 2] }),
+        icon: L.divIcon({ className: '', html: symbolSvg(s, px, f.arcStart || 0), iconSize: [px, px], iconAnchor: [px / 2, px / 2] }),
         interactive: true, keyboard: false,
       })
       m.on('click', (e) => { if (e.originalEvent) e.originalEvent.stopPropagation?.(); setSelected(f) })
@@ -620,6 +620,21 @@ export default function CourseMap({ user, manage }) {
     if (!file) return
     try { const dataUrl = await compressPhoto(file); await saveSelected({ photo: dataUrl }) } catch { setMsg('Could not read that photo.') }
   }
+  // Move the selected object onto where you're standing — the calibration-style
+  // capture: stand on the head, tap, it averages GPS for a few seconds and moves.
+  const [movingGps, setMovingGps] = useState(null)
+  async function moveSelectedToGps() {
+    if (!selected) return
+    setMovingGps({ n: 0, acc: null })
+    try {
+      const g = await captureAveragedGps({ seconds: 6, onTick: (n, acc) => setMovingGps({ n, acc: Math.round(acc || 0) }) })
+      await saveSelected({ lat: g.lat, lng: g.lng })
+      setMsg(`Moved onto your spot (±${g.acc} ft-ish, ${g.n} reads).`)
+    } catch (e) { setMsg(e.message || 'GPS capture failed.') }
+    finally { setMovingGps(null) }
+  }
+  // Aim a part-circle head — rotate which way it faces (stored in arcStart).
+  const rotateSelected = (delta) => { if (selected) saveSelected({ arcStart: (((selected.arcStart || 0) + delta) % 360 + 360) % 360 }) }
 
   // ── Calibration drawing pane (image in its own pixel space) ─────────────────
   useEffect(() => {
@@ -1053,8 +1068,22 @@ export default function CourseMap({ user, manage }) {
                     </span>
                     <button onClick={() => setArcOpen(true)} className="ml-auto font-body text-[11px] font-bold px-2.5 py-1.5 rounded-full text-white" style={{ backgroundColor: FERN }}>Measure arc</button>
                   </div>
+                  {/* Aim a part-circle head (which way it faces) */}
+                  {isPartCircle(selected.symbol) && (
+                    <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ backgroundColor: '#F6F8F6' }}>
+                      <span dangerouslySetInnerHTML={{ __html: symbolSvg(symbolById(selected.symbol), 22, selected.arcStart || 0) }} />
+                      <span className="font-body text-[12px]" style={{ color: FOREST }}>Facing <b>{Math.round(selected.arcStart || 0)}°</b></span>
+                      <div className="ml-auto flex items-center gap-1">
+                        <button onClick={() => rotateSelected(-15)} className="w-8 h-8 rounded-full border border-slate-200 font-body font-bold" style={{ color: FOREST }}>↺</button>
+                        <button onClick={() => rotateSelected(15)} className="w-8 h-8 rounded-full border border-slate-200 font-body font-bold" style={{ color: FOREST }}>↻</button>
+                      </div>
+                    </div>
+                  )}
                   <p className="font-body text-[10px] text-slate-400">Changes save automatically.</p>
                   <div className="pt-1 flex items-center gap-2 flex-wrap">
+                    <button onClick={moveSelectedToGps} disabled={!!movingGps} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5 text-white disabled:opacity-60" style={{ backgroundColor: FOREST }}>
+                      {movingGps ? <><Loader2 size={13} className="animate-spin" /> Averaging… {movingGps.n}</> : <><Crosshair size={13} /> Move to my GPS</>}
+                    </button>
                     <button onClick={() => setMoveMode(true)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: FOREST, border: '1px solid #E2E8F0' }}><Navigation size={13} /> Move on map</button>
                     {!confirmDel ? (
                       <button onClick={() => setConfirmDel(true)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: '#B91C1C', border: '1px solid #F3C6C6' }}><Trash2 size={13} /> Delete</button>
