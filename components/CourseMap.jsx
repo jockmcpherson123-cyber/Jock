@@ -112,6 +112,14 @@ export default function CourseMap({ user, manage }) {
 
   // On-screen diagnostics (no console needed): container size + tile status
   const [diag, setDiag] = useState({ w: 0, h: 0, tiles: 'waiting', err: 0 })
+  // Definite pixel height for the map (calc(100vh) wasn't resolving in the layout).
+  const [vh, setVh] = useState(() => (typeof window !== 'undefined' ? window.innerHeight : 800))
+  useEffect(() => {
+    const onR = () => setVh(window.innerHeight)
+    window.addEventListener('resize', onR)
+    return () => window.removeEventListener('resize', onR)
+  }, [])
+  const mapPxH = Math.max(460, vh - 140)
 
   const LRef = useRef(null)
   const pipeLayerRef = useRef(null)
@@ -198,40 +206,25 @@ export default function CourseMap({ user, manage }) {
     const L = LRef.current
     const el = mainRef.current
     if (!el) return
-    let map = null, ro = null, cancelled = false, tries = 0
+    let ro = null, cancelled = false
+    const c0 = (Number.isFinite(center[0]) && Number.isFinite(center[1])) ? center : [FALLBACK.lat, FALLBACK.lng]
+    const map = L.map(el, { center: c0, zoom: 17, zoomControl: true, attributionControl: true, preferCanvas: true })
+    map.attributionControl.setPrefix('')
+    const tl = L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, attribution: SAT_ATTR, crossOrigin: true })
+    let errs = 0, loaded = false
+    tl.on('load', () => { loaded = true; setDiag((d) => ({ ...d, tiles: 'ok' })) })
+    tl.on('tileerror', () => { errs += 1; setDiag((d) => ({ ...d, err: errs, tiles: 'error' }))
+      if (errs === 6 && !loaded) { try { map.removeLayer(tl); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map); setDiag((d) => ({ ...d, tiles: 'osm-fallback' })) } catch { /* ignore */ } } })
+    tl.addTo(map)
+    mainMap.current = map
+    // Repeatedly re-measure the container and resize the map — and report the live
+    // size in the diagnostic badge so we can see it settle.
+    const inval = () => { try { map.invalidateSize(false); setDiag((d) => ({ ...d, w: el.clientWidth, h: el.clientHeight })) } catch { /* ignore */ } }
+    map.whenReady(() => { inval(); setMapTick((t) => t + 1) })
+    ;[0, 100, 300, 700, 1400, 2500].forEach((t) => setTimeout(() => { if (!cancelled) inval() }, t))
+    try { ro = new ResizeObserver(inval); ro.observe(el) } catch { /* ignore */ }
 
-    const create = () => {
-      if (cancelled || map) return
-      const c0 = (Number.isFinite(center[0]) && Number.isFinite(center[1])) ? center : [FALLBACK.lat, FALLBACK.lng]
-      map = L.map(el, { center: c0, zoom: 17, zoomControl: true, attributionControl: true, preferCanvas: true })
-      map.attributionControl.setPrefix('')
-      const tl = L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, attribution: SAT_ATTR, crossOrigin: true })
-      let errs = 0, loaded = false
-      tl.on('load', () => { loaded = true; setDiag((d) => ({ ...d, tiles: 'ok' })) })
-      tl.on('tileerror', () => { errs += 1; setDiag((d) => ({ ...d, err: errs, tiles: 'error' }))
-        // If the imagery host is blocked, fall back to OpenStreetMap so it's not blank.
-        if (errs === 6 && !loaded) { try { map.removeLayer(tl); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map); setDiag((d) => ({ ...d, tiles: 'osm-fallback' })) } catch { /* ignore */ } } })
-      tl.addTo(map)
-      mainMap.current = map
-      const inval = () => { try { map.invalidateSize(false) } catch { /* ignore */ } }
-      map.whenReady(() => { inval(); setMapTick((t) => t + 1) })
-      ;[0, 150, 400, 900, 1600].forEach((t) => setTimeout(inval, t))
-      try { ro = new ResizeObserver(inval); ro.observe(el) } catch { /* ignore */ }
-    }
-
-    // Wait until the container actually has a size — creating a Leaflet map in a
-    // 0-height box is the classic "blank map" bug.
-    const waitForSize = () => {
-      if (cancelled) return
-      const w = el.clientWidth, h = el.clientHeight
-      setDiag((d) => ({ ...d, w, h }))
-      if (w > 60 && h > 60) create()
-      else if (tries++ < 90) requestAnimationFrame(waitForSize)
-      else create() // give up waiting and try anyway
-    }
-    waitForSize()
-
-    return () => { cancelled = true; if (ro) ro.disconnect(); if (map) map.remove(); mainMap.current = null; overlayRef.current = null; locRef.current = null; accRef.current = null }
+    return () => { cancelled = true; if (ro) ro.disconnect(); map.remove(); mainMap.current = null; overlayRef.current = null; locRef.current = null; accRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, mode])
 
@@ -531,7 +524,7 @@ export default function CourseMap({ user, manage }) {
             </div>
           )}
           <div className="relative">
-            <div ref={mainRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: 'calc(100vh - 150px)', minHeight: 460, backgroundColor: '#0b1e12', cursor: addMode || moveMode ? 'crosshair' : '' }} />
+            <div ref={mainRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: mapPxH, minHeight: 460, backgroundColor: '#0b1e12', cursor: addMode || moveMode ? 'crosshair' : '' }} />
             {/* Floating controls */}
             <div className="absolute z-[500] top-3 right-3 flex flex-col gap-2">
               <button onClick={recenter} title="Center on me" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: FOREST }}><Navigation size={17} /></button>
