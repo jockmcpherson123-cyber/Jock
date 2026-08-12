@@ -9,7 +9,7 @@
 // Leaflet is loaded in the browser only (it needs `window`). The overlay image
 // is served behind the login via /api/course-overlay.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import 'leaflet/dist/leaflet.css'
 import { MapPin, Crosshair, Navigation, Layers, Check, X, Trash2, Loader2, Plus, Camera, Eye, EyeOff, Droplet } from 'lucide-react'
 import * as db from '@/lib/db'
@@ -121,6 +121,12 @@ export default function CourseMap({ user, manage }) {
   }, [])
   const mapPxH = Math.max(460, vh - 140)
 
+  // Callback ref: fires with the real DOM node whenever the map div mounts (or
+  // remounts). Drives map creation off the actually-attached node, so Leaflet is
+  // never bound to a stale/detached element (the 0x0 blank-map cause).
+  const [mapNode, setMapNode] = useState(null)
+  const mapCbRef = useCallback((n) => setMapNode(n), [])
+
   const LRef = useRef(null)
   const pipeLayerRef = useRef(null)
   const featLayerRef = useRef(null)
@@ -202,10 +208,9 @@ export default function CourseMap({ user, manage }) {
   // ── Main satellite map (created once per entry into map mode) ───────────────
   const [mapTick, setMapTick] = useState(0)
   useEffect(() => {
-    if (!ready || mode !== 'map') return
+    if (!ready || mode !== 'map' || !mapNode) return
     const L = LRef.current
-    const el = mainRef.current
-    if (!el) return
+    const el = mapNode
     let ro = null, cancelled = false
     const c0 = (Number.isFinite(center[0]) && Number.isFinite(center[1])) ? center : [FALLBACK.lat, FALLBACK.lng]
     const map = L.map(el, { center: c0, zoom: 17, zoomControl: true, attributionControl: true, preferCanvas: true })
@@ -226,7 +231,7 @@ export default function CourseMap({ user, manage }) {
 
     return () => { cancelled = true; if (ro) ro.disconnect(); map.remove(); mainMap.current = null; overlayRef.current = null; locRef.current = null; accRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, mode])
+  }, [ready, mode, mapNode])
 
   // Overlay layer — added/updated whenever the calibration is available (also
   // re-runs once the saved calibration loads after the map is built).
@@ -529,7 +534,7 @@ export default function CourseMap({ user, manage }) {
           </div>
 
           <div className="relative" key="map-wrap">
-            <div ref={mainRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: mapPxH, minHeight: 460, backgroundColor: '#0b1e12', cursor: addMode || moveMode ? 'crosshair' : '' }} />
+            <div ref={mapCbRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: mapPxH, minHeight: 460, backgroundColor: '#0b1e12', cursor: addMode || moveMode ? 'crosshair' : '' }} />
             {/* Floating controls */}
             <div className="absolute z-[500] top-3 right-3 flex flex-col gap-2">
               <button onClick={recenter} title="Center on me" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: FOREST }}><Navigation size={17} /></button>
