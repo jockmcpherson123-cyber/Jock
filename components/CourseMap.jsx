@@ -554,10 +554,6 @@ export default function CourseMap({ user, manage }) {
             <div className="absolute z-[500] bottom-3 right-3 bg-white/95 rounded-full shadow px-3 py-1.5 font-body text-[11px] font-bold flex items-center gap-1.5" style={{ color: FOREST }}>
               <Droplet size={12} style={{ color: '#2563EB' }} /> {features.length} object{features.length !== 1 ? 's' : ''}
             </div>
-            {/* Diagnostic badge — tells us why a map might be blank (read this to me) */}
-            <div className="absolute z-[500] top-3 left-1/2 -translate-x-1/2 bg-black/70 text-white rounded-full px-3 py-1 font-body text-[11px] tabular-nums">
-              map {diag.w}×{diag.h} · tiles {diag.tiles}{diag.err ? ` (${diag.err} err)` : ''} · {transform ? 'calibrated' : 'no-cal'} · {features.length} pins
-            </div>
             {transform && (
               <div className="absolute z-[500] bottom-3 left-3 right-3 sm:right-auto sm:w-72 bg-white/95 backdrop-blur rounded-xl shadow p-3">
                 <div className="flex items-center gap-2 mb-1.5">
