@@ -52,6 +52,22 @@ const WIRE_LEGEND = [
   ['#e11d1d', 'Wire loop A'], ['#1a8cff', 'Wire loop B'], ['#b0a800', 'Wire loop C'], ['#c824ff', 'Wire loop D'], ['#ff00bf', 'Wire loop E'],
 ]
 
+// Surface types you can draw (fill colour + stroke), like the as-built areas.
+const SURFACES = [
+  ['green', 'Green', '#3f9b47', '#1f6a2a'],
+  ['tee', 'Tee', '#57b356', '#2f7a34'],
+  ['fairway', 'Fairway', '#6ec46e', '#3a8f43'],
+  ['approach', 'Approach', '#7fce7f', '#3a8f43'],
+  ['rough', 'Rough', '#8fa863', '#5e7040'],
+  ['bunker', 'Bunker', '#e6d8a8', '#b8a561'],
+  ['water', 'Water', '#7fbfe6', '#3f7fb0'],
+  ['cartpath', 'Cart path', '#d0d0d0', '#8a8a8a'],
+  ['nursery', 'Nursery / other', '#9fb98a', '#6e8a5a'],
+]
+const SURF = Object.fromEntries(SURFACES.map(([k, l, f, s]) => [k, { label: l, fill: f, stroke: s }]))
+// Pipe sizes you can draw (reuse the legend colours).
+const DRAW_PIPES = PIPE_LEGEND // [[cls, color], …]
+
 // Compress a photo to a small data URL (same idea as the scouting log) so it
 // stores inline without a separate file service.
 function compressPhoto(file, max = 1100, quality = 0.7) {
@@ -147,6 +163,26 @@ export default function CourseMap({ user, manage }) {
   // Control-wire loops (dotted colour paths from the blue as-built)
   const [wires, setWires] = useState(null)
   const [showWires, setShowWires] = useState(false)
+  // Drawn shapes (surfaces + pipe lines you add) + the edit tools
+  const [shapes, setShapes] = useState([])
+  const [showShapes, setShowShapes] = useState(true)
+  const [drawOpen, setDrawOpen] = useState(false)      // the draw toolbar is open
+  const [draw, setDraw] = useState(null)               // active drawing {shape,kind,color,pts:[]}
+  const [eraser, setEraser] = useState(false)          // tap a pipe to delete it
+  const [selShape, setSelShape] = useState(null)       // a drawn shape being edited
+  const [removedPipes, setRemovedPipes] = useState([]) // indices of extracted pipes hidden/erased
+  const shapesLayerRef = useRef(null)
+  const drawLayerRef = useRef(null)
+  const drawRefState = useRef(null)   // live drawing for the map click handler
+  const eraserRef = useRef(false)
+  const pipesRefL = useRef(null)
+  const transformRefL = useRef(null)
+  const removedRefL = useRef([])
+  const courseInfoRefL = useRef({})
+  useEffect(() => { drawRefState.current = draw }, [draw])
+  useEffect(() => { eraserRef.current = eraser }, [eraser])
+  useEffect(() => { pipesRefL.current = pipes }, [pipes])
+  useEffect(() => { removedRefL.current = removedPipes }, [removedPipes])
   // Calibration method: 'photo' = line the drawing up on the satellite photo
   // (inch-accurate, no GPS); 'gps' = stand on each head and capture GPS.
   const [calMode, setCalMode] = useState('photo')
@@ -185,6 +221,8 @@ export default function CourseMap({ user, manage }) {
   // Fitted transform + how good the fit is — recomputed whenever points change.
   const transform = useMemo(() => fitSimilarity(points, IMAGE_H), [points])
   const fit = useMemo(() => fitResiduals(points, transform, IMAGE_H), [points, transform])
+  useEffect(() => { transformRefL.current = transform }, [transform])
+  useEffect(() => { courseInfoRefL.current = courseInfo }, [courseInfo])
 
   // ── Load Leaflet (browser only) + the rotated-overlay plugin ────────────────
   // The plugin is loaded best-effort: if it fails, the base map, pipes and heads
@@ -215,6 +253,7 @@ export default function CourseMap({ user, manage }) {
         setLocation(s.location || null)
         const cal = s.courseInfo?.mapCalibration
         if (cal?.points?.length) setPoints(cal.points)
+        if (Array.isArray(s.courseInfo?.removedPipes)) setRemovedPipes(s.courseInfo.removedPipes)
       } catch (e) { console.error(e) } finally { if (!cancelled) setLoading(false) }
     })()
     return () => { cancelled = true }
@@ -282,6 +321,15 @@ export default function CourseMap({ user, manage }) {
     let cancelled = false
     ;(async () => {
       try { const res = await fetch('/api/course-wires', { cache: 'no-store' }); if (res.ok) { const j = await res.json(); if (!cancelled) setWires(j) } } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // Load the drawn shapes (surfaces + added pipe lines)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try { const s = await db.fetchShapes(); if (!cancelled) setShapes(s) } catch (e) { console.error('shapes load', e) }
     })()
     return () => { cancelled = true }
   }, [])
@@ -387,6 +435,8 @@ export default function CourseMap({ user, manage }) {
     if (!map) return
     const handler = (e) => {
       if (moveRef.current) { placeRef.current?.(e.latlng, 'relocate'); return }
+      if (drawRefState.current) { setDraw((d) => (d ? { ...d, pts: [...d.pts, [e.latlng.lat, e.latlng.lng]] } : d)); return }
+      if (eraserRef.current) { eraseNearestPipe(e.latlng); return }
       if (stampRef.current) { placeRef.current?.(e.latlng, 'manual', stampRef.current); return }
       if (addModeRef.current) placeRef.current?.(e.latlng)
     }
@@ -408,7 +458,9 @@ export default function CourseMap({ user, manage }) {
       // ~9 layers instead of ~19k keeps the map fast (thousands of separate
       // layers choke Leaflet, which also stalled the heads drawn afterwards).
       const byClass = new Map()
-      pipes.lines.forEach((ln) => {
+      const removed = new Set(removedPipes)
+      pipes.lines.forEach((ln, idx) => {
+        if (removed.has(idx)) return // erased on the map
         const latlngs = ln.p
           .map(([px, py]) => { const { lat, lng } = pixelToLatLng(px, py, transform, H); return [lat, lng] })
           .filter(([la, lo]) => Number.isFinite(la) && Number.isFinite(lo))
@@ -427,7 +479,7 @@ export default function CourseMap({ user, manage }) {
       pipeLayerRef.current = group
     } catch (e) { console.error('pipe render failed', e) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pipes, transform, mode, mapTick, showPipes])
+  }, [pipes, transform, mode, mapTick, showPipes, removedPipes])
 
   // Draw the control-wire loops as small colour dots (reproduces the dotted
   // wire paths), one colour per satellite/controller. Canvas keeps ~19k dots fast.
@@ -451,6 +503,55 @@ export default function CourseMap({ user, manage }) {
     } catch (e) { console.error('wire render failed', e) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wires, transform, mode, mapTick, showWires])
+
+  // Render the drawn shapes — surfaces (filled polygons) under the pipes, and
+  // any pipe lines you've added, on top. Tap one to select/edit/delete.
+  useEffect(() => {
+    const L = LRef.current, map = mainMap.current
+    if (!L || !map || mode !== 'map') return
+    if (shapesLayerRef.current) { shapesLayerRef.current.remove(); shapesLayerRef.current = null }
+    if (!showShapes || shapes.length === 0) return
+    const group = L.layerGroup()
+    try {
+      // Areas first (underneath), then lines.
+      const areas = shapes.filter((s) => s.shape === 'area')
+      const lines = shapes.filter((s) => s.shape === 'line')
+      areas.forEach((s) => {
+        if (!Array.isArray(s.points) || s.points.length < 3) return
+        const sel = selShape?.id === s.id
+        const meta = SURF[s.kind] || { fill: s.color || '#9fb98a', stroke: '#5e7040' }
+        L.polygon(s.points, { color: sel ? GOLD : meta.stroke, weight: sel ? 3 : 1.5, fillColor: s.color || meta.fill, fillOpacity: s.kind === 'water' ? 0.5 : 0.4 })
+          .on('click', (e) => { if (eraserRef.current) return; if (e.originalEvent) e.originalEvent.stopPropagation?.(); setSelShape(s) }).addTo(group)
+      })
+      lines.forEach((s) => {
+        if (!Array.isArray(s.points) || s.points.length < 2) return
+        const sel = selShape?.id === s.id
+        L.polyline(s.points, { color: sel ? GOLD : (s.color || '#1e1e1e'), weight: sel ? 5 : 3.4, opacity: 0.95 })
+          .on('click', (e) => { if (eraserRef.current) { deletePipeShape(s.id); return } if (e.originalEvent) e.originalEvent.stopPropagation?.(); setSelShape(s) }).addTo(group)
+      })
+      group.addTo(map)
+      shapesLayerRef.current = group
+    } catch (e) { console.error('shapes render failed', e) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shapes, showShapes, selShape, mode, mapTick])
+
+  // Live preview of the shape you're currently drawing (vertices + rubber line).
+  useEffect(() => {
+    const L = LRef.current, map = mainMap.current
+    if (!L || !map || mode !== 'map') return
+    if (drawLayerRef.current) { drawLayerRef.current.remove(); drawLayerRef.current = null }
+    if (!draw || draw.pts.length === 0) return
+    const group = L.layerGroup()
+    try {
+      const col = draw.color || '#2563EB'
+      if (draw.shape === 'area' && draw.pts.length >= 3) L.polygon(draw.pts, { color: col, weight: 2, dashArray: '5,5', fillColor: col, fillOpacity: 0.2 }).addTo(group)
+      else if (draw.pts.length >= 2) L.polyline(draw.pts, { color: col, weight: 3, dashArray: '5,5' }).addTo(group)
+      draw.pts.forEach((p, i) => L.circleMarker(p, { radius: 5, color: '#fff', weight: 2, fillColor: col, fillOpacity: 1 }).addTo(group))
+      group.addTo(map)
+      drawLayerRef.current = group
+    } catch (e) { console.error('draw preview failed', e) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draw, mode, mapTick])
 
   // Draw the editable irrigation markers as fast canvas circles (handles the
   // thousands of heads smoothly). Tap one to edit; move via the edit panel.
@@ -747,6 +848,59 @@ export default function CourseMap({ user, manage }) {
     } catch (e) { console.error(e); setMsg('Could not save — try again.') } finally { setSaving(false) }
   }
 
+  // ── Drawing surfaces + pipe lines, and erasing extracted pipes ──────────────
+  const startDraw = (shape, kind, color) => { setSelShape(null); setEraser(false); setAddMode(false); setStampSym(null); setMoveMode(false); setDraw({ shape, kind, color, pts: [] }) }
+  const undoVertex = () => setDraw((d) => (d ? { ...d, pts: d.pts.slice(0, -1) } : d))
+  const cancelDraw = () => setDraw(null)
+  async function finishDraw() {
+    const d = drawRefState.current
+    if (!d) return
+    const need = d.shape === 'area' ? 3 : 2
+    if (d.pts.length < need) { setMsg(d.shape === 'area' ? 'A surface needs at least 3 taps.' : 'A line needs at least 2 taps.'); return }
+    try {
+      const s = await db.addShape({ shape: d.shape, kind: d.kind, color: d.color, points: d.pts })
+      setShapes((prev) => [...prev, s]); setDraw(null)
+      setMsg(`${d.shape === 'area' ? (SURF[d.kind]?.label || 'Surface') : (d.kind || 'Pipe')} added.`)
+    } catch (e) { console.error(e); setMsg('Could not save that — is the phase24 table set up?') }
+  }
+  async function deletePipeShape(id) {
+    try { await db.deleteShape(id); setShapes((prev) => prev.filter((x) => x.id !== id)); if (selShape?.id === id) setSelShape(null) }
+    catch (e) { console.error(e); setMsg('Could not delete.') }
+  }
+  async function saveShapePatch(id, patch) {
+    try { const up = await db.updateShape(id, patch); setShapes((prev) => prev.map((x) => (x.id === up.id ? up : x))); setSelShape(up) }
+    catch (e) { console.error(e); setMsg('Could not save.') }
+  }
+  async function persistRemoved(list) {
+    try { const ci = { ...courseInfoRefL.current, removedPipes: list }; await db.saveSettings({ courseInfo: ci }); setCourseInfo(ci) } catch (e) { console.error(e) }
+  }
+  // Point-to-segment distance in screen pixels.
+  const segDistPx = (p, a, b) => {
+    const dx = b.x - a.x, dy = b.y - a.y
+    const len2 = dx * dx + dy * dy || 1
+    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
+    t = Math.max(0, Math.min(1, t))
+    const qx = a.x + t * dx, qy = a.y + t * dy
+    return Math.hypot(p.x - qx, p.y - qy)
+  }
+  function eraseNearestPipe(latlng) {
+    const pp = pipesRefL.current, tf = transformRefL.current, map = mainMap.current
+    if (!pp?.lines || !tf || !map) return
+    const H = pp.imageH || IMAGE_H
+    const removed = new Set(removedRefL.current)
+    const cpt = map.latLngToLayerPoint(latlng)
+    let best = -1, bestD = Infinity
+    pp.lines.forEach((ln, idx) => {
+      if (removed.has(idx)) return
+      // cheap bbox reject: skip lines whose first vertex is far away in latlng
+      const pts = ln.p.map(([px, py]) => { const { lat, lng } = pixelToLatLng(px, py, tf, H); return map.latLngToLayerPoint([lat, lng]) })
+      for (let i = 0; i < pts.length - 1; i++) { const dd = segDistPx(cpt, pts[i], pts[i + 1]); if (dd < bestD) { bestD = dd; best = idx } }
+    })
+    if (best >= 0 && bestD <= 12) { const next = [...removedRefL.current, best]; setRemovedPipes(next); persistRemoved(next); setMsg('Pipe line erased.') }
+    else setMsg('No pipe line right there — tap right on the line.')
+  }
+  const restorePipes = () => { setRemovedPipes([]); persistRemoved([]); setMsg('Restored all erased pipe lines.') }
+
   const avgFt = fit.avgErrorM != null ? Math.round(metresToFeet(fit.avgErrorM)) : null
   // Straight-line distance (ft) from you to the object you're walking to.
   const navDistFt = (gps && selected && Number.isFinite(selected.lat)) ? (() => {
@@ -836,6 +990,25 @@ export default function CourseMap({ user, manage }) {
               <button onClick={() => setStampSym(null)} className="font-body text-[11px] font-bold shrink-0 px-2.5 py-1 rounded-full text-white" style={{ backgroundColor: '#6D28D9' }}>Done</button>
             </div>
           )}
+          {draw && (
+            <div className="rounded-xl px-4 py-2.5 font-body text-[13px] flex items-center justify-between gap-2" style={{ backgroundColor: '#EAF2FB', border: '1px solid #BBD3F0', color: '#1E3A5F' }}>
+              <span><b>Drawing {draw.shape === 'area' ? (SURF[draw.kind]?.label || 'surface') : `${draw.kind} pipe`}:</b> tap along the {draw.shape === 'area' ? 'edge of the area' : 'line'} ({draw.pts.length} point{draw.pts.length === 1 ? '' : 's'}). Then <b>Finish</b>.</span>
+              <span className="flex items-center gap-1.5 shrink-0">
+                <button onClick={undoVertex} disabled={!draw.pts.length} className="font-body text-[11px] font-bold px-2 py-1 rounded-full bg-white disabled:opacity-40" style={{ color: FOREST }}>Undo</button>
+                <button onClick={finishDraw} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full text-white" style={{ backgroundColor: FERN }}>Finish</button>
+                <button onClick={cancelDraw} className="font-body text-[11px] font-bold px-2 py-1 rounded-full text-slate-500">Cancel</button>
+              </span>
+            </div>
+          )}
+          {eraser && (
+            <div className="rounded-xl px-4 py-2.5 font-body text-[13px] flex items-center justify-between gap-2" style={{ backgroundColor: '#FDECEC', border: '1px solid #F3C6C6', color: '#7A1C1C' }}>
+              <span><b>Eraser on:</b> tap a pipe line to delete it{removedPipes.length ? ` · ${removedPipes.length} erased` : ''}.</span>
+              <span className="flex items-center gap-1.5 shrink-0">
+                {removedPipes.length > 0 && <button onClick={restorePipes} className="font-body text-[11px] font-bold px-2 py-1 rounded-full bg-white" style={{ color: FOREST }}>Restore all</button>}
+                <button onClick={() => setEraser(false)} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full text-white" style={{ backgroundColor: '#B91C1C' }}>Done</button>
+              </span>
+            </div>
+          )}
           </div>
 
           <div className="relative" key="map-wrap">
@@ -845,6 +1018,9 @@ export default function CourseMap({ user, manage }) {
               <button onClick={recenter} title="Center on me" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: FOREST }}><Navigation size={17} /></button>
               <button onClick={() => setShowFeatures((v) => !v)} title={showFeatures ? 'Hide heads' : 'Show heads'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showFeatures ? FERN : '#94A3B8' }}>{showFeatures ? <Eye size={17} /> : <EyeOff size={17} />}</button>
               <button onClick={() => setLabelsOn((v) => !v)} title={labelsOn ? 'Hide head numbers' : 'Show head numbers'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center font-body text-[11px] font-bold" style={{ color: labelsOn ? FERN : '#94A3B8' }}>R#</button>
+              {shapes.length > 0 && (
+                <button onClick={() => setShowShapes((v) => !v)} title={showShapes ? 'Hide surfaces' : 'Show surfaces'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center font-body text-[14px] font-bold" style={{ color: showShapes ? '#3f9b47' : '#94A3B8' }}>▦</button>
+              )}
               {pipes?.lines?.length > 0 && (
                 <button onClick={() => setShowPipes((v) => !v)} title={showPipes ? 'Hide pipes' : 'Show pipes'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showPipes ? '#2563EB' : '#94A3B8' }}><Layers size={17} /></button>
               )}
@@ -865,6 +1041,7 @@ export default function CourseMap({ user, manage }) {
               <div className="absolute z-[500] top-3 left-3 flex flex-col gap-2">
                 <button onClick={() => setAddMode((v) => !v)} className="font-body text-[12px] font-bold px-3 h-10 rounded-full shadow flex items-center gap-1.5" style={addMode ? { backgroundColor: '#2563EB', color: '#fff' } : { backgroundColor: '#fff', color: FOREST }}><Plus size={15} /> Add head</button>
                 <button onClick={addAtGps} disabled={!gps} title="Add at my location" className="font-body text-[12px] font-bold px-3 h-10 rounded-full shadow flex items-center gap-1.5 bg-white disabled:opacity-50" style={{ color: FOREST }}><Crosshair size={14} /> At my GPS</button>
+                <button onClick={() => setDrawOpen(true)} className="font-body text-[12px] font-bold px-3 h-10 rounded-full shadow flex items-center gap-1.5 bg-white" style={{ color: FOREST }}><Plus size={15} /> Draw / edit</button>
               </div>
             )}
             {/* Count chip */}
@@ -1104,6 +1281,83 @@ export default function CourseMap({ user, manage }) {
 
       {arcOpen && selected && (
         <ArcTool feature={selected} onClose={() => setArcOpen(false)} onSave={async (vals) => { await saveSelected(vals); setArcOpen(false) }} />
+      )}
+
+      {/* Draw toolbar — pick a surface or pipe to draw, or the eraser. */}
+      {drawOpen && (
+        <div className="fixed inset-0 z-[1100] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setDrawOpen(false)}>
+          <div className="bg-white rounded-2xl w-full sm:max-w-md shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-white" style={{ borderBottom: '1px solid #EEF0EC' }}>
+              <p className="font-display text-base font-bold" style={{ color: FOREST }}>Draw &amp; edit</p>
+              <button onClick={() => setDrawOpen(false)} className="text-slate-400"><X size={18} /></button>
+            </div>
+            <div className="p-4">
+              <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Add a surface</p>
+              <div className="grid grid-cols-2 gap-1.5 mb-4">
+                {SURFACES.map(([k, l, f, s]) => (
+                  <button key={k} onClick={() => { startDraw('area', k, f); setDrawOpen(false) }} className="flex items-center gap-2 rounded-xl px-2.5 py-2 text-left" style={{ backgroundColor: '#F6F8F6' }}>
+                    <span className="w-5 h-5 rounded shrink-0" style={{ backgroundColor: f, border: `1.5px solid ${s}` }} />
+                    <span className="font-body text-[12px] font-bold" style={{ color: FOREST }}>{l}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Add a pipe line</p>
+              <div className="grid grid-cols-2 gap-1.5 mb-4">
+                {DRAW_PIPES.map(([cls, col]) => (
+                  <button key={cls} onClick={() => { startDraw('line', cls, col); setDrawOpen(false) }} className="flex items-center gap-2 rounded-xl px-2.5 py-2 text-left" style={{ backgroundColor: '#F6F8F6' }}>
+                    <span className="shrink-0" style={{ display: 'inline-block', width: 18, borderTop: `3px solid ${col}` }} />
+                    <span className="font-body text-[12px] font-bold" style={{ color: FOREST }}>{cls}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Remove</p>
+              <button onClick={() => { setEraser(true); setDrawOpen(false) }} className="w-full flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-white font-body text-[13px] font-bold" style={{ backgroundColor: '#B91C1C' }}><Trash2 size={15} /> Erase a pipe line (tap it on the map)</button>
+              <p className="font-body text-[10px] text-slate-400 mt-2">Tip: tap along the map to lay points, then Finish. Tap any surface or drawn line to edit or delete it.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit a drawn shape (surface or added pipe) */}
+      {selShape && (
+        <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setSelShape(null)}>
+          <div className="bg-white rounded-2xl w-full sm:max-w-sm shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #EEF0EC' }}>
+              <div className="flex items-center gap-2">
+                <span className="w-3.5 h-3.5 rounded" style={{ backgroundColor: selShape.color || (SURF[selShape.kind]?.fill) || '#888' }} />
+                <p className="font-display text-base font-bold" style={{ color: FOREST }}>{selShape.shape === 'area' ? (SURF[selShape.kind]?.label || 'Surface') : `${selShape.kind} pipe`}</p>
+              </div>
+              <button onClick={() => setSelShape(null)} className="text-slate-400"><X size={18} /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              {manage ? (
+                <>
+                  <div>
+                    <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Type</label>
+                    {selShape.shape === 'area' ? (
+                      <select value={selShape.kind} onChange={(e) => { const k = e.target.value; saveShapePatch(selShape.id, { kind: k, color: SURF[k]?.fill || selShape.color }) }} className="w-full border border-slate-200 rounded-xl px-2.5 py-2 text-sm font-body bg-white">
+                        {SURFACES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                      </select>
+                    ) : (
+                      <select value={selShape.kind} onChange={(e) => { const cls = e.target.value; const col = (DRAW_PIPES.find(([c]) => c === cls) || [])[1]; saveShapePatch(selShape.id, { kind: cls, color: col || selShape.color }) }} className="w-full border border-slate-200 rounded-xl px-2.5 py-2 text-sm font-body bg-white">
+                        {DRAW_PIPES.map(([cls]) => <option key={cls} value={cls}>{cls}</option>)}
+                      </select>
+                    )}
+                  </div>
+                  <div>
+                    <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Label / notes</label>
+                    <input defaultValue={selShape.label} onBlur={(e) => e.target.value !== selShape.label && saveShapePatch(selShape.id, { label: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body" placeholder="e.g. 7 Green" />
+                  </div>
+                  <div className="pt-1">
+                    <button onClick={() => deletePipeShape(selShape.id)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: '#B91C1C', border: '1px solid #F3C6C6' }}><Trash2 size={13} /> Delete this {selShape.shape === 'area' ? 'surface' : 'line'}</button>
+                  </div>
+                </>
+              ) : (
+                <p className="font-body text-sm text-slate-500">{selShape.label || (selShape.shape === 'area' ? SURF[selShape.kind]?.label : selShape.kind)}</p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Symbol stamp palette — pick a symbol, then tap the map to drop it. */}
