@@ -1139,11 +1139,10 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
     return nv
   })
 
-  // ── PGR reapply timing (GDD base-32°F since each area's last growth-reg spray).
-  // The classic Primo/Anuew greens model is "200 GDD, base 0°C" — which equals
-  // 360 GDD at base 32°F (GDD°F = 1.8 × GDD°C). Using 200 here would fire about
-  // twice too often (~4 days in summer instead of ~8).
-  const PGR_TARGET = 360
+  // ── PGR reapply timing — the classic Primo/Anuew model: 200 GDD, base 0°C.
+  // The daily temps are °F, so we accumulate GDD base 32°F and convert to °C
+  // (÷1.8) for display against the familiar 200 target.
+  const PGR_TARGET = 200 // GDD, base 0°C
   const pgrRows = (() => {
     if (!manage || !wx.season.length) return []
     // Growth suppression comes from true PGRs AND DMI (FRAC 3) fungicides, which
@@ -1166,12 +1165,13 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
     // it should NOT create a growth-reg task for a fungicide-only area.
     return Object.keys(lastByArea).filter((area) => areaHasPGR[area]).map((area) => {
       const last = lastByArea[area]
-      const gdd = gddSince(wx.season, last.date, 32)
+      const gddF = gddSince(wx.season, last.date, 32)
+      const gdd = gddF == null ? null : Math.round(gddF / 1.8) // °F-GDD → °C-GDD
       const pct = gdd != null && PGR_TARGET > 0 ? Math.min(100, Math.round((gdd / PGR_TARGET) * 100)) : 0
       const status = gdd == null ? 'none' : gdd >= PGR_TARGET ? 'due' : gdd >= PGR_TARGET * 0.8 ? 'soon' : 'ok'
-      // Projected reapply date from the upcoming forecast (when the remaining GDD
-      // will accumulate).
-      const est = gdd == null ? null : projectGddReachDate(PGR_TARGET - gdd, wx.forecast, 32, today)
+      // Projected reapply date from the upcoming forecast — remaining °C-GDD is
+      // converted back to °F (×1.8) because the forecast walker works in °F.
+      const est = gdd == null ? null : projectGddReachDate((PGR_TARGET - gdd) * 1.8, wx.forecast, 32, today)
       return { area, last, gdd, pct, status, est }
     }).sort((a, b) => (b.gdd ?? -1) - (a.gdd ?? -1))
   })()
@@ -1524,7 +1524,7 @@ function PgrTimingCard({ rows, target }) {
   const st = { due: { bg: '#FEE2E2', fg: '#B91C1C', bar: '#DC2626', label: 'Reapply now' }, soon: { bg: '#FEF3DD', fg: '#92660D', bar: '#D97706', label: 'Soon' }, ok: { bg: '#E8F3EC', fg: FERN, bar: FERN, label: 'On track' } }
   return (
     <section>
-      <SectionHeader title="Growth-Reg Timing" subtitle={`GDD since the last growth-suppressing spray — PGR or DMI fungicide (base 32°F) · target ~${target}`} />
+      <SectionHeader title="Growth-Reg Timing" subtitle={`GDD since the last growth-suppressing spray — PGR or DMI fungicide (base 0°C) · target ~${target}`} />
       <div className="paper-card p-4 space-y-3">
         {rows.map((r) => {
           const s = st[r.status] || st.ok
@@ -6744,8 +6744,9 @@ function Kv({ label, value, accent }) {
 function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {}, onSaveTargets }) {
   const pgrTargets = courseInfo.pgrTargets || {}
   const [editTargets, setEditTargets] = useState(false)
-  // 360 GDD (base 32°F) = the classic 200-GDD Primo model stated at base 0°C.
-  const [target, setTarget] = useState(360)
+  // The classic Primo model: 200 GDD, base 0°C. Temps are °F, so we accumulate
+  // base 32°F and convert to °C (÷1.8) for display against this 200 target.
+  const [target, setTarget] = useState(200)
 
   if (!hasLocation) {
     return <ComingSoonCard title="Set your location first" desc="Growing Degree Days come from your course location. Add your address in Spray Ops → Settings → Location, then come back." />
@@ -6786,12 +6787,13 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
   const todayIso = localDateISO()
   const areaRows = Object.keys(areas).map((area) => {
     const last = lastByArea[area]
-    const gdd = last ? gddSince(daily, last.date, 32) : null
+    const gddF = last ? gddSince(daily, last.date, 32) : null
+    const gdd = gddF == null ? null : Math.round(gddF / 1.8) // °F-GDD → °C-GDD
     const pct = gdd != null && target > 0 ? Math.min(100, Math.round((gdd / target) * 100)) : 0
     let status = 'none'
     if (gdd != null) status = gdd >= target ? 'due' : gdd >= target * 0.8 ? 'soon' : 'ok'
-    // Projected reapply date, walking the forecast forward from today.
-    const est = gdd == null ? null : projectGddReachDate(target - gdd, daily, 32, todayIso)
+    // Projected reapply date — remaining °C-GDD converted back to °F for the walker.
+    const est = gdd == null ? null : projectGddReachDate((target - gdd) * 1.8, daily, 32, todayIso)
     return { area, last, gdd, pct, status, est }
   }).sort((a, b) => (b.gdd ?? -1) - (a.gdd ?? -1))
 
@@ -6841,10 +6843,10 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
           <div className="flex items-center gap-1.5">
             <span className="font-body text-[11px] text-slate-400">Reapply target</span>
             <input type="number" value={target} onChange={(e) => setTarget(Number(e.target.value) || 0)} className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
-            <span className="font-body text-[11px] text-slate-400">GDD</span>
+            <span className="font-body text-[11px] text-slate-400">GDD °C</span>
           </div>
         </div>
-        <p className="font-body text-[11px] text-slate-400 mb-3">GDD since each area's last growth-suppressing spray — a PGR <b>or</b> a DMI (FRAC 3) fungicide, which also regulates growth (base 32°F). ~360 is the classic greens target (the "200 GDD" Primo model at base 0°C); fairways run higher.</p>
+        <p className="font-body text-[11px] text-slate-400 mb-3">GDD since each area's last growth-suppressing spray — a PGR <b>or</b> a DMI (FRAC 3) fungicide, which also regulates growth. <b>200 GDD, base 0°C</b> is the classic greens target (the Primo model); fairways run higher.</p>
         <div className="space-y-3">
           {areaRows.map((r) => (
             <div key={r.area}>
@@ -6881,7 +6883,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
 
         {editTargets && (
           <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F8FAF9' }}>
-            <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Reapply GDD by product &amp; surface (base 32°F)</p>
+            <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Reapply GDD by product &amp; surface (base 0°C)</p>
             <div className="space-y-2.5">
               {PGR_MODELS.map((m) => (
                 <div key={m.id}>
@@ -6890,8 +6892,8 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
                     {['green', 'tee', 'fairway', 'rough'].map((surf) => (
                       <div key={surf}>
                         <label className="font-body text-[9px] uppercase tracking-wide text-slate-400 block mb-0.5">{surf}</label>
-                        <input type="number" inputMode="numeric" key={`${m.id}:${surf}:${pgrTargets[m.id]?.[surf] ?? m.gdd[surf]}`} defaultValue={pgrTargets[m.id]?.[surf] ?? m.gdd[surf]}
-                          onBlur={(e) => saveTarget(m.id, surf, e.target.value.trim(), m.gdd[surf])} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                        <input type="number" inputMode="numeric" key={`${m.id}:${surf}:${pgrTargets[m.id]?.[surf] ?? m.gdd[surf]}`} defaultValue={Math.round((pgrTargets[m.id]?.[surf] ?? m.gdd[surf]) / 1.8)}
+                          onBlur={(e) => { const v = e.target.value.trim(); saveTarget(m.id, surf, v === '' ? '' : String(Math.round(Number(v) * 1.8)), m.gdd[surf]) }} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
                           className="w-full border border-slate-200 rounded-lg px-1.5 py-1.5 text-base font-body text-center" />
                       </div>
                     ))}
@@ -6919,7 +6921,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
                     const ph = PHASE_STYLE[p.st.phase] || PHASE_STYLE.regulated
                     return (
                       <span key={p.name} className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: ph.bg, color: ph.fg }}>
-                        {p.model.label.split(' (')[0]} · {ph.label} · {p.gdd}/{p.st.target}
+                        {p.model.label.split(' (')[0]} · {ph.label} · {Math.round(p.gdd / 1.8)}/{Math.round(p.st.target / 1.8)}
                       </span>
                     )
                   })}

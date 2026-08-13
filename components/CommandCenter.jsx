@@ -32,7 +32,7 @@ const CC_WX_ICON = {
 const fmtDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })
 const fmtDate = (d) => { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) } catch { return d } }
 
-const PGR_TARGET = 360
+const PGR_TARGET = 200 // GDD, base 0°C (classic Primo model; temps are °F so we ÷1.8)
 
 export default function CommandCenter() {
   const [data, setData] = useState(null)
@@ -90,7 +90,8 @@ export default function CommandCenter() {
       if (!lastByArea[s.area] || s.date > lastByArea[s.area]) lastByArea[s.area] = s.date
     })
     return Object.keys(lastByArea).filter((a) => hasPGR[a]).map((area) => {
-      const gdd = gddSince(wx.season, lastByArea[area], 32)
+      const gddF = gddSince(wx.season, lastByArea[area], 32)
+      const gdd = gddF == null ? null : Math.round(gddF / 1.8) // °F-GDD → °C-GDD
       const pct = gdd != null ? Math.min(100, Math.round((gdd / PGR_TARGET) * 100)) : 0
       const status = gdd == null ? 'ok' : gdd >= PGR_TARGET ? 'due' : gdd >= PGR_TARGET * 0.8 ? 'soon' : 'ok'
       return { area, gdd, pct, status }
