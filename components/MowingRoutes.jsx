@@ -77,18 +77,13 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
   const printCards = () => {
     const esc = (x) => String(x ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]))
     const tint = (hex, a) => { const h = hex.replace('#', ''); const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16); return `rgba(${r},${g},${b},${a})` }
-    // Size the cards so the whole route fits on ONE page, as big as it can be.
-    // Two columns; rows = however many it takes; each card fills its share of the
-    // page. Fewer mowers → taller cards; 8 mowers → 2×4 still fits one sheet.
+    // Fixed card size — always sized so up to 8 fit on ONE sheet (2 columns × 4
+    // rows). Same size whether you print 5 or 8; fewer just leaves blank slots.
     const N = setGroups.length
-    const cols = N <= 1 ? 1 : 2
-    const rows = Math.ceil(N / cols)
     const GAP = 0.16
-    const usableW = 7.7            // letter width 8.5in − 0.4in margins each side
-    const usableH = 9.55           // height 11in − margins − page heading
-    const cardW = ((usableW - (cols - 1) * GAP) / cols).toFixed(2)
-    const cardH = Math.min(3.3, (usableH - (rows - 1) * GAP) / rows).toFixed(2)
-    const fs = Number(cardH) >= 3 ? 21 : Number(cardH) >= 2.6 ? 20 : 19 // greens font
+    const cardW = 3.77            // (7.7in usable − 1 gap) / 2 columns
+    const cardH = 2.26            // (9.55in usable − 3 gaps) / 4 rows
+    const fs = 19                 // greens font
     const cards = setGroups.map((grp, mi) => {
       const c = MOWER_COLORS[mi % MOWER_COLORS.length]
       const mine = order.filter((id) => grp.includes(id)).map(labelOf) // greens in mow order
