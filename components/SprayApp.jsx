@@ -6433,6 +6433,7 @@ function TurfPerformanceModule() {
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <ScoutingTab scouting={scouting} areas={turf.areas} courseInfo={turf.courseInfo}
               onAdd={async (s) => { await db.addScouting(s); await reloadScouting() }}
+              onUpdate={async (id, patch) => { await db.updateScouting(id, patch); await reloadScouting() }}
               onDelete={async (id) => { await db.deleteScouting(id); await reloadScouting() }} />
         )}
       </div>
@@ -6449,33 +6450,40 @@ const SCOUT_KIND_STYLE = {
   Insect: { bg: '#FEF3DD', fg: '#92660D' }, Wear: { bg: '#EEF2F7', fg: '#475569' },
   Nutrient: { bg: '#E8EEF6', fg: '#3A6187' }, Other: { bg: '#F1F5F9', fg: '#64748B' },
 }
-function ScoutingTab({ scouting = [], areas = {}, courseInfo = {}, onAdd, onDelete }) {
+// Downscale/compress a picked image file to a data URL (shared by add + edit).
+function compressScoutPhoto(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const img = new window.Image()
+      img.onload = () => {
+        const scale = Math.min(1, 1400 / img.width)
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale)
+        const c = document.createElement('canvas'); c.width = w; c.height = h
+        c.getContext('2d').drawImage(img, 0, 0, w, h)
+        resolve(c.toDataURL('image/jpeg', 0.72))
+      }
+      img.onerror = reject
+      img.src = reader.result
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+function ScoutingTab({ scouting = [], areas = {}, courseInfo = {}, onAdd, onUpdate, onDelete }) {
   const areaKeys = Object.keys(areas)
   const [form, setForm] = useState({ area: areaKeys[0] || '', date: localDateISO(), kind: 'Disease', target: '', severity: '', notes: '', photo: '' })
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState('All')
+  const [selected, setSelected] = useState(null) // observation open in the detail/edit modal
   const fileRef = useRef(null)
 
   const pickPhoto = async (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    try {
-      // Reuse the same client-side downscale/compress the handbook uses.
-      const reader = new FileReader()
-      reader.onload = () => {
-        const img = new window.Image()
-        img.onload = () => {
-          const scale = Math.min(1, 1400 / img.width)
-          const w = Math.round(img.width * scale), h = Math.round(img.height * scale)
-          const c = document.createElement('canvas'); c.width = w; c.height = h
-          c.getContext('2d').drawImage(img, 0, 0, w, h)
-          setForm((f) => ({ ...f, photo: c.toDataURL('image/jpeg', 0.72) }))
-        }
-        img.src = reader.result
-      }
-      reader.readAsDataURL(file)
-    } catch (err) { console.error(err) }
+    try { const url = await compressScoutPhoto(file); setForm((f) => ({ ...f, photo: url })) } catch (err) { console.error(err) }
   }
 
   const save = async () => {
@@ -6531,21 +6539,101 @@ function ScoutingTab({ scouting = [], areas = {}, courseInfo = {}, onAdd, onDele
           {list.map((s) => {
             const st = SCOUT_KIND_STYLE[s.kind] || SCOUT_KIND_STYLE.Other
             return (
-              <div key={s.id} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+              <button key={s.id} onClick={() => setSelected(s)} className="text-left bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden hover:shadow-md transition">
                 {s.photo && <img src={s.photo} alt="" className="w-full h-44 object-cover" />}
                 <div className="p-3">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: st.bg, color: st.fg }}>{s.kind}</span>
                     {s.target && <span className="font-body text-sm font-bold text-slate-900">{s.target}</span>}
                     {s.severity && <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F9', color: '#64748B' }}>{s.severity}</span>}
-                    <button onClick={() => onDelete(s.id)} className="ml-auto text-slate-300 hover:text-red-500 shrink-0"><Trash2 size={15} /></button>
+                    <span className="ml-auto font-body text-[11px] font-bold shrink-0" style={{ color: FERN }}>Open ›</span>
                   </div>
                   <p className="font-body text-[11px] text-slate-400 mt-1">{[s.area, fmtDate(s.date)].filter(Boolean).join(' · ')}</p>
-                  {s.notes && <p className="font-body text-[13px] text-slate-600 mt-1.5 whitespace-pre-wrap">{s.notes}</p>}
+                  {s.notes && <p className="font-body text-[13px] text-slate-600 mt-1.5 whitespace-pre-wrap line-clamp-2">{s.notes}</p>}
                 </div>
-              </div>
+              </button>
             )
           })}
+        </div>
+      )}
+
+      {selected && (
+        <ScoutingDetail obs={selected} areaKeys={areaKeys} onClose={() => setSelected(null)}
+          onSave={async (patch) => { await onUpdate(selected.id, patch); setSelected((cur) => cur ? { ...cur, ...patch } : cur) }}
+          onDelete={async () => { await onDelete(selected.id); setSelected(null) }} />
+      )}
+    </div>
+  )
+}
+
+// Detail / edit view for one scouting observation — big photo, all fields
+// editable, replace/remove the photo, or delete the observation.
+function ScoutingDetail({ obs, areaKeys = [], onClose, onSave, onDelete }) {
+  const [d, setD] = useState(obs)
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [zoom, setZoom] = useState(false)
+  const [confirmDel, setConfirmDel] = useState(false)
+  const fileRef = useRef(null)
+  const set = (patch) => { setD((p) => ({ ...p, ...patch })); setDirty(true) }
+  const replacePhoto = async (e) => {
+    const file = e.target.files?.[0]; e.target.value = ''
+    if (!file) return
+    try { const url = await compressScoutPhoto(file); set({ photo: url }) } catch (err) { console.error(err) }
+  }
+  const save = async () => { setSaving(true); try { await onSave({ area: d.area, date: d.date, kind: d.kind, target: d.target, severity: d.severity, notes: d.notes, photo: d.photo }); setDirty(false) } catch (e) { console.error(e) } setSaving(false) }
+  const inp = 'w-full border border-slate-200 rounded-xl px-3 py-2 text-base font-body bg-white'
+
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full sm:max-w-2xl shadow-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-white z-10" style={{ borderBottom: '1px solid #EEF0EC' }}>
+          <p className="font-display text-base font-bold" style={{ color: FOREST }}>Observation</p>
+          <div className="flex items-center gap-2">
+            <button onClick={save} disabled={!dirty || saving} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full text-white flex items-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: FOREST }}>{saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Save</button>
+            <button onClick={onClose} className="text-slate-400"><X size={18} /></button>
+          </div>
+        </div>
+        <div className="p-4">
+          {d.photo ? (
+            <div className="relative mb-3">
+              <img src={d.photo} alt="" onClick={() => setZoom(true)} className="w-full max-h-[46vh] object-contain rounded-xl bg-slate-50 cursor-zoom-in" />
+              <div className="absolute top-2 right-2 flex gap-1.5">
+                <button onClick={() => fileRef.current?.click()} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/90 shadow" style={{ color: FOREST }}>Replace</button>
+                <button onClick={() => set({ photo: '' })} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/90 shadow text-red-500">Remove</button>
+              </div>
+              <p className="font-body text-[10px] text-slate-400 mt-1 text-center">Tap the photo to zoom in</p>
+            </div>
+          ) : (
+            <button onClick={() => fileRef.current?.click()} className="w-full mb-3 py-8 rounded-xl border-2 border-dashed flex flex-col items-center gap-2" style={{ borderColor: '#E2E8F0', color: FERN }}><ImageIcon size={22} /> <span className="font-body text-sm font-bold">Add a photo</span></button>
+          )}
+          <input ref={fileRef} type="file" accept="image/*" onChange={replacePhoto} className="hidden" />
+
+          <div className="grid grid-cols-2 gap-3">
+            <div><FieldLabel>Area</FieldLabel><Select value={d.area} onChange={(v) => set({ area: v })} options={areaKeys} placeholder="Area…" /></div>
+            <div><FieldLabel>Date</FieldLabel><input type="date" value={d.date || ''} onChange={(e) => set({ date: e.target.value })} className={inp} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <div><FieldLabel>Type</FieldLabel><SearchSelect value={d.kind} options={SCOUT_KINDS} onPick={(v) => set({ kind: v })} sort={false} /></div>
+            <div><FieldLabel>Severity</FieldLabel><SearchSelect value={d.severity} options={['', 'Low', 'Moderate', 'High']} onPick={(v) => set({ severity: v })} sort={false} /></div>
+          </div>
+          <div className="mt-3"><FieldLabel>What is it?</FieldLabel><input value={d.target} onChange={(e) => set({ target: e.target.value })} className={inp} placeholder="e.g. Dollar Spot" /></div>
+          <div className="mt-3"><FieldLabel>Notes</FieldLabel><textarea value={d.notes} onChange={(e) => set({ notes: e.target.value })} rows={4} className={inp} style={{ resize: 'vertical' }} placeholder="Add detail — what you saw, conditions, what you did…" /></div>
+
+          <div className="mt-4 flex items-center">
+            {!confirmDel ? (
+              <button onClick={() => setConfirmDel(true)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: '#B91C1C', border: '1px solid #F3C6C6' }}><Trash2 size={13} /> Delete</button>
+            ) : (
+              <div className="flex items-center gap-2"><span className="font-body text-[12px] text-slate-500">Delete this observation?</span><button onClick={onDelete} className="font-body text-xs font-bold px-3 py-2 rounded-full text-white" style={{ backgroundColor: '#DC2626' }}>Yes, delete</button><button onClick={() => setConfirmDel(false)} className="font-body text-xs font-bold px-3 py-2 rounded-full text-slate-500 border border-slate-200">Keep</button></div>
+            )}
+            {dirty && <span className="ml-auto font-body text-[11px] text-amber-600">Unsaved changes</span>}
+          </div>
+        </div>
+      </div>
+      {zoom && d.photo && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-2 bg-black/90" onClick={() => setZoom(false)}>
+          <img src={d.photo} alt="" className="max-w-full max-h-full object-contain" />
+          <button onClick={() => setZoom(false)} className="absolute top-4 right-4 text-white/80"><X size={26} /></button>
         </div>
       )}
     </div>
