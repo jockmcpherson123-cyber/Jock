@@ -19,7 +19,7 @@ import {
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
-  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, productRateForN, eiqLoad,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, productRateForN, eiqLoad, measureOut,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder, mixRank } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -49,6 +49,9 @@ import Tournament from '@/components/Tournament'
 import CourseMap from '@/components/CourseMap'
 import SprayCalendar from '@/components/SprayCalendar'
 import Weather from '@/components/Weather'
+
+// Build the product's container/jug descriptor for measureOut (if one is set).
+const productJug = (prod) => (prod && prod.jugSize > 0 ? { size: Number(prod.jugSize), unit: prod.jugUnit || 'gal' } : null)
 
 // ── PALETTE ───────────────────────────────────────────────────────────────
 const FOREST = '#16291F'
@@ -2625,6 +2628,11 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                       <p className="text-[11px] text-slate-400">
                         {p.rate} {p.basis}{insufficient ? ` · only ${stock} ${unit} in stock` : ''}
                       </p>
+                      {measureOut(amt, unit, productJug(prodInfo)) && (
+                        <p className="text-[11px] mt-0.5 font-semibold" style={{ color: '#2563EB' }}>
+                          Measure{sheet.tanks > 1 ? ' / tank' : ''}: {measureOut(amt, unit, productJug(prodInfo))}
+                        </p>
+                      )}
                       {p.target && String(p.target).trim() && (
                         <p className="text-[11px] mt-0.5 flex items-start gap-1" style={{ color: FERN }}>
                           <Target size={11} className="shrink-0 mt-0.5" />
@@ -3545,6 +3553,15 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 </div>
               </div>
               <p className="font-body text-[10px] text-red-400 mt-2">Leave blank if not applicable. Rates outside this range show a red warning on spray sheets.</p>
+            </div>
+            {/* Container / jug size — drives the "measure out" note on spray sheets. */}
+            <div className="rounded-xl p-3" style={{ backgroundColor: '#F1F5F3' }}>
+              <FieldLabel noMargin>Container / jug size (optional)</FieldLabel>
+              <div className="grid grid-cols-2 gap-3 mt-1.5">
+                <input type="number" step="any" value={draft.jugSize ?? ''} onChange={(e) => setDraft({ ...draft, jugSize: e.target.value })} placeholder="e.g. 2.5" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" />
+                <SearchSelect value={draft.jugUnit || 'gal'} options={['gal', 'oz', 'qt', 'L']} onPick={(v) => setDraft({ ...draft, jugUnit: v })} sort={false} />
+              </div>
+              <p className="font-body text-[10px] text-slate-400 mt-2">The biggest jug this product comes in. The spray sheet uses it to say how to measure the amount out — e.g. <b>“2 × 2.5 gal + 2 gal.”</b> Leave blank and it just breaks the amount into gallons + ounces (1-gal jug).</p>
             </div>
             {draft.type === 'Fertilizer' && (
               <div className="rounded-xl p-3" style={{ backgroundColor: '#FFFBF0' }}>
