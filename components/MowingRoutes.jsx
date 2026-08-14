@@ -94,9 +94,9 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
     w.document.write(`<html><head><title>${esc(courseName)} Mowing Cards — ${setCnt} mowers</title><style>
       @page { margin: 0.4in; }
       * { box-sizing: border-box; }
-      body { font-family: -apple-system, Helvetica, Arial, sans-serif; margin: 0; padding: 6px; }
-      .wrap { display: flex; flex-wrap: wrap; gap: 0.14in; }
-      .card { width: 3.4in; min-height: 2.15in; border: 1px dashed #b8b8b8; border-radius: 10px; overflow: hidden; page-break-inside: avoid; display: flex; flex-direction: column; }
+      body { font-family: -apple-system, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
+      .wrap { font-size: 0; }  /* kills inline-block whitespace gaps */
+      .card { display: inline-block; vertical-align: top; width: 3.4in; min-height: 2.15in; margin: 0 0.16in 0.16in 0; border: 1px dashed #b8b8b8; border-radius: 10px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; -webkit-column-break-inside: avoid; }
       .band { color: #fff; padding: 7px 11px; }
       .band .m { font-size: 19px; font-weight: 800; line-height: 1.1; }
       .band .sub { font-size: 10px; opacity: .92; margin-top: 1px; }
