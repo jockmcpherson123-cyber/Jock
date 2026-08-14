@@ -81,7 +81,7 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
       const c = MOWER_COLORS[mi % MOWER_COLORS.length]
       const mine = order.filter((id) => grp.includes(id)).map(labelOf) // greens in mow order
       const items = mine.length
-        ? mine.map((lb) => `<span class="g">${esc(lb)}</span>`).join(`<span class="arw" style="color:${c}">→</span>`)
+        ? mine.map((lb, i) => `<span class="g">${esc(lb)}${i < mine.length - 1 ? ` <span class="arw" style="color:${c}">→</span>` : ''}</span>`).join(' ')
         : '<span class="none">No greens on this mower</span>'
       return `<div class="card" style="border-color:${c};background:${tint(c, 0.06)}">
           <div class="band" style="background:${c}">
@@ -98,14 +98,16 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
       html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       body { font-family: -apple-system, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
       .wrap { font-size: 0; }  /* kills inline-block whitespace gaps */
-      .card { display: inline-block; vertical-align: top; width: 3.4in; min-height: 2.05in; margin: 0 0.16in 0.16in 0; border: 2px solid #ccc; border-radius: 10px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; -webkit-column-break-inside: avoid; }
-      .band { color: #fff; padding: 7px 11px; }
-      .band .m { font-size: 19px; font-weight: 800; line-height: 1.1; }
-      .band .sub { font-size: 10px; opacity: .92; margin-top: 1px; }
-      .greens { padding: 9px 12px; line-height: 1.9; }
-      .g { font-size: 17px; font-weight: 800; color: #16291F; }
-      .arw { font-size: 15px; font-weight: 800; margin: 0 6px; }
-      .none { font-size: 12px; color: #999; }
+      .card { display: inline-block; vertical-align: top; width: 3.7in; min-height: 2.5in; margin: 0 0.16in 0.18in 0; border: 2px solid #ccc; border-radius: 12px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; -webkit-column-break-inside: avoid; }
+      .band { color: #fff; padding: 8px 13px; }
+      .band .m { font-size: 21px; font-weight: 800; line-height: 1.1; }
+      .band .sub { font-size: 11px; opacity: .92; margin-top: 2px; }
+      .greens { padding: 11px 14px; line-height: 2.1; }
+      /* keep each green (+ its arrow) on one line — drop the whole label to the
+         next line rather than splitting a name like "Pro Shop" mid-word. */
+      .g { font-size: 19px; font-weight: 800; color: #16291F; white-space: nowrap; }
+      .arw { font-size: 17px; font-weight: 800; margin: 0 3px 0 7px; }
+      .none { font-size: 13px; color: #999; }
     </style></head><body><div class="wrap">${cards}</div></body></html>`)
     w.document.close(); w.focus(); setTimeout(() => { try { w.print() } catch { /* ignore */ } }, 350)
   }
