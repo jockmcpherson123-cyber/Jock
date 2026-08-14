@@ -82,3 +82,10 @@ html { overscroll-behavior: none; }
 .overflow-scroll {
   overscroll-behavior-x: contain;
 }
+
+/* Horizontal scroll strips (nav tab rows) that scroll without a visible bar. */
+.no-scrollbar {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar { display: none; }

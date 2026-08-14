@@ -251,7 +251,7 @@ export default function SprayApp({ user }) {
     <ErrorBoundary>
       {/* Module switcher — always visible, sits above everything */}
       <div style={{ backgroundColor: '#0F1D15' }} className="text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-1">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-1 flex-nowrap overflow-x-auto no-scrollbar [&>*]:shrink-0">
           <button
             onClick={() => setModule('spray')}
             className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
@@ -1047,7 +1047,7 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
             </button>
           )}
         </div>
-        <div className="flex gap-1 font-body text-sm overflow-x-auto">
+        <div className="flex gap-1 font-body text-sm overflow-x-auto no-scrollbar [&>*]:shrink-0">
           {items.map(([key, label]) => (
             <button
               key={key}
