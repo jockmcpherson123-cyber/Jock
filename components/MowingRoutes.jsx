@@ -77,38 +77,52 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
   const printCards = () => {
     const esc = (x) => String(x ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]))
     const tint = (hex, a) => { const h = hex.replace('#', ''); const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16); return `rgba(${r},${g},${b},${a})` }
+    // Size the cards so the whole route fits on ONE page, as big as it can be.
+    // Two columns; rows = however many it takes; each card fills its share of the
+    // page. Fewer mowers → taller cards; 8 mowers → 2×4 still fits one sheet.
+    const N = setGroups.length
+    const cols = N <= 1 ? 1 : 2
+    const rows = Math.ceil(N / cols)
+    const GAP = 0.16
+    const usableW = 7.7            // letter width 8.5in − 0.4in margins each side
+    const usableH = 9.55           // height 11in − margins − page heading
+    const cardW = ((usableW - (cols - 1) * GAP) / cols).toFixed(2)
+    const cardH = Math.min(3.3, (usableH - (rows - 1) * GAP) / rows).toFixed(2)
+    const fs = Number(cardH) >= 3 ? 21 : Number(cardH) >= 2.6 ? 20 : 19 // greens font
     const cards = setGroups.map((grp, mi) => {
       const c = MOWER_COLORS[mi % MOWER_COLORS.length]
       const mine = order.filter((id) => grp.includes(id)).map(labelOf) // greens in mow order
       const items = mine.length
         ? mine.map((lb, i) => `<span class="g">${esc(lb)}${i < mine.length - 1 ? ` <span class="arw" style="color:${c}">→</span>` : ''}</span>`).join(' ')
         : '<span class="none">No greens on this mower</span>'
-      return `<div class="card" style="border-color:${c};background:${tint(c, 0.06)}">
+      return `<div class="card" style="width:${cardW}in;height:${cardH}in;border-color:${c};background:${tint(c, 0.06)}">
           <div class="band" style="background:${c}">
-            <div class="m">Mower ${mi + 1}</div>
-            <div class="sub">${esc(courseName)} · Greens · ${mine.length} green${mine.length === 1 ? '' : 's'}</div>
+            <div class="m">Mower ${mi + 1} <span class="of">of ${N}</span></div>
+            <div class="sub">${esc(courseName)} · ${N}-mower route · ${mine.length} green${mine.length === 1 ? '' : 's'}</div>
           </div>
           <div class="greens">${items}</div>
         </div>`
     }).join('')
     const w = window.open('', '_blank'); if (!w) return
-    w.document.write(`<html><head><title>${esc(courseName)} Mowing Cards — ${setCnt} mowers</title><style>
+    w.document.write(`<html><head><title>${esc(courseName)} — ${setCnt}-Mower Route</title><style>
       @page { margin: 0.4in; }
       * { box-sizing: border-box; }
       html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       body { font-family: -apple-system, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
+      .hd { font-size: 15px; font-weight: 800; color: #16291F; margin: 0 0 6px 2px; }
       .wrap { font-size: 0; }  /* kills inline-block whitespace gaps */
-      .card { display: inline-block; vertical-align: top; width: 3.7in; min-height: 2.5in; margin: 0 0.16in 0.18in 0; border: 2px solid #ccc; border-radius: 12px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; -webkit-column-break-inside: avoid; }
+      .card { display: inline-block; vertical-align: top; margin: 0 ${GAP}in ${GAP}in 0; border: 2px solid #ccc; border-radius: 12px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; -webkit-column-break-inside: avoid; }
       .band { color: #fff; padding: 8px 13px; }
-      .band .m { font-size: 21px; font-weight: 800; line-height: 1.1; }
+      .band .m { font-size: 22px; font-weight: 800; line-height: 1.1; }
+      .band .m .of { font-size: 13px; font-weight: 700; opacity: .8; }
       .band .sub { font-size: 11px; opacity: .92; margin-top: 2px; }
-      .greens { padding: 11px 14px; line-height: 2.1; }
+      .greens { padding: 11px 14px; line-height: 2.05; }
       /* keep each green (+ its arrow) on one line — drop the whole label to the
          next line rather than splitting a name like "Pro Shop" mid-word. */
-      .g { font-size: 19px; font-weight: 800; color: #16291F; white-space: nowrap; }
-      .arw { font-size: 17px; font-weight: 800; margin: 0 3px 0 7px; }
+      .g { font-size: ${fs}px; font-weight: 800; color: #16291F; white-space: nowrap; }
+      .arw { font-size: ${fs - 2}px; font-weight: 800; margin: 0 3px 0 7px; }
       .none { font-size: 13px; color: #999; }
-    </style></head><body><div class="wrap">${cards}</div></body></html>`)
+    </style></head><body><div class="hd">${esc(courseName)} — ${setCnt}-Mower Route</div><div class="wrap">${cards}</div></body></html>`)
     w.document.close(); w.focus(); setTimeout(() => { try { w.print() } catch { /* ignore */ } }, 350)
   }
   // Drag to reorder greens (grab the handle, slide up/down). Uses Pointer Events
