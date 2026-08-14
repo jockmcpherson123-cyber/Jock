@@ -67,4 +67,18 @@ body {
   background: var(--cream);
   color: var(--ink);
   font-family: 'Inter', sans-serif;
+  /* iOS Safari: a horizontal over-swipe was triggering the browser's
+     back/forward navigation, which wiped the whole screen. Stop the page from
+     scrolling sideways and stop overscroll from becoming a navigation gesture. */
+  overflow-x: hidden;
+  overscroll-behavior: none;
+}
+html { overscroll-behavior: none; }
+
+/* Keep a sideways scroll inside its own box (wide tables, tab rows) so dragging
+   past the end doesn't hand the gesture to the browser and navigate away. */
+.overflow-x-auto,
+.overflow-auto,
+.overflow-scroll {
+  overscroll-behavior-x: contain;
 }
