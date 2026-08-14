@@ -74,7 +74,7 @@ body {
   overscroll-behavior: none;
   max-width: 100%;
 }
-html { overscroll-behavior: none; overflow-x: hidden; max-width: 100%; }
+html { overscroll-behavior: none; }
 
 /* Keep a sideways scroll inside its own box (wide tables, tab rows) so dragging
    past the end doesn't hand the gesture to the browser and navigate away. */
