@@ -72,17 +72,18 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
     setSetSaved(true); setTimeout(() => setSetSaved(false), 2200)
   }
 
-  // Print one palm-size card per mower for this route — the greens each guy mows,
-  // in mow order, with tick boxes. Cut them out and hand them to the crew.
+  // Print one palm-size card per mower for this route — the greens each guy mows
+  // as a route (arrows to the next green), in the mower's colour. Cut and hand out.
   const printCards = () => {
     const esc = (x) => String(x ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]))
+    const tint = (hex, a) => { const h = hex.replace('#', ''); const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16); return `rgba(${r},${g},${b},${a})` }
     const cards = setGroups.map((grp, mi) => {
       const c = MOWER_COLORS[mi % MOWER_COLORS.length]
       const mine = order.filter((id) => grp.includes(id)).map(labelOf) // greens in mow order
       const items = mine.length
-        ? mine.map((lb) => `<span class="g"><span class="bx"></span>${esc(lb)}</span>`).join('')
+        ? mine.map((lb) => `<span class="g">${esc(lb)}</span>`).join(`<span class="arw" style="color:${c}">→</span>`)
         : '<span class="none">No greens on this mower</span>'
-      return `<div class="card">
+      return `<div class="card" style="border-color:${c};background:${tint(c, 0.06)}">
           <div class="band" style="background:${c}">
             <div class="m">Mower ${mi + 1}</div>
             <div class="sub">${esc(courseName)} · Greens · ${mine.length} green${mine.length === 1 ? '' : 's'}</div>
@@ -94,15 +95,16 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
     w.document.write(`<html><head><title>${esc(courseName)} Mowing Cards — ${setCnt} mowers</title><style>
       @page { margin: 0.4in; }
       * { box-sizing: border-box; }
+      html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       body { font-family: -apple-system, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
       .wrap { font-size: 0; }  /* kills inline-block whitespace gaps */
-      .card { display: inline-block; vertical-align: top; width: 3.4in; min-height: 2.15in; margin: 0 0.16in 0.16in 0; border: 1px dashed #b8b8b8; border-radius: 10px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; -webkit-column-break-inside: avoid; }
+      .card { display: inline-block; vertical-align: top; width: 3.4in; min-height: 2.05in; margin: 0 0.16in 0.16in 0; border: 2px solid #ccc; border-radius: 10px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; -webkit-column-break-inside: avoid; }
       .band { color: #fff; padding: 7px 11px; }
       .band .m { font-size: 19px; font-weight: 800; line-height: 1.1; }
       .band .sub { font-size: 10px; opacity: .92; margin-top: 1px; }
-      .greens { padding: 8px 11px; flex: 1; }
-      .g { display: inline-flex; align-items: center; font-size: 15px; font-weight: 700; color: #16291F; margin: 0 12px 7px 0; white-space: nowrap; }
-      .bx { display: inline-block; width: 13px; height: 13px; border: 1.5px solid #16291F; border-radius: 3px; margin-right: 5px; }
+      .greens { padding: 9px 12px; line-height: 1.9; }
+      .g { font-size: 17px; font-weight: 800; color: #16291F; }
+      .arw { font-size: 15px; font-weight: 800; margin: 0 6px; }
       .none { font-size: 12px; color: #999; }
     </style></head><body><div class="wrap">${cards}</div></body></html>`)
     w.document.close(); w.focus(); setTimeout(() => { try { w.print() } catch { /* ignore */ } }, 350)
