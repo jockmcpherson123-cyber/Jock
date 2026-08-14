@@ -88,7 +88,6 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
             <div class="sub">${esc(courseName)} · Greens · ${mine.length} green${mine.length === 1 ? '' : 's'}</div>
           </div>
           <div class="greens">${items}</div>
-          <div class="foot">Date __________ &nbsp; Name __________</div>
         </div>`
     }).join('')
     const w = window.open('', '_blank'); if (!w) return
@@ -105,7 +104,6 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
       .g { display: inline-flex; align-items: center; font-size: 15px; font-weight: 700; color: #16291F; margin: 0 12px 7px 0; white-space: nowrap; }
       .bx { display: inline-block; width: 13px; height: 13px; border: 1.5px solid #16291F; border-radius: 3px; margin-right: 5px; }
       .none { font-size: 12px; color: #999; }
-      .foot { padding: 5px 11px; border-top: 1px solid #eee; font-size: 10px; color: #888; }
     </style></head><body><div class="wrap">${cards}</div></body></html>`)
     w.document.close(); w.focus(); setTimeout(() => { try { w.print() } catch { /* ignore */ } }, 350)
   }
