@@ -81,8 +81,11 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
     // rows). Same size whether you print 5 or 8; fewer just leaves blank slots.
     const N = setGroups.length
     const GAP = 0.16
-    const cardW = 3.77            // (7.7in usable − 1 gap) / 2 columns
-    const cardH = 2.26            // (9.55in usable − 3 gaps) / 4 rows
+    // Each card also carries a right margin (GAP), so 2×(cardW+GAP) must clear the
+    // 7.7in usable width — hence 3.6, not 3.77 (that overflowed → cards stacked
+    // one-per-row → 2 pages). 4 rows × (cardH+GAP) + heading stays under one page.
+    const cardW = 3.5
+    const cardH = 2.2
     const fs = 19                 // greens font
     const cards = setGroups.map((grp, mi) => {
       const c = MOWER_COLORS[mi % MOWER_COLORS.length]
