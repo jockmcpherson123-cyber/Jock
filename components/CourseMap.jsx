@@ -1234,7 +1234,7 @@ export default function CourseMap({ user, manage }) {
                   <div>
                     <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 flex items-center gap-1.5"><Camera size={12} /> Photo</label>
                     {selected.photo && <img src={selected.photo} alt="" className="rounded-lg w-full mt-1 mb-1" />}
-                    <input type="file" accept="image/*" capture="environment" onChange={(e) => onPhoto(e.target.files?.[0])} className="font-body text-[12px] mt-1" />
+                    <input type="file" accept="image/*" onChange={(e) => onPhoto(e.target.files?.[0])} className="font-body text-[12px] mt-1" />
                   </div>
                   {/* Arc + radius readout, and the on-head compass tool */}
                   <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ backgroundColor: '#F6F8F6' }}>

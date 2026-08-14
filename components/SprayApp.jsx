@@ -3069,7 +3069,7 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
       <div className="flex flex-wrap gap-2">
         <label className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border cursor-pointer flex items-center gap-1.5" style={{ backgroundColor: 'white', color: '#7C3AED', borderColor: '#DDD6FE' }}>
           <CloudUpload size={13} /> {imgCount > 0 ? `${imgCount} photo${imgCount > 1 ? 's' : ''} ready` : 'Add label photo'}
-          <input type="file" accept="image/*" multiple capture="environment" onChange={onPick} className="hidden" />
+          <input type="file" accept="image/*" multiple onChange={onPick} className="hidden" />
         </label>
         <button type="button" onClick={analyze} disabled={busy} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full text-white flex items-center gap-1.5 disabled:opacity-60" style={{ backgroundColor: '#7C3AED' }}>
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
@@ -5158,14 +5158,14 @@ function LicenseField({ label, placeholder, num, img, exp, onNum, onImg, onExp }
             <a href={img} target="_blank" rel="noopener noreferrer"><img src={img} alt={`${label} copy`} className="h-10 rounded border border-slate-200" /></a>
             <label className="font-body text-[11px] font-bold cursor-pointer" style={{ color: FERN }}>
               Replace
-              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onImg} />
+              <input type="file" accept="image/*" className="hidden" onChange={onImg} />
             </label>
             <button type="button" onClick={() => onImg(null)} className="font-body text-[11px] font-bold text-slate-400">Remove</button>
           </>
         ) : (
           <label className="font-body text-[11px] font-bold cursor-pointer flex items-center gap-1" style={{ color: FERN }}>
             <CloudUpload size={12} /> Attach copy
-            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onImg} />
+            <input type="file" accept="image/*" className="hidden" onChange={onImg} />
           </label>
         )}
       </div>
@@ -6504,7 +6504,7 @@ function ScoutingTab({ scouting = [], areas = {}, courseInfo = {}, onAdd, onDele
         </div>
         <div className="mt-3"><FieldLabel>What is it? (e.g. Dollar Spot, Poa Annua)</FieldLabel><input value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body bg-white" /></div>
         <div className="mt-3"><FieldLabel>Notes</FieldLabel><textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body bg-white" style={{ resize: 'vertical' }} /></div>
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={pickPhoto} className="hidden" />
+        <input ref={fileRef} type="file" accept="image/*" onChange={pickPhoto} className="hidden" />
         <div className="mt-3 flex items-center gap-3">
           {form.photo ? (
             <div className="relative">
