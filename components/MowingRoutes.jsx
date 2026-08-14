@@ -9,7 +9,7 @@
 // route and gives each person their greens. Greens = practice greens first, then
 // holes 1..N. Everything saves in the courseInfo blob (no new table).
 import { useState, useEffect } from 'react'
-import { Scissors, Check, Lock, Plus, GripVertical } from 'lucide-react'
+import { Scissors, Check, Lock, Plus, GripVertical, Printer } from 'lucide-react'
 import { greensForCourse, reconcileOrder, layoutForCount } from '@/lib/mowing'
 
 const FOREST = '#16291F'
@@ -70,6 +70,44 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
     const orders = { ...(courseInfo.mowingOrder || {}), [courseName]: order }
     onSave({ mowingSets: sets, mowingOrder: orders })
     setSetSaved(true); setTimeout(() => setSetSaved(false), 2200)
+  }
+
+  // Print one palm-size card per mower for this route — the greens each guy mows,
+  // in mow order, with tick boxes. Cut them out and hand them to the crew.
+  const printCards = () => {
+    const esc = (x) => String(x ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]))
+    const cards = setGroups.map((grp, mi) => {
+      const c = MOWER_COLORS[mi % MOWER_COLORS.length]
+      const mine = order.filter((id) => grp.includes(id)).map(labelOf) // greens in mow order
+      const items = mine.length
+        ? mine.map((lb) => `<span class="g"><span class="bx"></span>${esc(lb)}</span>`).join('')
+        : '<span class="none">No greens on this mower</span>'
+      return `<div class="card">
+          <div class="band" style="background:${c}">
+            <div class="m">Mower ${mi + 1}</div>
+            <div class="sub">${esc(courseName)} · Greens · ${mine.length} green${mine.length === 1 ? '' : 's'}</div>
+          </div>
+          <div class="greens">${items}</div>
+          <div class="foot">Date __________ &nbsp; Name __________</div>
+        </div>`
+    }).join('')
+    const w = window.open('', '_blank'); if (!w) return
+    w.document.write(`<html><head><title>${esc(courseName)} Mowing Cards — ${setCnt} mowers</title><style>
+      @page { margin: 0.4in; }
+      * { box-sizing: border-box; }
+      body { font-family: -apple-system, Helvetica, Arial, sans-serif; margin: 0; padding: 6px; }
+      .wrap { display: flex; flex-wrap: wrap; gap: 0.14in; }
+      .card { width: 3.4in; min-height: 2.15in; border: 1px dashed #b8b8b8; border-radius: 10px; overflow: hidden; page-break-inside: avoid; display: flex; flex-direction: column; }
+      .band { color: #fff; padding: 7px 11px; }
+      .band .m { font-size: 19px; font-weight: 800; line-height: 1.1; }
+      .band .sub { font-size: 10px; opacity: .92; margin-top: 1px; }
+      .greens { padding: 8px 11px; flex: 1; }
+      .g { display: inline-flex; align-items: center; font-size: 15px; font-weight: 700; color: #16291F; margin: 0 12px 7px 0; white-space: nowrap; }
+      .bx { display: inline-block; width: 13px; height: 13px; border: 1.5px solid #16291F; border-radius: 3px; margin-right: 5px; }
+      .none { font-size: 12px; color: #999; }
+      .foot { padding: 5px 11px; border-top: 1px solid #eee; font-size: 10px; color: #888; }
+    </style></head><body><div class="wrap">${cards}</div></body></html>`)
+    w.document.close(); w.focus(); setTimeout(() => { try { w.print() } catch { /* ignore */ } }, 350)
   }
   // Drag to reorder greens (grab the handle, slide up/down). Uses Pointer Events
   // so it works with touch on the iPad; elementFromPoint finds the row you're
@@ -223,10 +261,15 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
         <p className="font-body text-[11px] mb-2" style={{ color: '#B23A2E' }}>⚠ Not on any mower: {unassigned.map(labelOf).join(', ')}</p>
       )}
 
-      <button onClick={saveSet} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white inline-flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
-        {setSaved ? <><Check size={14} /> Locked in</> : <><Lock size={13} /> Save &amp; lock this {setCnt}-mower route</>}
-      </button>
-      <p className="font-body text-[10px] mt-2" style={{ color: INK_3 }}>Saves this route <b>and</b> the mow order for {courseName || 'this course'}.</p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={saveSet} className="font-body text-xs font-bold px-4 py-2.5 rounded-full text-white inline-flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
+          {setSaved ? <><Check size={14} /> Locked in</> : <><Lock size={13} /> Save &amp; lock this {setCnt}-mower route</>}
+        </button>
+        <button onClick={printCards} disabled={unassigned.length === allIds.length} className="font-body text-xs font-bold px-4 py-2.5 rounded-full inline-flex items-center gap-1.5 disabled:opacity-40" style={{ color: FOREST, border: `1px solid ${HAIR}`, backgroundColor: PAPER }}>
+          <Printer size={13} /> Print cards ({setCnt})
+        </button>
+      </div>
+      <p className="font-body text-[10px] mt-2" style={{ color: INK_3 }}>Saves this route <b>and</b> the mow order for {courseName || 'this course'}. <b>Print cards</b> makes one palm-size card per mower — the greens they mow, in order — to hand out.</p>
     </div>
   )
 }
