@@ -47,6 +47,7 @@ import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import Tournament from '@/components/Tournament'
 import CourseMap from '@/components/CourseMap'
+import IrrigationParts from '@/components/IrrigationParts'
 import SprayCalendar from '@/components/SprayCalendar'
 import Weather from '@/components/Weather'
 
@@ -317,7 +318,7 @@ export default function SprayApp({ user }) {
         : module === 'turf' ? <TurfPerformanceModule />
         : module === 'playbook' ? <PlaybookModule user={user} manage={canManage(user.role)} />
         : module === 'tournament' ? <Tournament />
-        : module === 'map' ? <CourseMap user={user} manage={canManage(user.role)} />
+        : module === 'map' ? <IrrigationModule user={user} manage={canManage(user.role)} />
         : <WhiteboardModule user={user} />}
     </ErrorBoundary>
   )
@@ -325,6 +326,26 @@ export default function SprayApp({ user }) {
 
 function roleLabel(role) {
   return role === 'director' ? 'Director of Grounds' : role === 'superintendent' ? 'Superintendent' : 'Operator'
+}
+
+// ── IRRIGATION MODULE ─────────────────────────────────────────────────────
+// The irrigation map plus its parts stockroom, behind a small Map / Parts toggle.
+function IrrigationModule({ user, manage }) {
+  const [view, setView] = useState('map')
+  return (
+    <div>
+      <div style={{ backgroundColor: '#F4F6F4', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex gap-2">
+          {[['map', 'Map', MapPin], ['parts', 'Parts', Package]].map(([k, label, Icon]) => (
+            <button key={k} onClick={() => setView(k)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full flex items-center gap-1.5 transition" style={view === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+              <Icon size={13} /> {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {view === 'map' ? <CourseMap user={user} manage={manage} /> : <IrrigationParts manage={manage} />}
+    </div>
+  )
 }
 
 // ── SPRAY OPS MODULE ──────────────────────────────────────────────────────
