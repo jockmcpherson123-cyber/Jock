@@ -1342,8 +1342,9 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
             ))}
           </div>
 
-          {/* View toggle */}
-          <div className="flex items-center gap-2 mb-3">
+          {/* View toggle — scrolls sideways on a phone instead of forcing the
+              whole page wide (5 pills don't fit an iPhone width). */}
+          <div className="flex items-center gap-2 mb-3 overflow-x-auto no-scrollbar [&>*]:shrink-0">
             {[['now', 'This Week', Gauge], ['coverage', 'Coverage', LayoutGrid], ['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setViewMode(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 transition" style={viewMode === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
                 <Icon size={13} /> {label}
