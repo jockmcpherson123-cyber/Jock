@@ -2564,9 +2564,11 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-2">
                 <FieldLabel noMargin>Products</FieldLabel>
-                <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: '#E8F3EC', color: FERN }}>
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: FERN }} /> LIVE
-                </span>
+                {!manage && (
+                  <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: '#E8F3EC', color: FERN }}>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: FERN }} /> LIVE
+                  </span>
+                )}
               </div>
               <div className="flex gap-3 pr-1">
                 <span className="w-16 text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide">Amt/Tank</span>
@@ -2574,7 +2576,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
               </div>
             </div>
 
-            {tankCount > 1 && (
+            {tankCount > 1 && !manage && (
               <div className="mb-2 rounded-xl px-2.5 py-2" style={{ backgroundColor: '#F0F6F2' }}>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="font-body text-[10px] font-bold uppercase tracking-wide mr-1" style={{ color: FERN }}>Tanks</span>
@@ -2615,11 +2617,13 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                 const checked = curChecks.includes(p.id)
                 return (
                   <div key={p.id} className="py-2.5 flex items-center gap-2.5 font-body">
-                    <button onClick={() => toggleCheck(p.id)} className="shrink-0" aria-label="Confirm in tank">
-                      <span className="w-6 h-6 rounded-md border flex items-center justify-center transition" style={checked ? { backgroundColor: FERN, borderColor: FERN } : { borderColor: '#CBD5E1', backgroundColor: 'white' }}>
-                        {checked && <Check size={14} className="text-white" />}
-                      </span>
-                    </button>
+                    {!manage && (
+                      <button onClick={() => toggleCheck(p.id)} className="shrink-0" aria-label="Confirm in tank">
+                        <span className="w-6 h-6 rounded-md border flex items-center justify-center transition" style={checked ? { backgroundColor: FERN, borderColor: FERN } : { borderColor: '#CBD5E1', backgroundColor: 'white' }}>
+                          {checked && <Check size={14} className="text-white" />}
+                        </span>
+                      </button>
+                    )}
                     <div className="min-w-0 flex-1" style={{ opacity: checked ? 0.55 : 1 }}>
                       <p className="text-sm font-semibold text-slate-800 flex items-center gap-1.5 flex-wrap">
                         {p.product}
@@ -2771,7 +2775,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                     </>
                   )}
                   <button onClick={doApprove} disabled={!sig || !dirSig || (directorPins[sig] && !dirPin)} className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
-                    <CloudUpload size={15} /> Approve &amp; Push to iPads
+                    <Check size={15} /> Approve
                   </button>
                 </div>
               )}
