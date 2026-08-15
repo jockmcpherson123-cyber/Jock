@@ -2577,7 +2577,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                 )}
               </div>
               <div className="flex gap-3 pr-1">
-                <span className={`${manage ? 'w-16' : 'w-24'} text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide`}>Amt/Tank</span>
+                <span className={`${manage ? 'w-16' : 'w-28'} text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide`}>Amt/Tank</span>
                 <span className={`${manage ? 'w-16' : 'w-20'} text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide`}>Total</span>
               </div>
             </div>
@@ -2631,18 +2631,13 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                       </button>
                     )}
                     <div className="min-w-0 flex-1" style={{ opacity: checked ? 0.55 : 1 }}>
-                      <p className="text-sm font-semibold text-slate-800 flex items-center gap-1.5 flex-wrap">
+                      <p className={`${manage ? 'text-sm font-semibold' : 'text-lg font-bold'} text-slate-800 flex items-center gap-1.5 flex-wrap`}>
                         {p.product}
                         {overLimit && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">OVER</span>}
                       </p>
-                      <p className="text-[11px] text-slate-400">
+                      <p className={`${manage ? 'text-[11px]' : 'text-xs'} text-slate-400`}>
                         {p.rate} {p.basis}{insufficient ? ` · only ${stock} ${unit} in stock` : ''}
                       </p>
-                      {measureOut(amt, unit, productJug(prodInfo)) && (
-                        <p className="text-[11px] mt-0.5 font-semibold" style={{ color: '#2563EB' }}>
-                          Measure{sheet.tanks > 1 ? ' / tank' : ''}: {measureOut(amt, unit, productJug(prodInfo))}
-                        </p>
-                      )}
                       {p.target && String(p.target).trim() && (
                         <p className="text-[11px] mt-0.5 flex items-start gap-1" style={{ color: FERN }}>
                           <Target size={11} className="shrink-0 mt-0.5" />
@@ -2659,9 +2654,16 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                         </div>
                       )}
                     </div>
-                    <div className={`${manage ? 'w-16 py-1.5' : 'w-24 py-2.5'} text-center rounded-lg`} style={{ backgroundColor: '#FFF6DD' }}>
-                      <p className={`${manage ? 'text-sm' : 'text-2xl'} font-bold text-slate-900 leading-none`}>{amt ?? '—'}</p>
-                      <p className={`${manage ? 'text-[8px]' : 'text-[10px]'} text-slate-500 uppercase mt-0.5 font-semibold`}>{unit}</p>
+                    <div className={`${manage ? 'w-16' : 'w-28'} shrink-0 flex flex-col items-center`}>
+                      <div className={`w-full ${manage ? 'py-1.5' : 'py-2.5'} text-center rounded-lg`} style={{ backgroundColor: '#FFF6DD' }}>
+                        <p className={`${manage ? 'text-sm' : 'text-2xl'} font-bold text-slate-900 leading-none`}>{amt ?? '—'}</p>
+                        <p className={`${manage ? 'text-[8px]' : 'text-[10px]'} text-slate-500 uppercase mt-0.5 font-semibold`}>{unit}</p>
+                      </div>
+                      {!manage && measureOut(amt, unit, productJug(prodInfo)) && (
+                        <p className="text-xs mt-1 font-bold text-center leading-tight" style={{ color: '#2563EB' }}>
+                          = {measureOut(amt, unit, productJug(prodInfo))}
+                        </p>
+                      )}
                     </div>
                     <div className={`${manage ? 'w-16' : 'w-20'} text-center`}>
                       <p className={`${manage ? 'text-sm' : 'text-lg'} font-bold leading-none`} style={{ color: outOfRange ? '#DC2626' : FERN }}>{total ?? '—'}</p>
