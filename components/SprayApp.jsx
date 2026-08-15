@@ -2621,6 +2621,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                 const stock = prodInfo?.stock ?? null
                 const insufficient = stock !== null && total !== null && stock < total
                 const checked = curChecks.includes(p.id)
+                const measure = !manage && measureOut(amt, unit, productJug(prodInfo))
                 return (
                   <div key={p.id} className="py-2.5 flex items-center gap-2.5 font-body">
                     {!manage && (
@@ -2659,9 +2660,9 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                         <p className={`${manage ? 'text-sm' : 'text-2xl'} font-bold text-slate-900 leading-none`}>{amt ?? '—'}</p>
                         <p className={`${manage ? 'text-[8px]' : 'text-[10px]'} text-slate-500 uppercase mt-0.5 font-semibold`}>{unit}</p>
                       </div>
-                      {!manage && measureOut(amt, unit, productJug(prodInfo)) && (
+                      {measure && (
                         <p className="text-xs mt-1 font-bold text-center leading-tight" style={{ color: '#2563EB' }}>
-                          = {measureOut(amt, unit, productJug(prodInfo))}
+                          = {measure}
                         </p>
                       )}
                     </div>
@@ -2835,9 +2836,11 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                     <button onClick={reopen} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full text-slate-500 border border-slate-200">Reopen (back to To Spray)</button>
                   </div>
                 </div>
-              ) : (!manage && !allTanksDone) ? (
+              ) : (!manage && productIds.length > 0 && !allTanksDone) ? (
                 // Still spraying — keep the sign-off (weather + signature) tucked
                 // away until the last tank is ticked off, then it appears below.
+                // (A sheet with no products has nothing to tick, so we skip
+                //  straight to the sign-off rather than getting stuck here.)
                 <div className="text-center py-2">
                   <div className="w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-2" style={{ backgroundColor: '#F0F6F2' }}>
                     <Droplet size={18} style={{ color: FERN }} />
@@ -6613,17 +6616,30 @@ function ScoutingTab({ scouting = [], areas = {}, courseInfo = {}, onAdd, onUpda
 function ScoutingDetail({ obs, areaKeys = [], onClose, onSave, onDelete }) {
   const [d, setD] = useState(obs)
   const [dirty, setDirty] = useState(false)
+  // The photo is a big base64 string; only re-send it when it actually changed,
+  // so editing just the notes doesn't re-upload a 1-2 MB image every time.
+  const [photoDirty, setPhotoDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [zoom, setZoom] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const fileRef = useRef(null)
   const set = (patch) => { setD((p) => ({ ...p, ...patch })); setDirty(true) }
+  const setPhoto = (url) => { set({ photo: url }); setPhotoDirty(true) }
   const replacePhoto = async (e) => {
     const file = e.target.files?.[0]; e.target.value = ''
     if (!file) return
-    try { const url = await compressScoutPhoto(file); set({ photo: url }) } catch (err) { console.error(err) }
+    try { const url = await compressScoutPhoto(file); setPhoto(url) } catch (err) { console.error(err) }
   }
-  const save = async () => { setSaving(true); try { await onSave({ area: d.area, date: d.date, kind: d.kind, target: d.target, severity: d.severity, notes: d.notes, photo: d.photo }); setDirty(false) } catch (e) { console.error(e) } setSaving(false) }
+  const save = async () => {
+    setSaving(true)
+    try {
+      const patch = { area: d.area, date: d.date, kind: d.kind, target: d.target, severity: d.severity, notes: d.notes }
+      if (photoDirty) patch.photo = d.photo
+      await onSave(patch)
+      setDirty(false); setPhotoDirty(false)
+    } catch (e) { console.error(e) }
+    setSaving(false)
+  }
   const inp = 'w-full border border-slate-200 rounded-xl px-3 py-2 text-base font-body bg-white'
 
   return (
@@ -6642,7 +6658,7 @@ function ScoutingDetail({ obs, areaKeys = [], onClose, onSave, onDelete }) {
               <img src={d.photo} alt="" onClick={() => setZoom(true)} className="w-full max-h-[46vh] object-contain rounded-xl bg-slate-50 cursor-zoom-in" />
               <div className="absolute top-2 right-2 flex gap-1.5">
                 <button onClick={() => fileRef.current?.click()} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/90 shadow" style={{ color: FOREST }}>Replace</button>
-                <button onClick={() => set({ photo: '' })} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/90 shadow text-red-500">Remove</button>
+                <button onClick={() => setPhoto('')} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/90 shadow text-red-500">Remove</button>
               </div>
               <p className="font-body text-[10px] text-slate-400 mt-1 text-center">Tap the photo to zoom in</p>
             </div>
@@ -6673,9 +6689,11 @@ function ScoutingDetail({ obs, areaKeys = [], onClose, onSave, onDelete }) {
         </div>
       </div>
       {zoom && d.photo && (
-        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-2 bg-black/90" onClick={() => setZoom(false)}>
+        // stopPropagation so tapping to zoom back out doesn't bubble to the
+        // outer backdrop's onClose and exit the whole observation.
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-2 bg-black/90" onClick={(e) => { e.stopPropagation(); setZoom(false) }}>
           <img src={d.photo} alt="" className="max-w-full max-h-full object-contain" />
-          <button onClick={() => setZoom(false)} className="absolute top-4 right-4 text-white/80"><X size={26} /></button>
+          <button onClick={(e) => { e.stopPropagation(); setZoom(false) }} className="absolute top-4 right-4 text-white/80"><X size={26} /></button>
         </div>
       )}
     </div>
