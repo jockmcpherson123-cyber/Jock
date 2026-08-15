@@ -10,6 +10,8 @@ import * as db from '@/lib/db'
 import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, fetchBreakdownTemps, sprayWindow, buildRainYear, gddSince, weatherCodeInfo } from '@/lib/weather'
 import { fungicideLogByArea } from '@/lib/disease'
 import { suppressionMap } from '@/lib/pgr'
+import { airDiseaseRisks } from '@/lib/pests'
+import { buildRecommendations, PGR_TARGET } from '@/lib/recommendations'
 import { sheetApplied } from '@/lib/applied'
 import { localDateISO } from '@/lib/dates'
 
@@ -31,8 +33,6 @@ const CC_WX_ICON = {
 }
 const fmtDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })
 const fmtDate = (d) => { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) } catch { return d } }
-
-const PGR_TARGET = 200 // GDD, base 0°C (classic Primo model; temps are °F so we ÷1.8)
 
 export default function CommandCenter() {
   const [data, setData] = useState(null)
@@ -116,12 +116,10 @@ export default function CommandCenter() {
     return { date: day, avg: Math.round(avg * 100) / 100, min: Math.min(...vals), max: Math.max(...vals), n: vals.length }
   })()
 
-  const advisor = (() => {
-    const byArea = {}
-    const add = (area, reason, sev) => { if (!area) return; if (!byArea[area]) byArea[area] = { area, reasons: [], sev: 0 }; if (!byArea[area].reasons.includes(reason)) byArea[area].reasons.push(reason); byArea[area].sev = Math.max(byArea[area].sev, sev) }
-    pgr.forEach((r) => { if (r.status === 'due') add(r.area, 'PGR due', 3); else if (r.status === 'soon') add(r.area, 'PGR soon', 2) })
-    return Object.values(byArea).sort((a, b) => b.sev - a.sev).slice(0, 6)
-  })()
+  // Forward-looking action feed: PGR re-apply timing, disease pressure, and the
+  // best spray window — pulled together into one ranked list.
+  const risks = wx.season.length ? airDiseaseRisks(wx.season, today, courseInfo?.siteGrasses || []) : []
+  const recs = buildRecommendations({ pgr, forecast: forecast7, risks, fungLog })
 
   const ccAgo = (since) => (since == null ? '' : since <= 0 ? 'today' : since === 1 ? 'yesterday' : `${since}d ago`)
 
@@ -191,19 +189,24 @@ export default function CommandCenter() {
           ) : <Empty text="Waiting on weather…" />}
         </Widget>
 
-        {/* Spray Advisor */}
-        <Widget title="Needs Attention" icon={AlertTriangle} span={2}>
-          {advisor.length ? (
-            <div className="space-y-1.5">
-              {advisor.map((a) => (
-                <div key={a.area} className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: a.sev >= 3 ? '#DC2626' : '#CA8A04' }} />
-                  <span className="font-body text-sm font-bold text-slate-800 truncate">{a.area}</span>
-                  <span className="font-body text-[11px] text-slate-400 truncate">{a.reasons.join(' · ')}</span>
-                </div>
-              ))}
+        {/* Recommendations feed — PGR timing, disease pressure, spray windows */}
+        <Widget title="What Needs Attention" icon={AlertTriangle} span={2}>
+          {recs.length ? (
+            <div className="space-y-2">
+              {recs.slice(0, 6).map((r, i) => {
+                const dot = r.sev >= 3 ? '#DC2626' : r.sev === 2 ? '#CA8A04' : FERN
+                return (
+                  <div key={i} className="flex items-start gap-2">
+                    <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ backgroundColor: dot }} />
+                    <div className="min-w-0">
+                      <p className="font-body text-[13px] font-bold text-slate-800 leading-snug">{r.title}</p>
+                      <p className="font-body text-[11px] text-slate-500 leading-snug">{r.detail}</p>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-          ) : <Empty text="All areas covered — nothing pressing." good />}
+          ) : <Empty text="Nothing pressing — PGR, disease pressure and spray conditions all look fine." good />}
         </Widget>
 
         {/* Recent fungicide sprays — a plain record per area, newest first */}
