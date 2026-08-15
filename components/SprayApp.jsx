@@ -2421,6 +2421,10 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
 
   const curChecks = tankChecks[String(curTank)] || []
   const completedCount = Array.from({ length: tankCount }, (_, i) => i + 1).filter((n) => tankIsComplete(tankChecks, n)).length
+  // The spray is "done in the field" once every product is ticked into every
+  // tank. Until then the crew is still filling/spraying, so we keep the sign-off
+  // section (weather + signature) tucked away and only reveal it at the end.
+  const allTanksDone = productIds.length > 0 && completedCount === tankCount
 
   // Save the check-off state (broadcasts to the other iPads). No approval needed.
   const pushChecks = (next) => {
@@ -2573,8 +2577,8 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                 )}
               </div>
               <div className="flex gap-3 pr-1">
-                <span className="w-16 text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide">Amt/Tank</span>
-                <span className="w-16 text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide">Total</span>
+                <span className={`${manage ? 'w-16' : 'w-24'} text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide`}>Amt/Tank</span>
+                <span className={`${manage ? 'w-16' : 'w-20'} text-center font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide`}>Total</span>
               </div>
             </div>
 
@@ -2655,13 +2659,13 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                         </div>
                       )}
                     </div>
-                    <div className="w-16 text-center rounded-lg py-1.5" style={{ backgroundColor: '#FFF6DD' }}>
-                      <p className="text-sm font-bold text-slate-900 leading-none">{amt ?? '—'}</p>
-                      <p className="text-[8px] text-slate-500 uppercase mt-0.5">{unit}</p>
+                    <div className={`${manage ? 'w-16 py-1.5' : 'w-24 py-2.5'} text-center rounded-lg`} style={{ backgroundColor: '#FFF6DD' }}>
+                      <p className={`${manage ? 'text-sm' : 'text-2xl'} font-bold text-slate-900 leading-none`}>{amt ?? '—'}</p>
+                      <p className={`${manage ? 'text-[8px]' : 'text-[10px]'} text-slate-500 uppercase mt-0.5 font-semibold`}>{unit}</p>
                     </div>
-                    <div className="w-16 text-center">
-                      <p className="text-sm font-bold leading-none" style={{ color: outOfRange ? '#DC2626' : FERN }}>{total ?? '—'}</p>
-                      <p className="text-[8px] text-slate-400 uppercase mt-0.5">{unit}</p>
+                    <div className={`${manage ? 'w-16' : 'w-20'} text-center`}>
+                      <p className={`${manage ? 'text-sm' : 'text-lg'} font-bold leading-none`} style={{ color: outOfRange ? '#DC2626' : FERN }}>{total ?? '—'}</p>
+                      <p className={`${manage ? 'text-[8px]' : 'text-[10px]'} text-slate-400 uppercase mt-0.5 font-semibold`}>{unit}</p>
                     </div>
                   </div>
                 )
@@ -2829,6 +2833,20 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                     <button onClick={reopen} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full text-slate-500 border border-slate-200">Reopen (back to To Spray)</button>
                   </div>
                 </div>
+              ) : (!manage && !allTanksDone) ? (
+                // Still spraying — keep the sign-off (weather + signature) tucked
+                // away until the last tank is ticked off, then it appears below.
+                <div className="text-center py-2">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-2" style={{ backgroundColor: '#F0F6F2' }}>
+                    <Droplet size={18} style={{ color: FERN }} />
+                  </div>
+                  <p className="font-body text-sm font-bold" style={{ color: FOREST }}>
+                    Spraying in progress — {completedCount} of {tankCount} tank{tankCount > 1 ? 's' : ''} done
+                  </p>
+                  <p className="font-body text-xs text-slate-500 mt-1">
+                    Tick off every product in each tank as you go. When the last tank is checked, the sign-off (weather &amp; signature) shows up here to finish the spray.
+                  </p>
+                </div>
               ) : (
                 <>
                   <div className="flex items-center justify-between mb-2">
@@ -2866,7 +2884,6 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
                     // A spray can't be signed off (and won't feed the growth-reg /
                     // disease / nutrition trackers) until every product is checked
                     // into every tank, the weather's filled in, and it's signed.
-                    const allTanksDone = productIds.length > 0 && completedCount === tankCount
                     const weatherOk = !!(String(wx.temp).trim() && String(wx.humidity).trim() && String(wx.wind).trim())
                     const missing = []
                     if (!allTanksDone) missing.push(`tick every product into all ${tankCount} tank${tankCount > 1 ? 's' : ''}`)
