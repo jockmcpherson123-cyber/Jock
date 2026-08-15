@@ -2527,11 +2527,14 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
         <h2 className="font-display text-2xl font-semibold text-slate-900 mb-1">{sheet.area}</h2>
         <p className="font-body text-sm text-slate-400 mb-5">{fmtDate(sheet.date)}</p>
 
-        {/* Wide two-column layout — specs & products fill the broad left side,
-            the shorter reference/approval cards sit off to the right. */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-          {/* Left — the wide working area: specs, weather, products */}
-          <div className="lg:col-span-2 space-y-4">
+        {/* Manager view: wide two-column layout — specs & products fill the broad
+            left side, the shorter reference/approval cards sit off to the right.
+            Crew iPad view: a single full-width stack so the products (what the
+            crew works from) span the whole screen, with the reference/sign-off
+            cards flowing below. */}
+        <div className={manage ? 'grid grid-cols-1 lg:grid-cols-3 gap-4 items-start' : 'space-y-4'}>
+          {/* The wide working area: specs, weather, products */}
+          <div className={manage ? 'lg:col-span-2 space-y-4' : 'space-y-4'}>
           <Card>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-3 gap-x-4 font-body text-sm">
               <Row label="Date" value={sheet.date || '—'} />
