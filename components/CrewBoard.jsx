@@ -22,7 +22,9 @@ const GOLD = '#C9A84C'
 const todayStr = () => localDateISO()
 const prettyDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 
-export default function CrewBoard() {
+// `pub` (a club key) turns this into the no-login phone view: it reads today's
+// board from the public /api/crew endpoint and polls instead of using Realtime.
+export default function CrewBoard({ pub = null }) {
   const [date, setDate] = useState(todayStr())
   // Optional ?course=Blue in the URL gives this TV its own course board.
   const [course] = useState(() => (typeof window !== 'undefined' ? (new URLSearchParams(window.location.search).get('course') || '') : ''))
@@ -80,18 +82,31 @@ export default function CrewBoard() {
 
   const load = useCallback(async (d) => {
     try {
-      const t = await db.fetchCrewTasks(d, d)
-      setTasks(t)
-      setStatus('ok')
+      if (pub) {
+        const params = new URLSearchParams({ view: 'board', k: pub, date: d })
+        if (course) params.set('course', course)
+        const r = await fetch(`/api/crew?${params.toString()}`, { cache: 'no-store' })
+        if (r.status === 401) { setStatus('denied'); return }
+        if (!r.ok) throw new Error('load failed')
+        const j = await r.json()
+        setTasks(j.tasks || [])
+        setClub(j.club || ''); setCrew(j.crew || {}); setBoardMessage(j.boardMessage || ''); setLocation(j.location || null); setCourseInfo(j.courseInfo || {})
+        setStatus('ok')
+      } else {
+        const t = await db.fetchCrewTasks(d, d)
+        setTasks(t)
+        setStatus('ok')
+      }
     } catch (e) {
       console.error(e)
       setStatus('error')
     }
-  }, [])
+  }, [pub, course])
 
   // Club name, crew languages, location + shop message — refreshed every 30s so
   // the TV picks up setting changes (e.g. a new shop message) without a reload.
   useEffect(() => {
+    if (pub) return // phone view gets club/crew/message/location from load()
     let cancelled = false
     const pull = async () => {
       try {
@@ -107,7 +122,7 @@ export default function CrewBoard() {
     pull()
     const id = setInterval(pull, 30000)
     return () => { cancelled = true; clearInterval(id) }
-  }, [])
+  }, [pub])
 
   // Live weather for the header, refreshed every 10 minutes.
   useEffect(() => {
@@ -131,8 +146,14 @@ export default function CrewBoard() {
   // Load the day, and reload whenever the date rolls over.
   useEffect(() => { load(date) }, [date, load])
 
-  // Live subscription — refetch the current day on any board change.
+  // Live updates. The signed-in TV uses Realtime; the no-login phone view can't,
+  // so it polls every 20s instead.
   useEffect(() => {
+    if (pub) {
+      setLive(true)
+      const id = setInterval(() => load(dateRef.current), 20000)
+      return () => clearInterval(id)
+    }
     let unsub = () => {}
     try {
       unsub = db.subscribeCrewTasks(() => load(dateRef.current))
@@ -140,7 +161,7 @@ export default function CrewBoard() {
     } catch (e) { console.error(e); setLive(false) }
     return () => { try { unsub() } catch (e) { /* noop */ } }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [pub])
 
   // Tick the clock and roll the day over at midnight.
   useEffect(() => {
@@ -195,6 +216,8 @@ export default function CrewBoard() {
         {/* Board */}
         {status === 'loading' ? (
           <div style={{ textAlign: 'center', padding: '10vh 0', color: '#8AA394', fontSize: 'clamp(16px,1.6vw,28px)' }}>Loading the board…</div>
+        ) : status === 'denied' ? (
+          <div style={{ textAlign: 'center', padding: '10vh 0', color: '#E7C9C9', fontSize: 'clamp(15px,1.5vw,26px)' }}>This board link is invalid or expired.<br />Ask for a fresh QR code.</div>
         ) : status === 'error' ? (
           <div style={{ textAlign: 'center', padding: '8vh 0', color: '#E7C9C9', fontSize: 'clamp(15px,1.5vw,26px)' }}>
             Couldn't load the board.<br />

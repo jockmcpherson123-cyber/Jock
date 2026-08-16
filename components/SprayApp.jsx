@@ -15,7 +15,7 @@ import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, ChevronUp, ChevronDown, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
   Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target, Scissors, Gauge, Trophy,
-  Sun, CloudSun, CloudDrizzle, CloudSnow, CloudFog, CloudLightning,
+  Sun, CloudSun, CloudDrizzle, CloudSnow, CloudFog, CloudLightning, QrCode, Printer,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -48,6 +48,7 @@ import AnnualProgram from '@/components/AnnualProgram'
 import Tournament from '@/components/Tournament'
 import CourseMap from '@/components/CourseMap'
 import IrrigationParts from '@/components/IrrigationParts'
+import { qrDataUrl } from '@/lib/tournament'
 import SprayCalendar from '@/components/SprayCalendar'
 import Weather from '@/components/Weather'
 
@@ -5644,6 +5645,7 @@ function WhiteboardModule({ user }) {
   const [section, setSection] = useState('workboard')
   const [mowSub, setMowSub] = useState('routes')
   const [drawer, setDrawer] = useState(false)
+  const [qrOpen, setQrOpen] = useState(false)
 
   useEffect(() => { (async () => { try { setSettings(await db.fetchSettings()) } catch (e) { console.error(e) } })() }, [])
 
@@ -5688,6 +5690,11 @@ function WhiteboardModule({ user }) {
             <h1 className="font-display text-2xl font-semibold mt-0.5 truncate">{active.label}</h1>
           </div>
           <div className="ml-auto flex items-center gap-1.5 shrink-0">
+            {manage && (
+              <button onClick={() => setQrOpen(true)} className="font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Print QR codes so the crew can see the board & routes on their phones">
+                <QrCode size={13} /> <span className="hidden sm:inline">Crew QR</span>
+              </button>
+            )}
             {courses.length >= 2 ? (
               <>
                 <span className="font-body text-[10px] font-bold uppercase tracking-wide hidden sm:inline" style={{ color: 'rgba(255,255,255,0.5)' }}>TV</span>
@@ -5740,6 +5747,72 @@ function WhiteboardModule({ user }) {
           {section === 'crew' && <WhiteboardCrew roster={roster} operators={operators} crewMembers={crewMembers} courses={courses} crew={crew} manage={manage} onSaveCrew={(next) => saveCourse({ crew: next })} onSaveMembers={(list) => saveCourse({ crewMembers: list })} />}
           {section === 'equipment' && <WhiteboardListSection title="Equipment" hint="The mowers, rollers, blowers and carts your crew runs. These become quick-pick chips when you add a job." items={equipment} manage={manage} accent={FERN} onSave={(list) => saveCourse({ equipment: list })} />}
           {section === 'jobtypes' && <WhiteboardListSection title="Job Types" hint="The everyday jobs that show as one-tap chips on the Workboard. Add the ones your crew runs each morning." items={jobTypes} manage={manage} accent={FOREST} onSave={(list) => saveCourse({ jobTypes: list })} />}
+        </div>
+      </div>
+      {qrOpen && <CrewQRModal courseInfo={courseInfo} saveCourse={saveCourse} onClose={() => setQrOpen(false)} />}
+    </div>
+  )
+}
+
+// Print/scan QR codes that open the crew's phone views — the live job board and
+// the mowing routes — with no login (the club key rides in the QR link).
+function CrewQRModal({ courseInfo, saveCourse, onClose }) {
+  const [board, setBoard] = useState('')
+  const [routes, setRoutes] = useState('')
+  const club = courseInfo?.clubName || 'Golf Course'
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      let key = courseInfo?.partsKey
+      if (!key) {
+        key = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)).replace(/-/g, '')
+        try { await saveCourse({ partsKey: key }) } catch (e) { console.error(e) }
+      }
+      const origin = window.location.origin
+      const [b, r] = await Promise.all([
+        qrDataUrl(`${origin}/tv?k=${key}`, { width: 520 }),
+        qrDataUrl(`${origin}/routes?k=${key}`, { width: 520 }),
+      ])
+      if (!cancelled) { setBoard(b); setRoutes(r) }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const printOne = (title, img) => {
+    if (!img) return
+    const iframe = document.createElement('iframe')
+    Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
+    document.body.appendChild(iframe)
+    const doc = iframe.contentWindow.document
+    doc.open()
+    doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in}body{margin:0;font-family:Arial;text-align:center;padding:30px}h1{font-family:Georgia,serif;color:#16291F;font-size:26px;margin:0 0 4px}.sub{color:#3A6B4A;font-weight:700;font-size:14px;margin-bottom:20px}img{width:3.4in;height:3.4in}.foot{color:#888;font-size:12px;margin-top:14px}</style></head><body><h1>${club.replace(/[&<>"]/g, '')} — ${title}</h1><div class="sub">Scan with your phone camera</div><img src="${img}"><div class="foot">Point your phone camera at the code.</div></body></html>`)
+    doc.close()
+    setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }, 300)
+  }
+
+  const Card = ({ title, blurb, img }) => (
+    <div className="rounded-2xl border border-slate-100 p-4 text-center flex flex-col items-center">
+      <p className="font-body text-sm font-bold" style={{ color: FOREST }}>{title}</p>
+      <p className="font-body text-[11px] text-slate-400 mb-2">{blurb}</p>
+      {img ? <img src={img} alt="" className="w-40 h-40" /> : <div className="w-40 h-40 flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={22} /></div>}
+      <button onClick={() => printOne(title, img)} disabled={!img} className="mt-3 font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 disabled:opacity-40" style={{ color: FOREST, border: '1px solid #CBD5E1' }}><Printer size={13} /> Print</button>
+    </div>
+  )
+
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full sm:max-w-xl shadow-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-white" style={{ borderBottom: '1px solid #EEF0EC' }}>
+          <p className="font-display text-base font-bold" style={{ color: FOREST }}>Crew phone QR codes</p>
+          <button onClick={onClose} className="text-slate-400"><X size={18} /></button>
+        </div>
+        <div className="p-4">
+          <p className="font-body text-[12px] text-slate-500 mb-3">Print these and post them in the shop (or the crew can scan right off your screen). No login needed — they open straight to the board or routes on a phone.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Card title="Job Board" blurb="Today's live crew board" img={board} />
+            <Card title="Mowing Routes" blurb="Locked greens routes per mower" img={routes} />
+          </div>
         </div>
       </div>
     </div>
