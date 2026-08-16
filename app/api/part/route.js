@@ -26,11 +26,31 @@ function shape(r) {
 }
 const noStore = { 'Cache-Control': 'no-store' }
 
+// The shop-shelf QR opens the WHOLE inventory, so that page has to prove it holds
+// the club's parts key (courseInfo.partsKey) before we hand back the full list —
+// otherwise the fixed /inventory URL would be readable by anyone. A single part
+// (?id=) stays reachable by its unguessable UUID with no key.
+async function keyOk(supabase, k) {
+  if (!k) return false
+  const { data } = await supabase.from('app_settings').select('course_info').eq('id', 1).maybeSingle()
+  const stored = data?.course_info?.partsKey
+  return !!stored && stored === k
+}
+
 export async function GET(request) {
   const supabase = admin()
   if (!supabase) return Response.json({ error: 'Not configured' }, { status: 500 })
-  const id = new URL(request.url).searchParams.get('id')
-  if (!id) return Response.json({ error: 'Missing id' }, { status: 400 })
+  const sp = new URL(request.url).searchParams
+  const id = sp.get('id')
+
+  // Whole-inventory list — requires the club parts key.
+  if (!id) {
+    if (!(await keyOk(supabase, sp.get('k')))) return Response.json({ error: 'Not authorized' }, { status: 401 })
+    const { data, error } = await supabase.from('irrigation_parts').select(PUBLIC).order('name', { ascending: true })
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ parts: (data || []).map(shape) }, { headers: noStore })
+  }
+
   const { data, error } = await supabase.from('irrigation_parts').select(PUBLIC).eq('id', id).maybeSingle()
   if (error) return Response.json({ error: error.message }, { status: 500 })
   if (!data) return Response.json({ error: 'Part not found' }, { status: 404 })

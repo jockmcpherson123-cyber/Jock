@@ -66,6 +66,22 @@ export default function IrrigationParts({ manage = false }) {
     try { await db.updatePart(p.id, { stock: next }) } catch (e) { console.error(e); load() }
   }
 
+  // Print the one shop-shelf QR that opens the whole inventory. Mints a stable
+  // per-club key on first use (stored in settings) so the link isn't reachable
+  // by guessing the URL.
+  const inventoryQR = async () => {
+    let key = courseInfo?.partsKey
+    if (!key) {
+      key = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)).replace(/-/g, '')
+      const next = { ...courseInfo, partsKey: key }
+      try { await db.saveSettings({ courseInfo: next }); setCourseInfo(next) } catch (e) { console.error(e) }
+    }
+    const club = courseInfo?.clubName || 'Golf Course'
+    const url = `${window.location.origin}/inventory?k=${key}`
+    const qr = await qrDataUrl(url, { width: 600 })
+    printHtml(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in}body{margin:0;font-family:Arial;text-align:center;padding:30px}h1{font-family:Georgia,serif;color:#16291F;font-size:26px;margin:0 0 4px}.sub{color:#3A6B4A;font-weight:700;font-size:14px;margin-bottom:20px}img{width:3.4in;height:3.4in}.foot{color:#888;font-size:12px;margin-top:14px}</style></head><body><h1>${esc(club)} — Parts Inventory</h1><div class="sub">Scan to view &amp; update parts stock</div><img src="${qr}"><div class="foot">Point your phone camera at the code.</div></body></html>`)
+  }
+
   const lowCount = useMemo(() => parts.filter(isLow).length, [parts])
   const cats = useMemo(() => {
     const present = new Set(parts.map((p) => p.category).filter(Boolean))
@@ -89,10 +105,15 @@ export default function IrrigationParts({ manage = false }) {
           <h2 className="font-display text-lg font-semibold text-slate-900">Irrigation Parts</h2>
           <p className="font-body text-sm text-slate-400">Your parts stockroom — what's on hand and what's running low</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {manage && parts.length > 0 && (
+            <button onClick={inventoryQR} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#CBD5E1', backgroundColor: 'white' }}>
+              <QrCode size={14} /> Inventory QR
+            </button>
+          )}
           {manage && shown.length > 0 && (
             <button onClick={() => printLabels(shown)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#CBD5E1', backgroundColor: 'white' }}>
-              <QrCode size={14} /> QR labels
+              <QrCode size={14} /> Part labels
             </button>
           )}
           {parts.length > 0 && (
