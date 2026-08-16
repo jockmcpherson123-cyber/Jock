@@ -5,9 +5,10 @@
 // hand, and a low-stock level that flags reorders. Crew can bump the count up or
 // down as they pull/return parts; managers add, edit and delete the parts.
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Plus, Search, Trash2, X, Check, Loader2, Image as ImageIcon, Package, AlertTriangle, Minus, Printer, FileDown, Copy, ClipboardList } from 'lucide-react'
+import { Plus, Search, Trash2, X, Check, Loader2, Image as ImageIcon, Package, AlertTriangle, Minus, Printer, FileDown, Copy, ClipboardList, QrCode } from 'lucide-react'
 import * as db from '@/lib/db'
 import { SearchSelect } from '@/components/pickers'
+import { qrDataUrl } from '@/lib/tournament'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -89,6 +90,11 @@ export default function IrrigationParts({ manage = false }) {
           <p className="font-body text-sm text-slate-400">Your parts stockroom — what's on hand and what's running low</p>
         </div>
         <div className="flex items-center gap-2">
+          {manage && shown.length > 0 && (
+            <button onClick={() => printLabels(shown)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#CBD5E1', backgroundColor: 'white' }}>
+              <QrCode size={14} /> QR labels
+            </button>
+          )}
           {parts.length > 0 && (
             <button onClick={() => setOrdering(true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
               <ClipboardList size={14} /> Create order
@@ -282,7 +288,8 @@ function PartEditor({ part, onClose, onSaved }) {
           <div className="mt-3"><FieldLabel>Notes</FieldLabel><textarea value={d.notes} onChange={(e) => set({ notes: e.target.value })} rows={2} className={inp} style={{ resize: 'vertical' }} placeholder="Anything worth remembering — fits which heads, spares, etc." /></div>
 
           {!isNew && (
-            <div className="mt-4">
+            <div className="mt-4 flex items-center gap-2 flex-wrap">
+              <button onClick={() => printLabels([part])} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: FOREST, border: '1px solid #CBD5E1' }}><QrCode size={13} /> Print QR label</button>
               {!confirmDel ? (
                 <button onClick={() => setConfirmDel(true)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: '#B91C1C', border: '1px solid #F3C6C6' }}><Trash2 size={13} /> Delete part</button>
               ) : (
@@ -310,6 +317,30 @@ function printHtml(html) {
   doc.open(); doc.write(html); doc.close()
   const go = () => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }
   setTimeout(go, 300)
+}
+
+// Print a sheet of scannable QR labels — one per part — to stick on bins/shelves.
+// Each QR points at /part?id=… (a no-login page for just that one part).
+async function printLabels(list) {
+  const origin = window.location.origin
+  const cells = await Promise.all(list.map(async (p) => {
+    const qr = await qrDataUrl(`${origin}/part?id=${p.id}`, { width: 320 })
+    return `<div class="lbl">
+      <img src="${qr}" width="150" height="150" alt="">
+      <div class="nm">${esc(p.name || p.partNumber || 'Part')}</div>
+      ${p.partNumber ? `<div class="pn">#${esc(p.partNumber)}</div>` : ''}
+      ${p.location ? `<div class="loc">${esc(p.location)}</div>` : ''}
+      <div class="scan">Scan to update stock</div>
+    </div>`
+  }))
+  const css = `@page{margin:0.4in} body{margin:0;font-family:Arial}
+    .lbl{display:inline-block;vertical-align:top;width:2.35in;box-sizing:border-box;text-align:center;border:1px solid #ccc;border-radius:8px;padding:8px 6px;margin:5px;break-inside:avoid;page-break-inside:avoid}
+    .lbl img{display:block;margin:0 auto}
+    .nm{font-weight:700;font-size:12px;color:#16291F;margin-top:4px;line-height:1.15}
+    .pn{font-size:11px;color:#3A6B4A;font-weight:700}
+    .loc{font-size:10px;color:#888;margin-top:1px}
+    .scan{font-size:9px;color:#aaa;margin-top:3px}`
+  printHtml(`<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head><body>${cells.join('')}</body></html>`)
 }
 
 function OrderBuilder({ parts, courseInfo, onClose }) {
