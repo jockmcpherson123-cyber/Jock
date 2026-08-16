@@ -21,15 +21,17 @@ function Inventory() {
   const [cat, setCat] = useState('all')
   const [lowOnly, setLowOnly] = useState(false)
   const [busy, setBusy] = useState({})
+  const [errMsg, setErrMsg] = useState('')
 
   const load = useCallback(async () => {
     if (!k) { setState('denied'); return }
     try {
       const r = await fetch(`/api/part?k=${encodeURIComponent(k)}`, { cache: 'no-store' })
       if (r.status === 401) { setState('denied'); return }
-      if (!r.ok) throw new Error()
-      const d = await r.json(); setParts(d.parts || []); setState('ok')
-    } catch { setState('error') }
+      const d = await r.json().catch(() => null)
+      if (!r.ok) { setErrMsg(d?.error || `Server error ${r.status}`); setState('error'); return }
+      setParts(d.parts || []); setState('ok')
+    } catch (e) { setErrMsg(String(e?.message || e)); setState('error') }
   }, [k])
   useEffect(() => { load() }, [load])
 
@@ -58,7 +60,7 @@ function Inventory() {
 
   if (state === 'loading') return <Center><Loader2 className="animate-spin" size={26} style={{ color: '#cbd5e1' }} /></Center>
   if (state === 'denied') return <Center><p className="font-body text-sm text-slate-400 text-center px-6">This inventory link is invalid or expired. Ask for a fresh QR code.</p></Center>
-  if (state === 'error') return <Center><p className="font-body text-sm text-slate-400">Couldn’t load the inventory. Try again.</p></Center>
+  if (state === 'error') return <Center><div className="text-center px-6"><p className="font-body text-sm text-slate-500">Couldn’t load the inventory.</p>{errMsg && <p className="font-body text-[12px] text-slate-400 mt-2">Reason: {errMsg}</p>}<button onClick={() => { setState('loading'); load() }} className="mt-3 font-body text-xs font-bold px-4 py-2 rounded-full text-white" style={{ backgroundColor: FOREST }}>Try again</button></div></Center>
 
   return (
     <div style={{ minHeight: '100vh', background: '#EEF1EE' }}>

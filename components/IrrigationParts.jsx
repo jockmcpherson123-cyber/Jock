@@ -70,13 +70,17 @@ export default function IrrigationParts({ manage = false }) {
   // per-club key on first use (stored in settings) so the link isn't reachable
   // by guessing the URL.
   const inventoryQR = async () => {
-    let key = courseInfo?.partsKey
+    // Pull the freshest settings so minting the key never clobbers other
+    // courseInfo fields (e.g. if this component loaded before settings did).
+    let info = courseInfo
+    try { const s = await db.fetchSettings(); info = s.courseInfo || {} } catch { /* use what we have */ }
+    let key = info?.partsKey
     if (!key) {
       key = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)).replace(/-/g, '')
-      const next = { ...courseInfo, partsKey: key }
-      try { await db.saveSettings({ courseInfo: next }); setCourseInfo(next) } catch (e) { console.error(e) }
+      const next = { ...info, partsKey: key }
+      try { await db.saveSettings({ courseInfo: next }); setCourseInfo(next); info = next } catch (e) { console.error(e) }
     }
-    const club = courseInfo?.clubName || 'Golf Course'
+    const club = info?.clubName || 'Golf Course'
     const url = `${window.location.origin}/inventory?k=${key}`
     const qr = await qrDataUrl(url, { width: 600 })
     printHtml(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in}body{margin:0;font-family:Arial;text-align:center;padding:30px}h1{font-family:Georgia,serif;color:#16291F;font-size:26px;margin:0 0 4px}.sub{color:#3A6B4A;font-weight:700;font-size:14px;margin-bottom:20px}img{width:3.4in;height:3.4in}.foot{color:#888;font-size:12px;margin-top:14px}</style></head><body><h1>${esc(club)} — Parts Inventory</h1><div class="sub">Scan to view &amp; update parts stock</div><img src="${qr}"><div class="foot">Point your phone camera at the code.</div></body></html>`)
