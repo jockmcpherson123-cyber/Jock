@@ -5,7 +5,7 @@
 // hand, and a low-stock level that flags reorders. Crew can bump the count up or
 // down as they pull/return parts; managers add, edit and delete the parts.
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Plus, Search, Trash2, X, Check, Loader2, Image as ImageIcon, Package, AlertTriangle, Minus } from 'lucide-react'
+import { Plus, Search, Trash2, X, Check, Loader2, Image as ImageIcon, Package, AlertTriangle, Minus, Printer, FileDown, Copy, ClipboardList } from 'lucide-react'
 import * as db from '@/lib/db'
 import { SearchSelect } from '@/components/pickers'
 
@@ -48,12 +48,15 @@ export default function IrrigationParts({ manage = false }) {
   const [lowOnly, setLowOnly] = useState(false)
   const [editing, setEditing] = useState(null) // part object or {} for new
   const [zoom, setZoom] = useState(null)        // photo data URL to show big
+  const [ordering, setOrdering] = useState(false) // order-sheet builder open
+  const [courseInfo, setCourseInfo] = useState({})
 
   const load = useCallback(async () => {
     try { setParts(await db.fetchParts()) } catch (e) { console.error(e) }
     setLoading(false)
   }, [])
   useEffect(() => { load() }, [load])
+  useEffect(() => { db.fetchSettings().then((s) => setCourseInfo(s.courseInfo || {})).catch(() => {}) }, [])
 
   // Quick stock bump (crew pulling/returning a part) — optimistic + persisted.
   const bump = async (p, delta) => {
@@ -85,11 +88,18 @@ export default function IrrigationParts({ manage = false }) {
           <h2 className="font-display text-lg font-semibold text-slate-900">Irrigation Parts</h2>
           <p className="font-body text-sm text-slate-400">Your parts stockroom — what's on hand and what's running low</p>
         </div>
-        {manage && (
-          <button onClick={() => setEditing({})} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
-            <Plus size={14} /> Add part
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {parts.length > 0 && (
+            <button onClick={() => setOrdering(true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
+              <ClipboardList size={14} /> Create order
+            </button>
+          )}
+          {manage && (
+            <button onClick={() => setEditing({})} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
+              <Plus size={14} /> Add part
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Search + filters */}
@@ -158,6 +168,10 @@ export default function IrrigationParts({ manage = false }) {
       {editing && (
         <PartEditor part={editing} onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load() }} />
+      )}
+
+      {ordering && (
+        <OrderBuilder parts={parts} courseInfo={courseInfo} onClose={() => setOrdering(false)} />
       )}
 
       {zoom && (
@@ -276,6 +290,156 @@ function PartEditor({ part, onClose, onSaved }) {
               )}
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Order sheet builder ───────────────────────────────────────────────────────
+const money = (n) => (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const suggestFor = (p) => (isLow(p) ? Math.max(1, Math.ceil((p.lowStock * 2) - p.stock)) : 0)
+
+// Native (text) print via a hidden iframe — crisp, selectable, multi-page.
+function printHtml(html) {
+  const iframe = document.createElement('iframe')
+  Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
+  document.body.appendChild(iframe)
+  const doc = iframe.contentWindow.document
+  doc.open(); doc.write(html); doc.close()
+  const go = () => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }
+  setTimeout(go, 300)
+}
+
+function OrderBuilder({ parts, courseInfo, onClose }) {
+  const [qtys, setQtys] = useState(() => {
+    const m = {}; parts.forEach((p) => { const s = suggestFor(p); if (s > 0) m[p.id] = String(s) }); return m
+  })
+  const [poNumber, setPoNumber] = useState('')
+  const [orderedBy, setOrderedBy] = useState('')
+  const [notes, setNotes] = useState('')
+  const [onlyLow, setOnlyLow] = useState(true)
+  const date = new Date().toLocaleDateString()
+
+  const setQty = (id, v) => setQtys((m) => ({ ...m, [id]: v.replace(/[^\d.]/g, '') }))
+  const visible = useMemo(() => parts.filter((p) => !onlyLow || isLow(p) || (Number(qtys[p.id]) || 0) > 0), [parts, onlyLow, qtys])
+
+  // Lines being ordered (qty > 0), grouped by supplier.
+  const groups = useMemo(() => {
+    const bySup = {}
+    parts.forEach((p) => {
+      const qty = Number(qtys[p.id]) || 0
+      if (qty <= 0) return
+      const key = p.supplier?.trim() || 'Unspecified supplier'
+      ;(bySup[key] ||= []).push({ ...p, qty, lineTotal: qty * (Number(p.price) || 0) })
+    })
+    return Object.keys(bySup).sort().map((sup) => ({
+      supplier: sup,
+      lines: bySup[sup].sort((a, b) => (a.name || '').localeCompare(b.name || '')),
+      subtotal: bySup[sup].reduce((s, l) => s + l.lineTotal, 0),
+    }))
+  }, [parts, qtys])
+
+  const grandTotal = groups.reduce((s, g) => s + g.subtotal, 0)
+  const lineCount = groups.reduce((s, g) => s + g.lines.length, 0)
+  const club = courseInfo?.clubName || 'Golf Course'
+
+  const buildHtml = () => {
+    const head = `<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #16291F;padding-bottom:8px;margin-bottom:14px">
+      <div><div style="font:700 20px Georgia,serif;color:#16291F">${esc(club)}</div>
+      <div style="font:600 13px Arial;color:#3A6B4A;margin-top:2px">Irrigation Parts — Purchase Order</div></div>
+      <div style="font:12px Arial;color:#444;text-align:right">Date: ${esc(date)}${poNumber ? `<br>PO #: ${esc(poNumber)}` : ''}${orderedBy ? `<br>Ordered by: ${esc(orderedBy)}` : ''}</div></div>`
+    const anyPrice = groups.some((g) => g.lines.some((l) => l.price > 0))
+    const sections = groups.map((g) => {
+      const rows = g.lines.map((l) => `<tr>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee">${esc(l.partNumber)}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee">${esc(l.name)}${l.size ? ` <span style="color:#888">(${esc(l.size)})</span>` : ''}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:700">${l.qty} ${esc(l.unit)}</td>
+        ${anyPrice ? `<td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right">${l.price > 0 ? '$' + money(l.price) : '—'}</td><td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right">${l.price > 0 ? '$' + money(l.lineTotal) : '—'}</td>` : ''}
+      </tr>`).join('')
+      return `<div style="margin-bottom:16px">
+        <div style="font:700 13px Arial;color:#16291F;background:#F0F6F2;padding:5px 8px;border-radius:4px">${esc(g.supplier)}</div>
+        <table style="width:100%;border-collapse:collapse;font:12px Arial;margin-top:4px">
+          <thead><tr style="color:#888;font-size:10px;text-transform:uppercase">
+            <th style="text-align:left;padding:4px 8px">Part #</th><th style="text-align:left;padding:4px 8px">Item</th><th style="text-align:right;padding:4px 8px">Qty</th>${anyPrice ? '<th style="text-align:right;padding:4px 8px">Unit</th><th style="text-align:right;padding:4px 8px">Total</th>' : ''}
+          </tr></thead><tbody>${rows}</tbody>
+          ${anyPrice && g.subtotal > 0 ? `<tfoot><tr><td colspan="4" style="text-align:right;padding:6px 8px;font-weight:700">Subtotal</td><td style="text-align:right;padding:6px 8px;font-weight:700">$${money(g.subtotal)}</td></tr></tfoot>` : ''}
+        </table></div>`
+    }).join('')
+    const foot = `${anyPrice && grandTotal > 0 ? `<div style="text-align:right;font:700 15px Arial;color:#16291F;border-top:2px solid #16291F;padding-top:8px;margin-top:6px">Order total: $${money(grandTotal)}</div>` : ''}
+      ${notes ? `<div style="margin-top:12px;font:12px Arial;color:#444"><b>Notes:</b> ${esc(notes)}</div>` : ''}`
+    return `<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in}body{margin:0;font-family:Arial}</style></head><body>${head}${sections || '<p style="font:13px Arial;color:#888">No items on this order yet.</p>'}${foot}</body></html>`
+  }
+
+  const doPrint = () => printHtml(buildHtml())
+
+  const doCsv = () => {
+    const rows = [['Supplier', 'Part #', 'Item', 'Size', 'Order qty', 'Unit', 'Unit cost', 'Line total']]
+    groups.forEach((g) => g.lines.forEach((l) => rows.push([g.supplier, l.partNumber, l.name, l.size, l.qty, l.unit, l.price || '', l.lineTotal ? l.lineTotal.toFixed(2) : ''])))
+    const csv = rows.map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    const a = document.createElement('a'); a.href = url; a.download = `Irrigation-Order_${new Date().toISOString().slice(0, 10)}.csv`; a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  const doCopy = () => {
+    const lines = [`${club} — Irrigation Parts Order`, `Date: ${date}${poNumber ? `   PO #: ${poNumber}` : ''}`, '']
+    groups.forEach((g) => {
+      lines.push(`${g.supplier}:`)
+      g.lines.forEach((l) => lines.push(`  • ${l.qty} ${l.unit} — ${l.name}${l.partNumber ? ` (#${l.partNumber})` : ''}${l.size ? ` ${l.size}` : ''}`))
+      lines.push('')
+    })
+    if (notes) lines.push(`Notes: ${notes}`)
+    navigator.clipboard?.writeText(lines.join('\n')).catch(() => {})
+  }
+
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-2 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full sm:max-w-2xl shadow-2xl max-h-[94vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #EEF0EC' }}>
+          <p className="font-display text-base font-bold" style={{ color: FOREST }}>Create order sheet</p>
+          <button onClick={onClose} className="text-slate-400"><X size={18} /></button>
+        </div>
+
+        <div className="p-4 overflow-y-auto">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+            <div><FieldLabel>PO # (optional)</FieldLabel><input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className={inp} placeholder="e.g. 2026-114" /></div>
+            <div><FieldLabel>Ordered by</FieldLabel><input value={orderedBy} onChange={(e) => setOrderedBy(e.target.value)} className={inp} placeholder="Your name" /></div>
+            <div className="col-span-2 sm:col-span-1 flex items-end">
+              <button onClick={() => setOnlyLow((v) => !v)} className="font-body text-xs font-bold px-3 py-2.5 rounded-xl w-full flex items-center justify-center gap-1.5" style={onlyLow ? { backgroundColor: '#DC2626', color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.12)' }}>
+                <AlertTriangle size={13} /> {onlyLow ? 'Low stock only' : 'Showing all'}
+              </button>
+            </div>
+          </div>
+
+          <p className="font-body text-[11px] text-slate-400 mb-2">Set the order quantity for each part. Low-stock items are pre-filled with a suggested amount; adjust as you like. Parts with a quantity of 0 are left off.</p>
+
+          <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl">
+            {visible.length === 0 ? (
+              <p className="font-body text-sm text-slate-400 p-4 text-center">Nothing low right now. Switch to “Showing all” to add any part to an order.</p>
+            ) : visible.map((p) => (
+              <div key={p.id} className="flex items-center gap-3 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-sm font-semibold text-slate-800 truncate">{p.name || p.partNumber || '(unnamed)'}</p>
+                  <p className="font-body text-[11px] text-slate-400 truncate">{[p.partNumber && `#${p.partNumber}`, p.supplier, `${p.stock} ${p.unit} on hand`].filter(Boolean).join(' · ')}{isLow(p) ? ' · LOW' : ''}</p>
+                </div>
+                <input value={qtys[p.id] || ''} onChange={(e) => setQty(p.id, e.target.value)} inputMode="decimal" placeholder="0" className="w-16 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-right tabular-nums" />
+                <span className="font-body text-[11px] text-slate-400 w-8">{p.unit}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3"><FieldLabel>Notes to supplier (optional)</FieldLabel><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inp} style={{ resize: 'vertical' }} placeholder="Delivery instructions, account #, will-call, etc." /></div>
+        </div>
+
+        <div className="px-4 py-3 flex items-center justify-between gap-2 flex-wrap" style={{ borderTop: '1px solid #EEF0EC' }}>
+          <p className="font-body text-[12px] text-slate-500">{lineCount} item{lineCount !== 1 ? 's' : ''} across {groups.length} supplier{groups.length !== 1 ? 's' : ''}{grandTotal > 0 ? ` · $${money(grandTotal)}` : ''}</p>
+          <div className="flex items-center gap-2">
+            <button onClick={doCopy} disabled={!lineCount} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5 disabled:opacity-40 border border-slate-200 text-slate-600"><Copy size={13} /> Copy</button>
+            <button onClick={doCsv} disabled={!lineCount} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5 disabled:opacity-40 border" style={{ color: FOREST, borderColor: FOREST }}><FileDown size={13} /> CSV</button>
+            <button onClick={doPrint} disabled={!lineCount} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: FOREST }}><Printer size={13} /> Print / PDF</button>
+          </div>
         </div>
       </div>
     </div>

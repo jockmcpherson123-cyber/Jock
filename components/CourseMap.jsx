@@ -124,6 +124,12 @@ export default function CourseMap({ user, manage }) {
   const [opacity, setOpacity] = useState(0) // PDF raster overlay off by default — the vectors are the map now
   const [mode, setMode] = useState('map')        // 'map' | 'calibrate'
   const [gps, setGps] = useState(null)           // live location
+  // Location is OFF until the user asks for it — so just opening the map never
+  // triggers the browser's "allow location?" prompt. Once turned on we remember
+  // it (per browser) so it comes back on the next visit without a fresh tap.
+  const [locate, setLocate] = useState(false)
+  useEffect(() => { try { if (localStorage.getItem('irrigLocate') === '1') setLocate(true) } catch { /* ignore */ } }, [])
+  const enableLocate = useCallback(() => { setLocate(true); try { localStorage.setItem('irrigLocate', '1') } catch { /* ignore */ } }, [])
   const [heading, setHeading] = useState(null)   // phone compass heading (deg)
   const [headingOn, setHeadingOn] = useState(false)
   const headingRef = useRef(null)
@@ -260,15 +266,17 @@ export default function CourseMap({ user, manage }) {
   }, [])
 
   // ── One live-location watch for the whole screen ────────────────────────────
+  // Only runs once the user has turned location on (see `locate`), so entering
+  // the map doesn't prompt for GPS every time.
   useEffect(() => {
-    if (!navigator.geolocation) return
+    if (!locate || !navigator.geolocation) return
     const id = navigator.geolocation.watchPosition(
       (pos) => setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy || null }),
       () => {},
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 }
     )
     return () => navigator.geolocation.clearWatch(id)
-  }, [])
+  }, [locate])
 
   // ── Phone compass heading (for the direction arrow on the you-are-here dot) ──
   useEffect(() => {
@@ -671,7 +679,7 @@ export default function CourseMap({ user, manage }) {
       }
     } catch (e) { console.error(e); setMsg('Could not add that — is the phase21 table set up?') }
   }
-  const addAtGps = () => { if (gps) placeRef.current({ lat: gps.lat, lng: gps.lng }, 'gps'); else setMsg('No GPS fix yet.') }
+  const addAtGps = () => { if (!locate) { enableLocate(); setMsg('Turning on location — try again in a second.'); return } if (gps) placeRef.current({ lat: gps.lat, lng: gps.lng }, 'gps'); else setMsg('No GPS fix yet.') }
 
   // One-time: import every head/valve from the as-built, placed with the
   // calibration transform. Turns the 2,600+ symbols into editable objects.
@@ -804,6 +812,7 @@ export default function CourseMap({ user, manage }) {
   // ── Capture the GPS for the pending drawing point ───────────────────────────
   async function doCapture() {
     if (!pending) { setMsg('First tap the head on the drawing above.'); return }
+    enableLocate()
     setCapturing({ n: 0, acc: null })
     try {
       const g = await captureAveragedGps({ seconds: 6, onTick: (n, acc) => setCapturing({ n, acc: Math.round(acc || 0) }) })
@@ -909,7 +918,7 @@ export default function CourseMap({ user, manage }) {
     const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(gps.lat)) * Math.cos(toRad(selected.lat)) * Math.sin(dLng / 2) ** 2
     return Math.round(2 * Rft * Math.asin(Math.min(1, Math.sqrt(a))))
   })() : null
-  const recenter = () => { enableHeading(); if (mainMap.current && gps) mainMap.current.setView([gps.lat, gps.lng], 19) }
+  const recenter = () => { enableLocate(); enableHeading(); if (mainMap.current && gps) mainMap.current.setView([gps.lat, gps.lng], 19) }
 
   // ── UI ──────────────────────────────────────────────────────────────────────
   return (
@@ -1015,7 +1024,7 @@ export default function CourseMap({ user, manage }) {
             <div ref={mapCbRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: mapPxH, minHeight: 460, backgroundColor: '#0b1e12', cursor: addMode || moveMode ? 'crosshair' : '' }} />
             {/* Floating controls */}
             <div className="absolute z-[500] top-3 right-3 flex flex-col gap-2">
-              <button onClick={recenter} title="Center on me" className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: FOREST }}><Navigation size={17} /></button>
+              <button onClick={recenter} title={locate ? 'Center on me' : 'Show my location'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: locate ? FOREST : '#94A3B8' }}><Navigation size={17} /></button>
               <button onClick={() => setShowFeatures((v) => !v)} title={showFeatures ? 'Hide heads' : 'Show heads'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showFeatures ? FERN : '#94A3B8' }}>{showFeatures ? <Eye size={17} /> : <EyeOff size={17} />}</button>
               <button onClick={() => setLabelsOn((v) => !v)} title={labelsOn ? 'Hide head numbers' : 'Show head numbers'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center font-body text-[11px] font-bold" style={{ color: labelsOn ? FERN : '#94A3B8' }}>R#</button>
               {shapes.length > 0 && (
@@ -1175,7 +1184,7 @@ export default function CourseMap({ user, manage }) {
                 <p className="font-display text-base font-bold" style={{ color: FOREST }}>{selected.label ? selected.label : (manage ? 'Edit ' : '') + (KIND_LABEL[selected.kind] || 'Object')}</p>
               </div>
               <div className="flex items-center gap-1.5">
-                <button onClick={() => { setNavMode(true); enableHeading(); if (mainMap.current) mainMap.current.setView([selected.lat, selected.lng], Math.max(19, mapZoom)) }} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-full text-white flex items-center gap-1" style={{ backgroundColor: FERN }}><Navigation size={13} /> Walk to it</button>
+                <button onClick={() => { enableLocate(); setNavMode(true); enableHeading(); if (mainMap.current) mainMap.current.setView([selected.lat, selected.lng], Math.max(19, mapZoom)) }} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-full text-white flex items-center gap-1" style={{ backgroundColor: FERN }}><Navigation size={13} /> Walk to it</button>
                 <button onClick={() => { setSelected(null); setConfirmDel(false) }} className="text-slate-400"><X size={18} /></button>
               </div>
             </div>
