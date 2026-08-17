@@ -26,8 +26,9 @@ const prettyDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-US', {
 // board from the public /api/crew endpoint and polls instead of using Realtime.
 export default function CrewBoard({ pub = null }) {
   const [date, setDate] = useState(todayStr())
-  // Optional ?course=Blue in the URL gives this TV its own course board.
-  const [course] = useState(() => (typeof window !== 'undefined' ? (new URLSearchParams(window.location.search).get('course') || '') : ''))
+  // Optional ?course=Blue in the URL sets the starting course; the on-screen
+  // All / Blue / Gold toggle can switch it live on the screen too.
+  const [course, setCourse] = useState(() => (typeof window !== 'undefined' ? (new URLSearchParams(window.location.search).get('course') || '') : ''))
   const [tasks, setTasks] = useState([])
   const [club, setClub] = useState('')
   const [crew, setCrew] = useState({})
@@ -179,6 +180,7 @@ export default function CrewBoard({ pub = null }) {
   // Scope to this TV's course (its own jobs plus property-wide ones); no course
   // param = whole property.
   const shown = course ? tasks.filter((t) => t.course === course || !t.course) : tasks
+  const courseNames = (courseInfo?.courses || []).map((c) => c && c.name).filter(Boolean)
 
   // Group by job (one bubble each), split into rounds — 1st / 2nd / 3rd jobs —
   // so the day's later work shows as its own section on the board.
@@ -196,6 +198,20 @@ export default function CrewBoard({ pub = null }) {
             {club && <div style={{ fontSize: 'clamp(12px,1.1vw,20px)', letterSpacing: '0.28em', textTransform: 'uppercase', color: GOLD, fontWeight: 600 }}>{club}</div>}
             <div style={{ fontFamily: 'ui-serif, Georgia, serif', fontSize: 'clamp(30px,3.6vw,64px)', fontWeight: 700, lineHeight: 1.05 }}>{course ? `${course} · Crew Board` : 'Crew Board'}</div>
             <div style={{ fontSize: 'clamp(14px,1.4vw,26px)', color: '#C7CFC2', marginTop: 4 }}>{prettyDay(date)}</div>
+            {courseNames.length >= 2 && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                {['', ...courseNames].map((c) => {
+                  const on = course === c
+                  return (
+                    <button key={c || 'all'} onClick={() => setCourse(c)} style={{
+                      fontSize: 'clamp(12px,1.2vw,20px)', fontWeight: 700, padding: '0.35em 1.1em', borderRadius: 999,
+                      border: on ? 'none' : '1px solid rgba(255,255,255,0.25)',
+                      background: on ? GOLD : 'rgba(255,255,255,0.08)', color: on ? FOREST : '#E8EDE7', cursor: 'pointer',
+                    }}>{c || 'All'}</button>
+                  )
+                })}
+              </div>
+            )}
           </div>
           {weather && weather.temp && (
             <div style={{ textAlign: 'center', color: '#C7CFC2' }}>
