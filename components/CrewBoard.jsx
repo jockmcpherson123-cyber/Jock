@@ -4,7 +4,7 @@
 // the shop screen. It fetches today's jobs, then subscribes to Realtime so any
 // change made on an iPad shows up here within a second, no refresh needed. Big
 // type, high contrast, and it rolls over to the new day on its own overnight.
-import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react'
+import { useState, useEffect, useCallback, useRef, useLayoutEffect, useMemo } from 'react'
 import * as db from '@/lib/db'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { fetchCurrent } from '@/lib/weather'
@@ -20,7 +20,20 @@ const GOLD = '#C9A84C'
 // Local calendar date so the board rolls over at local midnight, not UTC
 // midnight (which is early evening in US timezones).
 const todayStr = () => localDateISO()
-const prettyDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+const prettyDay = (d, lang) => new Date(`${d}T00:00:00`).toLocaleDateString(lang === 'es' ? 'es-ES' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+
+// Spanish for the board's fixed labels (the job text itself is AI-translated).
+const ES = {
+  'Crew Board': 'Tablero de Trabajo',
+  Afternoon: 'Tarde', Later: 'Más tarde',
+  'Direction of cut': 'Dirección de corte',
+  Unassigned: 'Sin asignar',
+  'Loading the board…': 'Cargando el tablero…',
+  "Couldn't load the board.": 'No se pudo cargar el tablero.',
+  job: 'trabajo', jobs: 'trabajos', on: 'en labor',
+  'No jobs posted yet today.': 'No hay trabajos publicados hoy.',
+}
+const SLOT_ES = { '1': 'Trabajos 1', '2': 'Trabajos 2', '3': 'Trabajos 3', '4': 'Trabajos 4' }
 
 // `pub` (a club key) turns this into the no-login phone view: it reads today's
 // board from the public /api/crew endpoint and polls instead of using Realtime.
@@ -40,6 +53,9 @@ export default function CrewBoard({ pub = null }) {
   const [clock, setClock] = useState('')
   const [status, setStatus] = useState('loading') // loading | ok | error
   const [live, setLive] = useState(false)
+  // Whole-board language toggle (independent of each person's own language).
+  const [lang, setLang] = useState('en')
+  const T = (en) => (lang === 'es' ? (ES[en] || en) : en)
   const dateRef = useRef(date)
   useEffect(() => { dateRef.current = date }, [date])
 
@@ -135,11 +151,19 @@ export default function CrewBoard({ pub = null }) {
     return () => { cancelled = true; clearInterval(id) }
   }, [location])
 
-  // Translate each person's jobs into their language (AI, cached).
-  const crewSig = JSON.stringify(crew || {})
+  // Translate each person's jobs into their language (AI, cached). When the whole
+  // board is flipped to Spanish, force every task's language to 'es' so all the
+  // job text comes back translated regardless of each person's own setting.
+  const effCrew = useMemo(() => {
+    if (lang !== 'es') return crew
+    const forced = { ...crew }
+    ;(tasks || []).forEach((t) => { if (t.assignee) forced[t.assignee] = { ...(crew[t.assignee] || {}), lang: 'es' } })
+    return forced
+  }, [lang, crew, tasks])
+  const crewSig = JSON.stringify(effCrew || {})
   useEffect(() => {
     let cancelled = false
-    loadTranslations(tasks, crew).then((m) => { if (!cancelled) setTx(m) }).catch(() => {})
+    loadTranslations(tasks, effCrew).then((m) => { if (!cancelled) setTx(m) }).catch(() => {})
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, crewSig])
@@ -196,22 +220,30 @@ export default function CrewBoard({ pub = null }) {
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, borderBottom: `2px solid ${GOLD}`, paddingBottom: '1.4vw', marginBottom: '1.8vw' }}>
           <div>
             {club && <div style={{ fontSize: 'clamp(12px,1.1vw,20px)', letterSpacing: '0.28em', textTransform: 'uppercase', color: GOLD, fontWeight: 600 }}>{club}</div>}
-            <div style={{ fontFamily: 'ui-serif, Georgia, serif', fontSize: 'clamp(30px,3.6vw,64px)', fontWeight: 700, lineHeight: 1.05 }}>{course ? `${course} · Crew Board` : 'Crew Board'}</div>
-            <div style={{ fontSize: 'clamp(14px,1.4vw,26px)', color: '#C7CFC2', marginTop: 4 }}>{prettyDay(date)}</div>
-            {courseNames.length >= 2 && (
-              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                {['', ...courseNames].map((c) => {
-                  const on = course === c
-                  return (
-                    <button key={c || 'all'} onClick={() => setCourse(c)} style={{
-                      fontSize: 'clamp(12px,1.2vw,20px)', fontWeight: 700, padding: '0.35em 1.1em', borderRadius: 999,
-                      border: on ? 'none' : '1px solid rgba(255,255,255,0.25)',
-                      background: on ? GOLD : 'rgba(255,255,255,0.08)', color: on ? FOREST : '#E8EDE7', cursor: 'pointer',
-                    }}>{c || 'All'}</button>
-                  )
-                })}
-              </div>
-            )}
+            <div style={{ fontFamily: 'ui-serif, Georgia, serif', fontSize: 'clamp(30px,3.6vw,64px)', fontWeight: 700, lineHeight: 1.05 }}>{course ? `${course} · ${T('Crew Board')}` : T('Crew Board')}</div>
+            <div style={{ fontSize: 'clamp(14px,1.4vw,26px)', color: '#C7CFC2', marginTop: 4, textTransform: 'capitalize' }}>{prettyDay(date, lang)}</div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+              {courseNames.length >= 2 && ['', ...courseNames].map((c) => {
+                const on = course === c
+                return (
+                  <button key={c || 'all'} onClick={() => setCourse(c)} style={{
+                    fontSize: 'clamp(12px,1.2vw,20px)', fontWeight: 700, padding: '0.35em 1.1em', borderRadius: 999,
+                    border: on ? 'none' : '1px solid rgba(255,255,255,0.25)',
+                    background: on ? GOLD : 'rgba(255,255,255,0.08)', color: on ? FOREST : '#E8EDE7', cursor: 'pointer',
+                  }}>{c || 'All'}</button>
+                )
+              })}
+              {[['en', 'English'], ['es', 'Español']].map(([code, label]) => {
+                const on = lang === code
+                return (
+                  <button key={code} onClick={() => setLang(code)} style={{
+                    fontSize: 'clamp(12px,1.2vw,20px)', fontWeight: 700, padding: '0.35em 1.1em', borderRadius: 999,
+                    border: on ? 'none' : '1px solid rgba(255,255,255,0.25)',
+                    background: on ? '#E8EDE7' : 'rgba(255,255,255,0.08)', color: on ? FOREST : '#E8EDE7', cursor: 'pointer',
+                  }}>{label}</button>
+                )
+              })}
+            </div>
           </div>
           {weather && weather.temp && (
             <div style={{ textAlign: 'center', color: '#C7CFC2' }}>
@@ -231,7 +263,7 @@ export default function CrewBoard({ pub = null }) {
 
         {/* Board */}
         {status === 'loading' ? (
-          <div style={{ textAlign: 'center', padding: '10vh 0', color: '#8AA394', fontSize: 'clamp(16px,1.6vw,28px)' }}>Loading the board…</div>
+          <div style={{ textAlign: 'center', padding: '10vh 0', color: '#8AA394', fontSize: 'clamp(16px,1.6vw,28px)' }}>{T('Loading the board…')}</div>
         ) : status === 'denied' ? (
           <div style={{ textAlign: 'center', padding: '10vh 0', color: '#E7C9C9', fontSize: 'clamp(15px,1.5vw,26px)' }}>This board link is invalid or expired.<br />Ask for a fresh QR code.</div>
         ) : status === 'error' ? (
@@ -240,7 +272,7 @@ export default function CrewBoard({ pub = null }) {
             <span style={{ fontSize: 'clamp(12px,1.1vw,18px)', color: '#B8C2B0' }}>If this is the first run, a manager needs to sign in on this screen and set up the Whiteboard (run phase13.sql in Supabase).</span>
           </div>
         ) : shown.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '12vh 0', color: '#8AA394', fontSize: 'clamp(18px,2vw,34px)', fontFamily: 'ui-serif, Georgia, serif' }}>No jobs posted yet today.</div>
+          <div style={{ textAlign: 'center', padding: '12vh 0', color: '#8AA394', fontSize: 'clamp(18px,2vw,34px)', fontFamily: 'ui-serif, Georgia, serif' }}>{T('No jobs posted yet today.')}</div>
         ) : (
           <div ref={fitWrapRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
           <div ref={fitContentRef} style={{ transformOrigin: 'top left' }}>
@@ -254,10 +286,10 @@ export default function CrewBoard({ pub = null }) {
               <div key={slotKey} style={{ marginBottom: '1.4vw', marginTop: slotsPresent.indexOf(slotKey) > 0 ? '2.4vw' : 0 }}>
                 {slotsPresent.length > 1 && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '0 0 1vw', padding: '0.6vw 1.1vw', background: 'linear-gradient(90deg, rgba(201,168,76,0.26), rgba(201,168,76,0.03))', borderLeft: `7px solid ${GOLD}`, borderRadius: 12 }}>
-                    <span style={{ fontSize: 'clamp(16px,1.6vw,32px)', fontWeight: 900, letterSpacing: '0.14em', textTransform: 'uppercase', color: GOLD }}>{SLOT_LABELS[slotKey]}</span>
-                    <span style={{ fontSize: 'clamp(11px,1vw,18px)', fontWeight: 600, color: '#B7C4B4' }}>{Object.keys(sGroups).length} job{Object.keys(sGroups).length !== 1 ? 's' : ''}</span>
+                    <span style={{ fontSize: 'clamp(16px,1.6vw,32px)', fontWeight: 900, letterSpacing: '0.14em', textTransform: 'uppercase', color: GOLD }}>{lang === 'es' ? SLOT_ES[slotKey] : SLOT_LABELS[slotKey]}</span>
+                    <span style={{ fontSize: 'clamp(11px,1vw,18px)', fontWeight: 600, color: '#B7C4B4' }}>{Object.keys(sGroups).length} {Object.keys(sGroups).length !== 1 ? T('jobs') : T('job')}</span>
                     <div style={{ flex: 1 }} />
-                    {slotKey !== '1' && <span style={{ fontSize: 'clamp(11px,1vw,18px)', fontWeight: 700, color: '#B7C4B4' }}>{slotKey === '2' ? 'Afternoon' : 'Later'}</span>}
+                    {slotKey !== '1' && <span style={{ fontSize: 'clamp(11px,1vw,18px)', fontWeight: 700, color: '#B7C4B4' }}>{slotKey === '2' ? T('Afternoon') : T('Later')}</span>}
                   </div>
                 )}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.1vw', alignItems: 'start' }}>
@@ -272,8 +304,8 @@ export default function CrewBoard({ pub = null }) {
                 <div key={jk} style={{ maxWidth: 560, background: '#FBFAF6', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.28)' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '0.55vw 0.8vw', background: '#E6EDE4', borderBottom: '1px solid #D3DCD2' }}>
                     <div style={{ flex: 1, minWidth: 0, lineHeight: 1.15 }}>
-                      <span style={{ fontSize: 'clamp(15px,1.4vw,26px)', fontWeight: 800, color: '#1A2A1F' }}>{jk}</span>
-                      {variants.length > 0 && <span style={{ fontSize: 'clamp(12px,1.15vw,21px)', fontWeight: 600, color: '#5E7A67' }}> · {variants.join(' · ')}</span>}
+                      <span style={{ fontSize: 'clamp(15px,1.4vw,26px)', fontWeight: 800, color: '#1A2A1F' }}>{lang === 'es' ? (txGet(tx, 'es', jk) || jk) : jk}</span>
+                      {lang !== 'es' && variants.length > 0 && <span style={{ fontSize: 'clamp(12px,1.15vw,21px)', fontWeight: 600, color: '#5E7A67' }}> · {variants.join(' · ')}</span>}
                     </div>
                     <span style={{ fontSize: 'clamp(11px,1vw,17px)', fontWeight: 700, color: '#8A9A8E', fontVariantNumeric: 'tabular-nums' }}>{list.length}</span>
                   </div>
@@ -305,15 +337,17 @@ export default function CrewBoard({ pub = null }) {
                   })()}
                   <div>
                     {list.map((t) => {
-                      const lang = crew[t.assignee]?.lang
-                      const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => txGet(tx, lang, tool) || tool)
+                      // The board toggle wins; otherwise fall back to the person's own language.
+                      const dispLang = lang === 'es' ? 'es' : crew[t.assignee]?.lang
+                      const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => txGet(tx, dispLang, tool) || tool)
                       const detail = tools.join(' · ')
+                      const noteText = t.notes ? (txGet(tx, dispLang, t.notes) || t.notes) : ''
                       return (
                         <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.4vw 0.7vw', borderLeft: `5px solid ${FERN}`, borderBottom: '1px solid #EFEEE6' }}>
                           <div style={{ minWidth: 0, flex: 1 }}>
-                            <span style={{ fontSize: 'clamp(13px,1.2vw,22px)', fontWeight: 600, color: '#23241E' }}>{t.assignee || 'Unassigned'}</span>
+                            <span style={{ fontSize: 'clamp(13px,1.2vw,22px)', fontWeight: 600, color: '#23241E' }}>{t.assignee || T('Unassigned')}</span>
                             {detail && <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#7C8A80' }}>{'  ·  ' + detail}</span>}
-                            {t.notes && <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: FERN, fontWeight: 600 }}>{'  ·  ' + t.notes}</span>}
+                            {noteText && <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: FERN, fontWeight: 600 }}>{'  ·  ' + noteText}</span>}
                           </div>
                           {!course && t.course && <span style={{ fontSize: 'clamp(9px,0.8vw,14px)', fontWeight: 700, color: '#3B5BA5', background: '#E7ECF8', padding: '1px 7px', borderRadius: 999, whiteSpace: 'nowrap' }}>{t.course}</span>}
                         </div>

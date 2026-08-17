@@ -31,6 +31,8 @@ function Routes() {
   const [state, setState] = useState('loading') // loading | ok | denied | error
   const [courseName, setCourseName] = useState('')
   const [count, setCount] = useState(null)
+  const [lang, setLang] = useState('en')
+  const es = lang === 'es'
 
   const load = useCallback(async () => {
     if (!k) { setState('denied'); return }
@@ -67,9 +69,16 @@ function Routes() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#EEF1EE' }}>
-      <div style={{ background: FOREST }} className="text-white px-4 py-3 sticky top-0 z-10">
-        {courseInfo.clubName && <p className="font-body text-[10px] tracking-[0.22em] uppercase" style={{ color: GOLD }}>{courseInfo.clubName}</p>}
-        <p className="font-display text-lg font-semibold">Mowing Routes</p>
+      <div style={{ background: FOREST }} className="text-white px-4 py-3 sticky top-0 z-10 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          {courseInfo.clubName && <p className="font-body text-[10px] tracking-[0.22em] uppercase truncate" style={{ color: GOLD }}>{courseInfo.clubName}</p>}
+          <p className="font-display text-lg font-semibold">{es ? 'Rutas de Corte' : 'Mowing Routes'}</p>
+        </div>
+        <div className="flex gap-1.5 shrink-0">
+          {[['en', 'EN'], ['es', 'ES']].map(([code, label]) => (
+            <button key={code} onClick={() => setLang(code)} className="font-body text-xs font-bold px-3 py-1.5 rounded-full" style={lang === code ? { backgroundColor: GOLD, color: FOREST } : { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }}>{label}</button>
+          ))}
+        </div>
       </div>
       <div className="max-w-2xl mx-auto px-3 py-3">
         {/* Course picker */}
@@ -82,14 +91,14 @@ function Routes() {
         {counts.length > 0 ? (
           <>
             <div className="flex items-center gap-2 mb-1 overflow-x-auto no-scrollbar [&>*]:shrink-0 pb-1">
-              <span className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">Mowers:</span>
+              <span className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">{es ? 'Máquinas:' : 'Mowers:'}</span>
               {counts.map((n) => <Chip key={n} on={n === activeCount} onClick={() => setCount(n)}>{n}</Chip>)}
             </div>
             {autoCount > 0 && (
               <p className="font-body text-[11px] mb-3" style={{ color: FERN }}>
                 {counts.includes(autoCount)
-                  ? `Auto-set to today's board — ${autoCount} greens mower${autoCount === 1 ? '' : 's'} on.`
-                  : `${autoCount} greens mower${autoCount === 1 ? '' : 's'} on the board today — showing the closest saved route (${activeCount}).`}
+                  ? (es ? `Ajustado al tablero de hoy — ${autoCount} en greens.` : `Auto-set to today's board — ${autoCount} greens mower${autoCount === 1 ? '' : 's'} on.`)
+                  : (es ? `${autoCount} en greens hoy — mostrando la ruta guardada más cercana (${activeCount}).` : `${autoCount} greens mower${autoCount === 1 ? '' : 's'} on the board today — showing the closest saved route (${activeCount}).`)}
               </p>
             )}
             <div className="space-y-3">
@@ -98,7 +107,7 @@ function Routes() {
                 return (
                   <div key={i} className="bg-white rounded-2xl border shadow-sm overflow-hidden" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
                     <div className="px-4 py-2 flex items-center justify-between" style={{ backgroundColor: accent }}>
-                      <span className="font-body text-sm font-bold text-white">Route {i + 1}</span>
+                      <span className="font-body text-sm font-bold text-white">{es ? 'Ruta' : 'Route'} {i + 1}</span>
                       <span className="font-body text-[11px] text-white/80">{greens.length} green{greens.length === 1 ? '' : 's'}</span>
                     </div>
                     <div className="px-4 py-3 flex flex-wrap items-center gap-x-1.5 gap-y-1">
@@ -115,7 +124,7 @@ function Routes() {
             </div>
           </>
         ) : (
-          <p className="font-body text-sm text-slate-400 text-center py-10">No locked mowing routes for {courseName || 'this course'} yet.</p>
+          <p className="font-body text-sm text-slate-400 text-center py-10">{es ? `Aún no hay rutas guardadas para ${courseName || 'este campo'}.` : `No locked mowing routes for ${courseName || 'this course'} yet.`}</p>
         )}
       </div>
     </div>
