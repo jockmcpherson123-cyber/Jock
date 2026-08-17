@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect, useMemo } from 'react'
 import * as db from '@/lib/db'
 import { loadTranslations, txGet } from '@/lib/translate'
+import { toEs } from '@/lib/es'
 import { fetchCurrent } from '@/lib/weather'
 import { localDateISO } from '@/lib/dates'
 import { directionForJob, stepLabel, surfaceKind } from '@/lib/mowdir'
@@ -32,6 +33,7 @@ const ES = {
   "Couldn't load the board.": 'No se pudo cargar el tablero.',
   job: 'trabajo', jobs: 'trabajos', on: 'en labor',
   'No jobs posted yet today.': 'No hay trabajos publicados hoy.',
+  "Today's Cut": 'Corte de hoy',
 }
 const SLOT_ES = { '1': 'Trabajos 1', '2': 'Trabajos 2', '3': 'Trabajos 3', '4': 'Trabajos 4' }
 
@@ -56,6 +58,10 @@ export default function CrewBoard({ pub = null }) {
   // Whole-board language toggle (independent of each person's own language).
   const [lang, setLang] = useState('en')
   const T = (en) => (lang === 'es' ? (ES[en] || en) : en)
+  // Dynamic text (job names, notes, message): prefer an AI translation if one is
+  // cached, otherwise fall back to the built-in Spanish dictionary so it still
+  // flips without an AI key.
+  const D = (x) => (lang === 'es' ? (txGet(tx, 'es', x) || toEs(x)) : x)
   const dateRef = useRef(date)
   useEffect(() => { dateRef.current = date }, [date])
 
@@ -304,7 +310,7 @@ export default function CrewBoard({ pub = null }) {
                 <div key={jk} style={{ maxWidth: 560, background: '#FBFAF6', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.28)' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '0.55vw 0.8vw', background: '#E6EDE4', borderBottom: '1px solid #D3DCD2' }}>
                     <div style={{ flex: 1, minWidth: 0, lineHeight: 1.15 }}>
-                      <span style={{ fontSize: 'clamp(15px,1.4vw,26px)', fontWeight: 800, color: '#1A2A1F' }}>{lang === 'es' ? (txGet(tx, 'es', jk) || jk) : jk}</span>
+                      <span style={{ fontSize: 'clamp(15px,1.4vw,26px)', fontWeight: 800, color: '#1A2A1F' }}>{D(jk)}</span>
                       {lang !== 'es' && variants.length > 0 && <span style={{ fontSize: 'clamp(12px,1.15vw,21px)', fontWeight: 600, color: '#5E7A67' }}> · {variants.join(' · ')}</span>}
                     </div>
                     <span style={{ fontSize: 'clamp(11px,1vw,17px)', fontWeight: 700, color: '#8A9A8E', fontVariantNumeric: 'tabular-nums' }}>{list.length}</span>
@@ -330,7 +336,7 @@ export default function CrewBoard({ pub = null }) {
                     const noteVariants = langs.map((l) => txGet(tx, l, groupNoteVal)).filter((v) => v && v !== groupNoteVal)
                     return (
                       <div style={{ padding: '0.35vw 0.8vw', background: '#FFF7E6', borderBottom: '1px solid #F0E4C8' }}>
-                        <div style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#8A5A12', fontWeight: 600 }}>{groupNoteVal}</div>
+                        <div style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#8A5A12', fontWeight: 600 }}>{D(groupNoteVal)}</div>
                         {noteVariants.map((v, i) => <div key={i} style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#A98547', fontStyle: 'italic' }}>{v}</div>)}
                       </div>
                     )
@@ -339,9 +345,9 @@ export default function CrewBoard({ pub = null }) {
                     {list.map((t) => {
                       // The board toggle wins; otherwise fall back to the person's own language.
                       const dispLang = lang === 'es' ? 'es' : crew[t.assignee]?.lang
-                      const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => txGet(tx, dispLang, tool) || tool)
+                      const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => txGet(tx, dispLang, tool) || (lang === 'es' ? toEs(tool) : tool))
                       const detail = tools.join(' · ')
-                      const noteText = t.notes ? (txGet(tx, dispLang, t.notes) || t.notes) : ''
+                      const noteText = t.notes ? (txGet(tx, dispLang, t.notes) || (lang === 'es' ? toEs(t.notes) : t.notes)) : ''
                       return (
                         <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.4vw 0.7vw', borderLeft: `5px solid ${FERN}`, borderBottom: '1px solid #EFEEE6' }}>
                           <div style={{ minWidth: 0, flex: 1 }}>
@@ -364,7 +370,7 @@ export default function CrewBoard({ pub = null }) {
             </div>
             {/* Vertical hole — a tight column running up the right side */}
             <div style={{ flex: '0 0 clamp(130px, 11vw, 190px)', alignSelf: 'flex-start' }}>
-              <div style={{ fontSize: 'clamp(11px,1vw,18px)', letterSpacing: '0.2em', textTransform: 'uppercase', color: GOLD, fontWeight: 700, marginBottom: 8, textAlign: 'center' }}>Today's Cut</div>
+              <div style={{ fontSize: 'clamp(11px,1vw,18px)', letterSpacing: '0.2em', textTransform: 'uppercase', color: GOLD, fontWeight: 700, marginBottom: 8, textAlign: 'center' }}>{T("Today's Cut")}</div>
               <HoleMap courseInfo={courseInfo} courseName={course} orientation="vertical" />
             </div>
           </div>
@@ -375,7 +381,7 @@ export default function CrewBoard({ pub = null }) {
       {boardMessage && (
         <div style={{ flexShrink: 0, background: '#B4232A', color: '#FFF', padding: '0.7vw 2.5vw', fontSize: 'clamp(15px,1.6vw,30px)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 -4px 20px rgba(0,0,0,0.3)' }}>
           <span style={{ fontSize: '1.1em' }}>🔔</span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boardMessage}</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{D(boardMessage)}</span>
         </div>
       )}
       <style>{`@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(87,208,122,0.7) } 70% { box-shadow: 0 0 0 12px rgba(87,208,122,0) } 100% { box-shadow: 0 0 0 0 rgba(87,208,122,0) } }`}</style>
