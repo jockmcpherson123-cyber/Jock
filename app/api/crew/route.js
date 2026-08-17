@@ -47,7 +47,17 @@ export async function GET(request) {
 
   const view = sp.get('view')
   if (view === 'routes') {
-    return Response.json({ courses: courseInfo.courses || [], courseInfo: safeCourseInfo(courseInfo) }, { headers: noStore })
+    // Also report who's mowing greens today so the phone view can auto-pick the
+    // matching mower-count route layout. A greens-mowing job is any job whose
+    // name mentions both "mow" and "green".
+    let greensMowToday = []
+    const date = sp.get('date')
+    if (date) {
+      const { data } = await supabase.from('crew_tasks').select('job, course, assignee').eq('task_date', date)
+      const isGreensMow = (j) => { const s = String(j || '').toLowerCase(); return s.includes('mow') && s.includes('green') }
+      greensMowToday = (data || []).filter((t) => isGreensMow(t.job)).map((t) => ({ course: t.course || '', assignee: t.assignee || '' }))
+    }
+    return Response.json({ courses: courseInfo.courses || [], courseInfo: safeCourseInfo(courseInfo), greensMowToday }, { headers: noStore })
   }
 
   // Default: the job board for one day.

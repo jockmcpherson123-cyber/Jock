@@ -7,6 +7,16 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { labelledLayout } from '@/lib/mowing'
+import { localDateISO } from '@/lib/dates'
+
+// Pick the route layout that best matches today's actual mower count: the exact
+// locked set if there is one, otherwise the biggest locked set that isn't over.
+function nearestCount(counts, target) {
+  if (!counts.length) return null
+  if (counts.includes(target)) return target
+  const below = counts.filter((c) => c <= target)
+  return below.length ? Math.max(...below) : Math.min(...counts)
+}
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -25,7 +35,7 @@ function Routes() {
   const load = useCallback(async () => {
     if (!k) { setState('denied'); return }
     try {
-      const r = await fetch(`/api/crew?view=routes&k=${encodeURIComponent(k)}`, { cache: 'no-store' })
+      const r = await fetch(`/api/crew?view=routes&k=${encodeURIComponent(k)}&date=${localDateISO()}`, { cache: 'no-store' })
       if (r.status === 401) { setState('denied'); return }
       if (!r.ok) throw new Error()
       const d = await r.json()
@@ -41,7 +51,14 @@ function Routes() {
   const courseInfo = data?.courseInfo || {}
   const course = courses.find((c) => c.name === courseName) || courses[0] || {}
   const counts = useMemo(() => Object.keys(courseInfo?.mowingSets?.[courseName] || {}).map(Number).filter((n) => n > 0).sort((a, b) => a - b), [courseInfo, courseName])
-  const activeCount = count && counts.includes(count) ? count : (counts[0] || null)
+  // How many greens mowers are actually on the board today for this course.
+  const autoCount = useMemo(() => {
+    const rows = (data?.greensMowToday || []).filter((t) => !courseName || t.course === courseName || !t.course)
+    const people = new Set(rows.map((t) => t.assignee).filter(Boolean))
+    return people.size || rows.length
+  }, [data, courseName])
+  // Honor a manual pick; otherwise auto-match today's mower count.
+  const activeCount = (count && counts.includes(count)) ? count : (autoCount > 0 ? nearestCount(counts, autoCount) : (counts[0] || null))
   const routes = useMemo(() => (activeCount ? labelledLayout(courseInfo, courseName, course, activeCount) : []), [courseInfo, courseName, course, activeCount])
 
   if (state === 'loading') return <Center>Loading…</Center>
@@ -64,10 +81,17 @@ function Routes() {
         {/* Mower-count picker */}
         {counts.length > 0 ? (
           <>
-            <div className="flex items-center gap-2 mb-3 overflow-x-auto no-scrollbar [&>*]:shrink-0 pb-1">
+            <div className="flex items-center gap-2 mb-1 overflow-x-auto no-scrollbar [&>*]:shrink-0 pb-1">
               <span className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">Mowers:</span>
               {counts.map((n) => <Chip key={n} on={n === activeCount} onClick={() => setCount(n)}>{n}</Chip>)}
             </div>
+            {autoCount > 0 && (
+              <p className="font-body text-[11px] mb-3" style={{ color: FERN }}>
+                {counts.includes(autoCount)
+                  ? `Auto-set to today's board — ${autoCount} greens mower${autoCount === 1 ? '' : 's'} on.`
+                  : `${autoCount} greens mower${autoCount === 1 ? '' : 's'} on the board today — showing the closest saved route (${activeCount}).`}
+              </p>
+            )}
             <div className="space-y-3">
               {routes.map((greens, i) => {
                 const accent = ACCENTS[i % ACCENTS.length]
