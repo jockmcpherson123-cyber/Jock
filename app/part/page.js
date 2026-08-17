@@ -10,7 +10,9 @@ const FOREST = '#16291F'
 const FERN = '#3A6B4A'
 
 function PartView() {
-  const id = useSearchParams().get('id')
+  const sp = useSearchParams()
+  const id = sp.get('id')
+  const k = sp.get('k')
   const [part, setPart] = useState(null)
   const [state, setState] = useState('loading') // loading | ok | error
   const [busy, setBusy] = useState(false)
@@ -30,7 +32,7 @@ function PartView() {
   const send = async (payload) => {
     setBusy(true)
     try {
-      const r = await fetch('/api/part', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...payload }) })
+      const r = await fetch('/api/part', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, k, ...payload }) })
       if (r.ok) setPart(await r.json())
     } catch { /* ignore */ }
     setBusy(false)

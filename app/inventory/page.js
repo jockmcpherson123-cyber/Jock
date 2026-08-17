@@ -40,7 +40,7 @@ function Inventory() {
     setParts((cur) => cur.map((x) => (x.id === p.id ? { ...x, stock: next } : x)))
     setBusy((b) => ({ ...b, [p.id]: true }))
     try {
-      const r = await fetch('/api/part', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: p.id, delta }) })
+      const r = await fetch('/api/part', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: p.id, delta, k }) })
       if (r.ok) { const u = await r.json(); setParts((cur) => cur.map((x) => (x.id === p.id ? { ...x, stock: u.stock } : x))) }
     } catch { /* ignore */ }
     setBusy((b) => ({ ...b, [p.id]: false }))

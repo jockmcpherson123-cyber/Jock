@@ -66,21 +66,25 @@ export default function IrrigationParts({ manage = false }) {
     try { await db.updatePart(p.id, { stock: next }) } catch (e) { console.error(e); load() }
   }
 
-  // Print the one shop-shelf QR that opens the whole inventory. Mints a stable
-  // per-club key on first use (stored in settings) so the link isn't reachable
-  // by guessing the URL.
-  const inventoryQR = async () => {
-    // Pull the freshest settings so minting the key never clobbers other
-    // courseInfo fields (e.g. if this component loaded before settings did).
+  // The stable per-club key that gates the public scan pages. Minted on first
+  // use and stored in settings; re-reads the freshest settings first so it never
+  // clobbers other courseInfo fields.
+  const ensureKey = async () => {
     let info = courseInfo
     try { const s = await db.fetchSettings(); info = s.courseInfo || {} } catch { /* use what we have */ }
     let key = info?.partsKey
     if (!key) {
       key = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)).replace(/-/g, '')
       const next = { ...info, partsKey: key }
-      try { await db.saveSettings({ courseInfo: next }); setCourseInfo(next); info = next } catch (e) { console.error(e) }
+      try { await db.saveSettings({ courseInfo: next }); setCourseInfo(next) } catch (e) { console.error(e) }
     }
-    const club = info?.clubName || 'Golf Course'
+    return key
+  }
+
+  // Print the one shop-shelf QR that opens the whole inventory.
+  const inventoryQR = async () => {
+    const key = await ensureKey()
+    const club = courseInfo?.clubName || 'Golf Course'
     const url = `${process.env.NEXT_PUBLIC_SITE_URL || window.location.origin}/inventory?k=${key}`
     const qr = await qrDataUrl(url, { width: 600 })
     printHtml(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in}body{margin:0;font-family:Arial;text-align:center;padding:30px}h1{font-family:Georgia,serif;color:#16291F;font-size:26px;margin:0 0 4px}.sub{color:#3A6B4A;font-weight:700;font-size:14px;margin-bottom:20px}img{width:3.4in;height:3.4in}.foot{color:#888;font-size:12px;margin-top:14px}</style></head><body><h1>${esc(club)} — Parts Inventory</h1><div class="sub">Scan to view &amp; update parts stock</div><img src="${qr}"><div class="foot">Point your phone camera at the code.</div></body></html>`)
@@ -116,7 +120,7 @@ export default function IrrigationParts({ manage = false }) {
             </button>
           )}
           {manage && shown.length > 0 && (
-            <button onClick={() => printLabels(shown)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#CBD5E1', backgroundColor: 'white' }}>
+            <button onClick={async () => printLabels(shown, await ensureKey())} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#CBD5E1', backgroundColor: 'white' }}>
               <QrCode size={14} /> Part labels
             </button>
           )}
@@ -197,7 +201,7 @@ export default function IrrigationParts({ manage = false }) {
       )}
 
       {editing && (
-        <PartEditor part={editing} onClose={() => setEditing(null)}
+        <PartEditor part={editing} onClose={() => setEditing(null)} getKey={ensureKey}
           onSaved={() => { setEditing(null); load() }} />
       )}
 
@@ -225,7 +229,7 @@ const FieldLabel = ({ children }) => <p className="font-body text-[11px] font-bo
 const inp = 'w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white'
 
 // Add / edit one part — all fields, with a photo you can take or attach.
-function PartEditor({ part, onClose, onSaved }) {
+function PartEditor({ part, onClose, onSaved, getKey }) {
   const isNew = !part.id
   const [d, setD] = useState({
     partNumber: part.partNumber || '', name: part.name || '', category: part.category || '', brand: part.brand || '',
@@ -314,7 +318,7 @@ function PartEditor({ part, onClose, onSaved }) {
 
           {!isNew && (
             <div className="mt-4 flex items-center gap-2 flex-wrap">
-              <button onClick={() => printLabels([part])} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: FOREST, border: '1px solid #CBD5E1' }}><QrCode size={13} /> Print QR label</button>
+              <button onClick={async () => printLabels([part], getKey ? await getKey() : undefined)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: FOREST, border: '1px solid #CBD5E1' }}><QrCode size={13} /> Print QR label</button>
               {!confirmDel ? (
                 <button onClick={() => setConfirmDel(true)} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: '#B91C1C', border: '1px solid #F3C6C6' }}><Trash2 size={13} /> Delete part</button>
               ) : (
@@ -346,10 +350,11 @@ function printHtml(html) {
 
 // Print a sheet of scannable QR labels — one per part — to stick on bins/shelves.
 // Each QR points at /part?id=… (a no-login page for just that one part).
-async function printLabels(list) {
+async function printLabels(list, key) {
   const origin = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin
+  const kq = key ? `&k=${encodeURIComponent(key)}` : ''
   const cells = await Promise.all(list.map(async (p) => {
-    const qr = await qrDataUrl(`${origin}/part?id=${p.id}`, { width: 320 })
+    const qr = await qrDataUrl(`${origin}/part?id=${p.id}${kq}`, { width: 320 })
     return `<div class="lbl">
       <img src="${qr}" width="150" height="150" alt="">
       <div class="nm">${esc(p.name || p.partNumber || 'Part')}</div>

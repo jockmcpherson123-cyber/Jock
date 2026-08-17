@@ -62,8 +62,11 @@ export async function POST(request) {
   if (!supabase) return Response.json({ error: 'Not configured' }, { status: 500 })
   let body
   try { body = await request.json() } catch { return Response.json({ error: 'Bad request' }, { status: 400 }) }
-  const { id, delta, stock } = body || {}
+  const { id, delta, stock, k } = body || {}
   if (!id) return Response.json({ error: 'Missing id' }, { status: 400 })
+  // Writes require the club key — so a leaked part UUID alone can't be used to
+  // overwrite stock. (Reads by UUID stay open for the single-part page.)
+  if (!(await keyOk(supabase, k))) return Response.json({ error: 'Not authorized' }, { status: 401 })
 
   const { data: cur, error: e1 } = await supabase.from('irrigation_parts').select('stock').eq('id', id).maybeSingle()
   if (e1) return Response.json({ error: e1.message }, { status: 500 })

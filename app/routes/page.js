@@ -95,7 +95,7 @@ function Routes() {
               <span className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">{es ? 'Máquinas:' : 'Mowers:'}</span>
               {counts.map((n) => <Chip key={n} on={n === activeCount} onClick={() => setCount(n)}>{n}</Chip>)}
             </div>
-            {autoCount > 0 && (
+            {autoCount > 0 && !count && (
               <p className="font-body text-[11px] mb-3" style={{ color: FERN }}>
                 {counts.includes(autoCount)
                   ? (es ? `Ajustado al tablero de hoy — ${autoCount} en greens.` : `Auto-set to today's board — ${autoCount} greens mower${autoCount === 1 ? '' : 's'} on.`)
