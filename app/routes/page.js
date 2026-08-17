@@ -8,6 +8,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { labelledLayout } from '@/lib/mowing'
 import { localDateISO } from '@/lib/dates'
+import { toEs } from '@/lib/es'
 
 // Pick the route layout that best matches today's actual mower count: the exact
 // locked set if there is one, otherwise the biggest locked set that isn't over.
@@ -113,7 +114,7 @@ function Routes() {
                     <div className="px-4 py-3 flex flex-wrap items-center gap-x-1.5 gap-y-1">
                       {greens.map((g, j) => (
                         <span key={j} className="inline-flex items-center gap-1.5">
-                          <span className="font-body text-base font-bold" style={{ color: FOREST }}>{g}</span>
+                          <span className="font-body text-base font-bold" style={{ color: FOREST }}>{es ? toEs(g) : g}</span>
                           {j < greens.length - 1 && <span style={{ color: accent }} className="font-bold">–</span>}
                         </span>
                       ))}
