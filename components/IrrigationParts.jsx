@@ -81,7 +81,7 @@ export default function IrrigationParts({ manage = false }) {
       try { await db.saveSettings({ courseInfo: next }); setCourseInfo(next); info = next } catch (e) { console.error(e) }
     }
     const club = info?.clubName || 'Golf Course'
-    const url = `${window.location.origin}/inventory?k=${key}`
+    const url = `${process.env.NEXT_PUBLIC_SITE_URL || window.location.origin}/inventory?k=${key}`
     const qr = await qrDataUrl(url, { width: 600 })
     printHtml(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in}body{margin:0;font-family:Arial;text-align:center;padding:30px}h1{font-family:Georgia,serif;color:#16291F;font-size:26px;margin:0 0 4px}.sub{color:#3A6B4A;font-weight:700;font-size:14px;margin-bottom:20px}img{width:3.4in;height:3.4in}.foot{color:#888;font-size:12px;margin-top:14px}</style></head><body><h1>${esc(club)} — Parts Inventory</h1><div class="sub">Scan to view &amp; update parts stock</div><img src="${qr}"><div class="foot">Point your phone camera at the code.</div></body></html>`)
   }
@@ -347,7 +347,7 @@ function printHtml(html) {
 // Print a sheet of scannable QR labels — one per part — to stick on bins/shelves.
 // Each QR points at /part?id=… (a no-login page for just that one part).
 async function printLabels(list) {
-  const origin = window.location.origin
+  const origin = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin
   const cells = await Promise.all(list.map(async (p) => {
     const qr = await qrDataUrl(`${origin}/part?id=${p.id}`, { width: 320 })
     return `<div class="lbl">

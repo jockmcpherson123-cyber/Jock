@@ -5768,7 +5768,7 @@ function CrewQRModal({ courseInfo, saveCourse, onClose }) {
         key = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)).replace(/-/g, '')
         try { await saveCourse({ partsKey: key }) } catch (e) { console.error(e) }
       }
-      const origin = window.location.origin
+      const origin = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin
       const [b, r] = await Promise.all([
         qrDataUrl(`${origin}/tv?k=${key}`, { width: 520 }),
         qrDataUrl(`${origin}/routes?k=${key}`, { width: 520 }),
