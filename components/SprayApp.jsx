@@ -34,6 +34,7 @@ import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget, diseas
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { modelForProduct, regulationStatus, suppressionAt, combinedSuppression, surfaceCol, withTargets, PGR_MODELS, PHASE_STYLE } from '@/lib/pgrmodel'
 import { localDateISO } from '@/lib/dates'
+import { mixPlan } from '@/lib/mix'
 import { sheetApplied } from '@/lib/applied'
 import { SearchSelect, MultiSelect } from '@/components/pickers'
 import PlaybookModule from '@/components/Playbook'
@@ -2035,6 +2036,29 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             })}
           </div>
         </Card>
+
+        {/* Build-time check: are we short on any product for the whole job, and
+            how full is the tank? Live as rates/tanks change. */}
+        {(() => {
+          const plan = mixPlan(s, area, products, courseInfo?.mixOrder)
+          if (!plan.hasProducts) return null
+          return (
+            <Card>
+              <div className="flex items-center justify-between">
+                <FieldLabel noMargin>Tank &amp; Stock Check</FieldLabel>
+                <span className="font-body text-[11px] text-slate-400">{plan.totalSolutionGal} gal · {plan.tanks} tank{plan.tanks > 1 ? 's' : ''}{plan.totalLiquidPct != null ? ` · products ~${plan.totalLiquidPct}% of tank` : ''}</span>
+              </div>
+              {plan.stockIssues.length > 0 ? (
+                <div className="rounded-lg px-3 py-2 mt-2 font-body text-[12px] flex items-start gap-1.5" style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}>
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span><b>Short on stock for this job:</b> {plan.stockIssues.map((l) => `${l.name} — need ${l.need}, have ${l.stock} ${l.stockUnit}`).join('; ')}.</span>
+                </div>
+              ) : (
+                <p className="font-body text-[12px] text-slate-500 mt-2 flex items-center gap-1.5"><Check size={14} style={{ color: FERN }} /> Enough stock on hand for every product.</p>
+              )}
+            </Card>
+          )
+        })()}
       </div>
     </div>
   )
@@ -2700,6 +2724,49 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
               )}
             </div>
           </Card>
+
+          {/* Mix & fill — the tank-fill order (by formulation), the amount +
+              measure per tank, each product's share of the tank, the total
+              solution, and a stock check for the whole job. */}
+          {(() => {
+            const plan = mixPlan(sheet, area, products, courseInfo?.mixOrder)
+            if (!plan.hasProducts) return null
+            return (
+              <Card>
+                <div className="flex items-center justify-between mb-1">
+                  <FieldLabel noMargin>Mix &amp; Fill Order</FieldLabel>
+                  <span className="font-body text-[11px] text-slate-400">{plan.totalSolutionGal} gal solution · {plan.tanks} tank{plan.tanks > 1 ? 's' : ''}</span>
+                </div>
+                <p className="font-body text-[11px] text-slate-400 mb-2.5">Fill the tank about half with water, add each product in this order agitating between each, then top off.</p>
+                {plan.stockIssues.length > 0 && (
+                  <div className="rounded-lg px-3 py-2 mb-2.5 font-body text-[11px] flex items-start gap-1.5" style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}>
+                    <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                    <span><b>Short on stock:</b> {plan.stockIssues.map((l) => `${l.name} (need ${l.need}, have ${l.stock})`).join('; ')}. Order or reduce the job before spraying.</span>
+                  </div>
+                )}
+                <ol className="space-y-1.5">
+                  {plan.steps.map((st, i) => (
+                    <li key={st.id} className="flex items-center gap-2.5 font-body">
+                      <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[12px] font-bold text-white" style={{ backgroundColor: st.short ? '#DC2626' : FERN }}>{i + 1}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold text-slate-800 leading-tight">
+                          {st.name}
+                          <span className="text-[10px] font-bold uppercase tracking-wide ml-1.5 px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#EEF2EF', color: FERN }}>{st.formLabel}</span>
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          {st.total ?? '—'} {st.unit} total{st.pctOfTank != null ? ` · ~${st.pctOfTank}% of tank` : ''}
+                          {st.measure ? <span style={{ color: '#2563EB' }}> · {st.measure}/tank</span> : ''}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                {plan.totalLiquidPct != null && plan.totalLiquidPct > 0 && (
+                  <p className="font-body text-[11px] text-slate-400 mt-2.5">Products make up about <b>{plan.totalLiquidPct}%</b> of each tank; the rest is water.{plan.totalLiquidPct > 12 ? ' That’s a heavy load — double-check compatibility and cut the water to fit.' : ''}</p>
+                )}
+              </Card>
+            )
+          })()}
 
           {/* Optional partial fill — a separate extra spray with the same mix. Does
               not touch the main sheet above, and needs no re-approval. */}
