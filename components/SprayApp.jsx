@@ -2132,6 +2132,13 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 }
+// Parse a re-entry interval string ("12 hours", "2 days") to hours, or null.
+function reiHours(str) {
+  const m = String(str || '').match(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|d|day|days)/i)
+  if (!m) return null
+  const n = parseFloat(m[1])
+  return /^d/i.test(m[2]) ? n * 24 : n
+}
 function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], courseInfo = {}) {
   const L = 'border:1px solid #ccc;padding:5px 8px;background:#F0F0EA;font-weight:700;width:15%'
   const V = 'border:1px solid #ccc;padding:5px 8px;width:35%'
@@ -2145,6 +2152,7 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
   const partialGal = sheet.partialGallons
   const hasPartial = partialGal && area.galTank
   const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p) => {
+    const prodInfo = products.find((pr) => pr.name === p.product) || {}
     const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
     let partialAmt = 0
     if (hasPartial && amt !== null) {
@@ -2152,14 +2160,27 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
       partialAmt = pAmt || 0
     }
     const total = amt !== null ? Math.round((amt * (sheet.tanks || 1) + partialAmt) * 10) / 10 : null
-    return { ...p, amt, total, unit }
+    return { ...p, amt, total, unit, epaReg: prodInfo.epaReg, ai: prodInfo.activeIngredient, rei: prodInfo.rei, signalWord: prodInfo.signalWord }
   })
   const productRows = rows.map((p, i) => {
     const forLine = (p.target && String(p.target).trim()) ? `<div style="font-size:9px;color:#3A6B4A;margin-top:1px">For: ${esc(p.target)}</div>` : ''
+    const meta = [p.epaReg && `EPA Reg&nbsp;# ${esc(p.epaReg)}`, p.ai && `AI: ${esc(p.ai)}`, p.rei && `REI: ${esc(p.rei)}`, p.signalWord && esc(p.signalWord)].filter(Boolean).join(' · ')
+    const metaLine = meta ? `<div style="font-size:9px;color:#666;margin-top:1px">${meta}</div>` : ''
     return `<tr style="background:${i % 2 === 0 ? '#fff' : '#F5F5F0'}">
-    <td style="${R}"><b>${i + 1}.</b> ${esc(p.product)}${forLine}</td><td style="${R}">${esc(p.rate)}</td><td style="${R}">${esc(p.basis)}</td>
+    <td style="${R}"><b>${i + 1}.</b> ${esc(p.product)}${forLine}${metaLine}</td><td style="${R}">${esc(p.rate)}</td><td style="${R}">${esc(p.basis)}</td>
     <td style="${R}">${p.amt ?? '—'} ${esc(p.unit || '')}</td><td style="${R};font-weight:700">${p.total ?? '—'} ${esc(p.unit || '')}</td></tr>`
   }).join('')
+
+  // Restricted-entry summary: the longest REI on the sheet, and — if signed off
+  // with a parseable interval — the time the area is clear to re-enter.
+  const maxRei = rows.reduce((mx, p) => { const h = reiHours(p.rei); return h != null && h > mx ? h : mx }, 0)
+  const longestReiLabel = (rows.find((p) => reiHours(p.rei) === maxRei) || {}).rei || ''
+  let reiRow = ''
+  if (maxRei > 0) {
+    let clear = ''
+    if (sheet.completedAt) { const t = new Date(new Date(sheet.completedAt).getTime() + maxRei * 3600000); clear = ` — keep posted until <b>${esc(t.toLocaleString())}</b>` }
+    reiRow = `<table style="${tbl}"><tbody><tr><td style="${L};background:#FFF7E6">Restricted Entry</td><td style="${V}" colspan="3">Longest REI on this sheet: <b>${esc(longestReiLabel || `${maxRei} hours`)}</b>${clear}. Do not allow entry until the interval has passed.</td></tr></tbody></table>`
+  }
   const partialNote = hasPartial ? `<div style="font-size:10px;color:#555;margin:-6px 0 12px">Totals include the ${esc(partialGal)} gal partial fill (${sheet.tanks || 1} full tank${(sheet.tanks || 1) !== 1 ? 's' : ''} + ${esc(partialGal)} gal).</div>` : ''
   const sig = (v) => v ? `<img src="${v}" style="height:48px;max-width:100%" />` : blank
   const w = sheet.weather || {}
@@ -2183,6 +2204,7 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
       <tr><td style="${L}">Instructions</td><td style="${V}" colspan="3">${esc(sheet.instructions || '—')}</td></tr>
     </tbody></table>
     <table style="${tbl}"><tbody><tr><td style="${L};background:#FEF2F2">Safety Notice</td><td style="${V}" colspan="3">Check ALL nozzles before leaving maintenance area. Calculate rates BEFORE filling sprayer.</td></tr></tbody></table>
+    ${reiRow}
     <table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>
       <tr><td style="${L}">Applicator</td><td style="${V}">${esc(sheet.completedBy || sheet.operator || blank)}</td><td style="${L}">Date Applied</td><td style="${V}">${sheet.completedAt ? esc(new Date(sheet.completedAt).toLocaleString()) : blank}</td></tr>
       <tr><td style="${L}">Pesticide Lic #</td><td style="${V}">${esc(sheet.applicatorPesticideLicense || '—')}</td><td style="${L}">Fertilizer Lic #</td><td style="${V}">${esc(sheet.applicatorFertilizerLicense || '—')}</td></tr>
@@ -3883,6 +3905,10 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                     <FieldLabel>Re-entry (REI)</FieldLabel>
                     <input value={draft.rei ?? ''} onChange={(e) => setDraft({ ...draft, rei: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 12 hours" />
                   </div>
+                </div>
+                <div className="mt-3">
+                  <FieldLabel>EPA Registration #</FieldLabel>
+                  <input value={draft.epaReg ?? ''} onChange={(e) => setDraft({ ...draft, epaReg: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 100-1234 (from the label — shows on the spray record)" />
                 </div>
               </div>
             </div>
