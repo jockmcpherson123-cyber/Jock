@@ -3484,6 +3484,8 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   const [aiBusy, setAiBusy] = useState(false)
   const [aiReview, setAiReview] = useState(null) // { items:[{product,fills,confidence,include}], error }
   const [aiApplying, setAiApplying] = useState(false)
+  const [oneAiBusy, setOneAiBusy] = useState(false)
+  const [oneAiMsg, setOneAiMsg] = useState(null) // { text, tone: 'ok'|'warn'|'err' }
   const fileRef = useRef(null)
   const editRef = useRef(null)
 
@@ -3519,6 +3521,29 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
     } catch (e) { setAiReview({ error: String(e?.message || e) }) }
     setAiBusy(false)
   }
+  // Autofill just the product being edited — fills only the blank fields in the
+  // current form, leaving everything you've typed untouched.
+  const autofillOne = async () => {
+    if (!draft?.name?.trim()) { setOneAiMsg({ text: 'Enter a product name first.', tone: 'warn' }); return }
+    setOneAiBusy(true); setOneAiMsg(null)
+    try {
+      const r = await fetch('/api/enrich-products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: [{ name: draft.name, type: draft.type }] }) })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) { setOneAiMsg({ text: d?.error || `Server error ${r.status}`, tone: 'err' }); setOneAiBusy(false); return }
+      const res = (d.results || [])[0]
+      if (!res || !res.found) { setOneAiMsg({ text: 'The AI wasn’t confident about this product — fill it by hand.', tone: 'warn' }); setOneAiBusy(false); return }
+      const fills = {}
+      ;['activeIngredient', 'manufacturer', 'formulation', 'signalWord', 'rei', 'moaGroup', 'epaReg'].forEach((f) => { if (!AI_BLANK(res[f]) && AI_BLANK(draft[f])) fills[f] = res[f] })
+      if (AI_NUM(res.activePct) != null && AI_BLANK(draft.activePct)) fills.activePct = AI_NUM(res.activePct)
+      ;['labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA', 'sprayInterval'].forEach((f) => { if (AI_NUM(res[f]) != null && AI_BLANK(draft[f])) fills[f] = AI_NUM(res[f]) })
+      const n = Object.keys(fills).length
+      if (n === 0) { setOneAiMsg({ text: 'Nothing to add — the blanks here are already filled in.', tone: 'ok' }); setOneAiBusy(false); return }
+      setDraft((d0) => ({ ...d0, ...fills }))
+      setOneAiMsg({ text: `Filled ${n} blank field${n !== 1 ? 's' : ''}. Double-check EPA Reg # and rates against the label.`, tone: 'ok' })
+    } catch (e) { setOneAiMsg({ text: String(e?.message || e), tone: 'err' }) }
+    setOneAiBusy(false)
+  }
+
   const applyAiReview = async () => {
     if (!aiReview?.items) return
     setAiApplying(true)
@@ -3623,14 +3648,16 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   }
 
   const startEdit = (p) => {
+    setOneAiMsg(null)
     setEditing(p.name)
     setDraft({ ...p })
   }
   const startNew = () => {
+    setOneAiMsg(null)
     setEditing('new')
     setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '', eiq: '', caseSize: '', ozPerCase: '', costPerCase: '', moaGroup: '', rotationDays: '', sprayInterval: '' })
   }
-  const cancelEdit = () => { setEditing(null); setDraft(null) }
+  const cancelEdit = () => { setOneAiMsg(null); setEditing(null); setDraft(null) }
 
   const saveDraft = () => {
     if (!draft.name.trim()) return
@@ -3814,7 +3841,17 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
 
       {editing && draft && (
         <div ref={editRef} className="bg-white rounded-2xl border-2 p-4 mb-4 shadow-sm scroll-mt-4" style={{ borderColor: GOLD }}>
-          <p className="font-display text-base font-semibold text-slate-900 mb-3">{editing === 'new' ? 'Add New Chemical' : `Edit ${editing}`}</p>
+          <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+            <p className="font-display text-base font-semibold text-slate-900">{editing === 'new' ? 'Add New Chemical' : `Edit ${editing}`}</p>
+            <button onClick={autofillOne} disabled={oneAiBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-50 shrink-0" style={{ color: '#6D4AC2', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}>
+              {oneAiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {oneAiBusy ? 'Reading…' : 'Autofill this product'}
+            </button>
+          </div>
+          {oneAiMsg && (
+            <div className="rounded-lg px-3 py-2 mb-3 font-body text-[12px] flex items-start gap-1.5" style={oneAiMsg.tone === 'err' ? { backgroundColor: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA' } : oneAiMsg.tone === 'warn' ? { backgroundColor: '#FBF2E4', color: '#8A5A12', border: '1px solid #F0DFC0' } : { backgroundColor: '#F0F6F2', color: FERN, border: '1px solid #CFE3D6' }}>
+              <span>{oneAiMsg.text}{/not set up|ANTHROPIC/i.test(oneAiMsg.text) ? ' — say the word and I’ll walk you through adding the AI key.' : ''}</span>
+            </div>
+          )}
           <div className="space-y-3">
             <div>
               <FieldLabel>Product Name</FieldLabel>
