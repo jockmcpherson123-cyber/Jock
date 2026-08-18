@@ -3675,23 +3675,23 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
 
   return (
     <div className="pt-6 pb-10">
-      <div className="flex items-center justify-between mb-1 gap-2">
+      <div className="flex items-start justify-between mb-1 gap-2 flex-wrap">
         <SectionHeader title="Chemical Library" subtitle="Manage products, rates, and label maximums" noMargin />
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={pickFile} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <button onClick={pickFile} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border shrink-0" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
             <CloudUpload size={14} /> Import Excel
           </button>
           {products.length > 0 && (
-            <button onClick={exportLibrary} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#E2E8F0', backgroundColor: 'white' }}>
+            <button onClick={exportLibrary} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border shrink-0" style={{ color: FOREST, borderColor: '#E2E8F0', backgroundColor: 'white' }}>
               <CloudUpload size={14} className="rotate-180" /> Export Excel
             </button>
           )}
           {products.length > 0 && (
-            <button onClick={runAiEnrich} disabled={aiBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-50" style={{ color: '#6D4AC2', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}>
+            <button onClick={runAiEnrich} disabled={aiBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border shrink-0 disabled:opacity-50" style={{ color: '#6D4AC2', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}>
               {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {aiBusy ? 'Reading…' : 'Auto-fill AI'}
             </button>
           )}
-          <button onClick={startNew} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
+          <button onClick={startNew} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
             <Plus size={14} /> Add Product
           </button>
         </div>
@@ -3804,7 +3804,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
         )}
       </div>
 
-      <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+      <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar [&>*]:shrink-0 pb-1">
         {['All', ...PRODUCT_TYPES].map((t) => (
           <button key={t} onClick={() => setFilter(t)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={filter === t ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {t}
