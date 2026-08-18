@@ -3481,8 +3481,57 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   const [search, setSearch] = useState('')
   const [importPreview, setImportPreview] = useState(null) // { products, columns, count, error, fileName }
   const [importing, setImporting] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiReview, setAiReview] = useState(null) // { items:[{product,fills,confidence,include}], error }
+  const [aiApplying, setAiApplying] = useState(false)
   const fileRef = useRef(null)
   const editRef = useRef(null)
+
+  // ── AI library fill ──────────────────────────────────────────────────────
+  // Ask the AI for each product's label facts, then keep only values for fields
+  // the user has left BLANK (never overwrite hand-entered data). EPA reg # and
+  // rate ranges are tagged "verify" because those are the ones to eyeball.
+  const AI_BLANK = (v) => v == null || v === ''
+  const AI_NUM = (s) => { const n = parseFloat(s); return isNaN(n) ? null : n }
+  const AI_LABELS = { activeIngredient: 'Active ingredient', activePct: 'Active %', manufacturer: 'Manufacturer', formulation: 'Formulation', signalWord: 'Signal word', rei: 'REI', moaGroup: 'Group', epaReg: 'EPA Reg #', labelMinM: 'Min oz/M', labelMaxM: 'Max oz/M', labelMinA: 'Min oz/A', labelMaxA: 'Max oz/A', sprayInterval: 'Interval (days)' }
+
+  const runAiEnrich = async () => {
+    setAiBusy(true); setAiReview(null)
+    try {
+      const r = await fetch('/api/enrich-products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: products.map((p) => ({ name: p.name, type: p.type })) }) })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) { setAiReview({ error: d?.error || `Server error ${r.status}` }); setAiBusy(false); return }
+      const byName = {}
+      ;(d.results || []).forEach((res) => { byName[String(res.name || '').toLowerCase()] = res })
+      const items = []
+      products.forEach((p) => {
+        const res = byName[String(p.name).toLowerCase()]
+        if (!res || !res.found) return
+        const fills = {}
+        const strFields = ['activeIngredient', 'manufacturer', 'formulation', 'signalWord', 'rei', 'moaGroup']
+        strFields.forEach((f) => { if (!AI_BLANK(res[f]) && AI_BLANK(p[f])) fills[f] = { value: res[f] } })
+        if (!AI_BLANK(res.epaReg) && AI_BLANK(p.epaReg)) fills.epaReg = { value: res.epaReg, verify: true }
+        if (AI_NUM(res.activePct) != null && AI_BLANK(p.activePct)) fills.activePct = { value: AI_NUM(res.activePct) }
+        ;['labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA', 'sprayInterval'].forEach((f) => { if (AI_NUM(res[f]) != null && AI_BLANK(p[f])) fills[f] = { value: AI_NUM(res[f]), verify: f.startsWith('label') } })
+        if (Object.keys(fills).length) items.push({ product: p, fills, confidence: res.confidence || 'medium', include: true })
+      })
+      setAiReview({ items })
+    } catch (e) { setAiReview({ error: String(e?.message || e) }) }
+    setAiBusy(false)
+  }
+  const applyAiReview = async () => {
+    if (!aiReview?.items) return
+    setAiApplying(true)
+    try {
+      for (const it of aiReview.items) {
+        if (!it.include) continue
+        const patch = {}
+        Object.entries(it.fills).forEach(([f, { value }]) => { patch[f] = value })
+        await onSaveProduct({ ...it.product, ...patch })
+      }
+    } catch (e) { console.error(e) }
+    setAiApplying(false); setAiReview(null)
+  }
 
   // When the editor opens, scroll it into view — it renders above the list, so
   // editing a product far down would otherwise leave the form off-screen.
@@ -3637,11 +3686,72 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               <CloudUpload size={14} className="rotate-180" /> Export Excel
             </button>
           )}
+          {products.length > 0 && (
+            <button onClick={runAiEnrich} disabled={aiBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-50" style={{ color: '#6D4AC2', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}>
+              {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {aiBusy ? 'Reading…' : 'Auto-fill AI'}
+            </button>
+          )}
           <button onClick={startNew} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
             <Plus size={14} /> Add Product
           </button>
         </div>
       </div>
+
+      {aiReview && (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={() => !aiApplying && setAiReview(null)}>
+          <div className="bg-white rounded-2xl w-full sm:max-w-2xl shadow-2xl max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #EEF0EC' }}>
+              <p className="font-display text-base font-bold flex items-center gap-1.5" style={{ color: FOREST }}><Sparkles size={16} style={{ color: '#6D4AC2' }} /> AI found details to fill</p>
+              <button onClick={() => !aiApplying && setAiReview(null)} className="text-slate-400"><X size={18} /></button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              {aiReview.error ? (
+                <div className="rounded-xl px-4 py-3 font-body text-sm" style={{ backgroundColor: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA' }}>
+                  Couldn’t run the AI fill. <b>Reason:</b> {aiReview.error}
+                  {/not set up|ANTHROPIC/i.test(aiReview.error) && <div className="mt-1 text-[12px]">This needs the AI key (ANTHROPIC_API_KEY) in Vercel — same steps as the other key. Say the word and I’ll walk you through it.</div>}
+                </div>
+              ) : aiReview.items.length === 0 ? (
+                <p className="font-body text-sm text-slate-500">Nothing to add — your products already have these details filled in, or the AI wasn’t confident enough to suggest anything.</p>
+              ) : (
+                <>
+                  <div className="rounded-lg px-3 py-2 mb-3 font-body text-[12px] flex items-start gap-1.5" style={{ backgroundColor: '#FBF2E4', border: '1px solid #F0DFC0', color: '#8A5A12' }}>
+                    <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                    <span>Only <b>blank fields</b> get filled — nothing you typed is touched. Values tagged <b style={{ color: '#B45309' }}>VERIFY</b> (EPA Reg # and rates) should be checked against the physical label before you rely on them.</span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {aiReview.items.map((it, idx) => (
+                      <div key={it.product.name} className="rounded-xl border p-3" style={{ borderColor: it.include ? '#D6C9F2' : '#E2E8F0', backgroundColor: it.include ? '#FBFAFE' : 'white' }}>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={it.include} onChange={(e) => setAiReview((r) => ({ ...r, items: r.items.map((x, i) => i === idx ? { ...x, include: e.target.checked } : x) }))} className="w-4 h-4 rounded" style={{ accentColor: '#6D4AC2' }} />
+                          <span className="font-body text-sm font-bold text-slate-800">{it.product.name}</span>
+                          <span className="font-body text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full" style={{ backgroundColor: it.confidence === 'high' ? '#E8F3EC' : it.confidence === 'low' ? '#FEF2F2' : '#FEF3DD', color: it.confidence === 'high' ? FERN : it.confidence === 'low' ? '#B91C1C' : '#92660D' }}>{it.confidence}</span>
+                        </label>
+                        <div className="flex flex-wrap gap-1.5 mt-2 pl-6">
+                          {Object.entries(it.fills).map(([f, { value, verify }]) => (
+                            <span key={f} className="font-body text-[11px] px-2 py-1 rounded-lg" style={{ backgroundColor: '#F1F5F3', color: '#334155' }}>
+                              <span className="text-slate-400">{AI_LABELS[f] || f}:</span> <b>{String(value)}</b>
+                              {verify && <b className="ml-1 text-[9px] uppercase" style={{ color: '#B45309' }}>verify</b>}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            {!aiReview.error && aiReview.items.length > 0 && (
+              <div className="px-4 py-3 flex items-center justify-between gap-2" style={{ borderTop: '1px solid #EEF0EC' }}>
+                <span className="font-body text-[12px] text-slate-500">{aiReview.items.filter((i) => i.include).length} of {aiReview.items.length} products selected</span>
+                <div className="flex gap-2">
+                  <button onClick={() => setAiReview(null)} disabled={aiApplying} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-slate-500 border border-slate-200">Cancel</button>
+                  <button onClick={applyAiReview} disabled={aiApplying || !aiReview.items.some((i) => i.include)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: FOREST }}>{aiApplying ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Fill selected</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} className="hidden" />
       <p className="font-body text-[11px] text-slate-400 mt-1.5">
         First time importing? <button onClick={downloadTemplate} className="font-bold underline" style={{ color: FERN }}>Download a blank template</button> with the right columns, fill it in, then import it. The <span className="font-semibold">Mixing Order</span> column sets the tank fill order — enter a formulation like Dry, Flowable, EC, or Adjuvant (or leave it blank and we'll guess).
