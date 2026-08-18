@@ -626,6 +626,31 @@ function SprayOpsModule({ user }) {
     setRoute('edit')
   }
 
+  // Clone a past sheet into a fresh, editable one for today — same area, mix and
+  // rates — clearing everything spray-specific (sign-off, weather, tank checks).
+  function sprayAgain(src) {
+    setActiveSheet({
+      id: crypto.randomUUID(),
+      sheetType: src.sheetType || src.area || 'Spray Sheet',
+      date: localDateISO(),
+      operator: src.operator || '',
+      area: src.area,
+      tanks: src.tanks || (src.area && areas[src.area] ? areas[src.area].tanks : 1),
+      weather: { temp: '', wind: '', humidity: '', windDir: '' },
+      products: (src.products || []).filter((p) => p.product).map((p) => ({
+        id: uid(), product: p.product, rate: p.rate, basis: p.basis, forceGal: !!p.forceGal, target: p.target || '',
+      })),
+      targets: src.targets || [],
+      instructions: src.instructions || '',
+      ppe: src.ppe || [],
+      status: 'pending',
+      directorSig: '',
+      directorDate: '',
+      createdAt: new Date().toISOString(),
+    })
+    setRoute('edit')
+  }
+
   // Match a program area name (e.g. "Blue Greens") to the best spray area in
   // Settings (e.g. "Blue Greens SprayBug 1.67gpm"). Falls back to the first area.
   function matchSprayArea(programArea) {
@@ -793,6 +818,7 @@ function SprayOpsModule({ user }) {
             onBack={() => setRoute(manage ? 'dashboard' : 'tospray')}
             onEdit={() => setRoute('edit')}
             onDelete={() => removeSheet(activeSheet)}
+            onSprayAgain={() => sprayAgain(activeSheet)}
             onApprove={approveSheet}
             onLogSpray={async (updated, opts = {}) => {
               try {
@@ -1696,8 +1722,26 @@ function SheetList({ sheets, onOpen, onNew, onDelete, onImportHistory, manage, v
   }
   const cfg = CONFIG[variant] || CONFIG.manage
   const [filter, setFilter] = useState(cfg.initial)
+  const [q, setQ] = useState('')
   const active = cfg.keys.length ? filter : cfg.initial
-  const filtered = sheets.filter((s) => matchSheetFilter(s, active))
+  const needle = q.trim().toLowerCase()
+  const searchMatch = (s) => !needle || [s.area, s.operator, s.completedBy, s.date, ...(s.products || []).flatMap((p) => [p.product, p.target])].some((v) => String(v || '').toLowerCase().includes(needle))
+  const filtered = sheets.filter((s) => matchSheetFilter(s, active) && searchMatch(s))
+
+  // One row per product line, so the export drops straight into a spreadsheet.
+  const exportRecordsCsv = () => {
+    const rows = [['Date', 'Area', 'Applicator', 'Tanks', 'Product', 'Rate', 'Basis', 'Spraying for', 'Temp F', 'Wind mph', 'Humidity %', 'Wind dir']]
+    filtered.forEach((s) => {
+      const w = s.weather || {}
+      ;(s.products || []).filter((p) => p.product).forEach((p) => {
+        rows.push([s.date || '', s.area || '', s.completedBy || s.operator || '', s.tanks ?? '', p.product, p.rate ?? '', p.basis || '', p.target || '', w.temp || '', w.wind || '', w.humidity || '', w.windDir || ''])
+      })
+    })
+    const csv = rows.map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    const a = document.createElement('a'); a.href = url; a.download = `spray-records_${new Date().toISOString().slice(0, 10)}.csv`; a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
 
   return (
     <div className="pt-6">
@@ -1750,9 +1794,22 @@ function SheetList({ sheets, onOpen, onNew, onDelete, onImportHistory, manage, v
           ))}
         </div>
       )}
+      {(variant === 'records' || variant === 'manage') && (
+        <div className="flex items-center gap-2 mb-3 mt-1">
+          <div className="relative flex-1">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by area, product, applicator, date…" className="w-full border border-slate-200 rounded-full pl-9 pr-3 py-2 text-sm font-body bg-white" />
+          </div>
+          {variant === 'records' && (
+            <button onClick={exportRecordsCsv} disabled={!filtered.length} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-40 shrink-0" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
+              <CloudUpload size={14} className="rotate-180" /> Export CSV
+            </button>
+          )}
+        </div>
+      )}
       {filtered.length === 0 ? (
         <div className="mt-3 bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm shadow-sm">
-          {variant === 'tospray' ? 'Nothing to spray right now — all caught up.' : variant === 'records' ? 'No completed sprays yet.' : 'No sheets match this filter.'}
+          {needle ? 'No sheets match your search.' : variant === 'tospray' ? 'Nothing to spray right now — all caught up.' : variant === 'records' ? 'No completed sprays yet.' : 'No sheets match this filter.'}
         </div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 mt-3 items-start">
@@ -1984,6 +2041,9 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
 
                       {overLimit && (
                         <p className="font-body text-[11px] font-semibold text-red-600 mb-2 flex items-center gap-1">⚠ Over label maximum — limit is {labelMax} {p.basis}</p>
+                      )}
+                      {!overLimit && labelMin && rateNum > 0 && rateNum < labelMin && (
+                        <p className="font-body text-[11px] font-semibold mb-2 flex items-center gap-1" style={{ color: '#B45309' }}>↓ Below label minimum ({labelMin} {p.basis}) — light rate. Fine if that's intended.</p>
                       )}
                       {grassConflicts(prodInfo, area).length > 0 && (
                         <p className="font-body text-[11px] font-semibold text-red-600 mb-2 rounded-lg px-2 py-1.5" style={{ backgroundColor: '#FEF2F2' }}>
@@ -2421,7 +2481,7 @@ function SignaturePad({ value, onChange }) {
 }
 
 // ── SHEET VIEWER ──────────────────────────────────────────────────────────
-function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, directorPins = {}, location, courseInfo, manage, approve }) {
+function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, directorPins = {}, location, courseInfo, manage, approve }) {
   const [confirmDel, setConfirmDel] = useState(false)
   const [sig, setSig] = useState('')
   const [dirPin, setDirPin] = useState('')
@@ -2547,6 +2607,9 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onApprove, onLogSpray, o
           <button onClick={saveNow} className="font-body text-sm font-medium" style={{ color: FERN }}>Save</button>
           <button onClick={printRecord} className="font-body text-sm font-medium" style={{ color: FOREST }}>Print</button>
           <button onClick={exportPdf} disabled={pdfBusy} className="font-body text-sm font-medium disabled:opacity-50" style={{ color: FOREST }}>{pdfBusy ? 'PDF…' : 'Export PDF'}</button>
+          {manage && onSprayAgain && (
+            <button onClick={onSprayAgain} className="font-body text-sm font-medium" style={{ color: FOREST }} title="Start a new sheet with this same mix & rates">Spray again</button>
+          )}
           {manage && (
             <button onClick={onEdit} className="font-body text-sm font-medium" style={{ color: FERN }}>Edit</button>
           )}
