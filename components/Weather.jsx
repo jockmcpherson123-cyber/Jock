@@ -519,10 +519,23 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
                       <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: '#2563EB' }}>How to scout</p>
                       <p className="font-body text-[12px] text-slate-700 leading-relaxed">{s.scout}</p>
                     </div>
+                    {s.stage && (
+                      <div className="rounded-xl p-2.5" style={{ backgroundColor: '#FBF3EC' }}>
+                        <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: '#B45309' }}>Life stage to target</p>
+                        <p className="font-body text-[12px] text-slate-700 leading-relaxed">{s.stage}</p>
+                      </div>
+                    )}
                     <div className="rounded-xl p-2.5" style={{ backgroundColor: '#F0F6F2' }}>
-                      <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: FERN }}>Control timing</p>
+                      <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: FERN }}>When to treat</p>
                       <p className="font-body text-[12px] text-slate-700 leading-relaxed">{s.action}</p>
                     </div>
+                    {s.products && (
+                      <div className="rounded-xl p-2.5 border" style={{ backgroundColor: '#F6F4FB', borderColor: '#E4DCF3' }}>
+                        <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: '#6D48C4' }}>Suggested products</p>
+                        <p className="font-body text-[12px] text-slate-700 leading-relaxed">{s.products}</p>
+                        <p className="font-body text-[10px] text-slate-400 mt-1">Common labeled options — confirm the product is labeled for your site &amp; pest, follow the label, rotate modes of action, and let a licensed applicator make the call.</p>
+                      </div>
+                    )}
                     {s.source && <p className="font-body text-[10px] text-slate-400 italic">Source: {s.source}</p>}
                   </div>
                 )}
