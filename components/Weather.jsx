@@ -7,7 +7,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind, Info } from 'lucide-react'
 import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps, buildRainYear, smithKernsModel, SK_THRESHOLD } from '@/lib/weather'
 import { applicationTimings, soilTrend, currentSoilTemp } from '@/lib/soiltiming'
-import { diseaseRisks, pestStages } from '@/lib/pests'
+import { diseaseRisks, pestWatch } from '@/lib/pests'
 import { profileById, photoSearchUrl } from '@/lib/knowledge'
 import { localDateISO } from '@/lib/dates'
 
@@ -222,6 +222,7 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
   const [editRain, setEditRain] = useState(null) // { date, draft } while editing
   const [savingRain, setSavingRain] = useState(false)
   const [openRisk, setOpenRisk] = useState(null) // disease id whose profile is expanded
+  const [openWatch, setOpenWatch] = useState(null) // pest-watch id whose scouting detail is expanded
   const canEditRain = manage && typeof onSaveRain === 'function'
   const openRainEdit = (date, cur) => setEditRain({ date, draft: cur != null ? String(cur) : '' })
   // Prefill the box for a chosen date: your saved value if any, else the forecast.
@@ -335,7 +336,7 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
   // Smith-Kerns dollar spot forecast (its own card below). The directional
   // dollar_spot row is dropped from the general list since this supersedes it.
   const dollarSpot = smithKernsModel(daily, today)
-  // Full disease-risk model list + GDD (base 50°F) + GDD-based pest stages.
+  // Full disease-risk model list + GDD (base 50°F) + transition-zone pest watch.
   const risks = diseaseRisks(daily, soilNow, trend, today, courseInfo?.siteGrasses || [])
     .filter((r) => !(r.id === 'dollar_spot' && dollarSpot.hasData))
   // Year-to-date rainfall from the season archive + forecast + manual entries,
@@ -346,7 +347,7 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
     : null
   const gddToDate = Math.round(summary.gddNow || 0)
   const gddForecast7 = Math.round(daily.filter((d) => d.date > today).slice(0, 7).reduce((s, d) => s + (d.tMax != null && d.tMin != null ? Math.max(0, (d.tMax + d.tMin) / 2 - 50) : 0), 0))
-  const stages = pestStages(gddToDate)
+  const watch = pestWatch(today)
 
   return (
     <div className="pt-6 pb-10 space-y-5">
@@ -490,24 +491,46 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
         </div>
       </div>
 
-      {/* Pest stages at this GDD */}
+      {/* Pest watch — transition-zone scouting calendar */}
       <div>
-        <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Pest Stages at this GDD</p>
+        <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Pest Watch</p>
         <div className="space-y-2">
-          {stages.map((s) => {
-            const dot = s.tone === 'now' ? '#CA8A04' : s.tone === 'soon' ? '#16A34A' : '#94A3B8'
+          {watch.map((s) => {
+            const style = s.tone === 'now'
+              ? { dot: '#DC2626', bg: '#FEE2E2', fg: '#B91C1C' }
+              : s.tone === 'soon'
+                ? { dot: '#CA8A04', bg: '#FEF3DD', fg: '#92660D' }
+                : { dot: '#94A3B8', bg: '#F1F5F9', fg: '#64748B' }
+            const open = openWatch === s.id
             return (
-              <div key={s.id} className="bg-white rounded-2xl border border-black/5 shadow-sm flex items-center gap-3 p-3">
-                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: dot }} />
-                <div className="min-w-0">
-                  <p className="font-body text-sm font-bold text-slate-900">{s.label}</p>
-                  <p className="font-body text-[11px] text-slate-500">{s.status}</p>
-                  {s.source && <p className="font-body text-[10px] text-slate-400 mt-0.5 italic">Source: {s.source}</p>}
-                </div>
+              <div key={s.id} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden" style={s.tone === 'now' ? { borderLeft: '5px solid #DC2626' } : {}}>
+                <button onClick={() => setOpenWatch(open ? null : s.id)} className="w-full text-left flex items-center gap-3 p-3">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: style.dot }} />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-body text-sm font-bold text-slate-900 flex items-center gap-1.5">{s.label} <Info size={12} className="text-slate-300 shrink-0" /></p>
+                    <p className="font-body text-[11px] text-slate-500 mt-0.5">{s.window}</p>
+                  </div>
+                  <span className="font-body text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0" style={{ backgroundColor: style.bg, color: style.fg }}>{s.status}</span>
+                </button>
+                {open && (
+                  <div className="px-3 pb-3 space-y-2">
+                    <p className="font-body text-[12px] text-slate-600 leading-relaxed">{s.cue}</p>
+                    <div className="rounded-xl p-2.5" style={{ backgroundColor: '#EEF4FB' }}>
+                      <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: '#2563EB' }}>How to scout</p>
+                      <p className="font-body text-[12px] text-slate-700 leading-relaxed">{s.scout}</p>
+                    </div>
+                    <div className="rounded-xl p-2.5" style={{ backgroundColor: '#F0F6F2' }}>
+                      <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: FERN }}>Control timing</p>
+                      <p className="font-body text-[12px] text-slate-700 leading-relaxed">{s.action}</p>
+                    </div>
+                    {s.source && <p className="font-body text-[10px] text-slate-400 italic">Source: {s.source}</p>}
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
+        <p className="font-body text-[10px] text-slate-400 mt-2">Transition-zone (mid-Atlantic) monitoring windows — when to scout and what to look for. Decision-support; confirm with a soap-flush or turf-flap check before treating.</p>
       </div>
 
       {/* Spray windows */}
