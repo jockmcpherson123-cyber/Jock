@@ -7,7 +7,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind, Info } from 'lucide-react'
 import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps, buildRainYear, smithKernsModel, SK_THRESHOLD } from '@/lib/weather'
 import { applicationTimings, soilTrend, currentSoilTemp } from '@/lib/soiltiming'
-import { diseaseRisks, pestWatch } from '@/lib/pests'
+import { diseaseRisks, pestWatch, matchLibraryForPest } from '@/lib/pests'
 import { profileById, photoSearchUrl } from '@/lib/knowledge'
 import { localDateISO } from '@/lib/dates'
 
@@ -211,7 +211,7 @@ function RainfallYearCard({ rain, prev, canEdit, onEditDay }) {
   )
 }
 
-export default function Weather({ location, courseInfo, manage = false, onSaveRain, onGoToSettings }) {
+export default function Weather({ location, courseInfo, products = [], manage = false, onSaveRain, onGoToSettings }) {
   const [state, setState] = useState({ loading: true, error: null, daily: null, summary: null })
   const [current, setCurrent] = useState(null)
   const [soilSeries, setSoilSeries] = useState([]) // recent daily soil temps
@@ -536,6 +536,39 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
                         <p className="font-body text-[10px] text-slate-400 mt-1">Common labeled options — confirm the product is labeled for your site &amp; pest, follow the label, rotate modes of action, and let a licensed applicator make the call.</p>
                       </div>
                     )}
+                    {(() => {
+                      const matches = matchLibraryForPest(s.id, products)
+                      if (matches.length === 0) {
+                        return (
+                          <div className="rounded-xl p-2.5" style={{ backgroundColor: '#F1F5F9' }}>
+                            <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-0.5 text-slate-500">In your Chemical Library</p>
+                            <p className="font-body text-[12px] text-slate-500 leading-relaxed">Nothing in your library matches this pest yet. Add the active ingredient to a product (or stock one of the options above) and it’ll show here.</p>
+                          </div>
+                        )
+                      }
+                      return (
+                        <div className="rounded-xl p-2.5 border" style={{ backgroundColor: '#ECF7F0', borderColor: '#CDE7D6' }}>
+                          <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: FERN }}>In your Chemical Library</p>
+                          <div className="space-y-1.5">
+                            {matches.map((m) => {
+                              const inStock = m.stock != null && m.stock > 0
+                              return (
+                                <div key={m.name} className="flex items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="font-body text-[12px] font-bold text-slate-800 truncate">{m.name}</p>
+                                    <p className="font-body text-[10px] text-slate-500 truncate capitalize">{m.matched}{m.activeIngredient && m.activeIngredient.toLowerCase() !== m.matched ? ` · ${m.activeIngredient}` : ''}</p>
+                                  </div>
+                                  <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={inStock ? { backgroundColor: '#DCFCE7', color: '#15803D' } : { backgroundColor: '#FEF3C7', color: '#92660D' }}>
+                                    {inStock ? `${m.stock}${m.unit ? ` ${m.unit}` : ''} in stock` : 'in library'}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                          <p className="font-body text-[10px] text-slate-400 mt-1.5">Matched to the active ingredient you entered on each product. Verify the label covers this pest before use.</p>
+                        </div>
+                      )
+                    })()}
                     {s.source && <p className="font-body text-[10px] text-slate-400 italic">Source: {s.source}</p>}
                   </div>
                 )}
