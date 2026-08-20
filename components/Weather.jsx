@@ -5,7 +5,7 @@
 // All from Open-Meteo using the club's saved location — no API key required.
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind, Info } from 'lucide-react'
-import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps, buildRainYear } from '@/lib/weather'
+import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps, buildRainYear, smithKernsModel, SK_THRESHOLD } from '@/lib/weather'
 import { applicationTimings, soilTrend, currentSoilTemp } from '@/lib/soiltiming'
 import { diseaseRisks, pestStages } from '@/lib/pests'
 import { profileById, photoSearchUrl } from '@/lib/knowledge'
@@ -34,6 +34,98 @@ function fmtMonth(mk) {
   return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short' })
 }
 
+
+// Colour for a dollar-spot probability against the 20% action threshold.
+function dsColor(prob, threshold = 20) {
+  if (prob >= threshold) return '#DC2626' // at/above threshold — spray
+  if (prob >= threshold - 6) return '#EA580C' // approaching
+  return '#16A34A' // low
+}
+
+// Smith-Kerns dollar spot model card: today's probability, a plain-English call,
+// and a 5-day-past → 7-day-forecast probability curve with the action threshold
+// drawn in. This is the turf industry's standard dollar-spot forecaster.
+function DollarSpotCard({ model }) {
+  const { series, today, level, threshold, trend, streak, crossing } = model
+  const pastPoints = series.filter((s) => !s.future)
+  const todayDate = pastPoints.length ? pastPoints[pastPoints.length - 1].date : null
+  const CH = 64 // chart height in px
+  const c = dsColor(today, threshold)
+  const st = level === 'high' ? RISK_STYLES.high : level === 'watch' ? RISK_STYLES.moderate : RISK_STYLES.low
+  const bandLabel = level === 'high' ? 'At / above threshold' : level === 'watch' ? 'Approaching threshold' : 'Below threshold'
+
+  // Plain-English guidance.
+  let guide
+  if (level === 'high') {
+    guide = streak >= 1
+      ? `Risk has been at or above the ${threshold}% spray threshold for ${streak} day${streak > 1 ? 's' : ''}. The model supports a preventive fungicide${crossing ? `; it looks to ease back by ${fmtDay(crossing.date)}.` : ' now.'}`
+      : `Risk has reached the ${threshold}% spray threshold today. The model supports a preventive fungicide.`
+  } else if (crossing && crossing.dir === 'up') {
+    guide = `Low today, but the model has risk crossing the ${threshold}% threshold around ${fmtDay(crossing.date)} (${crossing.prob}%). Line up a preventive so you're ahead of it.`
+  } else if (level === 'watch') {
+    guide = `Climbing toward the ${threshold}% threshold. Keep an eye on it over the next few days.`
+  } else {
+    guide = `Below the ${threshold}% action threshold and ${trend === 'up' ? 'rising slowly' : 'not building'}. No dollar-spot spray indicated by the model right now.`
+  }
+
+  return (
+    <div>
+      <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Dollar Spot · Smith-Kerns Model</p>
+      <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4" style={{ borderLeft: `5px solid ${c}` }}>
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="min-w-0">
+            <p className="font-display text-3xl font-bold text-slate-900 leading-none">
+              {today}<span className="text-lg font-medium text-slate-400">%</span>
+            </p>
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide mt-1" style={{ color: st.fg }}>
+              {bandLabel}{trend !== 'flat' ? ` · ${trend === 'up' ? '↑ rising' : '↓ easing'}` : ''}
+            </p>
+          </div>
+          <span className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0" style={{ backgroundColor: st.bg, color: st.fg }}>
+            Spray at {threshold}%+
+          </span>
+        </div>
+
+        {/* Probability curve: past 5 days → 7-day forecast, with threshold line */}
+        <div className="relative mt-1" style={{ height: CH }}>
+          {/* threshold line */}
+          <div className="absolute left-0 right-0 border-t border-dashed" style={{ bottom: (threshold / 100) * CH, borderColor: '#DC262666' }} />
+          <div className="absolute right-0 font-body text-[9px] font-bold" style={{ color: '#DC2626', bottom: (threshold / 100) * CH + 1 }}>{threshold}%</div>
+          <div className="flex items-end gap-[3px] h-full">
+            {series.map((p) => {
+              const h = Math.max(3, (p.prob / 100) * CH)
+              const isToday = p.date === todayDate
+              return (
+                <div key={p.date} className="flex-1 flex flex-col justify-end items-center h-full" title={`${fmtDay(p.date)}: ${p.prob}%`}>
+                  <div
+                    className="w-full rounded-t"
+                    style={{
+                      height: h,
+                      backgroundColor: dsColor(p.prob, threshold),
+                      opacity: p.future ? 0.45 : 1,
+                      outline: isToday ? `2px solid ${FOREST}` : 'none',
+                      outlineOffset: isToday ? 1 : 0,
+                    }}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        <div className="flex items-center justify-between mt-1.5 font-body text-[10px] text-slate-400">
+          <span>{series.length ? fmtDay(series[0].date) : ''}</span>
+          <span className="font-bold" style={{ color: FOREST }}>▲ Today</span>
+          <span>{series.length ? fmtDay(series[series.length - 1].date) : ''} (forecast)</span>
+        </div>
+
+        <p className="font-body text-[12px] text-slate-600 leading-relaxed mt-3">{guide}</p>
+        <p className="font-body text-[10px] text-slate-400 mt-2">
+          University of Wisconsin Smith-Kerns model — 5-day average humidity + air temperature. {threshold}% is the validated spray threshold; the fungus is dormant below 50°F / above 95°F. Decision-support — pair with scouting.
+        </p>
+      </div>
+    </div>
+  )
+}
 
 const RAIN_BLUE = '#2563EB'
 
@@ -240,8 +332,12 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
   const trend = soilTrend(soilSeries)
   const timings = soilNow != null ? applicationTimings(soilNow, trend) : []
 
+  // Smith-Kerns dollar spot forecast (its own card below). The directional
+  // dollar_spot row is dropped from the general list since this supersedes it.
+  const dollarSpot = smithKernsModel(daily, today)
   // Full disease-risk model list + GDD (base 50°F) + GDD-based pest stages.
   const risks = diseaseRisks(daily, soilNow, trend, today, courseInfo?.siteGrasses || [])
+    .filter((r) => !(r.id === 'dollar_spot' && dollarSpot.hasData))
   // Year-to-date rainfall from the season archive + forecast + manual entries,
   // plus last year to the same date for a fair comparison.
   const rain = buildRainYear(state.season, rawDaily, rainOverrides, today)
@@ -337,6 +433,9 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
           <p className="font-body text-[10px] text-slate-400 mt-2">Soil temp is a 2-inch estimate from your location. Windows are published transition-zone starting points — pair with your own read and local extension guidance.</p>
         </div>
       )}
+
+      {/* Dollar spot — Smith-Kerns probability model */}
+      {dollarSpot.hasData && <DollarSpotCard model={dollarSpot} />}
 
       {/* Disease risk models */}
       <div>

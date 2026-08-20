@@ -864,7 +864,7 @@ function SprayOpsModule({ user }) {
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
         {route === 'program' && manage && <AnnualProgram areas={areas} products={products} sheets={sheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
-        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} />}
+        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} onSaveSettings={saveSettings} />}
         {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
           <SettingsPage
@@ -4323,7 +4323,7 @@ function Inventory({ products, deliveries, onAddDelivery }) {
 }
 
 // ── REPORTS ───────────────────────────────────────────────────────────────
-function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [] }) {
+function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], onSaveSettings }) {
   const [view, setView] = useState('byArea')
   const [report, setReport] = useState('npk') // 'npk' | 'rotation'
   const npkData = aggregateNPK(sheets, products, areas)
@@ -4425,7 +4425,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [] }) 
 
       {report === 'nitrogen' && <NitrogenReport sheets={sheets} products={products} areas={areas} fertSheets={fertSheets} />}
       {report === 'reorder' && <ReorderReport sheets={sheets} products={products} areas={areas} />}
-      {report === 'cost' && <CostReport sheets={sheets} products={products} areas={areas} />}
+      {report === 'cost' && <CostReport sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} onSaveSettings={onSaveSettings} />}
       {report === 'impact' && <ImpactReport sheets={sheets} products={products} areas={areas} />}
       {report === 'rotation' && <RotationReport sheets={sheets} products={products} />}
       {report === 'usage' && <ProductUsageReport sheets={sheets} products={products} areas={areas} />}
@@ -4709,11 +4709,47 @@ function RotationReport({ sheets, products }) {
 // How much of each product actually went out (from approved/completed sheets).
 // ── COST / BUDGET REPORT ────────────────────────────────────────────────────
 // What the program has actually cost, from applied amounts × case pricing.
-function CostReport({ sheets, products, areas }) {
+function CostReport({ sheets, products, areas, courseInfo = {}, onSaveSettings }) {
   const [view, setView] = useState('product') // 'product' | 'area' | 'month'
   const data = productCosts(sheets, products, areas)
   const money = (n) => `$${(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const money0 = (n) => `$${Math.round(n || 0).toLocaleString('en-US')}`
   const monthLabel = (m) => { const [y, mm] = m.split('-'); return new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) }
+
+  // ── Budget layer ───────────────────────────────────────────────────────────
+  // One annual chemical budget (persisted in course settings) benchmarked
+  // against THIS calendar year's spend, with a pace read and a year-end
+  // projection so you know early if you're tracking over.
+  const budget = Number(courseInfo.sprayBudget) || 0
+  const nowY = new Date().getFullYear()
+  const spentThisYear = data.byMonth
+    .filter((r) => r.month.startsWith(String(nowY)))
+    .reduce((s, r) => s + r.cost, 0)
+  const totalApps = data.rows.reduce((s, r) => s + r.apps, 0)
+  const costPerApp = totalApps > 0 ? data.totalCost / totalApps : null
+  // Fraction of the year elapsed (day-of-year ÷ 365), for the pace comparison.
+  const startY = new Date(nowY, 0, 1)
+  const yearFrac = Math.min(1, Math.max(0.02, (Date.now() - startY.getTime()) / (365 * 86400000)))
+  const projected = spentThisYear > 0 ? spentThisYear / yearFrac : 0
+  const pctUsed = budget > 0 ? spentThisYear / budget : null
+  // Pace: spend fraction vs year fraction. >1.1 over pace, <0.9 under, else on.
+  const paceRatio = budget > 0 ? pctUsed / yearFrac : null
+  const paceLabel = paceRatio == null ? '' : paceRatio > 1.1 ? 'Over pace' : paceRatio < 0.9 ? 'Under budget' : 'On pace'
+  const paceColor = paceRatio == null ? FERN : paceRatio > 1.1 ? '#DC2626' : paceRatio < 0.9 ? FERN : '#92660D'
+  const overBudget = budget > 0 && spentThisYear > budget
+
+  const [editBudget, setEditBudget] = useState(false)
+  const [budgetDraft, setBudgetDraft] = useState('')
+  const [savingBudget, setSavingBudget] = useState(false)
+  const openBudget = () => { setBudgetDraft(budget ? String(budget) : ''); setEditBudget(true) }
+  async function commitBudget() {
+    if (!onSaveSettings) { setEditBudget(false); return }
+    setSavingBudget(true)
+    const val = budgetDraft === '' ? null : Math.max(0, Math.round(Number(budgetDraft) || 0))
+    try { await onSaveSettings({ courseInfo: { ...courseInfo, sprayBudget: val } }) } catch { /* parent toasts */ }
+    setSavingBudget(false)
+    setEditBudget(false)
+  }
 
   const lists = {
     product: data.rows.map((r) => ({ key: r.name, label: r.name, sub: `${r.apps} application${r.apps !== 1 ? 's' : ''}${r.type ? ` · ${r.type}` : ''}`, cost: r.cost })),
@@ -4751,6 +4787,79 @@ function CostReport({ sheets, products, areas }) {
           </button>
         )}
       </div>
+
+      {/* Annual budget tracker */}
+      <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 mb-4">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <div className="min-w-0">
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">{nowY} Chemical Budget</p>
+            {budget > 0 ? (
+              <p className="font-display text-2xl font-bold text-slate-900 mt-0.5">
+                {money0(spentThisYear)} <span className="font-body text-sm font-medium text-slate-400">of {money0(budget)}</span>
+              </p>
+            ) : (
+              <p className="font-body text-sm text-slate-500 mt-1">Set a budget to track spend against it.</p>
+            )}
+          </div>
+          {onSaveSettings && (
+            <button onClick={openBudget} className="font-body text-xs font-bold px-3 py-1.5 rounded-full shrink-0 border" style={{ color: FOREST, borderColor: '#D8E6DC', backgroundColor: '#F5FAF6' }}>
+              {budget > 0 ? 'Edit' : 'Set budget'}
+            </button>
+          )}
+        </div>
+
+        {budget > 0 && (
+          <>
+            <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden mb-2">
+              <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, Math.round((pctUsed || 0) * 100))}%`, backgroundColor: overBudget ? '#DC2626' : paceColor }} />
+            </div>
+            <div className="flex items-center justify-between flex-wrap gap-x-4 gap-y-1">
+              <span className="font-body text-[12px] font-bold" style={{ color: paceColor }}>
+                {Math.round((pctUsed || 0) * 100)}% used · {paceLabel}
+              </span>
+              <span className="font-body text-[12px] text-slate-500">
+                {overBudget ? <>Over by <b className="text-red-600">{money0(spentThisYear - budget)}</b></> : <>{money0(budget - spentThisYear)} left</>}
+              </span>
+            </div>
+            <div className="flex items-center gap-4 mt-2.5 pt-2.5 border-t border-black/5">
+              <div>
+                <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Projected year-end</p>
+                <p className="font-display text-base font-bold mt-0.5" style={{ color: projected > budget ? '#DC2626' : FOREST }}>{money0(projected)}</p>
+              </div>
+              {costPerApp != null && (
+                <div className="pl-4 border-l border-black/5">
+                  <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Avg cost / application</p>
+                  <p className="font-display text-base font-bold text-slate-900 mt-0.5">{money(costPerApp)}</p>
+                </div>
+              )}
+            </div>
+            <p className="font-body text-[10px] text-slate-400 mt-2">Pace compares spend so far against how much of the year has passed ({Math.round(yearFrac * 100)}% in). Projection = this year's spend ÷ that fraction. Counts approved &amp; completed sprays only.</p>
+          </>
+        )}
+        {budget === 0 && costPerApp != null && (
+          <div className="mt-1 pt-2.5 border-t border-black/5">
+            <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Avg cost / application</p>
+            <p className="font-display text-base font-bold text-slate-900 mt-0.5">{money(costPerApp)}</p>
+          </div>
+        )}
+      </div>
+
+      {editBudget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditBudget(false)}>
+          <div className="bg-white rounded-2xl border-2 p-4 shadow-2xl w-full max-w-xs" style={{ borderColor: FOREST }} onClick={(e) => e.stopPropagation()}>
+            <p className="font-display text-base font-semibold text-slate-900 mb-1">{nowY} chemical budget</p>
+            <p className="font-body text-xs text-slate-400 mb-3">Your target spend on spray products for the year. Leave blank to turn the tracker off.</p>
+            <div className="flex items-center gap-2">
+              <span className="font-body text-lg font-semibold text-slate-500">$</span>
+              <input type="number" step="1" min="0" inputMode="numeric" autoFocus value={budgetDraft} onChange={(e) => setBudgetDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') commitBudget() }} className="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body" placeholder="e.g. 120000" />
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setEditBudget(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+              <button onClick={commitBudget} disabled={savingBudget} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{savingBudget ? 'Saving…' : 'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {data.missing.length > 0 && (
         <div className="bg-amber-50 rounded-2xl border border-amber-200 p-4 mb-4">
