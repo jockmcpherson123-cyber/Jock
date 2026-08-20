@@ -451,6 +451,7 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
                   <div className="min-w-0 flex-1">
                     <p className="font-body text-sm font-bold text-slate-900 flex items-center gap-1.5">{r.label}{prof && <Info size={12} className="text-slate-300 shrink-0" />}</p>
                     <p className="font-body text-[11px] text-slate-500 mt-0.5">{r.desc}</p>
+                    {r.source && <p className="font-body text-[10px] text-slate-400 mt-1 italic">Source: {r.source}</p>}
                   </div>
                   <div className="w-11 h-11 rounded-full flex items-center justify-center shrink-0 text-white font-display font-bold text-sm" style={{ backgroundColor: c }}>{r.score}</div>
                 </button>
@@ -476,7 +477,7 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
           })}
           {risks.length === 0 && <div className="bg-white rounded-2xl border border-black/5 p-6 text-center text-slate-400 font-body text-sm">Not enough weather yet to score disease risk.</div>}
         </div>
-        <p className="font-body text-[10px] text-slate-400 mt-2">General 0–100 models from Open-Meteo weather + 2&quot; soil temp — directional, calibrate thresholds to your region.</p>
+        <p className="font-body text-[10px] text-slate-400 mt-2">0–100 risk indices built on published university-extension thresholds (source shown on each), computed from Open-Meteo weather + 2&quot; soil temp. Decision-support — pair with scouting and calibrate to your region.</p>
       </div>
 
       {/* Growing degree days */}
@@ -501,6 +502,7 @@ export default function Weather({ location, courseInfo, manage = false, onSaveRa
                 <div className="min-w-0">
                   <p className="font-body text-sm font-bold text-slate-900">{s.label}</p>
                   <p className="font-body text-[11px] text-slate-500">{s.status}</p>
+                  {s.source && <p className="font-body text-[10px] text-slate-400 mt-0.5 italic">Source: {s.source}</p>}
                 </div>
               </div>
             )
