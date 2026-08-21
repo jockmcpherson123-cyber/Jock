@@ -334,6 +334,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   // Annual Program tab with a per-surface, grass-matched, site-tuned program.
   const [bpSetup, setBpSetup] = useState(null) // { year, selected: {areaName:bool} }
   const [bpBusy, setBpBusy] = useState(false)
+  const [bpError, setBpError] = useState(null) // error shown INSIDE the dialog (toasts hide behind it)
 
   function openBuildSetup() {
     const names = Object.keys(areas || {})
@@ -344,24 +345,35 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   async function confirmBuild() {
     if (!bpSetup) return
     const chosen = Object.keys(bpSetup.selected).filter((n) => bpSetup.selected[n])
-    if (chosen.length === 0) { showToast('Pick at least one surface'); return }
+    if (chosen.length === 0) { setBpError('Pick at least one surface to include.'); return }
     setBpBusy(true)
+    setBpError(null)
     try {
-      // Tune to the course's own averaged soil curve when we have a location;
-      // fall back to regional normals so a program is always produced.
+      // Tune to the course's own averaged soil curve when we have a location,
+      // but NEVER let the weather fetch block the build — cap it hard and fall
+      // back to regional normals so the program always saves.
       let climate = null
-      try { if (location?.lat != null && location?.lng != null) climate = await fetchSiteClimate(location.lat, location.lng) } catch { climate = null }
+      if (location?.lat != null && location?.lng != null) {
+        try {
+          climate = await Promise.race([
+            fetchSiteClimate(location.lat, location.lng),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('climate timeout')), 8000)),
+          ])
+        } catch { climate = null }
+      }
       const areaList = chosen.map((n) => ({ name: n, grasses: areas[n]?.grasses || [] }))
       const program = buildProgram(bpSetup.year, { areas: areaList, products, climate })
+      const apps = toApplications(program)
       const prog = await db.createProgram({ year: Number(bpSetup.year), name: `${bpSetup.year} Model Program` })
-      await db.bulkInsertApplications(prog.id, toApplications(program))
+      await db.bulkInsertApplications(prog.id, apps)
       await loadPrograms()
       await selectProgram(prog)
       setBpSetup(null)
       showToast(`Built ${program.total} applications across ${chosen.length} surface${chosen.length > 1 ? 's' : ''}${program.climate.tuned ? ' · tuned to your site' : ''}`)
     } catch (e) {
-      console.error(e)
-      showToast('Could not build the program')
+      console.error('Build from models failed:', e)
+      // Show the real reason INSIDE the dialog — a toast would hide behind it.
+      setBpError(e?.message || e?.error_description || e?.hint || 'Unknown error while building the program.')
     } finally { setBpBusy(false) }
   }
   const fileRef = useRef(null)
@@ -910,8 +922,8 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 
       {bpSetup && (
         <BuildSetup
-          setup={bpSetup} setSetup={setBpSetup} areas={areas} busy={bpBusy}
-          onConfirm={confirmBuild} onClose={() => !bpBusy && setBpSetup(null)}
+          setup={bpSetup} setSetup={setBpSetup} areas={areas} busy={bpBusy} error={bpError}
+          onConfirm={confirmBuild} onClose={() => !bpBusy && (setBpSetup(null), setBpError(null))}
         />
       )}
 
@@ -1751,7 +1763,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 // Pick a year and which surfaces to include; each surface generates its own
 // grass-matched program. On confirm the parent fetches the site climate, builds
 // the per-surface program and saves it onto the Annual Program tab.
-function BuildSetup({ setup, setSetup, areas, busy, onConfirm, onClose }) {
+function BuildSetup({ setup, setSetup, areas, busy, error, onConfirm, onClose }) {
   const names = Object.keys(areas || {})
   const chosenCount = names.filter((n) => setup.selected[n]).length
   const thisYear = new Date().getFullYear()
@@ -1812,6 +1824,13 @@ function BuildSetup({ setup, setSetup, areas, busy, onConfirm, onClose }) {
             <AlertTriangle size={13} className="shrink-0 mt-0.5" />
             <span>Creates a new <b>{setup.year} Model Program</b> — a starting template to review. Chemistry classes with resistance-group rotation, no rates. A licensed applicator adjusts it before spraying.</span>
           </div>
+
+          {error && (
+            <div className="rounded-xl p-2.5 mt-3 flex items-start gap-2 text-[12px] bg-red-50 border border-red-200 text-red-700">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <span><b>Couldn't build.</b> {error}</span>
+            </div>
+          )}
 
           <div className="flex gap-2 mt-4">
             <button onClick={onClose} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200 disabled:opacity-50">Cancel</button>
