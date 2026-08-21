@@ -343,38 +343,57 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     setBpSetup({ year: new Date().getFullYear() + 1, selected })
   }
   async function confirmBuild() {
-    if (!bpSetup) return
+    if (!bpSetup || bpBusy) return
     const chosen = Object.keys(bpSetup.selected).filter((n) => bpSetup.selected[n])
     if (chosen.length === 0) { setBpError('Pick at least one surface to include.'); return }
     setBpBusy(true)
     setBpError(null)
     try {
-      // Tune to the course's own averaged soil curve when we have a location,
-      // but NEVER let the weather fetch block the build — cap it hard and fall
-      // back to regional normals so the program always saves.
-      let climate = null
-      if (location?.lat != null && location?.lng != null) {
-        try {
-          climate = await Promise.race([
-            fetchSiteClimate(location.lat, location.lng),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('climate timeout')), 8000)),
-          ])
-        } catch { climate = null }
-      }
+      // Build with regional normals — instant, no network — then save it. Site-
+      // climate tuning happens as a non-blocking refinement AFTER the save, so
+      // the button can never hang on a weather request.
       const areaList = chosen.map((n) => ({ name: n, grasses: areas[n]?.grasses || [] }))
-      const program = buildProgram(bpSetup.year, { areas: areaList, products, climate })
+      const program = buildProgram(bpSetup.year, { areas: areaList, products })
       const apps = toApplications(program)
       const prog = await db.createProgram({ year: Number(bpSetup.year), name: `${bpSetup.year} Model Program` })
       await db.bulkInsertApplications(prog.id, apps)
       await loadPrograms()
       await selectProgram(prog)
       setBpSetup(null)
-      showToast(`Built ${program.total} applications across ${chosen.length} surface${chosen.length > 1 ? 's' : ''}${program.climate.tuned ? ' · tuned to your site' : ''}`)
+      showToast(`Built ${program.total} applications across ${chosen.length} surface${chosen.length > 1 ? 's' : ''}`)
+      // Best-effort: refine soil-driven dates to the site's own climate in the
+      // background; if it fails or is slow it simply leaves the normals in place.
+      tuneProgramToSite(prog.id, bpSetup.year, areaList).catch(() => {})
     } catch (e) {
       console.error('Build from models failed:', e)
       // Show the real reason INSIDE the dialog — a toast would hide behind it.
       setBpError(e?.message || e?.error_description || e?.hint || 'Unknown error while building the program.')
     } finally { setBpBusy(false) }
+  }
+
+  // Non-blocking site-climate refinement: pull the course's averaged soil curve
+  // and, if it differs from the normals, rewrite the soil-driven applications'
+  // dates in place. Runs after the program is already saved and visible.
+  async function tuneProgramToSite(programId, year, areaList) {
+    if (!(location?.lat != null && location?.lng != null)) return
+    let climate = null
+    try {
+      climate = await Promise.race([
+        fetchSiteClimate(location.lat, location.lng),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
+      ])
+    } catch { return }
+    if (!climate || !climate.tuned) return
+    const tuned = buildProgram(year, { areas: areaList, products, climate })
+    // Only the soil-driven targets move; re-save the whole program cleanly.
+    try {
+      const existing = await db.fetchApplications(programId)
+      // Replace by clearing and re-inserting keeps it simple and consistent.
+      for (const a of existing) await db.deleteApplication(a.id)
+      await db.bulkInsertApplications(programId, toApplications(tuned))
+      if (activeProgram?.id === programId) setApps(await db.fetchApplications(programId))
+      showToast('Program tuned to your site climate')
+    } catch { /* leave the normals version in place */ }
   }
   const fileRef = useRef(null)
   const flatFileRef = useRef(null)
@@ -1834,8 +1853,8 @@ function BuildSetup({ setup, setSetup, areas, busy, error, onConfirm, onClose })
 
           <div className="flex gap-2 mt-4">
             <button onClick={onClose} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200 disabled:opacity-50">Cancel</button>
-            <button onClick={onConfirm} disabled={busy || chosenCount === 0} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
-              {busy ? <><Loader2 size={15} className="animate-spin" /> Reading your climate…</> : <>Build &amp; add to program</>}
+            <button onClick={onConfirm} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
+              {busy ? <><Loader2 size={15} className="animate-spin" /> Building…</> : <>Build &amp; add to program</>}
             </button>
           </div>
         </div>
