@@ -332,10 +332,9 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
   // ── Build From Models: pick a year + which surfaces, then auto-fill the
   // Annual Program tab with a per-surface, grass-matched, site-tuned program.
+  // The build+save runs inside the dialog (BuildSetup); the parent just opens
+  // it, refreshes on save, and runs the optional climate refinement.
   const [bpSetup, setBpSetup] = useState(null) // { year, selected: {areaName:bool} }
-  const [bpBusy, setBpBusy] = useState(false)
-  const [bpError, setBpError] = useState(null) // error shown INSIDE the dialog (toasts hide behind it)
-  const [bpTrace, setBpTrace] = useState('') // step-by-step trace for diagnosing the build
 
   function openBuildSetup() {
     const names = Object.keys(areas || {})
@@ -343,39 +342,11 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     names.forEach((n) => { selected[n] = true })
     setBpSetup({ year: new Date().getFullYear() + 1, selected })
   }
-  async function confirmBuild() {
-    setBpTrace(`start · busy=${bpBusy}`)
-    if (!bpSetup) { setBpTrace('no setup'); return }
-    const chosen = Object.keys(bpSetup.selected || {}).filter((n) => bpSetup.selected[n])
-    if (chosen.length === 0) { setBpError('Pick at least one surface to include.'); setBpTrace('0 surfaces'); return }
-    setBpBusy(true)
-    setBpError(null)
-    try {
-      setBpTrace(`building ${chosen.length} surface(s)…`)
-      const areaList = chosen.map((n) => ({ name: n, grasses: areas[n]?.grasses || [] }))
-      const program = buildProgram(bpSetup.year, { areas: areaList, products })
-      const apps = toApplications(program)
-      setBpTrace(`built ${apps.length} apps · creating season…`)
-      const prog = await db.createProgram({ year: Number(bpSetup.year), name: `${bpSetup.year} Model Program` })
-      setBpTrace(`season ${prog?.id ? 'ok' : 'null'} · inserting ${apps.length}…`)
-      await db.bulkInsertApplications(prog.id, apps)
-      setBpTrace('inserted · refreshing…')
-      await loadPrograms()
-      await selectProgram(prog)
-      setBpTrace('done')
-      setBpSetup(null)
-      showToast(`Built ${program.total} applications across ${chosen.length} surface${chosen.length > 1 ? 's' : ''}`)
-      tuneProgramToSite(prog.id, bpSetup.year, areaList).catch(() => {})
-    } catch (e) {
-      console.error('Build from models failed:', e)
-      setBpTrace(`ERROR: ${e?.message || e?.error_description || e?.hint || e?.code || 'unknown'}`)
-      setBpError(e?.message || e?.error_description || e?.hint || e?.code || 'Unknown error while building the program.')
-    } finally { setBpBusy(false) }
-  }
 
-  // Non-blocking site-climate refinement: pull the course's averaged soil curve
-  // and, if it differs from the normals, rewrite the soil-driven applications'
-  // dates in place. Runs after the program is already saved and visible.
+  // Non-blocking site-climate refinement: pulls the course's averaged soil curve
+  // and, if it differs from the regional normals, rewrites the soil-driven
+  // application dates in place. Runs AFTER the program is saved and visible, from
+  // the parent (which stays mounted), so it never affects the build button.
   async function tuneProgramToSite(programId, year, areaList) {
     if (!(location?.lat != null && location?.lng != null)) return
     let climate = null
@@ -386,11 +357,9 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
       ])
     } catch { return }
     if (!climate || !climate.tuned) return
-    const tuned = buildProgram(year, { areas: areaList, products, climate })
-    // Only the soil-driven targets move; re-save the whole program cleanly.
     try {
+      const tuned = buildProgram(year, { areas: areaList, products, climate })
       const existing = await db.fetchApplications(programId)
-      // Replace by clearing and re-inserting keeps it simple and consistent.
       for (const a of existing) await db.deleteApplication(a.id)
       await db.bulkInsertApplications(programId, toApplications(tuned))
       if (activeProgram?.id === programId) setApps(await db.fetchApplications(programId))
@@ -944,7 +913,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
       {bpSetup && (
         <BuildSetup
           setup={bpSetup} setSetup={setBpSetup} areas={areas} products={products}
-          onSaved={async (prog, summary) => { await loadPrograms(); await selectProgram(prog); setBpSetup(null); showToast(summary) }}
+          onSaved={async (prog, summary, areaList, year) => { await loadPrograms(); await selectProgram(prog); setBpSetup(null); showToast(summary); tuneProgramToSite(prog.id, year, areaList).catch(() => {}) }}
           onClose={() => setBpSetup(null)}
         />
       )}
@@ -1802,7 +1771,7 @@ function BuildSetup({ setup, setSetup, areas, products = [], onSaved, onClose })
       const apps = toApplications(program)
       const prog = await db.createProgram({ year: Number(setup.year), name: `${setup.year} Model Program` })
       await db.bulkInsertApplications(prog.id, apps)
-      await onSaved(prog, `Built ${program.total} applications across ${chosen.length} surface${chosen.length > 1 ? 's' : ''}`)
+      await onSaved(prog, `Built ${program.total} applications across ${chosen.length} surface${chosen.length > 1 ? 's' : ''}`, areaList, setup.year)
     } catch (e) {
       console.error('Build from models failed:', e)
       setError(e?.message || e?.error_description || e?.hint || e?.code || 'Unknown error while building the program.')
@@ -1820,7 +1789,7 @@ function BuildSetup({ setup, setSetup, areas, products = [], onSaved, onClose })
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-6" onClick={(e) => e.stopPropagation()}>
         <div className="border-b border-black/5 px-5 py-3.5 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-display text-lg font-semibold text-slate-900 flex items-center gap-1.5"><Sparkles size={16} style={{ color: FERN }} /> Build a program from the models <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 tracking-wide">v7</span></p>
+            <p className="font-display text-lg font-semibold text-slate-900 flex items-center gap-1.5"><Sparkles size={16} style={{ color: FERN }} /> Build a program from the models</p>
             <p className="font-body text-[11px] text-slate-400">Each surface is generated on its own, matched to its grass and tuned to your climate.</p>
           </div>
           <button onClick={onClose} disabled={busy} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 disabled:opacity-40"><X size={18} /></button>
