@@ -11,7 +11,7 @@ import { parseWorkbook } from '@/lib/importXlsx'
 import { downloadCSV } from '@/lib/calc'
 import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
 import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
-import { buildProgram } from '@/lib/programgen'
+import { buildProgram, toApplications, classifySurface, SURFACE_LABEL, grassesForSurface } from '@/lib/programgen'
 import { fetchSiteClimate } from '@/lib/climate'
 import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGGER_MODES, GDD_BASES, statusRank, coverageDays, isoAddDays } from '@/lib/triggers'
 import { suppressionMap } from '@/lib/pgr'
@@ -330,30 +330,39 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [covSel, setCovSel] = useState(null) // selected coverage cell: { area, start, end, state }
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
-  const [blueprint, setBlueprint] = useState(null) // model-generated program blueprint
-  const [bpBusy, setBpBusy] = useState(false) // fetching site climate for the blueprint
+  // ── Build From Models: pick a year + which surfaces, then auto-fill the
+  // Annual Program tab with a per-surface, grass-matched, site-tuned program.
+  const [bpSetup, setBpSetup] = useState(null) // { year, selected: {areaName:bool} }
+  const [bpBusy, setBpBusy] = useState(false)
 
-  const nextYear = new Date().getFullYear() + 1
-  async function generateBlueprint() {
-    setBpBusy(true)
-    // Tune the program to the course's own averaged soil-temperature curve when
-    // we have a location; fall back to regional normals if the archive is
-    // unreachable so a blueprint is always produced.
-    let climate = null
-    try {
-      if (location?.lat != null && location?.lng != null) climate = await fetchSiteClimate(location.lat, location.lng)
-    } catch { climate = null }
-    setBlueprint(buildProgram(nextYear, { grasses: courseInfo?.siteGrasses || [], products, climate }))
-    setBpBusy(false)
+  function openBuildSetup() {
+    const names = Object.keys(areas || {})
+    const selected = {}
+    names.forEach((n) => { selected[n] = true })
+    setBpSetup({ year: new Date().getFullYear() + 1, selected })
   }
-  function exportBlueprintCSV() {
-    if (!blueprint) return
-    const out = [['Date', 'Category', 'Target', 'Area', 'Chemistry / rotation', 'In stock', 'Reason', 'Source']]
-    blueprint.sections.forEach((sec) => sec.apps.forEach((a) => {
-      const stock = (a.library || []).filter((l) => l.stock > 0).map((l) => `${l.name} (${l.stock} ${l.unit})`).join('; ')
-      out.push([a.date, sec.title, a.target, a.area, a.chemistry, stock, a.reason, a.source])
-    }))
-    downloadCSV(out, `Model_Program_${blueprint.year}.csv`)
+  async function confirmBuild() {
+    if (!bpSetup) return
+    const chosen = Object.keys(bpSetup.selected).filter((n) => bpSetup.selected[n])
+    if (chosen.length === 0) { showToast('Pick at least one surface'); return }
+    setBpBusy(true)
+    try {
+      // Tune to the course's own averaged soil curve when we have a location;
+      // fall back to regional normals so a program is always produced.
+      let climate = null
+      try { if (location?.lat != null && location?.lng != null) climate = await fetchSiteClimate(location.lat, location.lng) } catch { climate = null }
+      const areaList = chosen.map((n) => ({ name: n, grasses: areas[n]?.grasses || [] }))
+      const program = buildProgram(bpSetup.year, { areas: areaList, products, climate })
+      const prog = await db.createProgram({ year: Number(bpSetup.year), name: `${bpSetup.year} Model Program` })
+      await db.bulkInsertApplications(prog.id, toApplications(program))
+      await loadPrograms()
+      await selectProgram(prog)
+      setBpSetup(null)
+      showToast(`Built ${program.total} applications across ${chosen.length} surface${chosen.length > 1 ? 's' : ''}${program.climate.tuned ? ' · tuned to your site' : ''}`)
+    } catch (e) {
+      console.error(e)
+      showToast('Could not build the program')
+    } finally { setBpBusy(false) }
   }
   const fileRef = useRef(null)
   const flatFileRef = useRef(null)
@@ -893,14 +902,17 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           <button onClick={() => fileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
             <Upload size={14} /> Full Plan
           </button>
-          <button onClick={generateBlueprint} disabled={bpBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 text-white disabled:opacity-60" style={{ backgroundColor: FERN }}>
-            {bpBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {bpBusy ? 'Reading your climate…' : 'Build from Models'}
+          <button onClick={openBuildSetup} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 text-white" style={{ backgroundColor: FERN }}>
+            <Sparkles size={14} /> Build from Models
           </button>
         </div>
       </div>
 
-      {blueprint && (
-        <ProgramBlueprint blueprint={blueprint} onClose={() => setBlueprint(null)} onExport={exportBlueprintCSV} />
+      {bpSetup && (
+        <BuildSetup
+          setup={bpSetup} setSetup={setBpSetup} areas={areas} busy={bpBusy}
+          onConfirm={confirmBuild} onClose={() => !bpBusy && setBpSetup(null)}
+        />
       )}
 
       {/* Simple-list import preview */}
@@ -1734,89 +1746,79 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   )
 }
 
-// ── Model-generated program blueprint ────────────────────────────────────────
-// A full-screen, read-only view of the auto-built season program: fungicides,
-// insecticides, herbicides and PGRs, grouped by area, each line dated, rotated
-// for resistance, and matched to the club's library. A starting template to
-// review — never a prescription.
-const BP_CAT = {
-  fungicide: { color: '#2E7D46', bg: '#E9F4EC', label: 'Fungicide' },
-  insecticide: { color: '#C0651C', bg: '#FBF0E2', label: 'Insecticide' },
-  herbicide: { color: '#2563EB', bg: '#E7EEFC', label: 'Herbicide' },
-  pgr: { color: '#6D48C4', bg: '#F0EBFA', label: 'PGR' },
-  note: { color: '#64748B', bg: '#F1F5F9', label: 'Note' },
-}
-function bpFmt(iso) { try { return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) } catch { return iso } }
-function bpRows(section) {
-  const by = {}
-  section.apps.forEach((a) => { (by[a.target] ||= []).push(a) })
-  return Object.entries(by).map(([target, apps]) => {
-    apps.sort((a, b) => a.date.localeCompare(b.date))
-    return { target, apps, catKey: section.key }
-  })
-}
-function ProgramBlueprint({ blueprint, onClose, onExport }) {
+
+// ── Build From Models — setup dialog ─────────────────────────────────────────
+// Pick a year and which surfaces to include; each surface generates its own
+// grass-matched program. On confirm the parent fetches the site climate, builds
+// the per-surface program and saves it onto the Annual Program tab.
+function BuildSetup({ setup, setSetup, areas, busy, onConfirm, onClose }) {
+  const names = Object.keys(areas || {})
+  const chosenCount = names.filter((n) => setup.selected[n]).length
+  const thisYear = new Date().getFullYear()
+  const years = [thisYear, thisYear + 1, thisYear + 2]
+  const toggle = (n) => setSetup((s) => ({ ...s, selected: { ...s.selected, [n]: !s.selected[n] } }))
+  const setAll = (v) => setSetup((s) => ({ ...s, selected: Object.fromEntries(names.map((n) => [n, v])) }))
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-3 overflow-y-auto" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl my-6" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-white rounded-t-2xl border-b border-black/5 px-5 py-3.5 flex items-center justify-between gap-3 z-10">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-6" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b border-black/5 px-5 py-3.5 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-display text-lg font-semibold text-slate-900">{blueprint.year} Program Blueprint</p>
-            <p className="font-body text-[11px] text-slate-400">{blueprint.total} dated applications · {blueprint.gaps.length === 0 ? 'no coverage gaps' : `${blueprint.gaps.length} gap(s)`}</p>
-            <p className="font-body text-[11px] mt-0.5 flex items-center gap-1" style={{ color: blueprint.climate?.tuned ? '#15803D' : '#92660D' }}>
-              {blueprint.climate?.tuned ? <Check size={11} /> : <MapPin size={11} />}
-              {blueprint.climate?.tuned ? `Tuned to your site · ${blueprint.climate.source}` : `Regional normals — set your course location for site-tuned timing`}
-            </p>
+            <p className="font-display text-lg font-semibold text-slate-900 flex items-center gap-1.5"><Sparkles size={16} style={{ color: FERN }} /> Build a program from the models</p>
+            <p className="font-body text-[11px] text-slate-400">Each surface is generated on its own, matched to its grass and tuned to your climate.</p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={onExport} className="font-body text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}><Package size={13} /> CSV</button>
-            <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100"><X size={18} /></button>
-          </div>
+          <button onClick={onClose} disabled={busy} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 disabled:opacity-40"><X size={18} /></button>
         </div>
 
         <div className="px-5 py-4">
-          <div className="rounded-xl p-3 mb-4 flex items-start gap-2 text-[12px]" style={{ backgroundColor: '#FBF3E2', color: '#6B531A' }}>
-            <AlertTriangle size={15} className="shrink-0 mt-0.5" />
-            <span><b>A starting template, not a prescription.</b> Chemistry classes and resistance-group rotations from published extension programs — no rates. Review and adjust to your turf, budget and the in-season models; a licensed applicator makes the call, and every product follows its label.</span>
+          {/* Year */}
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Season</p>
+          <div className="flex gap-2 mb-4">
+            {years.map((y) => (
+              <button key={y} onClick={() => setSetup((s) => ({ ...s, year: y }))} className="font-body text-sm font-bold px-4 py-2 rounded-xl transition" style={setup.year === y ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.1)' }}>{y}</button>
+            ))}
           </div>
 
-          {blueprint.sections.map((sec) => {
-            const c = BP_CAT[sec.key] || BP_CAT.note
-            return (
-              <div key={sec.key} className="mb-5">
-                <p className="font-body text-sm font-bold mb-2 flex items-center gap-2" style={{ color: c.color }}>
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c.color }} />{sec.title}
-                  <span className="font-body text-[11px] font-semibold text-slate-400 ml-auto">{sec.apps.length} apps</span>
-                </p>
-                <div className="space-y-2">
-                  {bpRows(sec).map((r) => {
-                    const a = r.apps[0]
-                    const window = r.apps.length > 1 ? `${bpFmt(r.apps[0].date)} – ${bpFmt(r.apps[r.apps.length - 1].date)}${a.interval ? ` · every ${a.interval}d` : ''}` : bpFmt(a.date)
-                    const inStock = (a.library || []).filter((l) => l.stock > 0)
-                    return (
-                      <div key={r.target} className="bg-white rounded-xl border border-black/5 shadow-sm p-3" style={{ borderLeft: `4px solid ${c.color}` }}>
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="font-body text-sm font-bold text-slate-800">{r.target}</p>
-                          <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: c.bg, color: c.color }}>{r.apps.length}×</span>
-                        </div>
-                        <p className="font-body text-[11px] text-slate-500 font-semibold mt-0.5">📅 {window} · {a.area}</p>
-                        <p className="font-body text-[12px] text-slate-700 mt-1">{a.chemistry}</p>
-                        <p className="font-body text-[11px] text-slate-500 mt-1 leading-relaxed">{a.reason}</p>
-                        {inStock.length > 0 ? (
-                          <div className="flex flex-wrap gap-1.5 mt-1.5">
-                            {inStock.map((l) => <span key={l.name} className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>✓ {l.name} · {l.stock} {l.unit}</span>)}
-                          </div>
-                        ) : (
-                          <p className="font-body text-[10px] text-slate-400 italic mt-1.5">Nothing in your library matches yet</p>
-                        )}
-                        <p className="font-body text-[10px] text-slate-400 italic mt-1.5">Source: {a.source}</p>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )
-          })}
+          {/* Surfaces */}
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400">Surfaces to include ({chosenCount}/{names.length})</p>
+            <div className="flex gap-2">
+              <button onClick={() => setAll(true)} className="font-body text-[11px] font-bold" style={{ color: FERN }}>All</button>
+              <button onClick={() => setAll(false)} className="font-body text-[11px] font-bold text-slate-400">None</button>
+            </div>
+          </div>
+          {names.length === 0 ? (
+            <p className="font-body text-sm text-slate-400 py-4 text-center">No surfaces set up yet. Add your areas in Settings first.</p>
+          ) : (
+            <div className="space-y-1.5 max-h-72 overflow-y-auto">
+              {names.map((n) => {
+                const surface = classifySurface(n)
+                const grasses = grassesForSurface(surface, areas[n]?.grasses || [])
+                const on = !!setup.selected[n]
+                const raw = (areas[n]?.grasses || []).length > 0
+                return (
+                  <button key={n} onClick={() => toggle(n)} className="w-full text-left flex items-center gap-3 p-2.5 rounded-xl border transition" style={{ borderColor: on ? FERN : 'rgba(0,0,0,0.08)', backgroundColor: on ? '#F1F8F3' : 'white' }}>
+                    <span className="w-5 h-5 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: on ? FERN : 'transparent', border: on ? 'none' : '2px solid #CBD5E1' }}>{on && <Check size={13} className="text-white" />}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-body text-sm font-semibold text-slate-800 truncate">{n}</p>
+                      <p className="font-body text-[11px] text-slate-500">{SURFACE_LABEL[surface] || surface} · {grasses.join(', ')}{!raw && <span className="text-slate-400 italic"> (assumed — set grass in Settings)</span>}</p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          <div className="rounded-xl p-2.5 mt-3 flex items-start gap-2 text-[11px]" style={{ backgroundColor: '#FBF3E2', color: '#6B531A' }}>
+            <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+            <span>Creates a new <b>{setup.year} Model Program</b> — a starting template to review. Chemistry classes with resistance-group rotation, no rates. A licensed applicator adjusts it before spraying.</span>
+          </div>
+
+          <div className="flex gap-2 mt-4">
+            <button onClick={onClose} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200 disabled:opacity-50">Cancel</button>
+            <button onClick={onConfirm} disabled={busy || chosenCount === 0} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
+              {busy ? <><Loader2 size={15} className="animate-spin" /> Reading your climate…</> : <>Build &amp; add to program</>}
+            </button>
+          </div>
         </div>
       </div>
     </div>
