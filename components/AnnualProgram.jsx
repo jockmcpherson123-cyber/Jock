@@ -1794,7 +1794,7 @@ function BuildSetup({ setup, setSetup, areas, busy, error, onConfirm, onClose })
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-6" onClick={(e) => e.stopPropagation()}>
         <div className="border-b border-black/5 px-5 py-3.5 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-display text-lg font-semibold text-slate-900 flex items-center gap-1.5"><Sparkles size={16} style={{ color: FERN }} /> Build a program from the models <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 tracking-wide">v3</span></p>
+            <p className="font-display text-lg font-semibold text-slate-900 flex items-center gap-1.5"><Sparkles size={16} style={{ color: FERN }} /> Build a program from the models <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 tracking-wide">v4</span></p>
             <p className="font-body text-[11px] text-slate-400">Each surface is generated on its own, matched to its grass and tuned to your climate.</p>
           </div>
           <button onClick={onClose} disabled={busy} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 disabled:opacity-40"><X size={18} /></button>
@@ -1850,10 +1850,16 @@ function BuildSetup({ setup, setSetup, areas, busy, error, onConfirm, onClose })
               <span><b>Couldn't build.</b> {error}</span>
             </div>
           )}
+          {busy && (
+            <div className="rounded-xl p-2.5 mt-3 flex items-center gap-2 text-[12px] bg-blue-50 border border-blue-200 text-blue-700">
+              <Loader2 size={14} className="shrink-0 animate-spin" />
+              <span><b>Building your program…</b> saving applications, this can take a few seconds.</span>
+            </div>
+          )}
 
           <div className="flex gap-2 mt-4">
-            <button onClick={onClose} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200 disabled:opacity-50">Cancel</button>
-            <button onClick={onConfirm} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
+            <button type="button" onClick={() => onClose()} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={() => onConfirm()} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
               {busy ? <><Loader2 size={15} className="animate-spin" /> Building…</> : <>Build &amp; add to program</>}
             </button>
           </div>
