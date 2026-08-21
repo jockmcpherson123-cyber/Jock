@@ -12,6 +12,7 @@ import { downloadCSV } from '@/lib/calc'
 import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
 import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
 import { buildProgram } from '@/lib/programgen'
+import { fetchSiteClimate } from '@/lib/climate'
 import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGGER_MODES, GDD_BASES, statusRank, coverageDays, isoAddDays } from '@/lib/triggers'
 import { suppressionMap } from '@/lib/pgr'
 import { sheetApplied } from '@/lib/applied'
@@ -330,10 +331,20 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
   const [blueprint, setBlueprint] = useState(null) // model-generated program blueprint
+  const [bpBusy, setBpBusy] = useState(false) // fetching site climate for the blueprint
 
   const nextYear = new Date().getFullYear() + 1
-  function generateBlueprint() {
-    setBlueprint(buildProgram(nextYear, { grasses: courseInfo?.siteGrasses || [], products }))
+  async function generateBlueprint() {
+    setBpBusy(true)
+    // Tune the program to the course's own averaged soil-temperature curve when
+    // we have a location; fall back to regional normals if the archive is
+    // unreachable so a blueprint is always produced.
+    let climate = null
+    try {
+      if (location?.lat != null && location?.lng != null) climate = await fetchSiteClimate(location.lat, location.lng)
+    } catch { climate = null }
+    setBlueprint(buildProgram(nextYear, { grasses: courseInfo?.siteGrasses || [], products, climate }))
+    setBpBusy(false)
   }
   function exportBlueprintCSV() {
     if (!blueprint) return
@@ -882,8 +893,8 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           <button onClick={() => fileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
             <Upload size={14} /> Full Plan
           </button>
-          <button onClick={generateBlueprint} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 text-white" style={{ backgroundColor: FERN }}>
-            <Sparkles size={14} /> Build from Models
+          <button onClick={generateBlueprint} disabled={bpBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 text-white disabled:opacity-60" style={{ backgroundColor: FERN }}>
+            {bpBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {bpBusy ? 'Reading your climate…' : 'Build from Models'}
           </button>
         </div>
       </div>
@@ -1751,7 +1762,11 @@ function ProgramBlueprint({ blueprint, onClose, onExport }) {
         <div className="sticky top-0 bg-white rounded-t-2xl border-b border-black/5 px-5 py-3.5 flex items-center justify-between gap-3 z-10">
           <div className="min-w-0">
             <p className="font-display text-lg font-semibold text-slate-900">{blueprint.year} Program Blueprint</p>
-            <p className="font-body text-[11px] text-slate-400">{blueprint.total} dated applications · {blueprint.gaps.length === 0 ? 'no coverage gaps' : `${blueprint.gaps.length} gap(s)`} · {blueprint.zone}</p>
+            <p className="font-body text-[11px] text-slate-400">{blueprint.total} dated applications · {blueprint.gaps.length === 0 ? 'no coverage gaps' : `${blueprint.gaps.length} gap(s)`}</p>
+            <p className="font-body text-[11px] mt-0.5 flex items-center gap-1" style={{ color: blueprint.climate?.tuned ? '#15803D' : '#92660D' }}>
+              {blueprint.climate?.tuned ? <Check size={11} /> : <MapPin size={11} />}
+              {blueprint.climate?.tuned ? `Tuned to your site · ${blueprint.climate.source}` : `Regional normals — set your course location for site-tuned timing`}
+            </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={onExport} className="font-body text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}><Package size={13} /> CSV</button>
