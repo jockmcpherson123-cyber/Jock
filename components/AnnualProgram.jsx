@@ -1794,7 +1794,7 @@ function BuildSetup({ setup, setSetup, areas, busy, error, onConfirm, onClose })
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-6" onClick={(e) => e.stopPropagation()}>
         <div className="border-b border-black/5 px-5 py-3.5 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-display text-lg font-semibold text-slate-900 flex items-center gap-1.5"><Sparkles size={16} style={{ color: FERN }} /> Build a program from the models</p>
+            <p className="font-display text-lg font-semibold text-slate-900 flex items-center gap-1.5"><Sparkles size={16} style={{ color: FERN }} /> Build a program from the models <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 tracking-wide">v3</span></p>
             <p className="font-body text-[11px] text-slate-400">Each surface is generated on its own, matched to its grass and tuned to your climate.</p>
           </div>
           <button onClick={onClose} disabled={busy} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 disabled:opacity-40"><X size={18} /></button>
