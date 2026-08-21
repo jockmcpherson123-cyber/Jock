@@ -851,10 +851,11 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
             <div key={a.id} className="flex items-center gap-2.5 px-4 py-2.5">
               <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: typeColor(a.type) }} />
               <div className="min-w-0 flex-1">
-                <p className="font-body text-sm font-semibold text-slate-800 truncate">{a.product}</p>
-                {(a.rateOzM || a.target) && (
-                  <p className="font-body text-[11px] text-slate-400 truncate">{a.rateOzM ? `${a.rateOzM} oz/M` : ''}{a.rateOzM && a.target ? ' · ' : ''}{a.target || ''}</p>
+                <p className="font-body text-sm font-semibold text-slate-800 truncate flex items-center gap-1.5">{a.product}{a.model?.generic && <span className="font-body text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 uppercase tracking-wide shrink-0">Generic</span>}</p>
+                {(a.rateOzM || a.model?.rate || a.target) && (
+                  <p className="font-body text-[11px] text-slate-400 truncate">{a.rateOzM ? `${a.rateOzM} oz/M` : a.model?.rate || ''}{(a.rateOzM || a.model?.rate) && a.target ? ' · ' : ''}{a.target || ''}</p>
                 )}
+                {a.model?.chemistry && <p className="font-body text-[10px] text-slate-400 truncate">{a.model.chemistry}</p>}
               </div>
               {a.type && (
                 <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: `${typeColor(a.type)}18`, color: typeColor(a.type) }}>{a.type}</span>
