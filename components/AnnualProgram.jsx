@@ -11,6 +11,7 @@ import { parseWorkbook } from '@/lib/importXlsx'
 import { downloadCSV } from '@/lib/calc'
 import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
 import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
+import { buildProgram } from '@/lib/programgen'
 import { triggerStatus, describeTrigger, normalizeTrigger, defaultTrigger, TRIGGER_MODES, GDD_BASES, statusRank, coverageDays, isoAddDays } from '@/lib/triggers'
 import { suppressionMap } from '@/lib/pgr'
 import { sheetApplied } from '@/lib/applied'
@@ -328,6 +329,21 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [covSel, setCovSel] = useState(null) // selected coverage cell: { area, start, end, state }
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
+  const [blueprint, setBlueprint] = useState(null) // model-generated program blueprint
+
+  const nextYear = new Date().getFullYear() + 1
+  function generateBlueprint() {
+    setBlueprint(buildProgram(nextYear, { grasses: courseInfo?.siteGrasses || [], products }))
+  }
+  function exportBlueprintCSV() {
+    if (!blueprint) return
+    const out = [['Date', 'Category', 'Target', 'Area', 'Chemistry / rotation', 'In stock', 'Reason', 'Source']]
+    blueprint.sections.forEach((sec) => sec.apps.forEach((a) => {
+      const stock = (a.library || []).filter((l) => l.stock > 0).map((l) => `${l.name} (${l.stock} ${l.unit})`).join('; ')
+      out.push([a.date, sec.title, a.target, a.area, a.chemistry, stock, a.reason, a.source])
+    }))
+    downloadCSV(out, `Model_Program_${blueprint.year}.csv`)
+  }
   const fileRef = useRef(null)
   const flatFileRef = useRef(null)
 
@@ -866,8 +882,15 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           <button onClick={() => fileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
             <Upload size={14} /> Full Plan
           </button>
+          <button onClick={generateBlueprint} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 text-white" style={{ backgroundColor: FERN }}>
+            <Sparkles size={14} /> Build from Models
+          </button>
         </div>
       </div>
+
+      {blueprint && (
+        <ProgramBlueprint blueprint={blueprint} onClose={() => setBlueprint(null)} onExport={exportBlueprintCSV} />
+      )}
 
       {/* Simple-list import preview */}
       {flatPrev && (
@@ -1696,6 +1719,91 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           )}
         </>
       )}
+    </div>
+  )
+}
+
+// ── Model-generated program blueprint ────────────────────────────────────────
+// A full-screen, read-only view of the auto-built season program: fungicides,
+// insecticides, herbicides and PGRs, grouped by area, each line dated, rotated
+// for resistance, and matched to the club's library. A starting template to
+// review — never a prescription.
+const BP_CAT = {
+  fungicide: { color: '#2E7D46', bg: '#E9F4EC', label: 'Fungicide' },
+  insecticide: { color: '#C0651C', bg: '#FBF0E2', label: 'Insecticide' },
+  herbicide: { color: '#2563EB', bg: '#E7EEFC', label: 'Herbicide' },
+  pgr: { color: '#6D48C4', bg: '#F0EBFA', label: 'PGR' },
+  note: { color: '#64748B', bg: '#F1F5F9', label: 'Note' },
+}
+function bpFmt(iso) { try { return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) } catch { return iso } }
+function bpRows(section) {
+  const by = {}
+  section.apps.forEach((a) => { (by[a.target] ||= []).push(a) })
+  return Object.entries(by).map(([target, apps]) => {
+    apps.sort((a, b) => a.date.localeCompare(b.date))
+    return { target, apps, catKey: section.key }
+  })
+}
+function ProgramBlueprint({ blueprint, onClose, onExport }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-3 overflow-y-auto" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl my-6" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white rounded-t-2xl border-b border-black/5 px-5 py-3.5 flex items-center justify-between gap-3 z-10">
+          <div className="min-w-0">
+            <p className="font-display text-lg font-semibold text-slate-900">{blueprint.year} Program Blueprint</p>
+            <p className="font-body text-[11px] text-slate-400">{blueprint.total} dated applications · {blueprint.gaps.length === 0 ? 'no coverage gaps' : `${blueprint.gaps.length} gap(s)`} · {blueprint.zone}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={onExport} className="font-body text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}><Package size={13} /> CSV</button>
+            <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100"><X size={18} /></button>
+          </div>
+        </div>
+
+        <div className="px-5 py-4">
+          <div className="rounded-xl p-3 mb-4 flex items-start gap-2 text-[12px]" style={{ backgroundColor: '#FBF3E2', color: '#6B531A' }}>
+            <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+            <span><b>A starting template, not a prescription.</b> Chemistry classes and resistance-group rotations from published extension programs — no rates. Review and adjust to your turf, budget and the in-season models; a licensed applicator makes the call, and every product follows its label.</span>
+          </div>
+
+          {blueprint.sections.map((sec) => {
+            const c = BP_CAT[sec.key] || BP_CAT.note
+            return (
+              <div key={sec.key} className="mb-5">
+                <p className="font-body text-sm font-bold mb-2 flex items-center gap-2" style={{ color: c.color }}>
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c.color }} />{sec.title}
+                  <span className="font-body text-[11px] font-semibold text-slate-400 ml-auto">{sec.apps.length} apps</span>
+                </p>
+                <div className="space-y-2">
+                  {bpRows(sec).map((r) => {
+                    const a = r.apps[0]
+                    const window = r.apps.length > 1 ? `${bpFmt(r.apps[0].date)} – ${bpFmt(r.apps[r.apps.length - 1].date)}${a.interval ? ` · every ${a.interval}d` : ''}` : bpFmt(a.date)
+                    const inStock = (a.library || []).filter((l) => l.stock > 0)
+                    return (
+                      <div key={r.target} className="bg-white rounded-xl border border-black/5 shadow-sm p-3" style={{ borderLeft: `4px solid ${c.color}` }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-body text-sm font-bold text-slate-800">{r.target}</p>
+                          <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: c.bg, color: c.color }}>{r.apps.length}×</span>
+                        </div>
+                        <p className="font-body text-[11px] text-slate-500 font-semibold mt-0.5">📅 {window} · {a.area}</p>
+                        <p className="font-body text-[12px] text-slate-700 mt-1">{a.chemistry}</p>
+                        <p className="font-body text-[11px] text-slate-500 mt-1 leading-relaxed">{a.reason}</p>
+                        {inStock.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {inStock.map((l) => <span key={l.name} className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>✓ {l.name} · {l.stock} {l.unit}</span>)}
+                          </div>
+                        ) : (
+                          <p className="font-body text-[10px] text-slate-400 italic mt-1.5">Nothing in your library matches yet</p>
+                        )}
+                        <p className="font-body text-[10px] text-slate-400 italic mt-1.5">Source: {a.source}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
