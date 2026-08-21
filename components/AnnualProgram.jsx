@@ -335,6 +335,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [bpSetup, setBpSetup] = useState(null) // { year, selected: {areaName:bool} }
   const [bpBusy, setBpBusy] = useState(false)
   const [bpError, setBpError] = useState(null) // error shown INSIDE the dialog (toasts hide behind it)
+  const [bpTrace, setBpTrace] = useState('') // step-by-step trace for diagnosing the build
 
   function openBuildSetup() {
     const names = Object.keys(areas || {})
@@ -343,31 +344,32 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     setBpSetup({ year: new Date().getFullYear() + 1, selected })
   }
   async function confirmBuild() {
-    if (!bpSetup || bpBusy) return
-    const chosen = Object.keys(bpSetup.selected).filter((n) => bpSetup.selected[n])
-    if (chosen.length === 0) { setBpError('Pick at least one surface to include.'); return }
+    setBpTrace(`start · busy=${bpBusy}`)
+    if (!bpSetup) { setBpTrace('no setup'); return }
+    const chosen = Object.keys(bpSetup.selected || {}).filter((n) => bpSetup.selected[n])
+    if (chosen.length === 0) { setBpError('Pick at least one surface to include.'); setBpTrace('0 surfaces'); return }
     setBpBusy(true)
     setBpError(null)
     try {
-      // Build with regional normals — instant, no network — then save it. Site-
-      // climate tuning happens as a non-blocking refinement AFTER the save, so
-      // the button can never hang on a weather request.
+      setBpTrace(`building ${chosen.length} surface(s)…`)
       const areaList = chosen.map((n) => ({ name: n, grasses: areas[n]?.grasses || [] }))
       const program = buildProgram(bpSetup.year, { areas: areaList, products })
       const apps = toApplications(program)
+      setBpTrace(`built ${apps.length} apps · creating season…`)
       const prog = await db.createProgram({ year: Number(bpSetup.year), name: `${bpSetup.year} Model Program` })
+      setBpTrace(`season ${prog?.id ? 'ok' : 'null'} · inserting ${apps.length}…`)
       await db.bulkInsertApplications(prog.id, apps)
+      setBpTrace('inserted · refreshing…')
       await loadPrograms()
       await selectProgram(prog)
+      setBpTrace('done')
       setBpSetup(null)
       showToast(`Built ${program.total} applications across ${chosen.length} surface${chosen.length > 1 ? 's' : ''}`)
-      // Best-effort: refine soil-driven dates to the site's own climate in the
-      // background; if it fails or is slow it simply leaves the normals in place.
       tuneProgramToSite(prog.id, bpSetup.year, areaList).catch(() => {})
     } catch (e) {
       console.error('Build from models failed:', e)
-      // Show the real reason INSIDE the dialog — a toast would hide behind it.
-      setBpError(e?.message || e?.error_description || e?.hint || 'Unknown error while building the program.')
+      setBpTrace(`ERROR: ${e?.message || e?.error_description || e?.hint || e?.code || 'unknown'}`)
+      setBpError(e?.message || e?.error_description || e?.hint || e?.code || 'Unknown error while building the program.')
     } finally { setBpBusy(false) }
   }
 
@@ -941,8 +943,8 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 
       {bpSetup && (
         <BuildSetup
-          setup={bpSetup} setSetup={setBpSetup} areas={areas} busy={bpBusy} error={bpError}
-          onConfirm={confirmBuild} onClose={() => !bpBusy && (setBpSetup(null), setBpError(null))}
+          setup={bpSetup} setSetup={setBpSetup} areas={areas} busy={bpBusy} error={bpError} trace={bpTrace}
+          onConfirm={confirmBuild} onClose={() => !bpBusy && (setBpSetup(null), setBpError(null), setBpTrace(''))}
         />
       )}
 
@@ -1782,7 +1784,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 // Pick a year and which surfaces to include; each surface generates its own
 // grass-matched program. On confirm the parent fetches the site climate, builds
 // the per-surface program and saves it onto the Annual Program tab.
-function BuildSetup({ setup, setSetup, areas, busy, error, onConfirm, onClose }) {
+function BuildSetup({ setup, setSetup, areas, busy, error, trace, onConfirm, onClose }) {
   const [dbg, setDbg] = useState('')
   const runConfirm = () => {
     setDbg(`tapped ${new Date().toLocaleTimeString()}`)
@@ -1806,7 +1808,7 @@ function BuildSetup({ setup, setSetup, areas, busy, error, onConfirm, onClose })
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-6" onClick={(e) => e.stopPropagation()}>
         <div className="border-b border-black/5 px-5 py-3.5 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-display text-lg font-semibold text-slate-900 flex items-center gap-1.5"><Sparkles size={16} style={{ color: FERN }} /> Build a program from the models <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 tracking-wide">v5</span></p>
+            <p className="font-display text-lg font-semibold text-slate-900 flex items-center gap-1.5"><Sparkles size={16} style={{ color: FERN }} /> Build a program from the models <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 tracking-wide">v6</span></p>
             <p className="font-body text-[11px] text-slate-400">Each surface is generated on its own, matched to its grass and tuned to your climate.</p>
           </div>
           <button onClick={onClose} disabled={busy} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 disabled:opacity-40"><X size={18} /></button>
@@ -1868,8 +1870,11 @@ function BuildSetup({ setup, setSetup, areas, busy, error, onConfirm, onClose })
               <span><b>Building your program…</b> saving applications, this can take a few seconds.</span>
             </div>
           )}
-          {dbg && (
-            <div className="rounded-xl p-2.5 mt-3 text-[11px] font-mono bg-slate-800 text-emerald-300 break-words">DEBUG: {dbg}</div>
+          {(dbg || trace) && (
+            <div className="rounded-xl p-2.5 mt-3 text-[11px] font-mono bg-slate-800 text-emerald-300 break-words leading-relaxed">
+              <div>DEBUG: {dbg}</div>
+              {trace && <div className="text-amber-300 mt-1">STEP: {trace}</div>}
+            </div>
           )}
 
           <div className="flex gap-2 mt-4">
