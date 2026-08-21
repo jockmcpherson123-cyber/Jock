@@ -943,8 +943,9 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 
       {bpSetup && (
         <BuildSetup
-          setup={bpSetup} setSetup={setBpSetup} areas={areas} busy={bpBusy} error={bpError} trace={bpTrace}
-          onConfirm={confirmBuild} onClose={() => !bpBusy && (setBpSetup(null), setBpError(null), setBpTrace(''))}
+          setup={bpSetup} setSetup={setBpSetup} areas={areas} products={products}
+          onSaved={async (prog, summary) => { await loadPrograms(); await selectProgram(prog); setBpSetup(null); showToast(summary) }}
+          onClose={() => setBpSetup(null)}
         />
       )}
 
@@ -1784,17 +1785,28 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 // Pick a year and which surfaces to include; each surface generates its own
 // grass-matched program. On confirm the parent fetches the site climate, builds
 // the per-surface program and saves it onto the Annual Program tab.
-function BuildSetup({ setup, setSetup, areas, busy, error, trace, onConfirm, onClose }) {
-  const [dbg, setDbg] = useState('')
-  const runConfirm = () => {
-    setDbg(`tapped ${new Date().toLocaleTimeString()}`)
+function BuildSetup({ setup, setSetup, areas, products = [], onSaved, onClose }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  // The whole build+save runs HERE, inside the handler that we've confirmed
+  // fires — no parent callback indirection, so it can't silently no-op.
+  async function runConfirm() {
+    if (busy) return
+    const chosen = Object.keys(setup.selected || {}).filter((n) => setup.selected[n])
+    if (chosen.length === 0) { setError('Pick at least one surface to include.'); return }
+    setBusy(true)
+    setError(null)
     try {
-      const r = onConfirm()
-      if (r && typeof r.then === 'function') {
-        r.then(() => setDbg((d) => d + ' · resolved')).catch((e) => setDbg('async error: ' + (e?.message || e?.toString?.() || 'unknown')))
-      }
+      const areaList = chosen.map((n) => ({ name: n, grasses: areas[n]?.grasses || [] }))
+      const program = buildProgram(setup.year, { areas: areaList, products })
+      const apps = toApplications(program)
+      const prog = await db.createProgram({ year: Number(setup.year), name: `${setup.year} Model Program` })
+      await db.bulkInsertApplications(prog.id, apps)
+      await onSaved(prog, `Built ${program.total} applications across ${chosen.length} surface${chosen.length > 1 ? 's' : ''}`)
     } catch (e) {
-      setDbg('sync error: ' + (e?.message || e?.toString?.() || 'unknown'))
+      console.error('Build from models failed:', e)
+      setError(e?.message || e?.error_description || e?.hint || e?.code || 'Unknown error while building the program.')
+      setBusy(false)
     }
   }
   const names = Object.keys(areas || {})
@@ -1808,7 +1820,7 @@ function BuildSetup({ setup, setSetup, areas, busy, error, trace, onConfirm, onC
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-6" onClick={(e) => e.stopPropagation()}>
         <div className="border-b border-black/5 px-5 py-3.5 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-display text-lg font-semibold text-slate-900 flex items-center gap-1.5"><Sparkles size={16} style={{ color: FERN }} /> Build a program from the models <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 tracking-wide">v6</span></p>
+            <p className="font-display text-lg font-semibold text-slate-900 flex items-center gap-1.5"><Sparkles size={16} style={{ color: FERN }} /> Build a program from the models <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 tracking-wide">v7</span></p>
             <p className="font-body text-[11px] text-slate-400">Each surface is generated on its own, matched to its grass and tuned to your climate.</p>
           </div>
           <button onClick={onClose} disabled={busy} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 disabled:opacity-40"><X size={18} /></button>
@@ -1868,12 +1880,6 @@ function BuildSetup({ setup, setSetup, areas, busy, error, trace, onConfirm, onC
             <div className="rounded-xl p-2.5 mt-3 flex items-center gap-2 text-[12px] bg-blue-50 border border-blue-200 text-blue-700">
               <Loader2 size={14} className="shrink-0 animate-spin" />
               <span><b>Building your program…</b> saving applications, this can take a few seconds.</span>
-            </div>
-          )}
-          {(dbg || trace) && (
-            <div className="rounded-xl p-2.5 mt-3 text-[11px] font-mono bg-slate-800 text-emerald-300 break-words leading-relaxed">
-              <div>DEBUG: {dbg}</div>
-              {trace && <div className="text-amber-300 mt-1">STEP: {trace}</div>}
             </div>
           )}
 
