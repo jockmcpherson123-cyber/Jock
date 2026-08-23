@@ -36,6 +36,35 @@ const KIND_LABEL = Object.fromEntries(KINDS)
 const STATUS = { ok: { label: 'Working', color: '#2563EB' }, repair: { label: 'Needs repair', color: '#DC2626' }, replaced: { label: 'Replaced', color: '#6B7280' } }
 const featureColor = (f) => (STATUS[f.status]?.color || '#2563EB')
 
+// As-built icon per kind — distinct shapes so the network reads at a glance
+// (blue head, red ✕ valve, teal controller, orange coupler, purple ✳ swing
+// joint/other). Heads stay fast vector dots; these are the sparser objects.
+const KIND_STYLE = {
+  valve: { color: '#DC2626' },
+  controller: { color: '#0E9F98' },
+  quick_coupler: { color: '#EA8A2A' },
+  other: { color: '#9333EA' },
+}
+function kindIconHtml(f, px, { selected } = {}) {
+  const kind = f.kind || 'other'
+  const base = KIND_STYLE[kind]?.color || '#9333EA'
+  // Status overrides the colour so a valve needing repair still reads red-hot.
+  const col = f.status === 'repair' ? '#DC2626' : f.status === 'replaced' ? '#6B7280' : base
+  const s = px
+  const ring = selected ? `<rect x="1" y="1" width="22" height="22" rx="6" fill="none" stroke="#C9A84C" stroke-width="2.5"/>` : ''
+  let shape
+  if (kind === 'valve') {
+    shape = `<g stroke="#fff" stroke-width="6" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></g><g stroke="${col}" stroke-width="3.6" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></g>`
+  } else if (kind === 'controller') {
+    shape = `<rect x="4" y="4" width="16" height="16" rx="4" fill="${col}" stroke="#fff" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="#fff"/>`
+  } else if (kind === 'quick_coupler') {
+    shape = `<g transform="rotate(45 12 12)"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="${col}" stroke="#fff" stroke-width="2"/></g>`
+  } else {
+    shape = `<g stroke="#fff" stroke-width="5.5" stroke-linecap="round"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></g><g stroke="${col}" stroke-width="3" stroke-linecap="round"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></g>`
+  }
+  return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))">${shape}${ring}</svg>`
+}
+
 // Pipe size classes (from the as-built legend) → draw order (thin first, mains
 // on top) and line weight. Bigger pipe = heavier line, so the mainline reads
 // clearly over the dense laterals.
@@ -574,15 +603,27 @@ export default function CourseMap({ user, manage }) {
       // Grow the dots as you zoom in so they read like the as-built (but stay
       // visible at the course-overview zoom too).
       const headR = Math.max(3.5, (mapZoom - 13) * 1.7)
+      const kpx = Math.round(Math.max(16, headR * 2.8)) // kind-icon pixel size
       features.forEach((f) => {
         if (!Number.isFinite(f.lat) || !Number.isFinite(f.lng)) return
         const sym = f.symbol ? symbolById(f.symbol) : null
+        // Non-head objects without an assigned as-built symbol get a distinct
+        // per-kind icon (red ✕ valve, teal controller, orange coupler, purple ✳);
+        // heads and symbol-assigned features stay fast vector dots.
+        if (f.kind && f.kind !== 'head' && !sym) {
+          const m = L.marker([f.lat, f.lng], {
+            icon: L.divIcon({ className: '', html: kindIconHtml(f, kpx, { selected: f.id === sel }), iconSize: [kpx, kpx], iconAnchor: [kpx / 2, kpx / 2] }),
+            keyboard: false,
+          })
+          m.on('click', (e) => { if (e.originalEvent) e.originalEvent.stopPropagation?.(); setSelected(f) })
+          m.addTo(group)
+          return
+        }
         const fill = sym ? sym.fill : featureColor(f)
         // Repair/replaced get a coloured ring so status still reads at a glance.
         const statusRing = f.status === 'repair' ? '#DC2626' : f.status === 'replaced' ? '#6B7280' : null
-        const isValve = f.kind !== 'head'
         const cm = L.circleMarker([f.lat, f.lng], {
-          radius: isValve ? headR * 1.35 : headR,
+          radius: headR,
           color: f.id === sel ? GOLD : (statusRing || (sym ? sym.stroke : '#ffffff')),
           weight: f.id === sel ? 3 : (statusRing ? 2.4 : 1.4),
           fillColor: fill,
@@ -605,13 +646,10 @@ export default function CourseMap({ user, manage }) {
     if (!L || !map || mode !== 'map') return
     if (shapeLayerRef.current) { shapeLayerRef.current.remove(); shapeLayerRef.current = null }
     if (!showFeatures || mapZoom < 18) return
-    const featSym = (f) => {
-      if (f.symbol) return symbolById(f.symbol)
-      if (f.kind === 'quick_coupler') return symbolById('qc-1')
-      if (f.kind === 'valve') return symbolById('ev-2')
-      if (f.kind === 'controller') return symbolById('ground-assy')
-      return null // plain heads already read as coloured circles
-    }
+    // Only explicitly-assigned as-built symbols get the precise shape here; the
+    // default per-kind icons (valve/controller/coupler/other) are already drawn
+    // in the base layer at every zoom, so we don't double them up.
+    const featSym = (f) => (f.symbol ? symbolById(f.symbol) : null)
     let bounds
     try { bounds = map.getBounds().pad(0.1) } catch { return }
     const inView = features.filter((f) => Number.isFinite(f.lat) && Number.isFinite(f.lng) && bounds.contains([f.lat, f.lng]) && featSym(f))
