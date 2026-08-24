@@ -39,11 +39,28 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const [course, setCourse] = useState('all')
   const [recipient, setRecipient] = useState(courseInfo.reportRecipient || '')
   const [sender, setSender] = useState(courseInfo.reportSender || courseInfo.directorName || '')
+  const [notes, setNotes] = useState(courseInfo.reportNotes || '')
+  const [schedule, setSchedule] = useState(Array.isArray(courseInfo.reportSchedule) ? courseInfo.reportSchedule : [])
+  const [schedDay, setSchedDay] = useState('Any')
+  const [schedText, setSchedText] = useState('')
   const [busy, setBusy] = useState('')
   const [toast, setToast] = useState(null)
   const reportRef = useRef(null)
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(null), 4500) }
+
+  // Persist the notes + schedule draft so they survive a reload.
+  const saveDraft = (patch) => { if (onSaveCourse) onSaveCourse(patch) }
+  const DAYS = ['Any', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  const dayRank = (d) => { const i = DAYS.indexOf(d); return i <= 0 ? 99 : i }
+  const addSchedItem = () => {
+    const text = schedText.trim()
+    if (!text) return
+    const next = [...schedule, { id: `s${Date.now()}`, day: schedDay, text }]
+    setSchedule(next); setSchedText(''); setSchedDay('Any'); saveDraft({ reportSchedule: next })
+  }
+  const removeSchedItem = (id) => { const next = schedule.filter((s) => s.id !== id); setSchedule(next); saveDraft({ reportSchedule: next }) }
+  const orderedSchedule = [...schedule].sort((a, b) => dayRank(a.day) - dayRank(b.day))
 
   useEffect(() => {
     (async () => {
@@ -173,7 +190,9 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     if (sprayDays.length === 0) lines.push('  None scheduled.')
     sprayDays.forEach((d) => { lines.push(`  ${fmtDay(d.date)} · ${d.area}: ${d.items.map((i) => i.product).join(', ')}`) })
     if (fertNext.length) { lines.push('', 'Fertility:'); fertNext.forEach((f) => lines.push(`  ${fmtDay(f.appDate)} · ${f.area}: ${f.product || 'Fertilizer'}${npk(f.analysis) ? ` (${npk(f.analysis)})` : ''}`)) }
+    if (schedule.length) { lines.push('', 'Schedule:'); orderedSchedule.forEach((s) => lines.push(`  ${s.day !== 'Any' ? s.day + ' — ' : ''}${s.text}`)) }
     if (nwx.n) lines.push('', `Next week forecast: avg high ${round(nwx.avgHigh)}°F / low ${round(nwx.avgLow)}°F, ${round(nwx.precip, 2)}" precip.`)
+    if (notes.trim()) lines.push('', 'Notes:', notes.trim())
     lines.push('', 'Full formatted report attached as a PDF.')
     return lines.join('\n')
   }
@@ -237,6 +256,37 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         </button>
       </div>
 
+      {/* Weekly schedule + notes editors (never printed) */}
+      <div className="no-print mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="rounded-xl border border-slate-200 p-3">
+          <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 block mb-1.5">Weekly schedule — things to get done</label>
+          <div className="flex gap-1.5 mb-2">
+            <select value={schedDay} onChange={(e) => setSchedDay(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-2 text-sm font-body bg-white">
+              {DAYS.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <input value={schedText} onChange={(e) => setSchedText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addSchedItem() }} placeholder="e.g. Aerify Blue greens" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body" />
+            <button onClick={addSchedItem} className="font-body text-sm font-bold px-3 py-2 rounded-lg text-white shrink-0" style={{ backgroundColor: FERN }}>Add</button>
+          </div>
+          {schedule.length === 0 ? (
+            <p className="font-body text-[11px] text-slate-400">Add tasks the crew has to complete next week — aerification, topdress, tournament prep, etc.</p>
+          ) : (
+            <div className="space-y-1">
+              {orderedSchedule.map((s) => (
+                <div key={s.id} className="flex items-center gap-2 text-sm">
+                  <span className="font-body text-[10px] font-bold w-9 shrink-0" style={{ color: FERN }}>{s.day !== 'Any' ? s.day : ''}</span>
+                  <span className="font-body text-slate-700 flex-1 min-w-0">{s.text}</span>
+                  <button onClick={() => removeSchedItem(s.id)} className="text-slate-300 hover:text-red-500 shrink-0 font-bold px-1">×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="rounded-xl border border-slate-200 p-3">
+          <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 block mb-1.5">Notes for the week</label>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={() => saveDraft({ reportNotes: notes })} rows={5} placeholder="Anything worth flagging — cart traffic, event prep, growth trends, watch-outs…" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-body resize-y" />
+        </div>
+      </div>
+
       {/* The report sheet */}
       <div id="weekly-report" ref={reportRef} className="bg-white rounded-2xl border border-black/5 shadow-sm p-6 md:p-8 max-w-3xl mx-auto">
         <div className="flex items-start justify-between gap-4 pb-4 border-b-2" style={{ borderColor: GOLD }}>
@@ -252,6 +302,14 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
             {sender && <p className="font-body text-[11px] text-slate-400 mt-1">by {sender}</p>}
           </div>
         </div>
+
+        {/* Notes callout */}
+        {notes.trim() && (
+          <div className="mt-4 rounded-lg px-4 py-3" style={{ backgroundColor: '#FFFDF2', border: '1px solid #EFE3B8' }}>
+            <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#92660D' }}>Notes</p>
+            <p className="font-body text-[13px] text-slate-700 whitespace-pre-wrap">{notes.trim()}</p>
+          </div>
+        )}
 
         {/* Sprays next week */}
         <H icon={Calendar}>Planned sprays — next week</H>
@@ -306,6 +364,22 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
               </tbody>
             </table>
           </div>
+        )}
+
+        {/* Weekly schedule / to-do */}
+        {schedule.length > 0 && (
+          <>
+            <H icon={Calendar}>Schedule — things to get done</H>
+            <div className="rounded-lg border border-black/5 overflow-hidden">
+              {orderedSchedule.map((s) => (
+                <div key={s.id} className="flex items-center gap-3 px-3 py-1.5 border-t border-black/5 first:border-t-0">
+                  <span className="inline-block w-4 h-4 rounded border border-slate-300 shrink-0" />
+                  {s.day !== 'Any' && <span className="font-body text-[10px] font-bold w-9 shrink-0" style={{ color: FERN }}>{s.day}</span>}
+                  <span className="font-body text-[12.5px] text-slate-700">{s.text}</span>
+                </div>
+              ))}
+            </div>
+          </>
         )}
 
         {/* Weather outlook next week */}
