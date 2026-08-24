@@ -893,10 +893,10 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     const trig = normalizeTrigger(ev.items[0]?.trigger, ev.items[0]?.type)
     return (
     <div key={ev.key}>
-      <div onClick={() => openEvent(ev.items)} className="cursor-pointer bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm hover:border-slate-200 transition">
-        <div className="flex items-center justify-between px-4 py-2.5 gap-2" style={{ backgroundColor: '#F0F6F2' }}>
-          <p className="font-body text-xs font-bold flex items-center gap-1.5 min-w-0" style={{ color: FOREST }}>
-            <Calendar size={12} className="shrink-0" /><span className="truncate">{trig.mode === 'date' ? fmtDateHeading(ev.date) : describeTrigger(trig, ev.items[0]?.type)}</span>
+      <div onClick={() => openEvent(ev.items)} className="cursor-pointer bg-white rounded-xl border border-black/5 overflow-hidden shadow-sm hover:border-slate-200 transition">
+        <div className="flex items-center justify-between px-3 py-1.5 gap-2" style={{ backgroundColor: '#F0F6F2' }}>
+          <p className="font-body text-[11px] font-bold flex items-center gap-1.5 min-w-0" style={{ color: FOREST }}>
+            <Calendar size={11} className="shrink-0" /><span className="truncate">{trig.mode === 'date' ? fmtDateHeading(ev.date) : describeTrigger(trig, ev.items[0]?.type)}</span>
           </p>
           <div className="flex items-center gap-1.5 shrink-0">
             <StatusChip status={status} />
@@ -906,26 +906,25 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           </div>
         </div>
         {status.detail && status.state !== 'done' && (
-          <div className="px-4 pt-2 pb-0">
-            <p className="font-body text-[11px] text-slate-400">{status.detail}{status.projectedDate && status.state !== 'due' && status.state !== 'overdue' ? ` · ~${fmtDate(status.projectedDate)}` : ''}</p>
+          <div className="px-3 pt-1 pb-0">
+            <p className="font-body text-[10.5px] text-slate-400">{status.detail}{status.projectedDate && status.state !== 'due' && status.state !== 'overdue' ? ` · ~${fmtDate(status.projectedDate)}` : ''}</p>
           </div>
         )}
         <div className="divide-y divide-black/5">
-          {ev.items.map((a) => (
-            <div key={a.id} className="flex items-center gap-2.5 px-4 py-2.5">
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: typeColor(a.type) }} />
-              <div className="min-w-0 flex-1">
-                <p className="font-body text-sm font-semibold text-slate-800 truncate flex items-center gap-1.5">{a.product}{a.model?.generic && <span className="font-body text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 uppercase tracking-wide shrink-0">Generic</span>}</p>
-                {(a.rateOzM || a.model?.rate || a.target) && (
-                  <p className="font-body text-[11px] text-slate-400 truncate">{a.rateOzM ? `${a.rateOzM} oz/M` : a.model?.rate || ''}{(a.rateOzM || a.model?.rate) && a.target ? ' · ' : ''}{a.target || ''}</p>
+          {ev.items.map((a) => {
+            const rate = a.rateOzM ? `${a.rateOzM} oz/M` : a.model?.rate || ''
+            const sub = `${rate}${rate && a.target ? ' · ' : ''}${a.target || ''}`
+            return (
+              <div key={a.id} className="flex items-center gap-2 px-3 py-1.5" style={{ borderLeft: `3px solid ${typeColor(a.type)}` }}>
+                <span className="font-body text-[12.5px] font-bold text-slate-800 whitespace-nowrap shrink-0">{a.product}</span>
+                {a.model?.generic && <span className="font-body text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 uppercase tracking-wide shrink-0">Gen</span>}
+                <span className="font-body text-[10.5px] text-slate-400 truncate flex-1 min-w-0">{sub}</span>
+                {a.type && (
+                  <span className="font-body text-[8.5px] font-bold uppercase tracking-wide shrink-0" style={{ color: typeColor(a.type) }}>{a.type}</span>
                 )}
-                {a.model?.chemistry && <p className="font-body text-[10px] text-slate-400 truncate">{a.model.chemistry}</p>}
               </div>
-              {a.type && (
-                <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: `${typeColor(a.type)}18`, color: typeColor(a.type) }}>{a.type}</span>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
       {onCreateSheet && (
@@ -1617,7 +1616,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                       <Check size={22} className="mx-auto mb-2" /> Nothing needs attention this week. {onTrack.length} spray{onTrack.length !== 1 ? 's' : ''} on track.
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {actionable.map(({ ev }) => EventCard(ev, { badge: ev.area }))}
                     </div>
                   )}
@@ -1630,7 +1629,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                         </span>
                       </button>
                       {!collapsed['now:ontrack'] && (
-                        <div className="space-y-3">{onTrack.map(({ ev }) => EventCard(ev, { badge: ev.area }))}</div>
+                        <div className="space-y-2">{onTrack.map(({ ev }) => EventCard(ev, { badge: ev.area }))}</div>
                       )}
                     </div>
                   )}
