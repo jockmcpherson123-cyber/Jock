@@ -47,6 +47,7 @@ import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import WeeklyReport from '@/components/WeeklyReport'
+import HocEditor from '@/components/HocEditor'
 import Tournament from '@/components/Tournament'
 import CourseMap from '@/components/CourseMap'
 import IrrigationParts from '@/components/IrrigationParts'
@@ -6933,7 +6934,7 @@ function TurfPerformanceModule() {
             <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
           </div>
           <div className="flex gap-1 font-body text-sm overflow-x-auto">
-            {[['dashboard', 'Dashboard'], ['report', 'Weekly Report'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['scouting', 'Scouting'], ['knowledge', 'Reference']].map(([key, label]) => (
+            {[['dashboard', 'Dashboard'], ['report', 'Weekly Report'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['hoc', 'Height of Cut'], ['scouting', 'Scouting'], ['knowledge', 'Reference']].map(([key, label]) => (
               <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
                 {label}
               </button>
@@ -6951,6 +6952,14 @@ function TurfPerformanceModule() {
         {route === 'report' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <WeeklyReport daily={daily} clippings={clippings} practices={practices} speeds={speeds} areas={turf.areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} />
+        )}
+        {route === 'hoc' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <div className="max-w-3xl">
+              <h2 className="font-display text-lg font-semibold text-slate-900 mb-1">Height of Cut</h2>
+              <p className="font-body text-xs text-slate-400 mb-3">Your maintained height of cut per surface. Edited here or on the Weekly Report — both stay in sync.</p>
+              <HocEditor courseInfo={turf.courseInfo} areas={turf.areas} practices={practices} onSaveCourse={saveTurfCourse} />
+            </div>
         )}
         {route === 'gdd' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>

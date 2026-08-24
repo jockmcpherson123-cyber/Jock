@@ -7,6 +7,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import * as db from '@/lib/db'
 import { Printer, Download, Mail, Loader2, Calendar, Thermometer, Scissors, Gauge, Sprout } from 'lucide-react'
+import HocEditor from '@/components/HocEditor'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -43,7 +44,6 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const [schedule, setSchedule] = useState(Array.isArray(courseInfo.reportSchedule) ? courseInfo.reportSchedule : [])
   const [schedDay, setSchedDay] = useState('Any')
   const [schedText, setSchedText] = useState('')
-  const [hocList, setHocList] = useState(Array.isArray(courseInfo.hocList) ? courseInfo.hocList : [])
   const [busy, setBusy] = useState('')
   const [toast, setToast] = useState(null)
   const reportRef = useRef(null)
@@ -62,13 +62,6 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   }
   const removeSchedItem = (id) => { const next = schedule.filter((s) => s.id !== id); setSchedule(next); saveDraft({ reportSchedule: next }) }
   const orderedSchedule = [...schedule].sort((a, b) => dayRank(a.day) - dayRank(b.day))
-
-  // Height-of-cut list: edit heights, add/delete surfaces. Persist to settings.
-  const setHocRow = (id, patch) => setHocList((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)))
-  const addHocRow = (surface = '', height = '') => { const next = [...hocList, { id: `h${Date.now()}`, surface, height }]; setHocList(next); saveDraft({ hocList: next }) }
-  const removeHocRow = (id) => { const next = hocList.filter((r) => r.id !== id); setHocList(next); saveDraft({ hocList: next }) }
-  const persistHoc = () => saveDraft({ hocList })
-  const seedHocRows = () => { const next = allMowed.map((a, i) => ({ id: `h${Date.now()}_${i}`, surface: a, height: hocByArea[a] || '' })); setHocList(next); saveDraft({ hocList: next }) }
 
   useEffect(() => {
     (async () => {
@@ -126,18 +119,9 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   // This week's collected data (filtered to the chosen course).
   const speedsThis = speeds.filter((s) => inRange(s.date, W.thisMon, W.thisSun) && s.speed != null && inCourse(s.area))
   const clipsThis = clippings.filter((c) => inRange(c.date, W.thisMon, W.thisSun) && c.volume != null && inCourse(c.area))
-  // Height of cut is a maintained list (edit/add/delete), stored in settings.
-  // For first-time seeding we can pull the latest logged mow-height per area.
-  const mowRe = /mow|height|hoc|cut/i
-  const MOWED_SURFACE = /green|collar|tee|approach|fairway|surround|rough/i
-  const surfRank = (n) => { const i = ['green', 'collar', 'tee', 'approach', 'fairway', 'surround', 'rough'].findIndex((x) => String(n).toLowerCase().includes(x)); return i < 0 ? 99 : i }
-  const hocByArea = useMemo(() => {
-    const m = {}
-    practices.forEach((p) => { if (mowRe.test(p.practice || '') && p.value != null && p.value !== '' && !m[p.area]) m[p.area] = `${p.value}${/["']|in|mm/i.test(String(p.unit)) ? p.unit : (p.unit ? ' ' + p.unit : '"')}` })
-    return m
-  }, [practices])
-  const allMowed = Object.keys(areas || {}).filter((a) => MOWED_SURFACE.test(a)).sort((a, b) => surfRank(a) - surfRank(b) || a.localeCompare(b))
-  const hocShown = hocList.filter((r) => r.surface && inCourse(r.surface))
+  // Height of cut is a maintained list (edited via the shared HocEditor, stored
+  // in settings). Show the surfaces for the selected course.
+  const hocShown = (Array.isArray(courseInfo.hocList) ? courseInfo.hocList : []).filter((r) => r.surface && inCourse(r.surface))
 
   const speedStat = (() => {
     const vals = speedsThis.map((s) => Number(s.speed)).filter((n) => !isNaN(n))
@@ -306,29 +290,8 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         </div>
       </div>
 
-      {/* Height-of-cut editor (never printed) */}
-      <div className="no-print mb-4 rounded-xl border border-slate-200 p-3">
-        <div className="flex items-center justify-between mb-1.5">
-          <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Height of cut — by surface</label>
-          <div className="flex gap-2">
-            {hocList.length === 0 && allMowed.length > 0 && <button onClick={seedHocRows} className="font-body text-[11px] font-bold" style={{ color: FERN }}>Add my surfaces</button>}
-            <button onClick={() => addHocRow()} className="font-body text-[11px] font-bold flex items-center gap-1" style={{ color: FOREST }}>+ Add surface</button>
-          </div>
-        </div>
-        {hocList.length === 0 ? (
-          <p className="font-body text-[11px] text-slate-400">Add each mowed surface and its height of cut — e.g. Blue Greens · 0.105″. These show on the report.</p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-            {hocList.map((r) => (
-              <div key={r.id} className="flex items-center gap-1.5">
-                <input value={r.surface} onChange={(e) => setHocRow(r.id, { surface: e.target.value })} onBlur={persistHoc} placeholder="Surface" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body" />
-                <input value={r.height} onChange={(e) => setHocRow(r.id, { height: e.target.value })} onBlur={persistHoc} placeholder="0.105″" className="w-20 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body text-right" />
-                <button onClick={() => removeHocRow(r.id)} className="text-slate-300 hover:text-red-500 shrink-0 px-1 font-bold" aria-label="Remove surface">×</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Height-of-cut editor (never printed) — shared with Turf Performance */}
+      <HocEditor courseInfo={courseInfo} areas={areas} practices={practices} onSaveCourse={onSaveCourse} className="no-print mb-4" />
 
       {/* The report sheet */}
       <div id="weekly-report" ref={reportRef} className="bg-white rounded-2xl border border-black/5 shadow-sm p-5 max-w-3xl mx-auto">
