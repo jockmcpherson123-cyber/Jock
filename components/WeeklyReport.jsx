@@ -6,7 +6,7 @@
 // Print it, save it as a PDF, or email it to an assistant in one click.
 import { useState, useEffect, useMemo, useRef } from 'react'
 import * as db from '@/lib/db'
-import { Printer, Download, Mail, Loader2, Calendar, Droplets, Thermometer, Scissors, Gauge, Sparkles } from 'lucide-react'
+import { Printer, Download, Mail, Loader2, Calendar, Droplets, Thermometer, Scissors, Gauge, Sprout } from 'lucide-react'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -33,8 +33,10 @@ function weekWindows(today = new Date()) {
 
 export default function WeeklyReport({ daily = [], clippings = [], practices = [], speeds = [], areas = {}, courseInfo = {}, onSaveCourse }) {
   const [apps, setApps] = useState([])
+  const [fertSheets, setFertSheets] = useState([])
   const [program, setProgram] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [course, setCourse] = useState('all')
   const [recipient, setRecipient] = useState(courseInfo.reportRecipient || '')
   const [sender, setSender] = useState(courseInfo.reportSender || courseInfo.directorName || '')
   const [busy, setBusy] = useState('')
@@ -50,16 +52,23 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         const active = progs.find((p) => p.status === 'active') || progs[0]
         if (active) { setProgram(active); setApps(await db.fetchApplications(active.id)) }
       } catch (e) { console.error(e) }
+      try { setFertSheets(await db.fetchFertSheets()) } catch (e) { console.error(e) }
       setLoading(false)
     })()
   }, [])
 
+  // Courses (e.g. Blue / Gold) come from Settings; areas are named with the
+  // course as their first word ("Blue Greens"), so we match by prefix.
+  const courseNames = (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)
+  const hasCourses = courseNames.length >= 2
+  const inCourse = (area) => course === 'all' || String(area || '').toLowerCase().startsWith(String(course).toLowerCase())
+
   const W = useMemo(() => weekWindows(), [])
   const inRange = (dISO, a, b) => dISO && dISO >= iso(a) && dISO <= iso(b)
 
-  // Next week's sprays, grouped by day → area.
+  // Next week's sprays, grouped by day → area (filtered to the chosen course).
   const sprayDays = useMemo(() => {
-    const next = apps.filter((a) => inRange(a.plannedDate, W.nextMon, W.nextSun))
+    const next = apps.filter((a) => inRange(a.plannedDate, W.nextMon, W.nextSun) && inCourse(a.area))
     const byKey = {}
     next.forEach((a) => {
       const key = `${a.plannedDate}||${a.area}`
@@ -67,7 +76,15 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
       byKey[key].items.push(a)
     })
     return Object.values(byKey).sort((x, y) => x.date.localeCompare(y.date) || String(x.area).localeCompare(String(y.area)))
-  }, [apps, W])
+  }, [apps, W, course])
+
+  // Next week's fertility sheets (planned feeds).
+  const fertNext = useMemo(() => (
+    fertSheets
+      .filter((f) => inRange(f.appDate, W.nextMon, W.nextSun) && inCourse(f.area))
+      .sort((a, b) => String(a.appDate).localeCompare(String(b.appDate)) || String(a.area).localeCompare(String(b.area)))
+  ), [fertSheets, W, course])
+  const npk = (an) => { const n = an?.n ?? an?.N, p = an?.p ?? an?.P, k = an?.k ?? an?.K; return [n, p, k].every((x) => x == null || x === '') ? '' : `${n || 0}-${p || 0}-${k || 0}` }
 
   // Weather split: past rows this week (actuals) and next-week forecast rows.
   const wxThis = daily.filter((r) => inRange(r.date, W.thisMon, W.today))
@@ -81,10 +98,10 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const twx = wxSummary(wxThis)
   const nwx = wxSummary(wxNext)
 
-  // This week's collected data.
-  const speedsThis = speeds.filter((s) => inRange(s.date, W.thisMon, W.thisSun) && s.speed != null)
-  const clipsThis = clippings.filter((c) => inRange(c.date, W.thisMon, W.thisSun) && c.volume != null)
-  const pracThis = practices.filter((p) => inRange(p.date, W.thisMon, W.thisSun))
+  // This week's collected data (filtered to the chosen course).
+  const speedsThis = speeds.filter((s) => inRange(s.date, W.thisMon, W.thisSun) && s.speed != null && inCourse(s.area))
+  const clipsThis = clippings.filter((c) => inRange(c.date, W.thisMon, W.thisSun) && c.volume != null && inCourse(c.area))
+  const pracThis = practices.filter((p) => inRange(p.date, W.thisMon, W.thisSun) && inCourse(p.area))
   const mowRe = /mow|height|hoc|cut/i
   const mowPractices = pracThis.filter((p) => mowRe.test(p.practice || ''))
 
@@ -139,7 +156,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         onSaveCourse({ reportRecipient: recipient, reportSender: sender })
       }
       const { base64 } = await makePdf()
-      const subject = `Weekly Turf & Spray Report — week of ${fmtLong(W.nextMon)}`
+      const subject = `Weekly Turf & Spray Report${course !== 'all' ? ` (${course} Course)` : ''} — week of ${fmtLong(W.nextMon)}`
       const res = await fetch('/api/send-report', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: recipient, subject, filename: fileName(), pdfBase64: base64, text: emailText() }),
@@ -152,9 +169,10 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     setBusy('')
   }
   const emailText = () => {
-    const lines = [`Weekly Turf & Spray Report`, `Week of ${fmtLong(W.nextMon)} – ${fmtLong(W.nextSun)}`, '', 'Planned sprays:']
+    const lines = [`Weekly Turf & Spray Report`, `${course !== 'all' ? course + ' Course · ' : ''}Week of ${fmtLong(W.nextMon)} – ${fmtLong(W.nextSun)}`, '', 'Planned sprays:']
     if (sprayDays.length === 0) lines.push('  None scheduled.')
     sprayDays.forEach((d) => { lines.push(`  ${fmtDay(d.date)} · ${d.area}: ${d.items.map((i) => i.product).join(', ')}`) })
+    if (fertNext.length) { lines.push('', 'Fertility:'); fertNext.forEach((f) => lines.push(`  ${fmtDay(f.appDate)} · ${f.area}: ${f.product || 'Fertilizer'}${npk(f.analysis) ? ` (${npk(f.analysis)})` : ''}`)) }
     if (nwx.n) lines.push('', `Next week forecast: avg high ${round(nwx.avgHigh)}°F / low ${round(nwx.avgLow)}°F, ${round(nwx.precip, 2)}" precip.`)
     lines.push('', 'Full formatted report attached as a PDF.')
     return lines.join('\n')
@@ -184,6 +202,20 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
 
       {toast && <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: '#1A1A16' }}>{toast}</div>}
 
+      {/* Course selector (never printed) */}
+      {hasCourses && (
+        <div className="no-print mb-3 flex flex-wrap gap-2">
+          {['all', ...courseNames].map((c) => {
+            const on = course === c
+            return (
+              <button key={c} onClick={() => setCourse(c)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition" style={on ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+                {c === 'all' ? 'All courses' : `${c} Course`}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {/* Controls (never printed) */}
       <div className="no-print mb-4 flex flex-wrap items-end gap-2">
         <div className="flex-1 min-w-[180px]">
@@ -212,6 +244,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
             <p className="font-display text-[10px] tracking-[0.22em] uppercase" style={{ color: GOLD }}>{club}</p>
             <h2 className="font-display text-2xl font-semibold mt-0.5" style={{ color: FOREST }}>Weekly Turf &amp; Spray Report</h2>
             <p className="font-body text-sm text-slate-500 mt-1">Week of <b>{fmtLong(W.nextMon)} – {fmtLong(W.nextSun)}, {W.nextSun.getFullYear()}</b></p>
+            {hasCourses && <p className="font-body text-[12px] font-bold mt-1" style={{ color: FERN }}>{course === 'all' ? 'All courses' : `${course} Course`}</p>}
           </div>
           <div className="text-right shrink-0">
             <p className="font-body text-[11px] text-slate-400">Prepared</p>
@@ -248,6 +281,30 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
                 </table>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Fertility / nutrition next week */}
+        <H icon={Sprout}>Fertility &amp; nutrition — next week</H>
+        {fertNext.length === 0 ? (
+          <p className="font-body text-sm text-slate-400">No fertility sheets scheduled for next week.</p>
+        ) : (
+          <div className="rounded-lg border border-black/5 overflow-hidden">
+            <table className="w-full border-collapse">
+              <tbody>
+                {fertNext.map((f) => (
+                  <tr key={f.id} className="border-t border-black/5 first:border-t-0">
+                    <td className="px-3 py-1.5 align-top" style={{ borderLeft: `3px solid ${typeColor('Fertilizer')}` }}>
+                      <span className="font-body text-[12.5px] font-bold text-slate-800">{f.product || 'Fertilizer'}</span>
+                      {npk(f.analysis) && <span className="font-body text-[10px] font-bold ml-2" style={{ color: typeColor('Fertilizer') }}>{npk(f.analysis)}</span>}
+                    </td>
+                    <td className="px-3 py-1.5 font-body text-[11px] text-slate-500 align-top">{f.area}</td>
+                    <td className="px-3 py-1.5 font-body text-[11px] text-slate-500 whitespace-nowrap tabular-nums align-top">{f.rate ? `${f.rate} lb/M` : ''}</td>
+                    <td className="px-3 py-1.5 font-body text-[10px] text-slate-400 text-right whitespace-nowrap align-top">{fmtDay(f.appDate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 
