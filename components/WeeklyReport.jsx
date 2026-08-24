@@ -80,6 +80,8 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const courseNames = (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)
   const hasCourses = courseNames.length >= 2
   const inCourse = (area) => course === 'all' || String(area || '').toLowerCase().startsWith(String(course).toLowerCase())
+  // "Blue" → "Blue Course", but "Blue Course" stays "Blue Course" (no double word).
+  const courseLabel = (c) => (/course/i.test(String(c)) ? String(c) : `${c} Course`)
 
   const W = useMemo(() => weekWindows(), [])
   const inRange = (dISO, a, b) => dISO && dISO >= iso(a) && dISO <= iso(b)
@@ -177,7 +179,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         onSaveCourse({ reportRecipient: recipient, reportSender: sender })
       }
       const { base64 } = await makePdf()
-      const subject = `Weekly Turf & Spray Report${course !== 'all' ? ` (${course} Course)` : ''} — week of ${fmtLong(W.nextMon)}`
+      const subject = `Weekly Turf & Spray Report${course !== 'all' ? ` (${courseLabel(course)})` : ''} — week of ${fmtLong(W.nextMon)}`
       const res = await fetch('/api/send-report', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: recipient, subject, filename: fileName(), pdfBase64: base64, text: emailText() }),
@@ -190,7 +192,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     setBusy('')
   }
   const emailText = () => {
-    const lines = [`Weekly Turf & Spray Report`, `${course !== 'all' ? course + ' Course · ' : ''}Week of ${fmtLong(W.nextMon)} – ${fmtLong(W.nextSun)}`, '', 'Planned sprays:']
+    const lines = [`Weekly Turf & Spray Report`, `${course !== 'all' ? courseLabel(course) + ' · ' : ''}Week of ${fmtLong(W.nextMon)} – ${fmtLong(W.nextSun)}`, '', 'Planned sprays:']
     if (sprayDays.length === 0) lines.push('  None scheduled.')
     sprayDays.forEach((d) => { lines.push(`  ${fmtDay(d.date)} · ${d.area}: ${d.items.map((i) => i.product).join(', ')}`) })
     if (fertNext.length) { lines.push('', 'Fertility:'); fertNext.forEach((f) => lines.push(`  ${fmtDay(f.appDate)} · ${f.area}: ${f.product || 'Fertilizer'}${npk(f.analysis) ? ` (${npk(f.analysis)})` : ''}`)) }
@@ -231,7 +233,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
             const on = course === c
             return (
               <button key={c} onClick={() => setCourse(c)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition" style={on ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
-                {c === 'all' ? 'All courses' : `${c} Course`}
+                {c === 'all' ? 'All courses' : courseLabel(c)}
               </button>
             )
           })}
@@ -299,7 +301,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
           <div>
             <p className="font-display text-[9px] tracking-[0.22em] uppercase" style={{ color: GOLD }}>{club}</p>
             <h2 className="font-display text-xl font-semibold mt-0.5" style={{ color: FOREST }}>Weekly Turf &amp; Spray Report</h2>
-            <p className="font-body text-[12px] text-slate-500 mt-0.5">Week of <b>{fmtLong(W.nextMon)} – {fmtLong(W.nextSun)}, {W.nextSun.getFullYear()}</b>{hasCourses && <span className="font-bold" style={{ color: FERN }}> · {course === 'all' ? 'All courses' : `${course} Course`}</span>}</p>
+            <p className="font-body text-[12px] text-slate-500 mt-0.5">Week of <b>{fmtLong(W.nextMon)} – {fmtLong(W.nextSun)}, {W.nextSun.getFullYear()}</b>{hasCourses && <span className="font-bold" style={{ color: FERN }}> · {course === 'all' ? 'All courses' : courseLabel(course)}</span>}</p>
           </div>
           <div className="text-right shrink-0">
             <p className="font-body text-[10px] text-slate-400">Prepared {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
