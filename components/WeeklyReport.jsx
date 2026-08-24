@@ -263,7 +263,21 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   async function makePdf() {
     const { toCanvas } = await import('html-to-image')
     const { jsPDF } = await import('jspdf')
-    const canvas = await toCanvas(reportRef.current, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true })
+    const node = reportRef.current
+    // Capture at a fixed page width so the layout is identical on any device
+    // (an iPad's narrow screen would otherwise clip the wide rows on the right).
+    const CAP_W = 760
+    const prev = { width: node.style.width, maxWidth: node.style.maxWidth }
+    node.style.width = `${CAP_W}px`
+    node.style.maxWidth = `${CAP_W}px`
+    void node.offsetWidth // force reflow at the new width
+    let canvas
+    try {
+      canvas = await toCanvas(node, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true, width: CAP_W, style: { width: `${CAP_W}px`, maxWidth: `${CAP_W}px` } })
+    } finally {
+      node.style.width = prev.width
+      node.style.maxWidth = prev.maxWidth
+    }
     const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' })
     const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight()
     const m = 16
