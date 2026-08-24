@@ -257,12 +257,13 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const dPrecip = twx.n ? `${round(twx.precip, 2)}"` : (mv('wxPrecip') ? `${mv('wxPrecip')}"` : '—')
 
   // ── Output actions ──────────────────────────────────────────────────────
-  // Capture the whole report as one image and scale it to fit a single A4 page
-  // — the report is meant to print on one sheet.
+  // Capture the whole report as one image and scale it to fit a single A4 page.
+  // Uses html-to-image (SVG foreignObject) so modern CSS colors (oklch/oklab
+  // from Tailwind) render via the browser instead of a JS color parser.
   async function makePdf() {
-    const html2canvas = (await import('html2canvas')).default
+    const { toCanvas } = await import('html-to-image')
     const { jsPDF } = await import('jspdf')
-    const canvas = await html2canvas(reportRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 820 })
+    const canvas = await toCanvas(reportRef.current, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true })
     const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' })
     const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight()
     const m = 16
