@@ -205,6 +205,15 @@ const rowKey = () => `r${Date.now()}_${_rowSeq++}`
 
 const round1 = (n) => Math.round(n * 10) / 10
 
+// Short label for a product on the tank banner — keep short names whole, else
+// use the first word (e.g. "Secure Action" → "Secure", "Primo MAXX" → "Primo").
+function shortName(name) {
+  const n = String(name || '').trim()
+  if (n.length <= 11) return n
+  const first = n.split(/\s+/)[0]
+  return first.length >= 4 ? first : n.slice(0, 11)
+}
+
 // Early Order: add up the whole program into how much of each product to buy,
 // like the spreadsheet's Totals tab. For each planned application, total product
 // (oz) = rate × the area's size. Then oz → cases using the product's case size,
@@ -329,6 +338,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [covFilter, setCovFilter] = useState('all') // coverage grid: 'all' | product type
   const [covSel, setCovSel] = useState(null) // selected coverage cell: { area, start, end, state }
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
+  const [openTanks, setOpenTanks] = useState({}) // sheet view: event key -> true when the tank is expanded
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
   // ── Build From Models: pick a year + which surfaces, then auto-fill the
   // Annual Program tab with a per-surface, grass-matched, site-tuned program.
@@ -1448,46 +1458,81 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
             <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No applications in this program.</div>
           ) : viewMode === 'sheet' ? (
             (() => {
-              const rows = [...visibleApps].sort((a, b) => String(a.plannedDate || '9999').localeCompare(String(b.plannedDate || '9999')) || String(a.area).localeCompare(String(b.area)))
               const showArea = areaFilter === 'all'
+              const months = groupByMonth(visibleApps)
               const rateOf = (a) => (a.rateOzM != null && a.rateOzM !== '' ? `${a.rateOzM} oz/M` : a.rateOzA != null && a.rateOzA !== '' ? `${a.rateOzA} oz/A` : a.model?.rate || '')
-              const th = 'text-left font-body text-[10px] font-bold uppercase tracking-wide text-white/85 px-2.5 py-2 whitespace-nowrap'
-              const td = 'font-body text-[12px] px-2.5 py-1.5 align-top'
+              const aiOf = (a) => (products.find((p) => p.name === a.product)?.activeIngredient || '')
+              // One tidy line per single spray; a multi-product day collapses to a
+              // banner listing every product (shortened, colored by type) with a
+              // drop-down to the full editable rows.
               return (
                 <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-                  <div className="overflow-x-auto no-scrollbar">
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr style={{ backgroundColor: FOREST }}>
-                          <th className={th}>Date</th>
-                          {showArea && <th className={th}>Area</th>}
-                          <th className={th}>Product</th>
-                          <th className={th}>Target</th>
-                          <th className={th}>Rate</th>
-                          <th className={th}>Type</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((a, i) => {
-                          const prev = rows[i - 1]
-                          const showDate = !prev || prev.plannedDate !== a.plannedDate || (showArea && prev.area !== a.area)
-                          const tc = typeColor(a.type)
+                  {months.map((mg) => {
+                    const events = groupByEvent(mg.items)
+                    const days = uniqueDays(mg.items)
+                    return (
+                      <div key={mg.key}>
+                        <div className="flex items-baseline gap-2 px-4 py-2" style={{ backgroundColor: '#EEF3EE', borderTop: '1px solid #E4E2D6' }}>
+                          <span className="font-display text-[15px] font-semibold" style={{ color: FOREST }}>{fmtMonth(mg.key)}</span>
+                          <span className="font-body text-[10px] font-bold" style={{ color: '#8aa094' }}>{days} spray day{days !== 1 ? 's' : ''} · {mg.items.length} product{mg.items.length !== 1 ? 's' : ''}</span>
+                        </div>
+                        {events.map((ev) => {
+                          const items = ev.items
+                          if (items.length === 1) {
+                            const a = items[0]; const tc = typeColor(a.type)
+                            return (
+                              <button key={ev.key} onClick={() => openEvent(items)} className="w-full text-left flex items-center gap-2.5 px-3.5 py-2 border-t border-black/5 hover:brightness-[.97] active:brightness-95 transition" style={{ borderLeft: `4px solid ${tc}` }}>
+                                <span className="font-body text-[11px] font-bold w-11 shrink-0" style={{ color: FOREST }}>{fmtDate(a.plannedDate)}</span>
+                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: tc }} />
+                                <span className="font-body text-[12px] font-bold text-slate-800 whitespace-nowrap">{a.product}</span>
+                                {showArea && <span className="font-body text-[10px] text-slate-400 whitespace-nowrap">{a.area}</span>}
+                                <span className="font-body text-[10.5px] text-slate-400 truncate flex-1 min-w-0">{a.target || ''}</span>
+                                <span className="font-body text-[11px] font-bold text-slate-500 whitespace-nowrap tabular-nums">{rateOf(a)}</span>
+                                <span className="font-body text-[8.5px] font-bold uppercase tracking-wide whitespace-nowrap shrink-0" style={{ color: tc }}>{a.type || ''}</span>
+                              </button>
+                            )
+                          }
+                          const open = !!openTanks[ev.key]
+                          const lead = typeColor(items[0].type)
                           return (
-                            <tr key={a.id} onClick={() => openEvent([a])} className="cursor-pointer border-t border-black/5 hover:brightness-95 active:brightness-90" style={{ backgroundColor: `${tc}12`, borderLeft: `4px solid ${tc}` }}>
-                              <td className={`${td} font-semibold text-slate-500 whitespace-nowrap`}>{showDate ? (a.plannedDate ? fmtDate(a.plannedDate) : '—') : ''}</td>
-                              {showArea && <td className={`${td} text-slate-500 whitespace-nowrap`}>{showDate ? a.area : ''}</td>}
-                              <td className={`${td} font-bold text-slate-800`}>{a.product}{a.model?.generic && <span className="ml-1.5 font-body text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 uppercase align-middle">gen</span>}</td>
-                              <td className={`${td} text-slate-600`}>{a.target || ''}</td>
-                              <td className={`${td} text-slate-500 whitespace-nowrap tabular-nums`}>{rateOf(a)}</td>
-                              <td className={td}><span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide whitespace-nowrap" style={{ backgroundColor: `${tc}1e`, color: tc }}>{a.type || '—'}</span></td>
-                            </tr>
+                            <div key={ev.key}>
+                              <button onClick={() => setOpenTanks((p) => ({ ...p, [ev.key]: !p[ev.key] }))} className="w-full text-left flex items-center gap-2 px-3.5 py-2 border-t-2 hover:brightness-[.98] transition" style={{ borderTopColor: '#E7E4D6', borderLeft: `4px solid ${lead}`, backgroundColor: open ? '#FBFAF4' : 'white' }}>
+                                {open ? <ChevronDown size={13} className="shrink-0" style={{ color: '#b7a86a' }} /> : <ChevronRight size={13} className="shrink-0" style={{ color: '#b7a86a' }} />}
+                                <span className="font-body text-[11px] font-bold w-11 shrink-0" style={{ color: FOREST }}>{fmtDate(ev.date)}</span>
+                                <span className="font-body text-[8.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1E7A8', color: '#8a6d1e' }}>Tank · {items.length}</span>
+                                {showArea && <span className="font-body text-[10px] text-slate-400 whitespace-nowrap shrink-0">{ev.area}</span>}
+                                <span className="flex-1 min-w-0 truncate text-[11.5px]">
+                                  {items.map((a, k) => (
+                                    <span key={a.id} className="whitespace-nowrap">
+                                      {k > 0 && <span className="mx-1" style={{ color: '#cfcbba' }}>·</span>}
+                                      <span className="font-bold" style={{ color: typeColor(a.type) }}>{shortName(a.product)}</span>
+                                    </span>
+                                  ))}
+                                </span>
+                              </button>
+                              {open && items.map((a) => {
+                                const tc = typeColor(a.type); const ai = aiOf(a)
+                                return (
+                                  <button key={a.id} onClick={() => openEvent(items)} className="w-full text-left flex items-center gap-2.5 py-1.5 pl-8 pr-3.5 border-t border-black/5 hover:brightness-[.97] active:brightness-95 transition" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: '#FCFBF6' }}>
+                                    <span className="min-w-0 flex-1">
+                                      <span className="font-body text-[12px] font-bold text-slate-800">{a.product}</span>
+                                      {ai && <span className="font-body text-[10px] text-slate-400 ml-1.5">{ai}</span>}
+                                    </span>
+                                    <span className="font-body text-[10.5px] text-slate-400 truncate flex-1 min-w-0 hidden sm:block">{a.target || ''}</span>
+                                    <span className="font-body text-[11px] font-bold text-slate-500 whitespace-nowrap tabular-nums">{rateOf(a)}</span>
+                                    <span className="font-body text-[8.5px] font-bold uppercase tracking-wide whitespace-nowrap shrink-0" style={{ color: tc }}>{a.type || ''}</span>
+                                    <Pencil size={12} className="shrink-0" style={{ color: '#c3bda6' }} />
+                                  </button>
+                                )
+                              })}
+                            </div>
                           )
                         })}
-                      </tbody>
-                    </table>
-                  </div>
+                      </div>
+                    )
+                  })}
                   <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-black/5" style={{ backgroundColor: '#F8FAF8' }}>
-                    <span className="font-body text-[11px] text-slate-400">{rows.length} application{rows.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a row to edit</span>
+                    <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a spray to edit</span>
                     <button onClick={startAddApp} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={12} /> Add</button>
                   </div>
                 </div>
