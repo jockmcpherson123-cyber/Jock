@@ -1537,7 +1537,6 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                   <span className="font-body text-[11px] font-bold block" style={{ color: FOREST }}>{fmtDate(ev.date)}</span>
                                   <span className="font-body text-[9px] font-semibold block mt-0.5" style={{ color: '#9aa69d' }}>{fmtWeekday(ev.date)}</span>
                                 </span>
-                                {multi && <span className="font-body text-[8.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1E7A8', color: '#8a6d1e' }}>Tank · {items.length}</span>}
                                 {showArea && <span className="font-body text-[10px] text-slate-400 whitespace-nowrap shrink-0">{ev.area}</span>}
                                 <span className="flex-1 min-w-0 truncate text-[11.5px]">
                                   {items.map((a, k) => (
