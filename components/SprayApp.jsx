@@ -46,6 +46,7 @@ import { directionForJob, stepLabel, surfaceKind } from '@/lib/mowdir'
 import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
+import WeeklyReport from '@/components/WeeklyReport'
 import Tournament from '@/components/Tournament'
 import CourseMap from '@/components/CourseMap'
 import IrrigationParts from '@/components/IrrigationParts'
@@ -6932,7 +6933,7 @@ function TurfPerformanceModule() {
             <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
           </div>
           <div className="flex gap-1 font-body text-sm overflow-x-auto">
-            {[['dashboard', 'Dashboard'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['scouting', 'Scouting'], ['knowledge', 'Reference']].map(([key, label]) => (
+            {[['dashboard', 'Dashboard'], ['report', 'Weekly Report'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['scouting', 'Scouting'], ['knowledge', 'Reference']].map(([key, label]) => (
               <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
                 {label}
               </button>
@@ -6947,6 +6948,10 @@ function TurfPerformanceModule() {
           : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} clippings={clippings} soilTests={soilTests} practices={practices} speeds={speeds} hasLocation={turf.location?.lat != null} onGo={setRoute} />
         )}
         {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} products={turf.products} />}
+        {route === 'report' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <WeeklyReport daily={daily} clippings={clippings} practices={practices} speeds={speeds} areas={turf.areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} />
+        )}
         {route === 'gdd' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <GddPgrTab daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} hasLocation={turf.location?.lat != null} courseInfo={turf.courseInfo} onSaveTargets={(pgrTargets) => saveTurfCourse({ pgrTargets })} />
