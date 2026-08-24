@@ -27,15 +27,25 @@ export async function POST(request) {
 
   let body
   try { body = await request.json() } catch { return Response.json({ ok: false, error: 'bad_request' }, { status: 400 }) }
-  const { to, subject, text, filename, pdfBase64 } = body || {}
+  const { to, subject, text, filename, pdfBase64, fromName, replyTo } = body || {}
   if (!to) return Response.json({ ok: false, error: 'no_recipient' }, { status: 400 })
 
+  // One central sending domain serves every club (multi-tenant). We keep the
+  // verified address from REPORT_FROM_EMAIL, but override the display name with
+  // the club's name so each report reads as coming from that club.
+  const addressMatch = String(from).match(/<([^>]+)>/)
+  const address = addressMatch ? addressMatch[1] : String(from).trim()
+  const displayName = fromName ? String(fromName).replace(/[<>"]/g, '').trim() : null
+  const fromField = displayName ? `${displayName} <${address}>` : from
+
   const payload = {
-    from,
+    from: fromField,
     to: Array.isArray(to) ? to : [to],
     subject: subject || 'Weekly Turf & Spray Report',
     text: text || 'The weekly report is attached.',
   }
+  // Replies go to the person who sent it, not the shared sending address.
+  if (replyTo) payload.reply_to = replyTo
   if (pdfBase64 && filename) {
     payload.attachments = [{ filename, content: pdfBase64 }]
   }

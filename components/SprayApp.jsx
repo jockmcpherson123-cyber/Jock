@@ -319,7 +319,7 @@ export default function SprayApp({ user }) {
       </div>
 
       {module === 'spray' ? <SprayOpsModule user={user} />
-        : module === 'turf' ? <TurfPerformanceModule />
+        : module === 'turf' ? <TurfPerformanceModule user={user} />
         : module === 'playbook' ? <PlaybookModule user={user} manage={canManage(user.role)} />
         : module === 'tournament' ? <Tournament />
         : module === 'map' ? <IrrigationModule user={user} manage={canManage(user.role)} />
@@ -6858,7 +6858,7 @@ function taskErrorText(e) {
 // ════════════════════════════════════════════════════════════════════════
 //  TURF PERFORMANCE MODULE — scaffold only (features come in a later phase).
 // ════════════════════════════════════════════════════════════════════════
-function TurfPerformanceModule() {
+function TurfPerformanceModule({ user }) {
   const [route, setRoute] = useState('dashboard')
   const [turf, setTurf] = useState({ location: null, sheets: [], products: [], areas: {} })
   const [daily, setDaily] = useState([])
@@ -6951,7 +6951,7 @@ function TurfPerformanceModule() {
         {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} products={turf.products} />}
         {route === 'report' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <WeeklyReport daily={daily} clippings={clippings} practices={practices} speeds={speeds} areas={turf.areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} />
+          : <WeeklyReport daily={daily} clippings={clippings} practices={practices} speeds={speeds} areas={turf.areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} userEmail={user?.email} userName={user?.fullName} />
         )}
         {route === 'hoc' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>

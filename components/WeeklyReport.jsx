@@ -76,14 +76,14 @@ function weekWindows(today = new Date()) {
   return { thisMon, thisSun, nextMon, nextSun, today: d }
 }
 
-export default function WeeklyReport({ daily = [], clippings = [], practices = [], speeds = [], areas = {}, courseInfo = {}, onSaveCourse }) {
+export default function WeeklyReport({ daily = [], clippings = [], practices = [], speeds = [], areas = {}, courseInfo = {}, onSaveCourse, userEmail = '', userName = '' }) {
   const [apps, setApps] = useState([])
   const [fertSheets, setFertSheets] = useState([])
   const [program, setProgram] = useState(null)
   const [loading, setLoading] = useState(true)
   const [course, setCourse] = useState('all')
   const [recipient, setRecipient] = useState(courseInfo.reportRecipient || '')
-  const [sender, setSender] = useState(courseInfo.reportSender || courseInfo.directorName || '')
+  const [sender, setSender] = useState(courseInfo.reportSender || courseInfo.directorName || userName || '')
   const [notes, setNotes] = useState(courseInfo.reportNotes || '')
   const [schedule, setSchedule] = useState(Array.isArray(courseInfo.reportSchedule) ? courseInfo.reportSchedule : [])
   const [schedDay, setSchedDay] = useState('Any')
@@ -299,7 +299,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
       const subject = `Weekly Turf & Spray Report${course !== 'all' ? ` (${courseLabel(course)})` : ''} — week of ${fmtLong(W.nextMon)}`
       const res = await fetch('/api/send-report', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: recipient, subject, filename: fileName(), pdfBase64: base64, text: emailText() }),
+        body: JSON.stringify({ to: recipient, subject, filename: fileName(), pdfBase64: base64, text: emailText(), fromName: `${courseInfo.clubName || 'Turf'}${course !== 'all' ? ' · ' + courseLabel(course) : ''}`, replyTo: userEmail || undefined }),
       })
       const j = await res.json().catch(() => ({}))
       if (res.ok && j.ok) { showToast(`Sent to ${recipient}`) }
