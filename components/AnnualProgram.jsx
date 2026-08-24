@@ -339,6 +339,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [covSel, setCovSel] = useState(null) // selected coverage cell: { area, start, end, state }
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const [openTanks, setOpenTanks] = useState({}) // sheet view: event key -> true when the tank is expanded
+  const [inlineEdit, setInlineEdit] = useState(null) // sheet view: quick inline edit of one product row
   // The spreadsheet Sheet view is a wide, desktop-only layout — hidden on
   // iPad/phone (no mouse, or a narrow screen), where the card views read better.
   const [isDesktop, setIsDesktop] = useState(false)
@@ -580,6 +581,39 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
         : r)),
     }
   })
+  // ── Sheet view: quick inline edit of a single product line ────────────────
+  // Tap a row → it becomes editable in place (searchable product + rate + Save).
+  const startInline = (a) => setInlineEdit({
+    id: a.id, area: a.area, plannedDate: a.plannedDate || null, trigger: a.trigger || { mode: 'date' },
+    product: a.product, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', basis: a.basis || 'oz / M', type: a.type || '', target: a.target || '',
+  })
+  // Swap the product mid-edit — re-fills rate + type + basis from the library live.
+  const swapInline = (name) => setInlineEdit((prev) => {
+    if (!prev) return prev
+    const prod = products.find((p) => p.name === name)
+    return { ...prev, product: name, type: prod?.type || '', basis: prod?.basis || 'oz / M', rateOzM: prod?.rate != null ? prod.rate : '', rateOzA: '', target: '' }
+  })
+  async function saveInline() {
+    if (!inlineEdit?.product) { setInlineEdit(null); return }
+    setBusy(true)
+    try {
+      await db.upsertApplication({
+        id: inlineEdit.id, programId: activeProgram.id, area: inlineEdit.area,
+        plannedDate: inlineEdit.plannedDate || null, product: inlineEdit.product,
+        rateOzM: inlineEdit.rateOzM === '' ? null : Number(inlineEdit.rateOzM),
+        rateOzA: inlineEdit.rateOzA === '' ? null : Number(inlineEdit.rateOzA),
+        basis: inlineEdit.basis || 'oz / M', type: inlineEdit.type || null,
+        target: inlineEdit.target || null, trigger: inlineEdit.trigger || { mode: 'date' },
+      })
+      setApps(await db.fetchApplications(activeProgram.id))
+      setInlineEdit(null)
+      showToast('Spray updated')
+    } catch (e) {
+      console.error(e)
+      showToast('Could not save — check your connection')
+    }
+    setBusy(false)
+  }
   // Add or remove a product from the tank mix — lets you tap several at once.
   const toggleProductRow = (name) => setEditApp((prev) => {
     if (prev.products.some((r) => r.product === name)) return { ...prev, products: prev.products.filter((r) => r.product !== name) }
@@ -1475,6 +1509,22 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               const months = groupByMonth(visibleApps)
               const rateOf = (a) => (a.rateOzM != null && a.rateOzM !== '' ? `${a.rateOzM} oz/M` : a.rateOzA != null && a.rateOzA !== '' ? `${a.rateOzA} oz/A` : a.model?.rate || '')
               const aiOf = (a) => (products.find((p) => p.name === a.product)?.activeIngredient || '')
+              // The row-in-place editor: searchable product (auto-fills rate + type),
+              // an editable rate, and Save / Cancel — no modal.
+              const inlineRow = (pad) => {
+                const tc = typeColor(inlineEdit.type)
+                const ai = products.find((p) => p.name === inlineEdit.product)?.activeIngredient || ''
+                return (
+                  <div className={`flex items-center gap-2 ${pad} border-t border-black/5`} style={{ borderLeft: `4px solid ${tc}`, backgroundColor: '#FFF9E8' }}>
+                    <div className="w-44 shrink-0"><SearchSelect value={inlineEdit.product} options={products.map((p) => p.name)} onPick={swapInline} placeholder="Search product…" /></div>
+                    <span className="font-body text-[10px] text-slate-400 truncate flex-1 min-w-0 hidden md:block">{ai}{inlineEdit.type ? ` · ${inlineEdit.type}` : ''}</span>
+                    <input type="number" step="any" value={inlineEdit.rateOzM} onChange={(e) => setInlineEdit((p) => ({ ...p, rateOzM: e.target.value }))} className="w-16 text-right border rounded-lg px-2 py-1.5 text-[12px] font-bold font-body" style={{ borderColor: GOLD, backgroundColor: '#fff' }} />
+                    <span className="font-body text-[9px] text-slate-400 shrink-0">oz/M</span>
+                    <button onClick={saveInline} disabled={busy} className="font-body text-[11px] font-bold text-white px-3 py-1.5 rounded-lg shrink-0 disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? '…' : 'Save'}</button>
+                    <button onClick={() => setInlineEdit(null)} className="font-body text-[11px] font-semibold text-slate-500 px-2.5 py-1.5 rounded-lg border border-slate-200 shrink-0">Cancel</button>
+                  </div>
+                )
+              }
               // One tidy line per single spray; a multi-product day collapses to a
               // banner listing every product (shortened, colored by type) with a
               // drop-down to the full editable rows.
@@ -1493,8 +1543,16 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                           const items = ev.items
                           if (items.length === 1) {
                             const a = items[0]; const tc = typeColor(a.type)
+                            if (inlineEdit?.id === a.id) {
+                              return (
+                                <div key={ev.key} className="flex items-stretch">
+                                  <span className="font-body text-[11px] font-bold w-14 shrink-0 flex items-center justify-center" style={{ color: FOREST, backgroundColor: '#FFF9E8', borderTop: '1px solid rgba(0,0,0,0.05)' }}>{fmtDate(a.plannedDate)}</span>
+                                  <div className="flex-1 min-w-0">{inlineRow('px-3 py-1.5')}</div>
+                                </div>
+                              )
+                            }
                             return (
-                              <button key={ev.key} onClick={() => openEvent(items)} className="w-full text-left flex items-center gap-2.5 px-3.5 py-2 border-t border-black/5 hover:brightness-[.97] active:brightness-95 transition" style={{ borderLeft: `4px solid ${tc}` }}>
+                              <div key={ev.key} onClick={() => startInline(a)} className="cursor-pointer w-full flex items-center gap-2.5 px-3.5 py-2 border-t border-black/5 hover:brightness-[.97] active:brightness-95 transition" style={{ borderLeft: `4px solid ${tc}` }}>
                                 <span className="font-body text-[11px] font-bold w-11 shrink-0" style={{ color: FOREST }}>{fmtDate(a.plannedDate)}</span>
                                 <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: tc }} />
                                 <span className="font-body text-[12px] font-bold text-slate-800 whitespace-nowrap">{a.product}</span>
@@ -1502,7 +1560,8 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                 <span className="font-body text-[10.5px] text-slate-400 truncate flex-1 min-w-0">{a.target || ''}</span>
                                 <span className="font-body text-[11px] font-bold text-slate-500 whitespace-nowrap tabular-nums">{rateOf(a)}</span>
                                 <span className="font-body text-[8.5px] font-bold uppercase tracking-wide whitespace-nowrap shrink-0" style={{ color: tc }}>{a.type || ''}</span>
-                              </button>
+                                <button onClick={(e) => { e.stopPropagation(); openEvent(items) }} className="shrink-0 text-slate-300 hover:text-slate-500 transition" title="Full editor (date, timing, targets)"><Pencil size={12} /></button>
+                              </div>
                             )
                           }
                           const open = !!openTanks[ev.key]
@@ -1525,8 +1584,9 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                               </button>
                               {open && items.map((a) => {
                                 const tc = typeColor(a.type); const ai = aiOf(a)
+                                if (inlineEdit?.id === a.id) return <div key={a.id} className="pl-4">{inlineRow('py-1.5 pl-4 pr-3.5')}</div>
                                 return (
-                                  <button key={a.id} onClick={() => openEvent(items)} className="w-full text-left flex items-center gap-2.5 py-1.5 pl-8 pr-3.5 border-t border-black/5 hover:brightness-[.97] active:brightness-95 transition" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: '#FCFBF6' }}>
+                                  <div key={a.id} onClick={() => startInline(a)} className="cursor-pointer w-full flex items-center gap-2.5 py-1.5 pl-8 pr-3.5 border-t border-black/5 hover:brightness-[.97] active:brightness-95 transition" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: '#FCFBF6' }}>
                                     <span className="min-w-0 flex-1">
                                       <span className="font-body text-[12px] font-bold text-slate-800">{a.product}</span>
                                       {ai && <span className="font-body text-[10px] text-slate-400 ml-1.5">{ai}</span>}
@@ -1534,8 +1594,8 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                     <span className="font-body text-[10.5px] text-slate-400 truncate flex-1 min-w-0 hidden sm:block">{a.target || ''}</span>
                                     <span className="font-body text-[11px] font-bold text-slate-500 whitespace-nowrap tabular-nums">{rateOf(a)}</span>
                                     <span className="font-body text-[8.5px] font-bold uppercase tracking-wide whitespace-nowrap shrink-0" style={{ color: tc }}>{a.type || ''}</span>
-                                    <Pencil size={12} className="shrink-0" style={{ color: '#c3bda6' }} />
-                                  </button>
+                                    <button onClick={(e) => { e.stopPropagation(); openEvent(items) }} className="shrink-0 text-slate-300 hover:text-slate-500 transition" title="Full editor (date, timing, targets)"><Pencil size={12} /></button>
+                                  </div>
                                 )
                               })}
                             </div>
@@ -1545,7 +1605,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                     )
                   })}
                   <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-black/5" style={{ backgroundColor: '#F8FAF8' }}>
-                    <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a spray to edit</span>
+                    <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a product to edit in place · <Pencil size={10} className="inline align-[-1px]" /> for the full editor</span>
                     <button onClick={startAddApp} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={12} /> Add</button>
                   </div>
                 </div>
