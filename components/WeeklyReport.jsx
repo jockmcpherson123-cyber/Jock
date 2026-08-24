@@ -45,6 +45,8 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const [schedText, setSchedText] = useState('')
   const [manual, setManual] = useState(courseInfo.reportManual && typeof courseInfo.reportManual === 'object' ? courseInfo.reportManual : {})
   const [hocRows, setHocRows] = useState(Array.isArray(courseInfo.hocList) ? courseInfo.hocList : [])
+  const [manualSprays, setManualSprays] = useState(Array.isArray(courseInfo.reportSprays) ? courseInfo.reportSprays : [])
+  const [manualFert, setManualFert] = useState(Array.isArray(courseInfo.reportFert) ? courseInfo.reportFert : [])
   const [editKey, setEditKey] = useState(null) // which inline field is being edited
   const [draft, setDraft] = useState('')       // its working value
   const [busy, setBusy] = useState('')
@@ -80,6 +82,19 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   // Schedule inline edits.
   const editSched = (id) => { const next = schedule.map((s) => (s.id === id ? { ...s, text: draft } : s)); setSchedule(next); saveDraft({ reportSchedule: next }); setEditKey(null) }
   const cycleDay = (id) => { const next = schedule.map((s) => (s.id === id ? { ...s, day: DAYS[(DAYS.indexOf(s.day) + 1) % DAYS.length] } : s)); setSchedule(next); saveDraft({ reportSchedule: next }) }
+  // Hand-typed spray + fertility rows (in addition to whatever the program has).
+  const persistSprays = (next) => { setManualSprays(next); saveDraft({ reportSprays: next }) }
+  const addSpray = () => persistSprays([...manualSprays, { id: `sp${Date.now()}`, when: '', area: course !== 'all' ? course : '', product: '', rate: '', target: '' }])
+  const editSprayField = (id, field) => { persistSprays(manualSprays.map((r) => (r.id === id ? { ...r, [field]: draft } : r))); setEditKey(null) }
+  const removeSpray = (id) => persistSprays(manualSprays.filter((r) => r.id !== id))
+  const persistFert = (next) => { setManualFert(next); saveDraft({ reportFert: next }) }
+  const addFert = () => persistFert([...manualFert, { id: `ft${Date.now()}`, when: '', area: course !== 'all' ? course : '', product: '', npk: '', rate: '' }])
+  const editFertField = (id, field) => { persistFert(manualFert.map((r) => (r.id === id ? { ...r, [field]: draft } : r))); setEditKey(null) }
+  const removeFert = (id) => persistFert(manualFert.filter((r) => r.id !== id))
+  // A tap-to-edit inline cell (text when idle, input when active).
+  const cell = (key, value, placeholder, commit, cls = '') => (editKey === key
+    ? <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit() }} placeholder={placeholder} className={`border rounded px-1 py-0.5 font-body ${cls}`} style={{ borderColor: '#E0D6A8' }} />
+    : <span onClick={() => startEdit(key, value)} className={`cursor-text ${cls}`}>{value || <span className="text-slate-300 no-print">{placeholder}</span>}</span>)
 
   useEffect(() => {
     (async () => {
@@ -143,6 +158,12 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   // from Turf Performance (same courseInfo.hocList). Keep a local mirror synced.
   const hocExtKey = JSON.stringify(courseInfo.hocList || [])
   useEffect(() => { setHocRows(Array.isArray(courseInfo.hocList) ? courseInfo.hocList : []) }, [hocExtKey])
+  const spraysExtKey = JSON.stringify(courseInfo.reportSprays || [])
+  useEffect(() => { setManualSprays(Array.isArray(courseInfo.reportSprays) ? courseInfo.reportSprays : []) }, [spraysExtKey])
+  const fertExtKey = JSON.stringify(courseInfo.reportFert || [])
+  useEffect(() => { setManualFert(Array.isArray(courseInfo.reportFert) ? courseInfo.reportFert : []) }, [fertExtKey])
+  const manualSpraysShown = manualSprays.filter((r) => !r.area || inCourse(r.area))
+  const manualFertShown = manualFert.filter((r) => !r.area || inCourse(r.area))
   const hocShown = hocRows.filter((r) => !r.surface || inCourse(r.surface))
   const MOWED_SURFACE = /green|collar|tee|approach|fairway|surround|rough/i
   const surfRank = (n) => { const i = ['green', 'collar', 'tee', 'approach', 'fairway', 'surround', 'rough'].findIndex((x) => String(n).toLowerCase().includes(x)); return i < 0 ? 99 : i }
@@ -232,9 +253,14 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   }
   const emailText = () => {
     const lines = [`Weekly Turf & Spray Report`, `${course !== 'all' ? courseLabel(course) + ' · ' : ''}Week of ${fmtLong(W.nextMon)} – ${fmtLong(W.nextSun)}`, '', 'Planned sprays:']
-    if (sprayDays.length === 0) lines.push('  None scheduled.')
+    if (sprayDays.length === 0 && manualSpraysShown.length === 0) lines.push('  None scheduled.')
     sprayDays.forEach((d) => { lines.push(`  ${fmtDay(d.date)} · ${d.area}: ${d.items.map((i) => i.product).join(', ')}`) })
-    if (fertNext.length) { lines.push('', 'Fertility:'); fertNext.forEach((f) => lines.push(`  ${fmtDay(f.appDate)} · ${f.area}: ${f.product || 'Fertilizer'}${npk(f.analysis) ? ` (${npk(f.analysis)})` : ''}`)) }
+    manualSpraysShown.forEach((r) => { if (r.product) lines.push(`  ${r.when || ''} ${r.area || ''}: ${r.product}${r.rate ? ` @ ${r.rate}` : ''}`.trim()) })
+    if (fertNext.length || manualFertShown.length) {
+      lines.push('', 'Fertility:')
+      fertNext.forEach((f) => lines.push(`  ${fmtDay(f.appDate)} · ${f.area}: ${f.product || 'Fertilizer'}${npk(f.analysis) ? ` (${npk(f.analysis)})` : ''}`))
+      manualFertShown.forEach((r) => { if (r.product) lines.push(`  ${r.when || ''} ${r.area || ''}: ${r.product}${r.npk ? ` (${r.npk})` : ''}`.trim()) })
+    }
     if (schedule.length) { lines.push('', 'Schedule:'); orderedSchedule.forEach((s) => lines.push(`  ${s.day !== 'Any' ? s.day + ' — ' : ''}${s.text}`)) }
     if (nwx.n) lines.push('', `Next week forecast: avg high ${round(nwx.avgHigh)}°F / low ${round(nwx.avgLow)}°F, ${round(nwx.precip, 2)}" precip.`)
     if (notes.trim()) lines.push('', 'Notes:', notes.trim())
@@ -320,10 +346,13 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
           )}
         </div>
 
-        {/* Sprays next week */}
-        <H icon={Calendar}>Planned sprays — next week</H>
-        {sprayDays.length === 0 ? (
-          <p className="font-body text-[12px] text-slate-400">No sprays scheduled for next week{program ? '' : ' (no active program found)'}.</p>
+        {/* Sprays next week (pulled from program + hand-typed) */}
+        <div className="flex items-center justify-between">
+          <H icon={Calendar}>Planned sprays — next week</H>
+          <button onClick={addSpray} className="no-print font-body text-[11px] font-bold" style={{ color: FOREST }}>+ Add spray</button>
+        </div>
+        {sprayDays.length === 0 && manualSpraysShown.length === 0 ? (
+          <p className="font-body text-[12px] text-slate-400"><span className="no-print">Tap “+ Add spray” to type one, or it fills from your Annual Program.</span></p>
         ) : (
           <div className="space-y-1.5">
             {sprayDays.map((d) => (
@@ -348,15 +377,36 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
                 </table>
               </div>
             ))}
+            {manualSpraysShown.length > 0 && (
+              <div className="rounded-lg border border-black/5 overflow-hidden avoid-break">
+                <table className="w-full border-collapse">
+                  <tbody>
+                    {manualSpraysShown.map((r) => (
+                      <tr key={r.id} className="border-t border-black/5 first:border-t-0" style={{ borderLeft: `3px solid ${FERN}` }}>
+                        <td className="px-2 py-1 w-16 font-body text-[10px] font-bold" style={{ color: FOREST }}>{cell(`sp:${r.id}:when`, r.when, 'Day', () => editSprayField(r.id, 'when'), 'text-[10px] w-14')}</td>
+                        <td className="px-2 py-1 font-body text-[10px] text-slate-500">{cell(`sp:${r.id}:area`, r.area, 'Area', () => editSprayField(r.id, 'area'), 'text-[10px] w-20')}</td>
+                        <td className="px-2 py-1 font-body text-[12px] font-bold text-slate-800">{cell(`sp:${r.id}:product`, r.product, 'Product', () => editSprayField(r.id, 'product'), 'text-[12px] w-28')}</td>
+                        <td className="px-2 py-1 font-body text-[10.5px] text-slate-500 whitespace-nowrap">{cell(`sp:${r.id}:rate`, r.rate, 'Rate', () => editSprayField(r.id, 'rate'), 'text-[10.5px] w-16')}</td>
+                        <td className="px-2 py-1 font-body text-[10.5px] text-slate-500">{cell(`sp:${r.id}:target`, r.target, 'Target', () => editSprayField(r.id, 'target'), 'text-[10.5px] w-24')}</td>
+                        <td className="px-1 py-1 text-right"><button onClick={() => removeSpray(r.id)} className="no-print text-slate-300 hover:text-red-500 font-bold text-xs">×</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
         {/* Fertility + Schedule side by side */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5">
           <div className="min-w-0 avoid-break">
-            <H icon={Sprout}>Fertility &amp; nutrition — next week</H>
-            {fertNext.length === 0 ? (
-              <p className="font-body text-[12px] text-slate-400">None scheduled.</p>
+            <div className="flex items-center justify-between">
+              <H icon={Sprout}>Fertility &amp; nutrition — next week</H>
+              <button onClick={addFert} className="no-print font-body text-[11px] font-bold" style={{ color: FOREST }}>+ Add</button>
+            </div>
+            {fertNext.length === 0 && manualFertShown.length === 0 ? (
+              <p className="font-body text-[12px] text-slate-400"><span className="no-print">Tap “+ Add” to type a feed, or it fills from your fert sheets.</span></p>
             ) : (
               <div className="rounded-lg border border-black/5 overflow-hidden">
                 <table className="w-full border-collapse">
@@ -370,6 +420,17 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
                         </td>
                         <td className="px-2.5 py-1 font-body text-[10px] text-slate-500 whitespace-nowrap tabular-nums text-right align-top">{f.rate ? `${f.rate} lb/M` : ''}</td>
                         <td className="px-2.5 py-1 font-body text-[9px] text-slate-400 text-right whitespace-nowrap align-top">{fmtDay(f.appDate)}</td>
+                      </tr>
+                    ))}
+                    {manualFertShown.map((r) => (
+                      <tr key={r.id} className="border-t border-black/5 first:border-t-0" style={{ borderLeft: `3px solid ${typeColor('Fertilizer')}` }}>
+                        <td className="px-2 py-1 align-top">
+                          <span className="font-body text-[12px] font-bold text-slate-800">{cell(`ft:${r.id}:product`, r.product, 'Product', () => editFertField(r.id, 'product'), 'text-[12px] w-24')}</span>
+                          <span className="ml-1.5 font-body text-[9px] font-bold" style={{ color: typeColor('Fertilizer') }}>{cell(`ft:${r.id}:npk`, r.npk, 'N-P-K', () => editFertField(r.id, 'npk'), 'text-[9px] w-14')}</span>
+                          <span className="ml-1.5 font-body text-[10px] text-slate-400">{cell(`ft:${r.id}:area`, r.area, 'Area', () => editFertField(r.id, 'area'), 'text-[10px] w-20')}</span>
+                        </td>
+                        <td className="px-2 py-1 font-body text-[10px] text-slate-500 whitespace-nowrap text-right align-top">{cell(`ft:${r.id}:rate`, r.rate, 'Rate', () => editFertField(r.id, 'rate'), 'text-[10px] w-14')}</td>
+                        <td className="px-1 py-1 text-right align-top"><button onClick={() => removeFert(r.id)} className="no-print text-slate-300 hover:text-red-500 font-bold text-xs">×</button></td>
                       </tr>
                     ))}
                   </tbody>
