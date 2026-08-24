@@ -19,6 +19,51 @@ const fmtLong = (d) => d.toLocaleDateString('en-US', { weekday: 'short', month: 
 const fmtDay = (isoStr) => (isoStr ? new Date(isoStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '')
 const round = (n, p = 0) => { const f = 10 ** p; return Math.round(n * f) / f }
 const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null)
+const shortDay = (isoStr) => (isoStr ? new Date(isoStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }) : '')
+
+// ── Tiny inline-SVG charts (render cleanly in the PDF/print) ────────────────
+// points: [{ label, v }]. VB is a fixed 340×64 drawing space scaled to fit.
+const VBW = 340, VBH = 64, PADX = 6, PADT = 8, PADB = 16
+function TrendLine({ points, color = FERN }) {
+  if (!points || points.length < 2) return null
+  const vs = points.map((p) => p.v)
+  const min = Math.min(...vs), max = Math.max(...vs)
+  const pad = (max - min) * 0.2 || (max * 0.1) || 1
+  const lo = min - pad, hi = max + pad
+  const iw = VBW - PADX * 2, ih = VBH - PADT - PADB
+  const xAt = (i) => PADX + (i / (points.length - 1)) * iw
+  const yAt = (v) => PADT + ih - ((v - lo) / (hi - lo)) * ih
+  const line = points.map((p, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)},${yAt(p.v).toFixed(1)}`).join(' ')
+  const area = `${line} L${xAt(points.length - 1).toFixed(1)},${(PADT + ih).toFixed(1)} L${xAt(0).toFixed(1)},${(PADT + ih).toFixed(1)} Z`
+  return (
+    <svg viewBox={`0 0 ${VBW} ${VBH}`} width="100%" style={{ height: 'auto', display: 'block' }} preserveAspectRatio="none">
+      <path d={area} fill={`${color}18`} />
+      <path d={line} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+      {points.map((p, i) => <circle key={i} cx={xAt(i)} cy={yAt(p.v)} r="2.1" fill={color} />)}
+      <text x={xAt(0)} y={VBH - 4} fontSize="8" fill="#9aa69d">{points[0].label}</text>
+      <text x={xAt(points.length - 1)} y={VBH - 4} fontSize="8" fill="#9aa69d" textAnchor="end">{points[points.length - 1].label}</text>
+      <text x={xAt(points.length - 1)} y={yAt(points[points.length - 1].v) - 4} fontSize="9" fontWeight="700" fill={color} textAnchor="end">{round(points[points.length - 1].v, 1)}</text>
+    </svg>
+  )
+}
+function TrendBars({ points, color = '#2563EB' }) {
+  if (!points || points.length < 2) return null
+  const vs = points.map((p) => p.v)
+  const hi = Math.max(...vs) * 1.15 || 1
+  const iw = VBW - PADX * 2, ih = VBH - PADT - PADB
+  const bw = Math.min(26, (iw / points.length) * 0.7)
+  const xAt = (i) => PADX + (i + 0.5) / points.length * iw
+  return (
+    <svg viewBox={`0 0 ${VBW} ${VBH}`} width="100%" style={{ height: 'auto', display: 'block' }} preserveAspectRatio="none">
+      {points.map((p, i) => {
+        const h = (p.v / hi) * ih
+        return <rect key={i} x={xAt(i) - bw / 2} y={PADT + ih - h} width={bw} height={Math.max(1, h)} rx="1.5" fill={color} opacity="0.85" />
+      })}
+      <text x={xAt(0)} y={VBH - 4} fontSize="8" fill="#9aa69d" textAnchor="middle">{points[0].label}</text>
+      <text x={xAt(points.length - 1)} y={VBH - 4} fontSize="8" fill="#9aa69d" textAnchor="middle">{points[points.length - 1].label}</text>
+    </svg>
+  )
+}
 
 // Monday of this week, and the Monday–Sunday of NEXT week.
 function weekWindows(today = new Date()) {
@@ -188,6 +233,18 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     clipsThis.forEach((c) => { byArea[c.area] = (byArea[c.area] || 0) + Number(c.volume || 0) })
     return { unit, byArea, total: round(clipsThis.reduce((a, c) => a + Number(c.volume || 0), 0), 1) }
   })()
+
+  // Trend data (recent readings) for the little charts — aggregated per date.
+  const speedTrend = useMemo(() => {
+    const byDate = {}
+    speeds.filter((s) => inCourse(s.area) && s.speed != null).forEach((s) => { (byDate[s.date] = byDate[s.date] || []).push(Number(s.speed)) })
+    return Object.keys(byDate).sort().slice(-8).map((d) => ({ label: shortDay(d), v: round(avg(byDate[d]), 1) }))
+  }, [speeds, course])
+  const clipTrend = useMemo(() => {
+    const byDate = {}
+    clippings.filter((c) => inCourse(c.area) && c.volume != null).forEach((c) => { byDate[c.date] = (byDate[c.date] || 0) + Number(c.volume) })
+    return Object.keys(byDate).sort().slice(-8).map((d) => ({ label: shortDay(d), v: round(byDate[d], 1) }))
+  }, [clippings, course])
 
   // Displayed this-week numbers: logged data wins; otherwise the quick-fill value.
   const mv = (k) => (manual[k] != null && String(manual[k]).trim() !== '' ? String(manual[k]).trim() : null)
@@ -501,6 +558,18 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
               )}
             </div>
           ))}
+        </div>
+
+        {/* Trend charts */}
+        <div className={`grid grid-cols-2 gap-x-5 gap-y-1 mt-2 avoid-break ${(speedTrend.length >= 2 || clipTrend.length >= 2) ? '' : 'empty-hide-print'}`}>
+          <div>
+            <p className="font-body text-[9px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Greens speed trend</p>
+            {speedTrend.length >= 2 ? <TrendLine points={speedTrend} color={FERN} /> : <p className="font-body text-[10px] text-slate-300 no-print">Chart appears after 2+ stimp readings.</p>}
+          </div>
+          <div>
+            <p className="font-body text-[9px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Clipping yield trend</p>
+            {clipTrend.length >= 2 ? <TrendBars points={clipTrend} color="#2563EB" /> : <p className="font-body text-[10px] text-slate-300 no-print">Chart appears after 2+ clipping logs.</p>}
+          </div>
         </div>
 
         <div className="flex items-center justify-between">
