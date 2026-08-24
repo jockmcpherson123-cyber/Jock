@@ -1395,7 +1395,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           {/* View toggle — scrolls sideways on a phone instead of forcing the
               whole page wide (5 pills don't fit an iPhone width). */}
           <div className="flex items-center gap-2 mb-3 overflow-x-auto no-scrollbar [&>*]:shrink-0">
-            {[['now', 'This Week', Gauge], ['coverage', 'Coverage', LayoutGrid], ['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
+            {[['sheet', 'Sheet', FileSpreadsheet], ['now', 'This Week', Gauge], ['coverage', 'Coverage', LayoutGrid], ['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setViewMode(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 transition" style={viewMode === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
                 <Icon size={13} /> {label}
               </button>
@@ -1416,6 +1416,53 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 
           {visibleApps.length === 0 ? (
             <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No applications in this program.</div>
+          ) : viewMode === 'sheet' ? (
+            (() => {
+              const rows = [...visibleApps].sort((a, b) => String(a.plannedDate || '9999').localeCompare(String(b.plannedDate || '9999')) || String(a.area).localeCompare(String(b.area)))
+              const showArea = areaFilter === 'all'
+              const rateOf = (a) => (a.rateOzM != null && a.rateOzM !== '' ? `${a.rateOzM} oz/M` : a.rateOzA != null && a.rateOzA !== '' ? `${a.rateOzA} oz/A` : a.model?.rate || '')
+              const th = 'text-left font-body text-[10px] font-bold uppercase tracking-wide text-white/85 px-2.5 py-2 whitespace-nowrap'
+              const td = 'font-body text-[12px] px-2.5 py-1.5 align-top'
+              return (
+                <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto no-scrollbar">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr style={{ backgroundColor: FOREST }}>
+                          <th className={th}>Date</th>
+                          {showArea && <th className={th}>Area</th>}
+                          <th className={th}>Product</th>
+                          <th className={th}>Target</th>
+                          <th className={th}>Rate</th>
+                          <th className={th}>Type</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((a, i) => {
+                          const prev = rows[i - 1]
+                          const showDate = !prev || prev.plannedDate !== a.plannedDate || (showArea && prev.area !== a.area)
+                          const tc = typeColor(a.type)
+                          return (
+                            <tr key={a.id} onClick={() => openEvent([a])} className="cursor-pointer border-t border-black/5 hover:brightness-95 active:brightness-90" style={{ backgroundColor: `${tc}12`, borderLeft: `4px solid ${tc}` }}>
+                              <td className={`${td} font-semibold text-slate-500 whitespace-nowrap`}>{showDate ? (a.plannedDate ? fmtDate(a.plannedDate) : '—') : ''}</td>
+                              {showArea && <td className={`${td} text-slate-500 whitespace-nowrap`}>{showDate ? a.area : ''}</td>}
+                              <td className={`${td} font-bold text-slate-800`}>{a.product}{a.model?.generic && <span className="ml-1.5 font-body text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 uppercase align-middle">gen</span>}</td>
+                              <td className={`${td} text-slate-600`}>{a.target || ''}</td>
+                              <td className={`${td} text-slate-500 whitespace-nowrap tabular-nums`}>{rateOf(a)}</td>
+                              <td className={td}><span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide whitespace-nowrap" style={{ backgroundColor: `${tc}1e`, color: tc }}>{a.type || '—'}</span></td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-black/5" style={{ backgroundColor: '#F8FAF8' }}>
+                    <span className="font-body text-[11px] text-slate-400">{rows.length} application{rows.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a row to edit</span>
+                    <button onClick={startAddApp} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={12} /> Add</button>
+                  </div>
+                </div>
+              )
+            })()
           ) : viewMode === 'now' ? (
             (() => {
               const events = groupByEvent(visibleApps).map((ev) => ({ ev, st: eventStatus(ev) }))
