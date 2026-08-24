@@ -81,7 +81,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const [fertSheets, setFertSheets] = useState([])
   const [program, setProgram] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [course, setCourse] = useState('all')
+  const [course, setCourse] = useState(() => (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)[0] || '')
   const [recipient, setRecipient] = useState(courseInfo.reportRecipient || '')
   const [sender, setSender] = useState(courseInfo.reportSender || courseInfo.directorName || userName || '')
   const [notes, setNotes] = useState(courseInfo.reportNotes || '')
@@ -129,11 +129,11 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const cycleDay = (id) => { const next = schedule.map((s) => (s.id === id ? { ...s, day: DAYS[(DAYS.indexOf(s.day) + 1) % DAYS.length] } : s)); setSchedule(next); saveDraft({ reportSchedule: next }) }
   // Hand-typed spray + fertility rows (in addition to whatever the program has).
   const persistSprays = (next) => { setManualSprays(next); saveDraft({ reportSprays: next }) }
-  const addSpray = () => persistSprays([...manualSprays, { id: `sp${Date.now()}`, when: '', area: course !== 'all' ? course : '', product: '', rate: '', target: '' }])
+  const addSpray = () => persistSprays([...manualSprays, { id: `sp${Date.now()}`, when: '', area: '', course, product: '', rate: '', target: '' }])
   const editSprayField = (id, field) => { persistSprays(manualSprays.map((r) => (r.id === id ? { ...r, [field]: draft } : r))); setEditKey(null) }
   const removeSpray = (id) => persistSprays(manualSprays.filter((r) => r.id !== id))
   const persistFert = (next) => { setManualFert(next); saveDraft({ reportFert: next }) }
-  const addFert = () => persistFert([...manualFert, { id: `ft${Date.now()}`, when: '', area: course !== 'all' ? course : '', product: '', npk: '', rate: '' }])
+  const addFert = () => persistFert([...manualFert, { id: `ft${Date.now()}`, when: '', area: '', course, product: '', npk: '', rate: '' }])
   const editFertField = (id, field) => { persistFert(manualFert.map((r) => (r.id === id ? { ...r, [field]: draft } : r))); setEditKey(null) }
   const removeFert = (id) => persistFert(manualFert.filter((r) => r.id !== id))
   // A tap-to-edit inline cell (text when idle, input when active).
@@ -157,7 +157,10 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   // course as their first word ("Blue Greens"), so we match by prefix.
   const courseNames = (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)
   const hasCourses = courseNames.length >= 2
-  const inCourse = (area) => course === 'all' || String(area || '').toLowerCase().startsWith(String(course).toLowerCase())
+  // Match by the course's first word ("Blue Course" → "Blue") so it lines up
+  // with area names like "Blue Greens". No course set → show everything.
+  const courseTok = String(course || '').trim().split(/\s+/)[0].toLowerCase()
+  const inCourse = (area) => !courseTok || String(area || '').toLowerCase().startsWith(courseTok)
   // "Blue" → "Blue Course", but "Blue Course" stays "Blue Course" (no double word).
   const courseLabel = (c) => (/course/i.test(String(c)) ? String(c) : `${c} Course`)
 
@@ -207,8 +210,11 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   useEffect(() => { setManualSprays(Array.isArray(courseInfo.reportSprays) ? courseInfo.reportSprays : []) }, [spraysExtKey])
   const fertExtKey = JSON.stringify(courseInfo.reportFert || [])
   useEffect(() => { setManualFert(Array.isArray(courseInfo.reportFert) ? courseInfo.reportFert : []) }, [fertExtKey])
-  const manualSpraysShown = manualSprays.filter((r) => !r.area || inCourse(r.area))
-  const manualFertShown = manualFert.filter((r) => !r.area || inCourse(r.area))
+  // A hand-added row belongs to the course it was created under; older untagged
+  // rows fall back to matching by the area text.
+  const inThisCourse = (r) => (r.course ? r.course === course : (!r.area || inCourse(r.area)))
+  const manualSpraysShown = manualSprays.filter(inThisCourse)
+  const manualFertShown = manualFert.filter(inThisCourse)
   const hocShown = hocRows.filter((r) => !r.surface || inCourse(r.surface))
   const MOWED_SURFACE = /green|collar|tee|approach|fairway|surround|rough/i
   const surfRank = (n) => { const i = ['green', 'collar', 'tee', 'approach', 'fairway', 'surround', 'rough'].findIndex((x) => String(n).toLowerCase().includes(x)); return i < 0 ? 99 : i }
@@ -265,16 +271,19 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     const { jsPDF } = await import('jspdf')
     const node = reportRef.current
     // Capture at a fixed page width so the layout is identical on any device
-    // (an iPad's narrow screen would otherwise clip the wide rows on the right).
+    // (a narrow screen would otherwise clip the wide rows), and add a class that
+    // hides the on-screen edit chrome (buttons, ×, blank rows) from the image.
     const CAP_W = 760
     const prev = { width: node.style.width, maxWidth: node.style.maxWidth }
+    node.classList.add('wr-capturing')
     node.style.width = `${CAP_W}px`
     node.style.maxWidth = `${CAP_W}px`
     void node.offsetWidth // force reflow at the new width
     let canvas
     try {
-      canvas = await toCanvas(node, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true, width: CAP_W, style: { width: `${CAP_W}px`, maxWidth: `${CAP_W}px` } })
+      canvas = await toCanvas(node, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true })
     } finally {
+      node.classList.remove('wr-capturing')
       node.style.width = prev.width
       node.style.maxWidth = prev.maxWidth
     }
@@ -311,10 +320,10 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         onSaveCourse({ reportRecipient: recipient, reportSender: sender })
       }
       const { base64 } = await makePdf()
-      const subject = `Weekly Turf & Spray Report${course !== 'all' ? ` (${courseLabel(course)})` : ''} — week of ${fmtLong(W.nextMon)}`
+      const subject = `Weekly Turf & Spray Report${course ? ` (${courseLabel(course)})` : ''} — week of ${fmtLong(W.nextMon)}`
       const res = await fetch('/api/send-report', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: recipient, subject, filename: fileName(), pdfBase64: base64, text: emailText(), fromName: `${courseInfo.clubName || 'Turf'}${course !== 'all' ? ' · ' + courseLabel(course) : ''}`, replyTo: userEmail || undefined }),
+        body: JSON.stringify({ to: recipient, subject, filename: fileName(), pdfBase64: base64, text: emailText(), fromName: `${courseInfo.clubName || 'Turf'}${course ? ' · ' + courseLabel(course) : ''}`, replyTo: userEmail || undefined }),
       })
       let j = {}
       try { j = await res.json() } catch { /* non-JSON (e.g. 413/504) */ }
@@ -325,7 +334,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     setBusy('')
   }
   const emailText = () => {
-    const lines = [`Weekly Turf & Spray Report`, `${course !== 'all' ? courseLabel(course) + ' · ' : ''}Week of ${fmtLong(W.nextMon)} – ${fmtLong(W.nextSun)}`, '', 'Planned sprays:']
+    const lines = [`Weekly Turf & Spray Report`, `${course ? courseLabel(course) + ' · ' : ''}Week of ${fmtLong(W.nextMon)} – ${fmtLong(W.nextSun)}`, '', 'Planned sprays:']
     if (sprayDays.length === 0 && manualSpraysShown.length === 0) lines.push('  None scheduled.')
     sprayDays.forEach((d) => { lines.push(`  ${fmtDay(d.date)} · ${d.area}: ${d.items.map((i) => i.product).join(', ')}`) })
     manualSpraysShown.forEach((r) => { if (r.product) lines.push(`  ${r.when || ''} ${r.area || ''}: ${r.product}${r.rate ? ` @ ${r.rate}` : ''}`.trim()) })
@@ -354,18 +363,20 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   return (
     <div>
       {/* Print rules: only the report prints, sized to one A4 page. */}
-      <style>{`@page { size: A4 portrait; margin: 8mm; } @media print { html, body { background: #fff !important; } body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: 100% !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; } #weekly-report .avoid-break { break-inside: avoid; } .no-print, .empty-hide-print { display: none !important; } }`}</style>
+      <style>{`@page { size: A4 portrait; margin: 8mm; } @media print { html, body { background: #fff !important; } body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: 100% !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; } #weekly-report .avoid-break { break-inside: avoid; } .no-print, .empty-hide-print { display: none !important; } }
+      /* Applied only while capturing the PDF/email image — hides edit chrome + blank rows. */
+      .wr-capturing .no-print, .wr-capturing .empty-hide-print, .wr-capturing .cap-hide { display: none !important; }`}</style>
 
       {toast && <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: '#1A1A16' }}>{toast}</div>}
 
       {/* Course selector (never printed) */}
       {hasCourses && (
         <div className="no-print mb-3 flex flex-wrap gap-2">
-          {['all', ...courseNames].map((c) => {
+          {courseNames.map((c) => {
             const on = course === c
             return (
               <button key={c} onClick={() => setCourse(c)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition" style={on ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
-                {c === 'all' ? 'All courses' : courseLabel(c)}
+                {courseLabel(c)}
               </button>
             )
           })}
@@ -401,7 +412,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
           <div>
             <p className="font-display text-[9px] tracking-[0.22em] uppercase" style={{ color: GOLD }}>{club}</p>
             <h2 className="font-display text-xl font-semibold mt-0.5" style={{ color: FOREST }}>Weekly Turf &amp; Spray Report</h2>
-            <p className="font-body text-[12px] text-slate-500 mt-0.5">Week of <b>{fmtLong(W.nextMon)} – {fmtLong(W.nextSun)}, {W.nextSun.getFullYear()}</b>{hasCourses && <span className="font-bold" style={{ color: FERN }}> · {course === 'all' ? 'All courses' : courseLabel(course)}</span>}</p>
+            <p className="font-body text-[12px] text-slate-500 mt-0.5">Week of <b>{fmtLong(W.nextMon)} – {fmtLong(W.nextSun)}, {W.nextSun.getFullYear()}</b>{course && <span className="font-bold" style={{ color: FERN }}> · {courseLabel(course)}</span>}</p>
           </div>
           <div className="text-right shrink-0">
             <p className="font-body text-[10px] text-slate-400">Prepared {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
@@ -455,7 +466,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
                 <table className="w-full border-collapse">
                   <tbody>
                     {manualSpraysShown.map((r) => (
-                      <tr key={r.id} className="border-t border-black/5 first:border-t-0" style={{ borderLeft: `3px solid ${FERN}` }}>
+                      <tr key={r.id} className={`border-t border-black/5 first:border-t-0 ${r.product ? '' : 'cap-hide'}`} style={{ borderLeft: `3px solid ${FERN}` }}>
                         <td className="px-2 py-1 w-16 font-body text-[10px] font-bold" style={{ color: FOREST }}>{cell(`sp:${r.id}:when`, r.when, 'Day', () => editSprayField(r.id, 'when'), 'text-[10px] w-14')}</td>
                         <td className="px-2 py-1 font-body text-[10px] text-slate-500">{cell(`sp:${r.id}:area`, r.area, 'Area', () => editSprayField(r.id, 'area'), 'text-[10px] w-20')}</td>
                         <td className="px-2 py-1 font-body text-[12px] font-bold text-slate-800">{cell(`sp:${r.id}:product`, r.product, 'Product', () => editSprayField(r.id, 'product'), 'text-[12px] w-28')}</td>
@@ -496,7 +507,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
                       </tr>
                     ))}
                     {manualFertShown.map((r) => (
-                      <tr key={r.id} className="border-t border-black/5 first:border-t-0" style={{ borderLeft: `3px solid ${typeColor('Fertilizer')}` }}>
+                      <tr key={r.id} className={`border-t border-black/5 first:border-t-0 ${r.product ? '' : 'cap-hide'}`} style={{ borderLeft: `3px solid ${typeColor('Fertilizer')}` }}>
                         <td className="px-2 py-1 align-top">
                           <span className="font-body text-[12px] font-bold text-slate-800">{cell(`ft:${r.id}:product`, r.product, 'Product', () => editFertField(r.id, 'product'), 'text-[12px] w-24')}</span>
                           <span className="ml-1.5 font-body text-[9px] font-bold" style={{ color: typeColor('Fertilizer') }}>{cell(`ft:${r.id}:npk`, r.npk, 'N-P-K', () => editFertField(r.id, 'npk'), 'text-[9px] w-14')}</span>
@@ -597,7 +608,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         </div>
         <div className={`grid grid-cols-2 md:grid-cols-3 gap-1.5 avoid-break ${hocShown.length ? '' : 'empty-hide-print'}`}>
           {hocShown.map((r) => (
-            <div key={r.id} className="rounded-lg border border-black/5 px-2.5 py-1 flex items-center justify-between gap-1.5" style={{ backgroundColor: '#F8FAF8' }}>
+            <div key={r.id} className={`rounded-lg border border-black/5 px-2.5 py-1 flex items-center justify-between gap-1.5 ${(!r.surface && !r.height) ? 'cap-hide' : ''}`} style={{ backgroundColor: '#F8FAF8' }}>
               {editKey === `hoc:${r.id}:surface` ? (
                 <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => editHoc(r.id, 'surface')} onKeyDown={(e) => { if (e.key === 'Enter') editHoc(r.id, 'surface') }} placeholder="Surface" className="min-w-0 flex-1 border rounded px-1 py-0.5 text-[11px] font-body" style={{ borderColor: '#E0D6A8' }} />
               ) : (
