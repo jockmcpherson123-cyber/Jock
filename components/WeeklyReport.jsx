@@ -7,7 +7,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import * as db from '@/lib/db'
 import { Printer, Download, Mail, Loader2, Calendar, Thermometer, Scissors, Gauge, Sprout } from 'lucide-react'
-import HocEditor from '@/components/HocEditor'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -45,6 +44,9 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const [schedDay, setSchedDay] = useState('Any')
   const [schedText, setSchedText] = useState('')
   const [manual, setManual] = useState(courseInfo.reportManual && typeof courseInfo.reportManual === 'object' ? courseInfo.reportManual : {})
+  const [hocRows, setHocRows] = useState(Array.isArray(courseInfo.hocList) ? courseInfo.hocList : [])
+  const [editKey, setEditKey] = useState(null) // which inline field is being edited
+  const [draft, setDraft] = useState('')       // its working value
   const [busy, setBusy] = useState('')
   const [toast, setToast] = useState(null)
   const reportRef = useRef(null)
@@ -64,9 +66,20 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const removeSchedItem = (id) => { const next = schedule.filter((s) => s.id !== id); setSchedule(next); saveDraft({ reportSchedule: next }) }
   const orderedSchedule = [...schedule].sort((a, b) => dayRank(a.day) - dayRank(b.day))
 
-  // Quick-fill for the this-week numbers — used only when nothing is logged.
-  const setManualField = (k, v) => setManual((m) => ({ ...m, [k]: v }))
-  const persistManual = () => saveDraft({ reportManual: manual })
+  // Inline editing helpers — one field at a time; commit on blur/Enter.
+  const startEdit = (key, current) => { setEditKey(key); setDraft(current ?? '') }
+  const cancelEdit = () => setEditKey(null)
+  const commitManual = (k) => { const next = { ...manual, [k]: draft }; setManual(next); saveDraft({ reportManual: next }); setEditKey(null) }
+  const commitNotes = () => { setNotes(draft); saveDraft({ reportNotes: draft }); setEditKey(null) }
+  // Height-of-cut inline edits (shares courseInfo.hocList with Turf Performance).
+  const persistHoc = (next) => { setHocRows(next); saveDraft({ hocList: next }) }
+  const editHoc = (id, field) => { persistHoc(hocRows.map((r) => (r.id === id ? { ...r, [field]: draft } : r))); setEditKey(null) }
+  const addHoc = () => { persistHoc([...hocRows, { id: `h${Date.now()}`, surface: '', height: '' }]) }
+  const removeHoc = (id) => persistHoc(hocRows.filter((r) => r.id !== id))
+  const seedHoc = () => { persistHoc(allMowed.map((a, i) => ({ id: `h${Date.now()}_${i}`, surface: a, height: hocByArea[a] || '' }))) }
+  // Schedule inline edits.
+  const editSched = (id) => { const next = schedule.map((s) => (s.id === id ? { ...s, text: draft } : s)); setSchedule(next); saveDraft({ reportSchedule: next }); setEditKey(null) }
+  const cycleDay = (id) => { const next = schedule.map((s) => (s.id === id ? { ...s, day: DAYS[(DAYS.indexOf(s.day) + 1) % DAYS.length] } : s)); setSchedule(next); saveDraft({ reportSchedule: next }) }
 
   useEffect(() => {
     (async () => {
@@ -126,9 +139,20 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   // This week's collected data (filtered to the chosen course).
   const speedsThis = speeds.filter((s) => inRange(s.date, W.thisMon, W.thisSun) && s.speed != null && inCourse(s.area))
   const clipsThis = clippings.filter((c) => inRange(c.date, W.thisMon, W.thisSun) && c.volume != null && inCourse(c.area))
-  // Height of cut is a maintained list (edited via the shared HocEditor, stored
-  // in settings). Show the surfaces for the selected course.
-  const hocShown = (Array.isArray(courseInfo.hocList) ? courseInfo.hocList : []).filter((r) => r.surface && inCourse(r.surface))
+  // Height of cut — maintained list stored in settings, edited inline here or
+  // from Turf Performance (same courseInfo.hocList). Keep a local mirror synced.
+  const hocExtKey = JSON.stringify(courseInfo.hocList || [])
+  useEffect(() => { setHocRows(Array.isArray(courseInfo.hocList) ? courseInfo.hocList : []) }, [hocExtKey])
+  const hocShown = hocRows.filter((r) => !r.surface || inCourse(r.surface))
+  const MOWED_SURFACE = /green|collar|tee|approach|fairway|surround|rough/i
+  const surfRank = (n) => { const i = ['green', 'collar', 'tee', 'approach', 'fairway', 'surround', 'rough'].findIndex((x) => String(n).toLowerCase().includes(x)); return i < 0 ? 99 : i }
+  const allMowed = Object.keys(areas || {}).filter((a) => MOWED_SURFACE.test(a)).sort((a, b) => surfRank(a) - surfRank(b) || a.localeCompare(b))
+  const mowRe = /mow|height|hoc|cut/i
+  const hocByArea = useMemo(() => {
+    const m = {}
+    practices.forEach((p) => { if (mowRe.test(p.practice || '') && p.value != null && p.value !== '' && !m[p.area]) m[p.area] = `${p.value}${/["']|in|mm/i.test(String(p.unit)) ? p.unit : (p.unit ? ' ' + p.unit : '"')}` })
+    return m
+  }, [practices])
 
   const speedStat = (() => {
     const vals = speedsThis.map((s) => Number(s.speed)).filter((n) => !isNaN(n))
@@ -221,12 +245,6 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   if (loading) return <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
 
   const club = courseInfo.clubName || 'Golf Club'
-  const Stat = ({ label, value, sub }) => (
-    <div className="rounded-lg border border-black/5 px-2.5 py-1.5" style={{ backgroundColor: '#F8FAF8' }}>
-      <p className="font-body text-[8px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="font-display font-bold text-slate-900" style={{ fontSize: 16, lineHeight: 1.1 }}>{value}{sub && <span className="font-body text-[9px] font-normal text-slate-400 ml-1">{sub}</span>}</p>
-    </div>
-  )
   const H = ({ icon: Icon, children }) => (
     <div className="flex items-center gap-1.5 mb-1 mt-3">
       <Icon size={12} style={{ color: FERN }} />
@@ -237,7 +255,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   return (
     <div>
       {/* Print rules: only the report prints, sized to one A4 page. */}
-      <style>{`@page { size: A4 portrait; margin: 8mm; } @media print { html, body { background: #fff !important; } body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: 100% !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; } #weekly-report .avoid-break { break-inside: avoid; } .no-print { display: none !important; } }`}</style>
+      <style>{`@page { size: A4 portrait; margin: 8mm; } @media print { html, body { background: #fff !important; } body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: 100% !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; } #weekly-report .avoid-break { break-inside: avoid; } .no-print, .empty-hide-print { display: none !important; } }`}</style>
 
       {toast && <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: '#1A1A16' }}>{toast}</div>}
 
@@ -276,53 +294,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         </button>
       </div>
 
-      {/* Weekly schedule + notes editors (never printed) */}
-      <div className="no-print mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div className="rounded-xl border border-slate-200 p-3">
-          <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 block mb-1.5">Weekly schedule — things to get done</label>
-          <div className="flex gap-1.5 mb-2">
-            <select value={schedDay} onChange={(e) => setSchedDay(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-2 text-sm font-body bg-white">
-              {DAYS.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
-            <input value={schedText} onChange={(e) => setSchedText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addSchedItem() }} placeholder="e.g. Aerify Blue greens" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body" />
-            <button onClick={addSchedItem} className="font-body text-sm font-bold px-3 py-2 rounded-lg text-white shrink-0" style={{ backgroundColor: FERN }}>Add</button>
-          </div>
-          {schedule.length === 0 ? (
-            <p className="font-body text-[11px] text-slate-400">Add tasks the crew has to complete next week — aerification, topdress, tournament prep, etc.</p>
-          ) : (
-            <div className="space-y-1">
-              {orderedSchedule.map((s) => (
-                <div key={s.id} className="flex items-center gap-2 text-sm">
-                  <span className="font-body text-[10px] font-bold w-9 shrink-0" style={{ color: FERN }}>{s.day !== 'Any' ? s.day : ''}</span>
-                  <span className="font-body text-slate-700 flex-1 min-w-0">{s.text}</span>
-                  <button onClick={() => removeSchedItem(s.id)} className="text-slate-300 hover:text-red-500 shrink-0 font-bold px-1">×</button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="rounded-xl border border-slate-200 p-3">
-          <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 block mb-1.5">Notes for the week</label>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={() => saveDraft({ reportNotes: notes })} rows={5} placeholder="Anything worth flagging — cart traffic, event prep, growth trends, watch-outs…" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-body resize-y" />
-        </div>
-      </div>
-
-      {/* Quick-fill for the this-week numbers (never printed) */}
-      <div className="no-print mb-4 rounded-xl border border-slate-200 p-3">
-        <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 block mb-0.5">This week — quick fill</label>
-        <p className="font-body text-[11px] text-slate-400 mb-2">Type any numbers you haven’t logged elsewhere. If you’ve logged the real data (Greens Speed, Clippings, weather), that’s used instead and these are ignored.</p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {[['stimpAvg', 'Stimp avg', speedStat ? `logged ${speedStat.avg}'` : "e.g. 11.5"], ['stimpRange', 'Stimp range', speedStat ? 'logged' : 'e.g. 11–12'], ['clippings', 'Clippings total', clipStat ? `logged ${clipStat.total}` : 'e.g. 14.2'], ['wxHigh', 'Avg high °F', twx.n ? `logged ${round(twx.avgHigh)}°` : 'e.g. 85'], ['wxLow', 'Avg low °F', twx.n ? `logged ${round(twx.avgLow)}°` : 'e.g. 66'], ['wxPrecip', 'Precip in', twx.n ? `logged ${round(twx.precip, 2)}"` : 'e.g. 1.2']].map(([k, label, ph]) => (
-            <div key={k}>
-              <label className="font-body text-[9px] font-bold uppercase tracking-wide text-slate-400 block mb-0.5">{label}</label>
-              <input value={manual[k] ?? ''} onChange={(e) => setManualField(k, e.target.value)} onBlur={persistManual} placeholder={ph} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body" />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Height-of-cut editor (never printed) — shared with Turf Performance */}
-      <HocEditor courseInfo={courseInfo} areas={areas} practices={practices} onSaveCourse={onSaveCourse} className="no-print mb-4" />
+      <p className="no-print mb-3 font-body text-[11px] text-slate-400">Tap any value on the report below to edit it — notes, schedule, the this-week numbers, and heights of cut. Sprays &amp; fertility come from your Annual Program and fert sheets.</p>
 
       {/* The report sheet */}
       <div id="weekly-report" ref={reportRef} className="bg-white rounded-2xl border border-black/5 shadow-sm p-5 max-w-3xl mx-auto">
@@ -338,13 +310,15 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
           </div>
         </div>
 
-        {/* Notes callout */}
-        {notes.trim() && (
-          <div className="mt-2.5 rounded-lg px-3 py-2 avoid-break" style={{ backgroundColor: '#FFFDF2', border: '1px solid #EFE3B8' }}>
-            <p className="font-body text-[9px] font-bold uppercase tracking-wide mb-0.5" style={{ color: '#92660D' }}>Notes</p>
-            <p className="font-body text-[12px] text-slate-700 whitespace-pre-wrap leading-snug">{notes.trim()}</p>
-          </div>
-        )}
+        {/* Notes callout (tap to edit) */}
+        <div className={`mt-2.5 rounded-lg px-3 py-2 avoid-break ${notes.trim() ? '' : 'empty-hide-print'}`} style={{ backgroundColor: '#FFFDF2', border: '1px solid #EFE3B8' }}>
+          <p className="font-body text-[9px] font-bold uppercase tracking-wide mb-0.5" style={{ color: '#92660D' }}>Notes</p>
+          {editKey === 'notes' ? (
+            <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commitNotes} rows={3} className="w-full border rounded px-2 py-1 text-[12px] font-body resize-y" style={{ borderColor: '#E0D6A8', backgroundColor: '#fff' }} />
+          ) : (
+            <p onClick={() => startEdit('notes', notes)} className="font-body text-[12px] text-slate-700 whitespace-pre-wrap leading-snug cursor-text">{notes.trim() || <span className="text-slate-300 no-print">Tap to add notes…</span>}</p>
+          )}
+        </div>
 
         {/* Sprays next week */}
         <H icon={Calendar}>Planned sprays — next week</H>
@@ -405,19 +379,28 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
           </div>
           <div className="min-w-0 avoid-break">
             <H icon={Calendar}>Schedule — to get done</H>
-            {schedule.length === 0 ? (
-              <p className="font-body text-[12px] text-slate-400">Nothing added.</p>
-            ) : (
-              <div className="rounded-lg border border-black/5 overflow-hidden">
-                {orderedSchedule.map((s) => (
-                  <div key={s.id} className="flex items-center gap-2 px-2.5 py-1 border-t border-black/5 first:border-t-0">
-                    <span className="inline-block w-3.5 h-3.5 rounded border border-slate-300 shrink-0" />
-                    {s.day !== 'Any' && <span className="font-body text-[9px] font-bold w-8 shrink-0" style={{ color: FERN }}>{s.day}</span>}
-                    <span className="font-body text-[12px] text-slate-700">{s.text}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className={`rounded-lg border border-black/5 overflow-hidden ${schedule.length ? '' : 'empty-hide-print'}`}>
+              {orderedSchedule.map((s) => (
+                <div key={s.id} className="flex items-center gap-2 px-2.5 py-1 border-t border-black/5 first:border-t-0">
+                  <span className="inline-block w-3.5 h-3.5 rounded border border-slate-300 shrink-0" />
+                  <button onClick={() => cycleDay(s.id)} className="font-body text-[9px] font-bold w-8 shrink-0 text-left" style={{ color: FERN }} title="Tap to change day">{s.day !== 'Any' ? s.day : <span className="text-slate-300 no-print">day</span>}</button>
+                  {editKey === `sched:${s.id}` ? (
+                    <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => editSched(s.id)} onKeyDown={(e) => { if (e.key === 'Enter') editSched(s.id) }} className="flex-1 min-w-0 border rounded px-1.5 py-0.5 text-[12px] font-body" style={{ borderColor: '#E0D6A8' }} />
+                  ) : (
+                    <span onClick={() => startEdit(`sched:${s.id}`, s.text)} className="font-body text-[12px] text-slate-700 flex-1 min-w-0 cursor-text">{s.text}</span>
+                  )}
+                  <button onClick={() => removeSchedItem(s.id)} className="no-print text-slate-300 hover:text-red-500 shrink-0 font-bold px-0.5">×</button>
+                </div>
+              ))}
+              {schedule.length === 0 && <p className="font-body text-[11px] text-slate-300 px-2.5 py-1 no-print">No tasks yet.</p>}
+            </div>
+            <div className="no-print flex gap-1.5 mt-1.5">
+              <select value={schedDay} onChange={(e) => setSchedDay(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-body bg-white">
+                {DAYS.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <input value={schedText} onChange={(e) => setSchedText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addSchedItem() }} placeholder="Add a task…" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body" />
+              <button onClick={addSchedItem} className="font-body text-sm font-bold px-3 py-1.5 rounded-lg text-white shrink-0" style={{ backgroundColor: FERN }}>Add</button>
+            </div>
           </div>
         </div>
 
@@ -440,27 +423,50 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         {/* This week's data — compact stat band + mowing */}
         <H icon={Gauge}>This week</H>
         <div className="grid grid-cols-3 md:grid-cols-6 gap-1.5 avoid-break">
-          <Stat label="Stimp avg" value={dStimpAvg} sub={speedStat ? `${speedStat.n}×` : ''} />
-          <Stat label="Stimp range" value={dStimpRange} />
-          <Stat label="Clippings" value={dClip} sub={dClipUnit} />
-          <Stat label="Avg high" value={dHigh} />
-          <Stat label="Avg low" value={dLow} />
-          <Stat label="Precip" value={dPrecip} />
+          {[
+            { k: 'stimpAvg', label: 'Stimp avg', display: dStimpAvg, sub: speedStat ? `${speedStat.n}×` : '' },
+            { k: 'stimpRange', label: 'Stimp range', display: dStimpRange },
+            { k: 'clippings', label: 'Clippings', display: dClip, sub: dClipUnit },
+            { k: 'wxHigh', label: 'Avg high', display: dHigh },
+            { k: 'wxLow', label: 'Avg low', display: dLow },
+            { k: 'wxPrecip', label: 'Precip', display: dPrecip },
+          ].map((c) => (
+            <div key={c.k} className="rounded-lg border border-black/5 px-2.5 py-1.5" style={{ backgroundColor: '#F8FAF8' }}>
+              <p className="font-body text-[8px] font-bold uppercase tracking-wide text-slate-400">{c.label}</p>
+              {editKey === `stat:${c.k}` ? (
+                <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => commitManual(c.k)} onKeyDown={(e) => { if (e.key === 'Enter') commitManual(c.k) }} className="w-full border rounded px-1 py-0.5 font-body" style={{ borderColor: '#E0D6A8', fontSize: 15 }} />
+              ) : (
+                <p onClick={() => startEdit(`stat:${c.k}`, manual[c.k] ?? '')} className="font-display font-bold text-slate-900 cursor-text" style={{ fontSize: 16, lineHeight: 1.1 }}>{c.display}{c.sub && <span className="font-body text-[9px] font-normal text-slate-400 ml-1">{c.sub}</span>}</p>
+              )}
+            </div>
+          ))}
         </div>
 
-        <H icon={Scissors}>Height of cut — by surface</H>
-        {hocShown.length === 0 ? (
-          <p className="font-body text-[12px] text-slate-400">No surfaces added yet — set them above.</p>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5 avoid-break">
-            {hocShown.map((r) => (
-              <div key={r.id} className="rounded-lg border border-black/5 px-2.5 py-1.5 flex items-center justify-between gap-2" style={{ backgroundColor: '#F8FAF8' }}>
-                <span className="font-body text-[11px] font-semibold text-slate-600 truncate">{r.surface}</span>
-                <span className="font-body text-[13px] font-bold tabular-nums whitespace-nowrap" style={{ color: r.height ? FOREST : '#cbd5c9' }}>{r.height || '—'}</span>
-              </div>
-            ))}
+        <div className="flex items-center justify-between">
+          <H icon={Scissors}>Height of cut — by surface</H>
+          <div className="no-print flex gap-2">
+            {hocRows.length === 0 && allMowed.length > 0 && <button onClick={seedHoc} className="font-body text-[11px] font-bold" style={{ color: FERN }}>Add my surfaces</button>}
+            <button onClick={addHoc} className="font-body text-[11px] font-bold" style={{ color: FOREST }}>+ Add</button>
           </div>
-        )}
+        </div>
+        <div className={`grid grid-cols-2 md:grid-cols-3 gap-1.5 avoid-break ${hocShown.length ? '' : 'empty-hide-print'}`}>
+          {hocShown.map((r) => (
+            <div key={r.id} className="rounded-lg border border-black/5 px-2.5 py-1 flex items-center justify-between gap-1.5" style={{ backgroundColor: '#F8FAF8' }}>
+              {editKey === `hoc:${r.id}:surface` ? (
+                <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => editHoc(r.id, 'surface')} onKeyDown={(e) => { if (e.key === 'Enter') editHoc(r.id, 'surface') }} placeholder="Surface" className="min-w-0 flex-1 border rounded px-1 py-0.5 text-[11px] font-body" style={{ borderColor: '#E0D6A8' }} />
+              ) : (
+                <span onClick={() => startEdit(`hoc:${r.id}:surface`, r.surface)} className="font-body text-[11px] font-semibold text-slate-600 truncate cursor-text flex-1 min-w-0">{r.surface || <span className="text-slate-300 no-print">Surface</span>}</span>
+              )}
+              {editKey === `hoc:${r.id}:height` ? (
+                <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => editHoc(r.id, 'height')} onKeyDown={(e) => { if (e.key === 'Enter') editHoc(r.id, 'height') }} placeholder="0.105″" className="w-16 border rounded px-1 py-0.5 text-[12px] font-body text-right" style={{ borderColor: '#E0D6A8' }} />
+              ) : (
+                <span onClick={() => startEdit(`hoc:${r.id}:height`, r.height)} className="font-body text-[13px] font-bold tabular-nums whitespace-nowrap cursor-text" style={{ color: r.height ? FOREST : '#cbd5c9' }}>{r.height || '—'}</span>
+              )}
+              <button onClick={() => removeHoc(r.id)} className="no-print text-slate-300 hover:text-red-500 shrink-0 font-bold text-xs px-0.5">×</button>
+            </div>
+          ))}
+          {hocShown.length === 0 && <p className="font-body text-[11px] text-slate-300 no-print col-span-full">No surfaces yet — tap “+ Add” or “Add my surfaces”.</p>}
+        </div>
 
         <p className="font-body text-[9px] text-slate-300 mt-3 pt-2 border-t border-black/5">Generated by the {club} turf app · {new Date().toLocaleDateString('en-US')}</p>
       </div>
