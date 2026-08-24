@@ -43,6 +43,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const [schedule, setSchedule] = useState(Array.isArray(courseInfo.reportSchedule) ? courseInfo.reportSchedule : [])
   const [schedDay, setSchedDay] = useState('Any')
   const [schedText, setSchedText] = useState('')
+  const [hocList, setHocList] = useState(Array.isArray(courseInfo.hocList) ? courseInfo.hocList : [])
   const [busy, setBusy] = useState('')
   const [toast, setToast] = useState(null)
   const reportRef = useRef(null)
@@ -61,6 +62,13 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   }
   const removeSchedItem = (id) => { const next = schedule.filter((s) => s.id !== id); setSchedule(next); saveDraft({ reportSchedule: next }) }
   const orderedSchedule = [...schedule].sort((a, b) => dayRank(a.day) - dayRank(b.day))
+
+  // Height-of-cut list: edit heights, add/delete surfaces. Persist to settings.
+  const setHocRow = (id, patch) => setHocList((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)))
+  const addHocRow = (surface = '', height = '') => { const next = [...hocList, { id: `h${Date.now()}`, surface, height }]; setHocList(next); saveDraft({ hocList: next }) }
+  const removeHocRow = (id) => { const next = hocList.filter((r) => r.id !== id); setHocList(next); saveDraft({ hocList: next }) }
+  const persistHoc = () => saveDraft({ hocList })
+  const seedHocRows = () => { const next = allMowed.map((a, i) => ({ id: `h${Date.now()}_${i}`, surface: a, height: hocByArea[a] || '' })); setHocList(next); saveDraft({ hocList: next }) }
 
   useEffect(() => {
     (async () => {
@@ -118,17 +126,18 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   // This week's collected data (filtered to the chosen course).
   const speedsThis = speeds.filter((s) => inRange(s.date, W.thisMon, W.thisSun) && s.speed != null && inCourse(s.area))
   const clipsThis = clippings.filter((c) => inRange(c.date, W.thisMon, W.thisSun) && c.volume != null && inCourse(c.area))
-  // Current height of cut per surface — the most recent mow-height reading
-  // logged for each area (practices arrive newest-first).
+  // Height of cut is a maintained list (edit/add/delete), stored in settings.
+  // For first-time seeding we can pull the latest logged mow-height per area.
   const mowRe = /mow|height|hoc|cut/i
   const MOWED_SURFACE = /green|collar|tee|approach|fairway|surround|rough/i
   const surfRank = (n) => { const i = ['green', 'collar', 'tee', 'approach', 'fairway', 'surround', 'rough'].findIndex((x) => String(n).toLowerCase().includes(x)); return i < 0 ? 99 : i }
   const hocByArea = useMemo(() => {
     const m = {}
-    practices.forEach((p) => { if (mowRe.test(p.practice || '') && p.value != null && p.value !== '' && !m[p.area]) m[p.area] = { value: p.value, unit: p.unit || '', date: p.date } })
+    practices.forEach((p) => { if (mowRe.test(p.practice || '') && p.value != null && p.value !== '' && !m[p.area]) m[p.area] = `${p.value}${/["']|in|mm/i.test(String(p.unit)) ? p.unit : (p.unit ? ' ' + p.unit : '"')}` })
     return m
   }, [practices])
-  const courseSurfaces = Object.keys(areas || {}).filter((a) => inCourse(a) && MOWED_SURFACE.test(a)).sort((a, b) => surfRank(a) - surfRank(b) || a.localeCompare(b))
+  const allMowed = Object.keys(areas || {}).filter((a) => MOWED_SURFACE.test(a)).sort((a, b) => surfRank(a) - surfRank(b) || a.localeCompare(b))
+  const hocShown = hocList.filter((r) => r.surface && inCourse(r.surface))
 
   const speedStat = (() => {
     const vals = speedsThis.map((s) => Number(s.speed)).filter((n) => !isNaN(n))
@@ -297,6 +306,30 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         </div>
       </div>
 
+      {/* Height-of-cut editor (never printed) */}
+      <div className="no-print mb-4 rounded-xl border border-slate-200 p-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Height of cut — by surface</label>
+          <div className="flex gap-2">
+            {hocList.length === 0 && allMowed.length > 0 && <button onClick={seedHocRows} className="font-body text-[11px] font-bold" style={{ color: FERN }}>Add my surfaces</button>}
+            <button onClick={() => addHocRow()} className="font-body text-[11px] font-bold flex items-center gap-1" style={{ color: FOREST }}>+ Add surface</button>
+          </div>
+        </div>
+        {hocList.length === 0 ? (
+          <p className="font-body text-[11px] text-slate-400">Add each mowed surface and its height of cut — e.g. Blue Greens · 0.105″. These show on the report.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            {hocList.map((r) => (
+              <div key={r.id} className="flex items-center gap-1.5">
+                <input value={r.surface} onChange={(e) => setHocRow(r.id, { surface: e.target.value })} onBlur={persistHoc} placeholder="Surface" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body" />
+                <input value={r.height} onChange={(e) => setHocRow(r.id, { height: e.target.value })} onBlur={persistHoc} placeholder="0.105″" className="w-20 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body text-right" />
+                <button onClick={() => removeHocRow(r.id)} className="text-slate-300 hover:text-red-500 shrink-0 px-1 font-bold" aria-label="Remove surface">×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* The report sheet */}
       <div id="weekly-report" ref={reportRef} className="bg-white rounded-2xl border border-black/5 shadow-sm p-5 max-w-3xl mx-auto">
         <div className="flex items-start justify-between gap-4 pb-2.5 border-b-2" style={{ borderColor: GOLD }}>
@@ -422,19 +455,16 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         </div>
 
         <H icon={Scissors}>Height of cut — by surface</H>
-        {courseSurfaces.length === 0 ? (
-          <p className="font-body text-[12px] text-slate-400">No surfaces found.</p>
+        {hocShown.length === 0 ? (
+          <p className="font-body text-[12px] text-slate-400">No surfaces added yet — set them above.</p>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5 avoid-break">
-            {courseSurfaces.map((area) => {
-              const h = hocByArea[area]
-              return (
-                <div key={area} className="rounded-lg border border-black/5 px-2.5 py-1.5 flex items-center justify-between gap-2" style={{ backgroundColor: '#F8FAF8' }}>
-                  <span className="font-body text-[11px] font-semibold text-slate-600 truncate">{area}</span>
-                  <span className="font-body text-[13px] font-bold tabular-nums whitespace-nowrap" style={{ color: h ? FOREST : '#cbd5c9' }}>{h ? `${h.value}${/["']|in|mm/i.test(String(h.unit)) ? h.unit : (h.unit ? ' ' + h.unit : '"')}` : '—'}</span>
-                </div>
-              )
-            })}
+            {hocShown.map((r) => (
+              <div key={r.id} className="rounded-lg border border-black/5 px-2.5 py-1.5 flex items-center justify-between gap-2" style={{ backgroundColor: '#F8FAF8' }}>
+                <span className="font-body text-[11px] font-semibold text-slate-600 truncate">{r.surface}</span>
+                <span className="font-body text-[13px] font-bold tabular-nums whitespace-nowrap" style={{ color: r.height ? FOREST : '#cbd5c9' }}>{r.height || '—'}</span>
+              </div>
+            ))}
           </div>
         )}
 
