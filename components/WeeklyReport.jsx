@@ -6,7 +6,7 @@
 // Print it, save it as a PDF, or email it to an assistant in one click.
 import { useState, useEffect, useMemo, useRef } from 'react'
 import * as db from '@/lib/db'
-import { Printer, Download, Mail, Loader2, Calendar, Droplets, Thermometer, Scissors, Gauge, Sprout } from 'lucide-react'
+import { Printer, Download, Mail, Loader2, Calendar, Thermometer, Scissors, Gauge, Sprout } from 'lucide-react'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -137,17 +137,20 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   })()
 
   // ── Output actions ──────────────────────────────────────────────────────
+  // Capture the whole report as one image and scale it to fit a single A4 page
+  // — the report is meant to print on one sheet.
   async function makePdf() {
-    const html2pdf = (await import('html2pdf.js')).default
-    const opts = {
-      margin: 14, filename: fileName(),
-      image: { type: 'jpeg', quality: 0.95 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 820 },
-      jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'] },
-    }
-    const worker = html2pdf().set(opts).from(reportRef.current)
-    const pdf = await worker.toPdf().get('pdf')
+    const html2canvas = (await import('html2canvas')).default
+    const { jsPDF } = await import('jspdf')
+    const canvas = await html2canvas(reportRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 820 })
+    const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' })
+    const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight()
+    const m = 16
+    let w = pw - m * 2
+    let h = canvas.height * (w / canvas.width)
+    const availH = ph - m * 2
+    if (h > availH) { h = availH; w = canvas.width * (h / canvas.height) }
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', (pw - w) / 2, m, w, h)
     return { blob: pdf.output('blob'), base64: pdf.output('datauristring').split(',')[1] }
   }
   const fileName = () => `Weekly_Report_${iso(W.nextMon)}.pdf`
@@ -201,23 +204,22 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
 
   const club = courseInfo.clubName || 'Golf Club'
   const Stat = ({ label, value, sub }) => (
-    <div className="rounded-lg border border-black/5 px-3 py-2.5" style={{ backgroundColor: '#F8FAF8' }}>
-      <p className="font-body text-[9px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="font-display font-bold text-slate-900" style={{ fontSize: 20, lineHeight: 1.1 }}>{value}</p>
-      {sub && <p className="font-body text-[10px] text-slate-400 mt-0.5">{sub}</p>}
+    <div className="rounded-lg border border-black/5 px-2.5 py-1.5" style={{ backgroundColor: '#F8FAF8' }}>
+      <p className="font-body text-[8px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="font-display font-bold text-slate-900" style={{ fontSize: 16, lineHeight: 1.1 }}>{value}{sub && <span className="font-body text-[9px] font-normal text-slate-400 ml-1">{sub}</span>}</p>
     </div>
   )
   const H = ({ icon: Icon, children }) => (
-    <div className="flex items-center gap-2 mb-2 mt-5">
-      <Icon size={15} style={{ color: FERN }} />
-      <h3 className="font-display text-sm font-bold" style={{ color: FOREST }}>{children}</h3>
+    <div className="flex items-center gap-1.5 mb-1 mt-3">
+      <Icon size={12} style={{ color: FERN }} />
+      <h3 className="font-display text-[12px] font-bold" style={{ color: FOREST }}>{children}</h3>
     </div>
   )
 
   return (
     <div>
-      {/* Print rules: only the report prints. */}
-      <style>{`@media print { body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; padding: 0 !important; box-shadow: none !important; border: 0 !important; } .no-print { display: none !important; } }`}</style>
+      {/* Print rules: only the report prints, sized to one A4 page. */}
+      <style>{`@page { size: A4 portrait; margin: 8mm; } @media print { html, body { background: #fff !important; } body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: 100% !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; } #weekly-report .avoid-break { break-inside: avoid; } .no-print { display: none !important; } }`}</style>
 
       {toast && <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: '#1A1A16' }}>{toast}</div>}
 
@@ -288,51 +290,49 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
       </div>
 
       {/* The report sheet */}
-      <div id="weekly-report" ref={reportRef} className="bg-white rounded-2xl border border-black/5 shadow-sm p-6 md:p-8 max-w-3xl mx-auto">
-        <div className="flex items-start justify-between gap-4 pb-4 border-b-2" style={{ borderColor: GOLD }}>
+      <div id="weekly-report" ref={reportRef} className="bg-white rounded-2xl border border-black/5 shadow-sm p-5 max-w-3xl mx-auto">
+        <div className="flex items-start justify-between gap-4 pb-2.5 border-b-2" style={{ borderColor: GOLD }}>
           <div>
-            <p className="font-display text-[10px] tracking-[0.22em] uppercase" style={{ color: GOLD }}>{club}</p>
-            <h2 className="font-display text-2xl font-semibold mt-0.5" style={{ color: FOREST }}>Weekly Turf &amp; Spray Report</h2>
-            <p className="font-body text-sm text-slate-500 mt-1">Week of <b>{fmtLong(W.nextMon)} – {fmtLong(W.nextSun)}, {W.nextSun.getFullYear()}</b></p>
-            {hasCourses && <p className="font-body text-[12px] font-bold mt-1" style={{ color: FERN }}>{course === 'all' ? 'All courses' : `${course} Course`}</p>}
+            <p className="font-display text-[9px] tracking-[0.22em] uppercase" style={{ color: GOLD }}>{club}</p>
+            <h2 className="font-display text-xl font-semibold mt-0.5" style={{ color: FOREST }}>Weekly Turf &amp; Spray Report</h2>
+            <p className="font-body text-[12px] text-slate-500 mt-0.5">Week of <b>{fmtLong(W.nextMon)} – {fmtLong(W.nextSun)}, {W.nextSun.getFullYear()}</b>{hasCourses && <span className="font-bold" style={{ color: FERN }}> · {course === 'all' ? 'All courses' : `${course} Course`}</span>}</p>
           </div>
           <div className="text-right shrink-0">
-            <p className="font-body text-[11px] text-slate-400">Prepared</p>
-            <p className="font-body text-[12px] font-semibold text-slate-600">{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-            {sender && <p className="font-body text-[11px] text-slate-400 mt-1">by {sender}</p>}
+            <p className="font-body text-[10px] text-slate-400">Prepared {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+            {sender && <p className="font-body text-[10px] text-slate-400">by {sender}</p>}
           </div>
         </div>
 
         {/* Notes callout */}
         {notes.trim() && (
-          <div className="mt-4 rounded-lg px-4 py-3" style={{ backgroundColor: '#FFFDF2', border: '1px solid #EFE3B8' }}>
-            <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#92660D' }}>Notes</p>
-            <p className="font-body text-[13px] text-slate-700 whitespace-pre-wrap">{notes.trim()}</p>
+          <div className="mt-2.5 rounded-lg px-3 py-2 avoid-break" style={{ backgroundColor: '#FFFDF2', border: '1px solid #EFE3B8' }}>
+            <p className="font-body text-[9px] font-bold uppercase tracking-wide mb-0.5" style={{ color: '#92660D' }}>Notes</p>
+            <p className="font-body text-[12px] text-slate-700 whitespace-pre-wrap leading-snug">{notes.trim()}</p>
           </div>
         )}
 
         {/* Sprays next week */}
         <H icon={Calendar}>Planned sprays — next week</H>
         {sprayDays.length === 0 ? (
-          <p className="font-body text-sm text-slate-400">No sprays scheduled for next week{program ? '' : ' (no active program found)'}.</p>
+          <p className="font-body text-[12px] text-slate-400">No sprays scheduled for next week{program ? '' : ' (no active program found)'}.</p>
         ) : (
-          <div className="space-y-2.5">
+          <div className="space-y-1.5">
             {sprayDays.map((d) => (
-              <div key={`${d.date}-${d.area}`} className="rounded-lg border border-black/5 overflow-hidden">
-                <div className="flex items-center justify-between px-3 py-1.5" style={{ backgroundColor: '#F0F6F2' }}>
-                  <span className="font-body text-[12px] font-bold" style={{ color: FOREST }}>{fmtDay(d.date)}</span>
-                  <span className="font-body text-[11px] font-semibold" style={{ color: FERN }}>{d.area}</span>
+              <div key={`${d.date}-${d.area}`} className="rounded-lg border border-black/5 overflow-hidden avoid-break">
+                <div className="flex items-center justify-between px-2.5 py-1" style={{ backgroundColor: '#F0F6F2' }}>
+                  <span className="font-body text-[11.5px] font-bold" style={{ color: FOREST }}>{fmtDay(d.date)}</span>
+                  <span className="font-body text-[10.5px] font-semibold" style={{ color: FERN }}>{d.area}</span>
                 </div>
                 <table className="w-full border-collapse">
                   <tbody>
                     {d.items.map((a) => (
                       <tr key={a.id} className="border-t border-black/5">
-                        <td className="px-3 py-1.5 align-top" style={{ borderLeft: `3px solid ${typeColor(a.type)}` }}>
-                          <span className="font-body text-[12.5px] font-bold text-slate-800">{a.product}</span>
-                          {a.type && <span className="font-body text-[9px] font-bold uppercase tracking-wide ml-2" style={{ color: typeColor(a.type) }}>{a.type}</span>}
+                        <td className="px-2.5 py-1 align-top" style={{ borderLeft: `3px solid ${typeColor(a.type)}` }}>
+                          <span className="font-body text-[12px] font-bold text-slate-800">{a.product}</span>
+                          {a.type && <span className="font-body text-[8.5px] font-bold uppercase tracking-wide ml-1.5" style={{ color: typeColor(a.type) }}>{a.type}</span>}
                         </td>
-                        <td className="px-3 py-1.5 font-body text-[11px] text-slate-500 whitespace-nowrap tabular-nums align-top">{a.rateOzM ? `${a.rateOzM} oz/M` : a.rateOzA ? `${a.rateOzA} oz/A` : ''}</td>
-                        <td className="px-3 py-1.5 font-body text-[11px] text-slate-500 align-top">{a.target || ''}</td>
+                        <td className="px-2.5 py-1 font-body text-[10.5px] text-slate-500 whitespace-nowrap tabular-nums align-top">{a.rateOzM ? `${a.rateOzM} oz/M` : a.rateOzA ? `${a.rateOzA} oz/A` : ''}</td>
+                        <td className="px-2.5 py-1 font-body text-[10.5px] text-slate-500 align-top">{a.target || ''}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -342,129 +342,96 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
           </div>
         )}
 
-        {/* Fertility / nutrition next week */}
-        <H icon={Sprout}>Fertility &amp; nutrition — next week</H>
-        {fertNext.length === 0 ? (
-          <p className="font-body text-sm text-slate-400">No fertility sheets scheduled for next week.</p>
-        ) : (
-          <div className="rounded-lg border border-black/5 overflow-hidden">
-            <table className="w-full border-collapse">
-              <tbody>
-                {fertNext.map((f) => (
-                  <tr key={f.id} className="border-t border-black/5 first:border-t-0">
-                    <td className="px-3 py-1.5 align-top" style={{ borderLeft: `3px solid ${typeColor('Fertilizer')}` }}>
-                      <span className="font-body text-[12.5px] font-bold text-slate-800">{f.product || 'Fertilizer'}</span>
-                      {npk(f.analysis) && <span className="font-body text-[10px] font-bold ml-2" style={{ color: typeColor('Fertilizer') }}>{npk(f.analysis)}</span>}
-                    </td>
-                    <td className="px-3 py-1.5 font-body text-[11px] text-slate-500 align-top">{f.area}</td>
-                    <td className="px-3 py-1.5 font-body text-[11px] text-slate-500 whitespace-nowrap tabular-nums align-top">{f.rate ? `${f.rate} lb/M` : ''}</td>
-                    <td className="px-3 py-1.5 font-body text-[10px] text-slate-400 text-right whitespace-nowrap align-top">{fmtDay(f.appDate)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Fertility + Schedule side by side */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5">
+          <div className="min-w-0 avoid-break">
+            <H icon={Sprout}>Fertility &amp; nutrition — next week</H>
+            {fertNext.length === 0 ? (
+              <p className="font-body text-[12px] text-slate-400">None scheduled.</p>
+            ) : (
+              <div className="rounded-lg border border-black/5 overflow-hidden">
+                <table className="w-full border-collapse">
+                  <tbody>
+                    {fertNext.map((f) => (
+                      <tr key={f.id} className="border-t border-black/5 first:border-t-0">
+                        <td className="px-2.5 py-1 align-top" style={{ borderLeft: `3px solid ${typeColor('Fertilizer')}` }}>
+                          <span className="font-body text-[12px] font-bold text-slate-800">{f.product || 'Fertilizer'}</span>
+                          {npk(f.analysis) && <span className="font-body text-[9px] font-bold ml-1.5" style={{ color: typeColor('Fertilizer') }}>{npk(f.analysis)}</span>}
+                          <span className="font-body text-[10px] text-slate-400 ml-1.5">{f.area}</span>
+                        </td>
+                        <td className="px-2.5 py-1 font-body text-[10px] text-slate-500 whitespace-nowrap tabular-nums text-right align-top">{f.rate ? `${f.rate} lb/M` : ''}</td>
+                        <td className="px-2.5 py-1 font-body text-[9px] text-slate-400 text-right whitespace-nowrap align-top">{fmtDay(f.appDate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        )}
+          <div className="min-w-0 avoid-break">
+            <H icon={Calendar}>Schedule — to get done</H>
+            {schedule.length === 0 ? (
+              <p className="font-body text-[12px] text-slate-400">Nothing added.</p>
+            ) : (
+              <div className="rounded-lg border border-black/5 overflow-hidden">
+                {orderedSchedule.map((s) => (
+                  <div key={s.id} className="flex items-center gap-2 px-2.5 py-1 border-t border-black/5 first:border-t-0">
+                    <span className="inline-block w-3.5 h-3.5 rounded border border-slate-300 shrink-0" />
+                    {s.day !== 'Any' && <span className="font-body text-[9px] font-bold w-8 shrink-0" style={{ color: FERN }}>{s.day}</span>}
+                    <span className="font-body text-[12px] text-slate-700">{s.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
-        {/* Weekly schedule / to-do */}
-        {schedule.length > 0 && (
-          <>
-            <H icon={Calendar}>Schedule — things to get done</H>
-            <div className="rounded-lg border border-black/5 overflow-hidden">
-              {orderedSchedule.map((s) => (
-                <div key={s.id} className="flex items-center gap-3 px-3 py-1.5 border-t border-black/5 first:border-t-0">
-                  <span className="inline-block w-4 h-4 rounded border border-slate-300 shrink-0" />
-                  {s.day !== 'Any' && <span className="font-body text-[10px] font-bold w-9 shrink-0" style={{ color: FERN }}>{s.day}</span>}
-                  <span className="font-body text-[12.5px] text-slate-700">{s.text}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* Weather outlook next week */}
+        {/* Weather outlook next week (full width) */}
         <H icon={Thermometer}>Weather outlook — next week</H>
         {nwx.n === 0 ? (
-          <p className="font-body text-sm text-slate-400">No forecast available (set your course location in Settings to turn on weather).</p>
+          <p className="font-body text-[12px] text-slate-400">No forecast (set your course location in Settings).</p>
         ) : (
-          <>
-            <div className="grid grid-cols-3 gap-2 mb-2">
-              <Stat label="Avg high" value={`${round(nwx.avgHigh)}°`} sub="°F" />
-              <Stat label="Avg low" value={`${round(nwx.avgLow)}°`} sub="°F" />
-              <Stat label="Precip" value={`${round(nwx.precip, 2)}"`} sub="forecast total" />
-            </div>
-            <div className="flex gap-1.5 overflow-x-auto">
-              {wxNext.map((r) => (
-                <div key={r.date} className="flex-1 min-w-[64px] text-center rounded-lg border border-black/5 py-1.5" style={{ backgroundColor: '#FCFCFA' }}>
-                  <p className="font-body text-[9px] font-bold uppercase text-slate-400">{new Date(r.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}</p>
-                  <p className="font-body text-[12px] font-bold text-slate-700">{round(r.tMax)}°<span className="text-slate-400 font-semibold"> / {round(r.tMin)}°</span></p>
-                  {r.precipProb != null && <p className="font-body text-[9px]" style={{ color: r.precipProb >= 50 ? '#2563EB' : '#94A3B8' }}>{round(r.precipProb)}%</p>}
-                </div>
-              ))}
-            </div>
-          </>
+          <div className="flex gap-1 avoid-break">
+            {wxNext.map((r) => (
+              <div key={r.date} className="flex-1 min-w-0 text-center rounded-lg border border-black/5 py-1" style={{ backgroundColor: '#FCFCFA' }}>
+                <p className="font-body text-[8.5px] font-bold uppercase text-slate-400">{new Date(r.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}</p>
+                <p className="font-body text-[11px] font-bold text-slate-700">{round(r.tMax)}°<span className="text-slate-400 font-semibold">/{round(r.tMin)}°</span></p>
+                {r.precipProb != null && <p className="font-body text-[8.5px]" style={{ color: r.precipProb >= 50 ? '#2563EB' : '#94A3B8' }}>{round(r.precipProb)}%</p>}
+              </div>
+            ))}
+          </div>
         )}
 
-        {/* This week's data */}
-        <H icon={Gauge}>Greens speed — this week</H>
-        {speedStat ? (
-          <div className="grid grid-cols-3 gap-2">
-            <Stat label="Average" value={`${speedStat.avg}'`} sub={`${speedStat.n} reading${speedStat.n !== 1 ? 's' : ''}`} />
-            <Stat label="Range" value={`${speedStat.min}–${speedStat.max}'`} />
-            <Stat label="Readings" value={speedStat.n} sub="this week" />
-          </div>
-        ) : <p className="font-body text-sm text-slate-400">No stimp readings logged this week.</p>}
-
-        <H icon={Droplets}>Clipping yields — this week</H>
-        {clipStat ? (
-          <div className="rounded-lg border border-black/5 overflow-hidden">
-            <table className="w-full border-collapse">
-              <tbody>
-                {Object.entries(clipStat.byArea).map(([area, vol]) => (
-                  <tr key={area} className="border-t border-black/5 first:border-t-0">
-                    <td className="px-3 py-1.5 font-body text-[12px] font-semibold text-slate-700">{area}</td>
-                    <td className="px-3 py-1.5 font-body text-[12px] text-slate-500 text-right tabular-nums">{round(vol, 1)} {clipStat.unit}</td>
-                  </tr>
-                ))}
-                <tr className="border-t border-black/10" style={{ backgroundColor: '#F8FAF8' }}>
-                  <td className="px-3 py-1.5 font-body text-[12px] font-bold" style={{ color: FOREST }}>Total</td>
-                  <td className="px-3 py-1.5 font-body text-[12px] font-bold text-right tabular-nums" style={{ color: FOREST }}>{clipStat.total} {clipStat.unit}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        ) : <p className="font-body text-sm text-slate-400">No clipping volumes logged this week.</p>}
+        {/* This week's data — compact stat band + mowing */}
+        <H icon={Gauge}>This week</H>
+        <div className="grid grid-cols-3 md:grid-cols-6 gap-1.5 avoid-break">
+          <Stat label="Stimp avg" value={speedStat ? `${speedStat.avg}'` : '—'} sub={speedStat ? `${speedStat.n}×` : ''} />
+          <Stat label="Stimp range" value={speedStat ? `${speedStat.min}–${speedStat.max}` : '—'} />
+          <Stat label="Clippings" value={clipStat ? `${clipStat.total}` : '—'} sub={clipStat ? clipStat.unit : ''} />
+          <Stat label="Avg high" value={twx.n ? `${round(twx.avgHigh)}°` : '—'} />
+          <Stat label="Avg low" value={twx.n ? `${round(twx.avgLow)}°` : '—'} />
+          <Stat label="Precip" value={twx.n ? `${round(twx.precip, 2)}"` : '—'} />
+        </div>
 
         <H icon={Scissors}>Mowing &amp; cultural practices — this week</H>
         {pracThis.length ? (
-          <div className="rounded-lg border border-black/5 overflow-hidden">
+          <div className="rounded-lg border border-black/5 overflow-hidden avoid-break">
             <table className="w-full border-collapse">
               <tbody>
-                {(mowPractices.length ? mowPractices : pracThis).slice(0, 12).map((p) => (
+                {(mowPractices.length ? mowPractices : pracThis).slice(0, 8).map((p) => (
                   <tr key={p.id} className="border-t border-black/5 first:border-t-0">
-                    <td className="px-3 py-1.5 font-body text-[12px] font-semibold text-slate-700">{p.practice}</td>
-                    <td className="px-3 py-1.5 font-body text-[11px] text-slate-500">{p.area}</td>
-                    <td className="px-3 py-1.5 font-body text-[12px] text-slate-600 text-right tabular-nums whitespace-nowrap">{p.value != null && p.value !== '' ? `${p.value} ${p.unit || ''}` : ''}</td>
-                    <td className="px-3 py-1.5 font-body text-[10px] text-slate-400 text-right whitespace-nowrap">{fmtDay(p.date)}</td>
+                    <td className="px-2.5 py-1 font-body text-[12px] font-semibold text-slate-700">{p.practice}</td>
+                    <td className="px-2.5 py-1 font-body text-[10px] text-slate-500">{p.area}</td>
+                    <td className="px-2.5 py-1 font-body text-[11px] text-slate-600 text-right tabular-nums whitespace-nowrap">{p.value != null && p.value !== '' ? `${p.value} ${p.unit || ''}` : ''}</td>
+                    <td className="px-2.5 py-1 font-body text-[9px] text-slate-400 text-right whitespace-nowrap">{fmtDay(p.date)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        ) : <p className="font-body text-sm text-slate-400">No practices logged this week.</p>}
+        ) : <p className="font-body text-[12px] text-slate-400">No practices logged this week.</p>}
 
-        <H icon={Thermometer}>Weather recap — this week</H>
-        {twx.n === 0 ? (
-          <p className="font-body text-sm text-slate-400">No weather data for this week.</p>
-        ) : (
-          <div className="grid grid-cols-3 gap-2">
-            <Stat label="Avg high" value={`${round(twx.avgHigh)}°`} sub="°F" />
-            <Stat label="Avg low" value={`${round(twx.avgLow)}°`} sub="°F" />
-            <Stat label="Precip" value={`${round(twx.precip, 2)}"`} sub="this week" />
-          </div>
-        )}
-
-        <p className="font-body text-[10px] text-slate-300 mt-6 pt-3 border-t border-black/5">Generated by the {club} turf app · {new Date().toLocaleString('en-US')}</p>
+        <p className="font-body text-[9px] text-slate-300 mt-3 pt-2 border-t border-black/5">Generated by the {club} turf app · {new Date().toLocaleDateString('en-US')}</p>
       </div>
     </div>
   )
