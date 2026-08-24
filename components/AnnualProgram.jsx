@@ -121,6 +121,13 @@ function fmtDate(d) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+// Just the weekday, e.g. "Mon" — shown under the date on the sheet so the
+// spray day is easy to place.
+function fmtWeekday(d) {
+  if (!d) return ''
+  return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })
+}
+
 // A fuller date heading for the grouped view, e.g. "Mon · Mar 30, 2021".
 function fmtDateHeading(d) {
   if (!d) return 'No date set'
@@ -1528,43 +1535,26 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                         </div>
                         {events.map((ev) => {
                           const items = ev.items
-                          if (items.length === 1) {
-                            const a = items[0]; const tc = typeColor(a.type)
-                            if (inlineEdit?.id === a.id) {
-                              return (
-                                <div key={ev.key} className="flex items-stretch">
-                                  <span className="font-body text-[11px] font-bold w-14 shrink-0 flex items-center justify-center" style={{ color: FOREST, backgroundColor: '#FFF9E8', borderTop: '1px solid rgba(0,0,0,0.05)' }}>{fmtDate(a.plannedDate)}</span>
-                                  <div className="flex-1 min-w-0">{inlineRow('px-3 py-1.5')}</div>
-                                </div>
-                              )
-                            }
-                            return (
-                              <div key={ev.key} onClick={() => startInline(a)} className="cursor-pointer w-full flex items-center gap-2.5 px-3.5 py-2 border-t border-black/5 hover:brightness-[.97] active:brightness-95 transition" style={{ borderLeft: `4px solid ${tc}` }}>
-                                <span className="font-body text-[11px] font-bold w-11 shrink-0" style={{ color: FOREST }}>{fmtDate(a.plannedDate)}</span>
-                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: tc }} />
-                                <span className="font-body text-[12px] font-bold text-slate-800 whitespace-nowrap">{a.product}</span>
-                                {showArea && <span className="font-body text-[10px] text-slate-400 whitespace-nowrap">{a.area}</span>}
-                                <span className="font-body text-[10.5px] text-slate-400 truncate flex-1 min-w-0">{a.target || ''}</span>
-                                <span className="font-body text-[11px] font-bold text-slate-500 whitespace-nowrap tabular-nums">{rateOf(a)}</span>
-                                <span className="font-body text-[8.5px] font-bold uppercase tracking-wide whitespace-nowrap shrink-0" style={{ color: tc }}>{a.type || ''}</span>
-                                <button onClick={(e) => { e.stopPropagation(); openEvent(items) }} className="shrink-0 text-slate-300 hover:text-slate-500 transition" title="Full editor (date, timing, targets)"><Pencil size={12} /></button>
-                              </div>
-                            )
-                          }
                           const open = !!openTanks[ev.key]
                           const lead = typeColor(items[0].type)
+                          const multi = items.length > 1
+                          // Every spray day is a banner you can open — single sprays
+                          // read the same as tank days, just without the Tank pill.
                           return (
                             <div key={ev.key}>
                               <button onClick={() => setOpenTanks((p) => ({ ...p, [ev.key]: !p[ev.key] }))} className="w-full text-left flex items-center gap-2 px-3.5 py-2 border-t-2 hover:brightness-[.98] transition" style={{ borderTopColor: '#E7E4D6', borderLeft: `4px solid ${lead}`, backgroundColor: open ? '#FBFAF4' : 'white' }}>
                                 {open ? <ChevronDown size={13} className="shrink-0" style={{ color: '#b7a86a' }} /> : <ChevronRight size={13} className="shrink-0" style={{ color: '#b7a86a' }} />}
-                                <span className="font-body text-[11px] font-bold w-11 shrink-0" style={{ color: FOREST }}>{fmtDate(ev.date)}</span>
-                                <span className="font-body text-[8.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1E7A8', color: '#8a6d1e' }}>Tank · {items.length}</span>
+                                <span className="w-11 shrink-0 leading-none">
+                                  <span className="font-body text-[11px] font-bold block" style={{ color: FOREST }}>{fmtDate(ev.date)}</span>
+                                  <span className="font-body text-[9px] font-semibold block mt-0.5" style={{ color: '#9aa69d' }}>{fmtWeekday(ev.date)}</span>
+                                </span>
+                                {multi && <span className="font-body text-[8.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1E7A8', color: '#8a6d1e' }}>Tank · {items.length}</span>}
                                 {showArea && <span className="font-body text-[10px] text-slate-400 whitespace-nowrap shrink-0">{ev.area}</span>}
                                 <span className="flex-1 min-w-0 truncate text-[11.5px]">
                                   {items.map((a, k) => (
                                     <span key={a.id} className="whitespace-nowrap">
                                       {k > 0 && <span className="mx-1" style={{ color: '#cfcbba' }}>·</span>}
-                                      <span className="font-bold" style={{ color: typeColor(a.type) }}>{shortName(a.product)}</span>
+                                      <span className="font-bold" style={{ color: typeColor(a.type) }}>{multi ? shortName(a.product) : a.product}</span>
                                     </span>
                                   ))}
                                 </span>
@@ -1592,7 +1582,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                     )
                   })}
                   <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-black/5" style={{ backgroundColor: '#F8FAF8' }}>
-                    <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a product to edit in place · <Pencil size={10} className="inline align-[-1px]" /> for the full editor</span>
+                    <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a day to open · tap a product to edit in place · <Pencil size={10} className="inline align-[-1px]" /> for the full editor</span>
                     <button onClick={startAddApp} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={12} /> Add</button>
                   </div>
                 </div>
