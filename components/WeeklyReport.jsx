@@ -301,11 +301,12 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: recipient, subject, filename: fileName(), pdfBase64: base64, text: emailText(), fromName: `${courseInfo.clubName || 'Turf'}${course !== 'all' ? ' · ' + courseLabel(course) : ''}`, replyTo: userEmail || undefined }),
       })
-      const j = await res.json().catch(() => ({}))
+      let j = {}
+      try { j = await res.json() } catch { /* non-JSON (e.g. 413/504) */ }
       if (res.ok && j.ok) { showToast(`Sent to ${recipient}`) }
-      else if (res.status === 501 || j.error === 'email_not_configured') { showToast('Email isn’t set up yet — see the note below the buttons') }
-      else { showToast(j.error ? `Could not send: ${j.error}` : 'Could not send the email') }
-    } catch (e) { console.error(e); showToast('Could not send the email') }
+      else if (res.status === 501 || j.error === 'email_not_configured') { showToast('Email isn’t set up yet — add the Gmail keys in Vercel and redeploy') }
+      else { console.error('send-report failed', res.status, j); showToast(`Could not send — error ${res.status}${j.error ? ': ' + String(j.error).slice(0, 80) : ''}`) }
+    } catch (e) { console.error(e); showToast(`Could not send — ${String(e.message || e).slice(0, 80)}`) }
     setBusy('')
   }
   const emailText = () => {
