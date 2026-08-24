@@ -544,6 +544,19 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     const prod = products.find((p) => p.name === name)
     return { key: rowKey(), product: name, type: prod?.type || '', basis: prod?.basis || 'oz / M', rateOzM: prod?.rate != null ? prod.rate : '', rateOzA: '', target: '' }
   }
+  // Swap the product on an existing row and re-fill its rate + type + basis
+  // live from the Chemical Library — so typing in a new product auto-resets
+  // everything about that line. Keeps the row's key/id so it edits in place.
+  const swapProductRow = (key, name) => setEditApp((prev) => {
+    if (!name || prev.products.some((r) => r.key !== key && r.product === name)) return prev
+    const prod = products.find((p) => p.name === name)
+    return {
+      ...prev,
+      products: prev.products.map((r) => (r.key === key
+        ? { ...r, product: name, type: prod?.type || '', basis: prod?.basis || 'oz / M', rateOzM: prod?.rate != null ? prod.rate : '', rateOzA: '', target: '' }
+        : r)),
+    }
+  })
   // Add or remove a product from the tank mix — lets you tap several at once.
   const toggleProductRow = (name) => setEditApp((prev) => {
     if (prev.products.some((r) => r.product === name)) return { ...prev, products: prev.products.filter((r) => r.product !== name) }
@@ -1094,10 +1107,27 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 items-start">
                 {sortByMixOrder(editApp.products.filter((r) => r.product), (r) => products.find((x) => x.name === r.product) || { name: r.product, type: r.type }, courseInfo.mixOrder).map((r) => (
                   <div key={r.key} className="rounded-xl border border-slate-100 p-2.5" style={{ backgroundColor: '#F8FAF9' }}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-body text-sm font-bold" style={{ color: FOREST }}>{r.product}</span>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="flex-1 min-w-0">
+                        {/* Search + swap the product on this line. Picking a new one
+                            re-fills rate + type from the Chemical Library on the spot. */}
+                        <SearchSelect value={r.product} options={products.map((p) => p.name)} onPick={(name) => swapProductRow(r.key, name)} placeholder="Search product…" />
+                      </div>
                       <button onClick={() => removeRow(r.key)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove product"><Trash2 size={15} /></button>
                     </div>
+                    {(() => {
+                      const prodInfo = products.find((x) => x.name === r.product)
+                      const shownType = r.type || prodInfo?.type
+                      const ai = prodInfo?.activeIngredient
+                      const frac = prodInfo?.moaGroup
+                      if (!shownType && !ai) return null
+                      return (
+                        <div className="flex items-center gap-1.5 flex-wrap mb-2 -mt-0.5">
+                          {shownType && <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide" style={{ backgroundColor: `${typeColor(shownType)}18`, color: typeColor(shownType) }}>{shownType}</span>}
+                          {ai && <span className="font-body text-[10px] text-slate-400 truncate">{ai}{frac ? ` · FRAC ${frac}` : ''}</span>}
+                        </div>
+                      )
+                    })()}
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Rate oz/M</label>
