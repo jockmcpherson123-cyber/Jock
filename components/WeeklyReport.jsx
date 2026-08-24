@@ -269,23 +269,25 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   async function makePdf() {
     const { toCanvas } = await import('html-to-image')
     const { jsPDF } = await import('jspdf')
-    const node = reportRef.current
-    // Capture at a fixed page width so the layout is identical on any device
-    // (a narrow screen would otherwise clip the wide rows), and add a class that
-    // hides the on-screen edit chrome (buttons, ×, blank rows) from the image.
-    const CAP_W = 760
-    const prev = { width: node.style.width, maxWidth: node.style.maxWidth }
-    node.classList.add('wr-capturing')
-    node.style.width = `${CAP_W}px`
-    node.style.maxWidth = `${CAP_W}px`
-    void node.offsetWidth // force reflow at the new width
+    // Capture a COPY of the report rendered off-screen at a fixed page width, so
+    // the output is identical on any device (a narrow screen can't clip it) and
+    // the edit chrome/blank rows are hidden via the .wr-capturing class.
+    const CAP_W = 780
+    const holder = document.createElement('div')
+    holder.style.cssText = `position:fixed;left:-10000px;top:0;width:${CAP_W}px;padding:0;margin:0;background:#ffffff;z-index:-1;`
+    const clone = reportRef.current.cloneNode(true)
+    clone.classList.add('wr-capturing')
+    clone.style.width = `${CAP_W}px`
+    clone.style.maxWidth = `${CAP_W}px`
+    clone.style.margin = '0'
+    holder.appendChild(clone)
+    document.body.appendChild(holder)
     let canvas
     try {
-      canvas = await toCanvas(node, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true })
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      canvas = await toCanvas(clone, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true, width: CAP_W })
     } finally {
-      node.classList.remove('wr-capturing')
-      node.style.width = prev.width
-      node.style.maxWidth = prev.maxWidth
+      document.body.removeChild(holder)
     }
     const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' })
     const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight()
@@ -438,23 +440,23 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         {sprayDays.length === 0 && manualSpraysShown.length === 0 ? (
           <p className="font-body text-[12px] text-slate-400"><span className="no-print">Tap “+ Add spray” to type one, or it fills from your Annual Program.</span></p>
         ) : (
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             {sprayDays.map((d) => (
               <div key={`${d.date}-${d.area}`} className="rounded-lg border border-black/5 overflow-hidden avoid-break">
-                <div className="flex items-center justify-between px-2.5 py-1" style={{ backgroundColor: '#F0F6F2' }}>
-                  <span className="font-body text-[11.5px] font-bold" style={{ color: FOREST }}>{fmtDay(d.date)}</span>
-                  <span className="font-body text-[10.5px] font-semibold" style={{ color: FERN }}>{d.area}</span>
+                <div className="flex items-center justify-between px-2.5 py-0.5" style={{ backgroundColor: '#F0F6F2' }}>
+                  <span className="font-body text-[11px] font-bold" style={{ color: FOREST }}>{fmtDay(d.date)}</span>
+                  <span className="font-body text-[10px] font-semibold" style={{ color: FERN }}>{d.area}</span>
                 </div>
                 <table className="w-full border-collapse">
                   <tbody>
                     {d.items.map((a) => (
                       <tr key={a.id} className="border-t border-black/5">
-                        <td className="px-2.5 py-1 align-top" style={{ borderLeft: `3px solid ${typeColor(a.type)}` }}>
-                          <span className="font-body text-[12px] font-bold text-slate-800">{a.product}</span>
-                          {a.type && <span className="font-body text-[8.5px] font-bold uppercase tracking-wide ml-1.5" style={{ color: typeColor(a.type) }}>{a.type}</span>}
+                        <td className="px-2.5 py-0.5 align-top" style={{ borderLeft: `3px solid ${typeColor(a.type)}` }}>
+                          <span className="font-body text-[11.5px] font-bold text-slate-800">{a.product}</span>
+                          {a.type && <span className="font-body text-[8px] font-bold uppercase tracking-wide ml-1.5" style={{ color: typeColor(a.type) }}>{a.type}</span>}
                         </td>
-                        <td className="px-2.5 py-1 font-body text-[10.5px] text-slate-500 whitespace-nowrap tabular-nums align-top">{a.rateOzM ? `${a.rateOzM} oz/M` : a.rateOzA ? `${a.rateOzA} oz/A` : ''}</td>
-                        <td className="px-2.5 py-1 font-body text-[10.5px] text-slate-500 align-top">{a.target || ''}</td>
+                        <td className="px-2.5 py-0.5 font-body text-[10px] text-slate-500 whitespace-nowrap tabular-nums align-top">{a.rateOzM ? `${a.rateOzM} oz/M` : a.rateOzA ? `${a.rateOzA} oz/A` : ''}</td>
+                        <td className="px-2.5 py-0.5 font-body text-[10px] text-slate-500 align-top">{a.target || ''}</td>
                       </tr>
                     ))}
                   </tbody>
