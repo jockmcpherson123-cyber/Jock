@@ -854,18 +854,16 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   // you see this week's sprays without scrolling.
   const _today = new Date(); _today.setHours(0, 0, 0, 0)
   const _in7 = new Date(_today); _in7.setDate(_in7.getDate() + 7)
-  const _ago30 = new Date(_today); _ago30.setDate(_ago30.getDate() - 30)
   const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   const todayIso = isoLocal(_today)
   const in7Iso = isoLocal(_in7)
-  const ago30Iso = isoLocal(_ago30)
   // Once the spray for a planned application has actually been signed off
   // (its linked sheet is approved/completed/logged), it drops off the "to do"
   // lists — it's done, not something still coming up or overdue.
   const doneSheetIds = new Set((sheets || []).filter((s) => sheetApplied(s)).map((s) => s.id))
   const isEventComplete = (ev) => (ev.items || []).some((i) => i.linkedSheetId && doneSheetIds.has(i.linkedSheetId))
-  // Only surface RECENTLY-missed sprays (last 30 days) — not a whole past season.
-  const overdueEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate < todayIso && a.plannedDate >= ago30Iso).sort((a, b) => dateKey(b).localeCompare(dateKey(a)))).filter((ev) => !isEventComplete(ev)).slice(0, 3)
+  // The top "This Week" banner shows upcoming sprays only (next 7 days) — no
+  // overdue/past-date sprays here, by design.
   const thisWeekEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate >= todayIso && a.plannedDate <= in7Iso)).filter((ev) => !isEventComplete(ev))
   const offYearCount = activeProgram ? apps.filter((a) => a.plannedDate && a.plannedDate.slice(0, 4) !== String(activeProgram.year)).length : 0
 
@@ -1446,18 +1444,10 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               <span className="font-body text-[11px] text-slate-400">next 7 days</span>
             </div>
             {thisWeekEvents.length === 0 ? (
-              <p className="font-body text-sm text-slate-500">Nothing scheduled in the next 7 days.{overdueEvents.length > 0 ? ' A few sprays are past their planned date — see below.' : ''}</p>
+              <p className="font-body text-sm text-slate-500">Nothing scheduled in the next 7 days.</p>
             ) : (
               <div className="space-y-2">
                 {thisWeekEvents.map((ev) => EventCard(ev))}
-              </div>
-            )}
-            {overdueEvents.length > 0 && (
-              <div className="mt-3">
-                <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#B91C1C' }}>Past their date</p>
-                <div className="space-y-2">
-                  {overdueEvents.map((ev) => EventCard(ev))}
-                </div>
               </div>
             )}
           </div>
