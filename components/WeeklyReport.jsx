@@ -44,6 +44,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const [schedule, setSchedule] = useState(Array.isArray(courseInfo.reportSchedule) ? courseInfo.reportSchedule : [])
   const [schedDay, setSchedDay] = useState('Any')
   const [schedText, setSchedText] = useState('')
+  const [manual, setManual] = useState(courseInfo.reportManual && typeof courseInfo.reportManual === 'object' ? courseInfo.reportManual : {})
   const [busy, setBusy] = useState('')
   const [toast, setToast] = useState(null)
   const reportRef = useRef(null)
@@ -62,6 +63,10 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   }
   const removeSchedItem = (id) => { const next = schedule.filter((s) => s.id !== id); setSchedule(next); saveDraft({ reportSchedule: next }) }
   const orderedSchedule = [...schedule].sort((a, b) => dayRank(a.day) - dayRank(b.day))
+
+  // Quick-fill for the this-week numbers — used only when nothing is logged.
+  const setManualField = (k, v) => setManual((m) => ({ ...m, [k]: v }))
+  const persistManual = () => saveDraft({ reportManual: manual })
 
   useEffect(() => {
     (async () => {
@@ -138,6 +143,16 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     clipsThis.forEach((c) => { byArea[c.area] = (byArea[c.area] || 0) + Number(c.volume || 0) })
     return { unit, byArea, total: round(clipsThis.reduce((a, c) => a + Number(c.volume || 0), 0), 1) }
   })()
+
+  // Displayed this-week numbers: logged data wins; otherwise the quick-fill value.
+  const mv = (k) => (manual[k] != null && String(manual[k]).trim() !== '' ? String(manual[k]).trim() : null)
+  const dStimpAvg = speedStat ? `${speedStat.avg}'` : (mv('stimpAvg') ? `${mv('stimpAvg')}'` : '—')
+  const dStimpRange = speedStat ? `${speedStat.min}–${speedStat.max}` : (mv('stimpRange') || '—')
+  const dClip = clipStat ? `${clipStat.total}` : (mv('clippings') || '—')
+  const dClipUnit = clipStat ? clipStat.unit : (mv('clippings') ? (mv('clipUnit') || 'L') : '')
+  const dHigh = twx.n ? `${round(twx.avgHigh)}°` : (mv('wxHigh') ? `${mv('wxHigh')}°` : '—')
+  const dLow = twx.n ? `${round(twx.avgLow)}°` : (mv('wxLow') ? `${mv('wxLow')}°` : '—')
+  const dPrecip = twx.n ? `${round(twx.precip, 2)}"` : (mv('wxPrecip') ? `${mv('wxPrecip')}"` : '—')
 
   // ── Output actions ──────────────────────────────────────────────────────
   // Capture the whole report as one image and scale it to fit a single A4 page
@@ -292,6 +307,20 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         </div>
       </div>
 
+      {/* Quick-fill for the this-week numbers (never printed) */}
+      <div className="no-print mb-4 rounded-xl border border-slate-200 p-3">
+        <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 block mb-0.5">This week — quick fill</label>
+        <p className="font-body text-[11px] text-slate-400 mb-2">Type any numbers you haven’t logged elsewhere. If you’ve logged the real data (Greens Speed, Clippings, weather), that’s used instead and these are ignored.</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {[['stimpAvg', 'Stimp avg', speedStat ? `logged ${speedStat.avg}'` : "e.g. 11.5"], ['stimpRange', 'Stimp range', speedStat ? 'logged' : 'e.g. 11–12'], ['clippings', 'Clippings total', clipStat ? `logged ${clipStat.total}` : 'e.g. 14.2'], ['wxHigh', 'Avg high °F', twx.n ? `logged ${round(twx.avgHigh)}°` : 'e.g. 85'], ['wxLow', 'Avg low °F', twx.n ? `logged ${round(twx.avgLow)}°` : 'e.g. 66'], ['wxPrecip', 'Precip in', twx.n ? `logged ${round(twx.precip, 2)}"` : 'e.g. 1.2']].map(([k, label, ph]) => (
+            <div key={k}>
+              <label className="font-body text-[9px] font-bold uppercase tracking-wide text-slate-400 block mb-0.5">{label}</label>
+              <input value={manual[k] ?? ''} onChange={(e) => setManualField(k, e.target.value)} onBlur={persistManual} placeholder={ph} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body" />
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Height-of-cut editor (never printed) — shared with Turf Performance */}
       <HocEditor courseInfo={courseInfo} areas={areas} practices={practices} onSaveCourse={onSaveCourse} className="no-print mb-4" />
 
@@ -411,12 +440,12 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         {/* This week's data — compact stat band + mowing */}
         <H icon={Gauge}>This week</H>
         <div className="grid grid-cols-3 md:grid-cols-6 gap-1.5 avoid-break">
-          <Stat label="Stimp avg" value={speedStat ? `${speedStat.avg}'` : '—'} sub={speedStat ? `${speedStat.n}×` : ''} />
-          <Stat label="Stimp range" value={speedStat ? `${speedStat.min}–${speedStat.max}` : '—'} />
-          <Stat label="Clippings" value={clipStat ? `${clipStat.total}` : '—'} sub={clipStat ? clipStat.unit : ''} />
-          <Stat label="Avg high" value={twx.n ? `${round(twx.avgHigh)}°` : '—'} />
-          <Stat label="Avg low" value={twx.n ? `${round(twx.avgLow)}°` : '—'} />
-          <Stat label="Precip" value={twx.n ? `${round(twx.precip, 2)}"` : '—'} />
+          <Stat label="Stimp avg" value={dStimpAvg} sub={speedStat ? `${speedStat.n}×` : ''} />
+          <Stat label="Stimp range" value={dStimpRange} />
+          <Stat label="Clippings" value={dClip} sub={dClipUnit} />
+          <Stat label="Avg high" value={dHigh} />
+          <Stat label="Avg low" value={dLow} />
+          <Stat label="Precip" value={dPrecip} />
         </div>
 
         <H icon={Scissors}>Height of cut — by surface</H>
