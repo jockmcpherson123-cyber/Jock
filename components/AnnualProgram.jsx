@@ -340,19 +340,6 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const [openTanks, setOpenTanks] = useState({}) // sheet view: event key -> true when the tank is expanded
   const [inlineEdit, setInlineEdit] = useState(null) // sheet view: quick inline edit of one product row
-  // The spreadsheet Sheet view is a wide, desktop-only layout — hidden on
-  // iPad/phone (no mouse, or a narrow screen), where the card views read better.
-  const [isDesktop, setIsDesktop] = useState(false)
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return
-    const mq = window.matchMedia('(min-width: 1024px) and (pointer: fine)')
-    const apply = () => setIsDesktop(mq.matches)
-    apply()
-    mq.addEventListener('change', apply)
-    return () => mq.removeEventListener('change', apply)
-  }, [])
-  // If we're on the Sheet view but not on a desktop, drop back to This Week.
-  useEffect(() => { if (!isDesktop && viewMode === 'sheet') setViewMode('now') }, [isDesktop, viewMode])
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
   // ── Build From Models: pick a year + which surfaces, then auto-fill the
   // Annual Program tab with a per-surface, grass-matched, site-tuned program.
@@ -1482,7 +1469,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           {/* View toggle — scrolls sideways on a phone instead of forcing the
               whole page wide (5 pills don't fit an iPhone width). */}
           <div className="flex items-center gap-2 mb-3 overflow-x-auto no-scrollbar [&>*]:shrink-0">
-            {[...(isDesktop ? [['sheet', 'Sheet', FileSpreadsheet]] : []), ['now', 'This Week', Gauge], ['coverage', 'Coverage', LayoutGrid], ['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
+            {[['sheet', 'Sheet', FileSpreadsheet], ['now', 'This Week', Gauge], ['coverage', 'Coverage', LayoutGrid], ['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setViewMode(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 transition" style={viewMode === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
                 <Icon size={13} /> {label}
               </button>
