@@ -6400,9 +6400,9 @@ function CrewQRModal({ courseInfo, saveCourse, onClose }) {
 // QR that opens the crew's no-login Field Data page — moisture, clippings,
 // greens speed and scouting entry only. The club key rides in the link.
 function DataQRModal({ courseInfo, saveCourse, onClose }) {
-  const [codes, setCodes] = useState([]) // [{ label, url, img }]
+  const [img, setImg] = useState('')
+  const [url, setUrl] = useState('')
   const club = courseInfo?.clubName || 'Golf Course'
-  const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -6412,49 +6412,39 @@ function DataQRModal({ courseInfo, saveCourse, onClose }) {
         try { await saveCourse({ partsKey: key }) } catch (e) { console.error(e) }
       }
       const origin = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin
-      // One QR per course when there are two+, otherwise a single all-courses code.
-      const targets = courseNames.length >= 2
-        ? courseNames.map((c) => ({ label: c, url: `${origin}/data?k=${key}&course=${encodeURIComponent(c)}` }))
-        : [{ label: 'Field Data', url: `${origin}/data?k=${key}` }]
-      const withImgs = await Promise.all(targets.map(async (t) => ({ ...t, img: await qrDataUrl(t.url, { width: 520 }) })))
-      if (!cancelled) setCodes(withImgs)
+      // One code for everyone — the crew picks the course on the page itself.
+      const link = `${origin}/data?k=${key}`
+      const q = await qrDataUrl(link, { width: 520 })
+      if (!cancelled) { setImg(q); setUrl(link) }
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const print = (label, img) => {
+  const print = () => {
     if (!img) return
     const iframe = document.createElement('iframe')
     Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
     document.body.appendChild(iframe)
     const doc = iframe.contentWindow.document
     doc.open()
-    doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in}body{margin:0;font-family:Arial;text-align:center;padding:30px}h1{font-family:Georgia,serif;color:#16291F;font-size:26px;margin:0 0 4px}.sub{color:#3A6B4A;font-weight:700;font-size:14px;margin-bottom:20px}img{width:3.4in;height:3.4in}.foot{color:#888;font-size:12px;margin-top:14px}</style></head><body><h1>${club.replace(/[&<>"]/g, '')} — ${String(label).replace(/[&<>"]/g, '')} Data</h1><div class="sub">Scan with your phone camera</div><img src="${img}"><div class="foot">Moisture · Clippings · Greens Speed · Scouting</div></body></html>`)
+    doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in}body{margin:0;font-family:Arial;text-align:center;padding:30px}h1{font-family:Georgia,serif;color:#16291F;font-size:26px;margin:0 0 4px}.sub{color:#3A6B4A;font-weight:700;font-size:14px;margin-bottom:20px}img{width:3.4in;height:3.4in}.foot{color:#888;font-size:12px;margin-top:14px}</style></head><body><h1>${club.replace(/[&<>"]/g, '')} — Field Data</h1><div class="sub">Scan with your phone camera</div><img src="${img}"><div class="foot">Pick your course on the page · Moisture · Clippings · Greens Speed · Scouting</div></body></html>`)
     doc.close()
     setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }, 300)
   }
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full sm:max-w-xl shadow-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl w-full sm:max-w-md shadow-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-white" style={{ borderBottom: '1px solid #EEF0EC' }}>
           <p className="font-display text-base font-bold" style={{ color: FOREST }}>Crew data QR</p>
           <button onClick={onClose} className="text-slate-400"><X size={18} /></button>
         </div>
-        <div className="p-4">
-          <p className="font-body text-[12px] text-slate-500 mb-3">{codes.length > 1 ? 'A separate code per course — the crew scans their own and lands straight on that course’s greens.' : 'The crew scans this to open data entry on their phone.'} No login, nothing else reachable.</p>
-          <div className={`grid gap-3 ${codes.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
-            {codes.length ? codes.map((c) => (
-              <div key={c.label} className="rounded-2xl border border-slate-100 p-4 text-center flex flex-col items-center">
-                <p className="font-body text-sm font-bold" style={{ color: FOREST }}>{c.label}</p>
-                <p className="font-body text-[11px] text-slate-400 mb-2">Moisture · Clippings · Speed · Scouting</p>
-                <img src={c.img} alt={`${c.label} data QR`} className="w-40 h-40" />
-                <p className="font-body text-[10px] text-slate-400 mt-2 break-all">{c.url}</p>
-                <button onClick={() => print(c.label, c.img)} className="mt-3 font-body text-xs font-bold px-3.5 py-2 rounded-full inline-flex items-center gap-1.5" style={{ color: FOREST, border: '1px solid #CBD5E1' }}><Printer size={13} /> Print</button>
-              </div>
-            )) : <div className="w-full h-48 flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={22} /></div>}
-          </div>
+        <div className="p-4 text-center">
+          <p className="font-body text-[12px] text-slate-500 mb-3">One code for the whole crew. They scan it, <b>pick their course at the top</b> (Blue / Gold), and record moisture, clippings, greens speed and scouting. No login, nothing else reachable.</p>
+          {img ? <img src={img} alt="Field data QR" className="w-48 h-48 mx-auto" /> : <div className="w-48 h-48 mx-auto flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={22} /></div>}
+          {url && <p className="font-body text-[10.5px] text-slate-400 mt-2 break-all">{url}</p>}
+          <button onClick={print} disabled={!img} className="mt-3 font-body text-xs font-bold px-4 py-2 rounded-full inline-flex items-center gap-1.5 disabled:opacity-40" style={{ color: FOREST, border: '1px solid #CBD5E1' }}><Printer size={13} /> Print</button>
         </div>
       </div>
     </div>
