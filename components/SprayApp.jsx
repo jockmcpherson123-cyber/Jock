@@ -251,81 +251,203 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// ── SIDEBAR NAVIGATION MODEL ─────────────────────────────────────────────────
+// One grouped left rail drives the whole app. Every screen is a sidebar item that
+// maps to a module (m) and the route/section within it (r). This replaced the old
+// top module-switcher + per-module tab strips.
+const NAV_MANAGER = [
+  { items: [{ id: 'home', label: 'Home', m: 'spray', r: 'dashboard', home: true, icon: BarChart3 }] },
+  { title: 'Spray Program', items: [
+    { id: 'program', label: 'Annual Program', m: 'spray', r: 'program' },
+    { id: 'sheets', label: 'Spray Sheets', m: 'spray', r: 'list' },
+    { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert' },
+    { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
+  ] },
+  { title: 'Agronomy', items: [
+    { id: 'gdd', label: 'GDD & Timing', m: 'turf', r: 'gdd' },
+    { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
+    { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil' },
+    { id: 'clippings', label: 'Clipping Yields', m: 'turf', r: 'clippings' },
+    { id: 'speed', label: 'Greens Speed', m: 'turf', r: 'speed' },
+    { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc' },
+    { id: 'practices', label: 'Practices', m: 'turf', r: 'practices' },
+    { id: 'scouting', label: 'Scouting', m: 'turf', r: 'scouting' },
+    { id: 'reference', label: 'Reference', m: 'turf', r: 'knowledge' },
+  ] },
+  { title: 'Course & Crew', items: [
+    { id: 'irrmap', label: 'Irrigation Map', m: 'map', r: 'map' },
+    { id: 'parts', label: 'Parts', m: 'map', r: 'parts' },
+    { id: 'mowing', label: 'Mowing', m: 'board', r: 'mowing' },
+    { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
+    { id: 'playbook', label: 'Playbook', m: 'playbook', r: null },
+    { id: 'tournament', label: 'Tournament', m: 'tournament', r: null },
+  ] },
+  { title: 'Reports', items: [
+    { id: 'weekly', label: 'Weekly Report', m: 'turf', r: 'report' },
+    { id: 'season', label: 'Season Reports', m: 'spray', r: 'reports' },
+    { id: 'weather', label: 'Weather', m: 'spray', r: 'weather' },
+  ] },
+]
+const NAV_MANAGER_BOTTOM = [{ id: 'settings', label: 'Settings', m: 'spray', r: 'settings' }]
+
+const NAV_CREW = [
+  { items: [{ id: 'tospray', label: 'To Spray', m: 'spray', r: 'tospray', icon: Droplet }] },
+  { title: 'Spraying', items: [
+    { id: 'records', label: 'Records', m: 'spray', r: 'records' },
+    { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert' },
+    { id: 'inventory', label: 'Inventory', m: 'spray', r: 'inventory' },
+    { id: 'documents', label: 'Labels & SDS', m: 'spray', r: 'documents' },
+    { id: 'weather', label: 'Weather', m: 'spray', r: 'weather' },
+  ] },
+  { title: 'Course', items: [
+    { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
+    { id: 'mowing', label: 'Mowing', m: 'board', r: 'mowing' },
+    { id: 'playbook', label: 'Playbook', m: 'playbook', r: null },
+  ] },
+]
+
+// Flatten the groups (plus the pinned-bottom items) into one lookup list.
+function flattenNav(groups, bottom = []) {
+  const out = []
+  for (const g of groups) for (const it of g.items) out.push(it)
+  for (const it of bottom) out.push(it)
+  return out
+}
+
 // ── ROOT ────────────────────────────────────────────────────────────────────
 export default function SprayApp({ user }) {
-  const [module, setModule] = useState('spray') // spray | turf
+  const manage = canManage(user.role)
+  const groups = manage ? NAV_MANAGER : NAV_CREW
+  const bottom = manage ? NAV_MANAGER_BOTTOM : []
+  const allItems = flattenNav(groups, bottom)
+  const initial = allItems[0]
+
+  const [sel, setSel] = useState(initial)
+  const [seq, setSeq] = useState(0)
+  const [drawer, setDrawer] = useState(false)
+
+  // A stable nav token — only changes when the user actually picks a sidebar item,
+  // so modules re-sync their internal route on a click (and on a re-click) but not
+  // on every incidental re-render (which would clobber in-module navigation).
+  const nav = React.useMemo(() => ({ route: sel.r, seq }), [sel.r, seq])
+
+  const pick = (item) => { setSel(item); setSeq((s) => s + 1); setDrawer(false) }
+
+  const Rail = ({ onPick }) => (
+    <SidebarRail
+      groups={groups} bottom={bottom} activeId={sel.id} onPick={onPick}
+      clubName={user.clubName} user={user}
+    />
+  )
 
   return (
     <ErrorBoundary>
-      {/* Module switcher — always visible, sits above everything */}
-      <div style={{ backgroundColor: '#0F1D15' }} className="text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-1 flex-nowrap overflow-x-auto no-scrollbar [&>*]:shrink-0">
-          <button
-            onClick={() => setModule('spray')}
-            className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
-            style={module === 'spray' ? { backgroundColor: GOLD, color: FOREST } : { color: 'rgba(255,255,255,0.5)' }}
-          >
-            <Droplet size={12} /> Spray Ops
-          </button>
-          <button
-            onClick={() => setModule('turf')}
-            className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
-            style={module === 'turf' ? { backgroundColor: GOLD, color: FOREST } : { color: 'rgba(255,255,255,0.5)' }}
-          >
-            <Sprout size={12} /> Turf Performance
-          </button>
-          <button
-            onClick={() => setModule('board')}
-            className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
-            style={module === 'board' ? { backgroundColor: GOLD, color: FOREST } : { color: 'rgba(255,255,255,0.5)' }}
-          >
-            <ClipboardList size={12} /> Whiteboard
-          </button>
-          <button
-            onClick={() => setModule('playbook')}
-            className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
-            style={module === 'playbook' ? { backgroundColor: GOLD, color: FOREST } : { color: 'rgba(255,255,255,0.5)' }}
-          >
-            <BookOpen size={12} /> Playbook
-          </button>
-          <button
-            onClick={() => setModule('map')}
-            className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
-            style={module === 'map' ? { backgroundColor: GOLD, color: FOREST } : { color: 'rgba(255,255,255,0.5)' }}
-          >
-            <MapPin size={12} /> Irrigation
-          </button>
-          {canManage(user.role) && (
-            <button
-              onClick={() => setModule('tournament')}
-              className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5"
-              style={module === 'tournament' ? { backgroundColor: GOLD, color: FOREST } : { color: 'rgba(255,255,255,0.5)' }}
-            >
-              <Trophy size={12} /> Tournament
-            </button>
-          )}
+      <div className="flex min-h-screen" style={{ backgroundColor: CREAM }}>
+        {/* Persistent rail — laptop/desktop (the primary way this app is used) */}
+        <aside className="hidden lg:flex flex-col shrink-0 w-56 h-screen sticky top-0" style={{ backgroundColor: FOREST }}>
+          <Rail onPick={pick} />
+        </aside>
 
-          <div className="ml-auto flex items-center gap-3">
-            <span className="font-body text-[11px] text-white/50 hidden sm:inline">
-              {user.fullName} · {roleLabel(user.role)}
-            </span>
-            <form action={logout}>
-              <button type="submit" className="font-body text-[11px] font-semibold text-white/60 hover:text-white transition">
-                Sign out
-              </button>
-            </form>
+        {/* Slide-out drawer — iPad portrait / phone */}
+        {drawer && (
+          <div className="lg:hidden fixed inset-0 z-50 flex" onClick={() => setDrawer(false)}>
+            <div className="absolute inset-0" style={{ backgroundColor: 'rgba(10,20,14,0.55)' }} />
+            <div className="relative w-60 max-w-[82%] h-full flex flex-col shadow-2xl" style={{ backgroundColor: FOREST }} onClick={(e) => e.stopPropagation()}>
+              <Rail onPick={pick} />
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 min-w-0 flex flex-col">
+          {/* Slim top bar: mobile menu + current location */}
+          <div className="flex items-center gap-3 px-4 sm:px-6 h-12 shrink-0 border-b" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
+            <button onClick={() => setDrawer(true)} className="lg:hidden w-8 h-8 -ml-1 rounded-lg flex items-center justify-center" style={{ color: FOREST }} aria-label="Open menu">
+              <Menu size={18} />
+            </button>
+            <span className="font-display text-[15px] font-semibold truncate" style={{ color: FOREST }}>{sel.label}</span>
+          </div>
+
+          <div className="flex-1 min-w-0">
+            {sel.m === 'spray' ? <SprayOpsModule user={user} nav={nav} hideChrome homeMode={!!sel.home} />
+              : sel.m === 'turf' ? <TurfPerformanceModule user={user} nav={nav} hideChrome />
+              : sel.m === 'playbook' ? <PlaybookModule user={user} manage={manage} hideChrome />
+              : sel.m === 'tournament' ? <Tournament />
+              : sel.m === 'map' ? <IrrigationModule user={user} manage={manage} nav={nav} hideChrome />
+              : <WhiteboardModule user={user} nav={nav} hideChrome />}
           </div>
         </div>
       </div>
-
-      {module === 'spray' ? <SprayOpsModule user={user} />
-        : module === 'turf' ? <TurfPerformanceModule user={user} />
-        : module === 'playbook' ? <PlaybookModule user={user} manage={canManage(user.role)} />
-        : module === 'tournament' ? <Tournament />
-        : module === 'map' ? <IrrigationModule user={user} manage={canManage(user.role)} />
-        : <WhiteboardModule user={user} />}
     </ErrorBoundary>
   )
+}
+
+// The grouped dark rail. Gold uppercase group labels, gold active left-bar.
+function SidebarRail({ groups, bottom, activeId, onPick, clubName, user }) {
+  const itemBtn = (it) => {
+    const on = it.id === activeId
+    return (
+      <button
+        key={it.id}
+        onClick={() => onPick(it)}
+        className="w-full text-left font-body text-[13px] transition"
+        style={{
+          padding: '7px 16px 7px 17px',
+          borderLeft: `3px solid ${on ? GOLD : 'transparent'}`,
+          backgroundColor: on ? 'rgba(201,168,76,0.13)' : 'transparent',
+          color: on ? '#FFFFFF' : 'rgba(255,255,255,0.62)',
+          fontWeight: on ? 700 : 500,
+        }}
+      >
+        {it.label}
+      </button>
+    )
+  }
+  return (
+    <>
+      {/* Brand */}
+      <div className="px-4 pt-4 pb-3 shrink-0">
+        <p className="font-display text-[9px] tracking-[0.22em] uppercase" style={{ color: GOLD }}>{clubName || 'Congressional'}</p>
+        <p className="font-display text-[17px] font-semibold text-white leading-tight mt-0.5">Grounds</p>
+      </div>
+
+      {/* Groups */}
+      <nav className="flex-1 overflow-y-auto no-scrollbar pb-3">
+        {groups.map((g, i) => (
+          <div key={g.title || `g${i}`} className="mb-1.5">
+            {g.title && (
+              <p className="font-body text-[9.5px] font-bold uppercase tracking-[0.12em] px-4 pt-3 pb-1" style={{ color: 'rgba(201,168,76,0.85)' }}>{g.title}</p>
+            )}
+            {g.items.map(itemBtn)}
+          </div>
+        ))}
+      </nav>
+
+      {/* Pinned bottom: settings + user + sign out */}
+      <div className="shrink-0 border-t" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+        {(bottom || []).map(itemBtn)}
+        <div className="px-4 py-3 flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-body text-[10px] font-extrabold" style={{ backgroundColor: GOLD, color: FOREST }}>
+            {initials(user.fullName)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-body text-[11.5px] font-semibold text-white truncate leading-tight">{user.fullName}</p>
+            <p className="font-body text-[10px] truncate" style={{ color: 'rgba(255,255,255,0.5)' }}>{roleLabel(user.role)}</p>
+          </div>
+          <form action={logout}>
+            <button type="submit" className="font-body text-[10.5px] font-semibold transition" style={{ color: 'rgba(255,255,255,0.55)' }} title="Sign out">
+              Sign out
+            </button>
+          </form>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function initials(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return '·'
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
 }
 
 function roleLabel(role) {
@@ -334,28 +456,33 @@ function roleLabel(role) {
 
 // ── IRRIGATION MODULE ─────────────────────────────────────────────────────
 // The irrigation map plus its parts stockroom, behind a small Map / Parts toggle.
-function IrrigationModule({ user, manage }) {
-  const [view, setView] = useState('map')
+function IrrigationModule({ user, manage, nav, hideChrome }) {
+  const [view, setView] = useState(nav?.route || 'map')
+  useEffect(() => { if (nav?.route) setView(nav.route) }, [nav])
   return (
     <div>
-      <div style={{ backgroundColor: '#F4F6F4', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex gap-2">
-          {[['map', 'Map', MapPin], ['parts', 'Parts', Package]].map(([k, label, Icon]) => (
-            <button key={k} onClick={() => setView(k)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full flex items-center gap-1.5 transition" style={view === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
-              <Icon size={13} /> {label}
-            </button>
-          ))}
+      {!hideChrome && (
+        <div style={{ backgroundColor: '#F4F6F4', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex gap-2">
+            {[['map', 'Map', MapPin], ['parts', 'Parts', Package]].map(([k, label, Icon]) => (
+              <button key={k} onClick={() => setView(k)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full flex items-center gap-1.5 transition" style={view === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+                <Icon size={13} /> {label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
       {view === 'map' ? <CourseMap user={user} manage={manage} /> : <IrrigationParts manage={manage} />}
     </div>
   )
 }
 
 // ── SPRAY OPS MODULE ──────────────────────────────────────────────────────
-function SprayOpsModule({ user }) {
+function SprayOpsModule({ user, nav, hideChrome, homeMode }) {
   const manage = canManage(user.role)
-  const [route, setRoute] = useState(canManage(user.role) ? 'dashboard' : 'tospray')
+  const [route, setRoute] = useState(nav?.route || (canManage(user.role) ? 'dashboard' : 'tospray'))
+  // Re-sync the internal route when the sidebar picks a Spray-Ops screen.
+  useEffect(() => { if (nav?.route) setRoute(nav.route) }, [nav])
   const [sheets, setSheets] = useState([])
   const [products, setProducts] = useState([])
   const [fertSheets, setFertSheets] = useState([])
@@ -736,7 +863,7 @@ function SprayOpsModule({ user }) {
         />
       )}
 
-      <TopNav route={route} setRoute={setRoute} onNew={newSheet} courseInfo={courseInfo} manage={manage} />
+      {!hideChrome && <TopNav route={route} setRoute={setRoute} onNew={newSheet} courseInfo={courseInfo} manage={manage} />}
 
       {(() => {
         if (dismissLic) return null
@@ -773,6 +900,7 @@ function SprayOpsModule({ user }) {
           <Dashboard
             sheets={sheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
             manage={manage} programApps={programApps} location={location} courseInfo={courseInfo}
+            homeMode={homeMode}
             onOpen={(s) => { setActiveSheet(s); setRoute('view') }}
             onNew={newSheet}
             onSeeAll={() => setRoute('list')}
@@ -1135,7 +1263,10 @@ function writeWxCache(lat, lng, day, patch) {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
-function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, courseInfo, onGoWeather }) {
+function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, courseInfo, onGoWeather, homeMode }) {
+  // Home is a read-only overview — the create-a-spray-sheet affordances live on
+  // the Annual Program and Spray Sheets screens, not here.
+  const create = manage && !homeMode
   const lowStock = (products || []).filter((p) => p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold)
   const today = localDateISO()
 
@@ -1284,7 +1415,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
             products={products}
             programApps={manage ? programApps : []}
             onOpenSheet={onOpen}
-            onCreateFromProgram={manage ? onCreateFromProgram : undefined}
+            onCreateFromProgram={create ? onCreateFromProgram : undefined}
           />
 
           {/* Insight cards — two-across on very wide screens so there's less scrolling */}
@@ -1301,7 +1432,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
           </div>
 
           {/* From the Program — turn the plan into spray sheets */}
-          {manage && upcomingGroups.length > 0 && (
+          {create && upcomingGroups.length > 0 && (
             <section>
               <SectionHeader title="From the Program" subtitle="Planned in the next 7 days — tap to start a spray sheet" />
               <div className="space-y-2">
@@ -1337,7 +1468,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
           )}
 
           {sheets.length === 0 && (
-            <EmptyState onNew={onNew} manage={manage} />
+            <EmptyState onNew={onNew} manage={create} />
           )}
         </div>
 
@@ -6053,10 +6184,11 @@ const slotLabel = (s) => (SLOTS.find(([k]) => k === String(s)) || [])[1] || '1st
 // Shell for the Whiteboard: a side menu (persistent rail on wide screens, a
 // slide-out drawer on iPad/phone) that switches between the daily board, the
 // efficiency trends, and the two lists that feed the board (equipment, jobs).
-function WhiteboardModule({ user }) {
+function WhiteboardModule({ user, nav, hideChrome }) {
   const manage = canManage(user.role)
   const [settings, setSettings] = useState({ operators: [], areas: {}, courseInfo: {} })
-  const [section, setSection] = useState('workboard')
+  const [section, setSection] = useState(nav?.route || 'workboard')
+  useEffect(() => { if (nav?.route) setSection(nav.route) }, [nav])
   const [mowSub, setMowSub] = useState('routes')
   const [drawer, setDrawer] = useState(false)
   const [qrOpen, setQrOpen] = useState(false)
@@ -6096,35 +6228,37 @@ function WhiteboardModule({ user }) {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
-      <div style={{ backgroundColor: FOREST }} className="text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4 flex items-center gap-3">
-          <button onClick={() => setDrawer(true)} className="md:hidden w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }} aria-label="Open menu"><Menu size={18} /></button>
-          <div className="min-w-0">
-            <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo.clubName || 'Golf Club'}</p>
-            <h1 className="font-display text-2xl font-semibold mt-0.5 truncate">{active.label}</h1>
-          </div>
-          <div className="ml-auto flex items-center gap-1.5 shrink-0">
-            {manage && (
-              <button onClick={() => setQrOpen(true)} className="font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Print QR codes so the crew can see the board & routes on their phones">
-                <QrCode size={13} /> <span className="hidden sm:inline">Crew QR</span>
-              </button>
-            )}
-            {courses.length >= 2 ? (
-              <>
-                <span className="font-body text-[10px] font-bold uppercase tracking-wide hidden sm:inline" style={{ color: 'rgba(255,255,255,0.5)' }}>TV</span>
-                {courses.map((c) => (
-                  <a key={c.name} href={`/board?course=${encodeURIComponent(c.name)}`} target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-2.5 py-2 rounded-full shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title={`Open the ${c.name} board for a shop TV`}>{c.name}</a>
-                ))}
-                <a href="/board" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-2.5 py-2 rounded-full shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Open the whole-property board">All</a>
-              </>
-            ) : (
-              <a href="/board" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Open the live board for the shop TV">
-                <BarChart3 size={13} /> TV board
-              </a>
-            )}
+      {!hideChrome && (
+        <div style={{ backgroundColor: FOREST }} className="text-white">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4 flex items-center gap-3">
+            <button onClick={() => setDrawer(true)} className="md:hidden w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }} aria-label="Open menu"><Menu size={18} /></button>
+            <div className="min-w-0">
+              <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo.clubName || 'Golf Club'}</p>
+              <h1 className="font-display text-2xl font-semibold mt-0.5 truncate">{active.label}</h1>
+            </div>
+            <div className="ml-auto flex items-center gap-1.5 shrink-0">
+              {manage && (
+                <button onClick={() => setQrOpen(true)} className="font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Print QR codes so the crew can see the board & routes on their phones">
+                  <QrCode size={13} /> <span className="hidden sm:inline">Crew QR</span>
+                </button>
+              )}
+              {courses.length >= 2 ? (
+                <>
+                  <span className="font-body text-[10px] font-bold uppercase tracking-wide hidden sm:inline" style={{ color: 'rgba(255,255,255,0.5)' }}>TV</span>
+                  {courses.map((c) => (
+                    <a key={c.name} href={`/board?course=${encodeURIComponent(c.name)}`} target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-2.5 py-2 rounded-full shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title={`Open the ${c.name} board for a shop TV`}>{c.name}</a>
+                  ))}
+                  <a href="/board" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-2.5 py-2 rounded-full shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Open the whole-property board">All</a>
+                </>
+              ) : (
+                <a href="/board" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' }} title="Open the live board for the shop TV">
+                  <BarChart3 size={13} /> TV board
+                </a>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {drawer && (
         <div className="md:hidden fixed inset-0 z-50 flex" onClick={() => setDrawer(false)}>
@@ -6135,6 +6269,32 @@ function WhiteboardModule({ user }) {
               <button onClick={() => setDrawer(false)} aria-label="Close menu"><X size={18} className="text-slate-400" /></button>
             </div>
             <Nav onPick={() => setDrawer(false)} />
+          </div>
+        </div>
+      )}
+
+      {hideChrome && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 flex items-center gap-1.5">
+          <button onClick={() => setDrawer(true)} className="md:hidden font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }} aria-label="Sections"><Menu size={15} /> Sections</button>
+          <div className="ml-auto flex items-center gap-1.5">
+            {manage && (
+              <button onClick={() => setQrOpen(true)} className="font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }} title="Print QR codes so the crew can see the board & routes on their phones">
+                <QrCode size={13} /> <span className="hidden sm:inline">Crew QR</span>
+              </button>
+            )}
+            {courses.length >= 2 ? (
+              <>
+                <span className="font-body text-[10px] font-bold uppercase tracking-wide hidden sm:inline" style={{ color: INK_3 }}>TV</span>
+                {courses.map((c) => (
+                  <a key={c.name} href={`/board?course=${encodeURIComponent(c.name)}`} target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-2.5 py-2 rounded-full shrink-0" style={{ backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }} title={`Open the ${c.name} board for a shop TV`}>{c.name}</a>
+                ))}
+                <a href="/board" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-2.5 py-2 rounded-full shrink-0" style={{ backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }} title="Open the whole-property board">All</a>
+              </>
+            ) : (
+              <a href="/board" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }} title="Open the live board for the shop TV">
+                <BarChart3 size={13} /> TV board
+              </a>
+            )}
           </div>
         </div>
       )}
@@ -6858,8 +7018,9 @@ function taskErrorText(e) {
 // ════════════════════════════════════════════════════════════════════════
 //  TURF PERFORMANCE MODULE — scaffold only (features come in a later phase).
 // ════════════════════════════════════════════════════════════════════════
-function TurfPerformanceModule({ user }) {
-  const [route, setRoute] = useState('dashboard')
+function TurfPerformanceModule({ user, nav, hideChrome }) {
+  const [route, setRoute] = useState(nav?.route || 'dashboard')
+  useEffect(() => { if (nav?.route) setRoute(nav.route) }, [nav])
   const [turf, setTurf] = useState({ location: null, sheets: [], products: [], areas: {} })
   const [daily, setDaily] = useState([])
   const [clippings, setClippings] = useState([])
@@ -6927,21 +7088,23 @@ function TurfPerformanceModule({ user }) {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
-      <div style={{ backgroundColor: FOREST }} className="text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4">
-          <div className="mb-4">
-            <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{turf.courseInfo?.clubName || 'Golf Club'}</p>
-            <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
-          </div>
-          <div className="flex gap-1 font-body text-sm overflow-x-auto">
-            {[['dashboard', 'Dashboard'], ['report', 'Weekly Report'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['hoc', 'Height of Cut'], ['scouting', 'Scouting'], ['knowledge', 'Reference']].map(([key, label]) => (
-              <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
-                {label}
-              </button>
-            ))}
+      {!hideChrome && (
+        <div style={{ backgroundColor: FOREST }} className="text-white">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4">
+            <div className="mb-4">
+              <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{turf.courseInfo?.clubName || 'Golf Club'}</p>
+              <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
+            </div>
+            <div className="flex gap-1 font-body text-sm overflow-x-auto">
+              {[['dashboard', 'Dashboard'], ['report', 'Weekly Report'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['hoc', 'Height of Cut'], ['scouting', 'Scouting'], ['knowledge', 'Reference']].map(([key, label]) => (
+                <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-24 pt-6">
         {route === 'dashboard' && (

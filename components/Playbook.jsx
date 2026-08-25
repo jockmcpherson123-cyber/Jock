@@ -120,7 +120,7 @@ function saveErr(e) {
   return 'Could not save. Please try again.'
 }
 
-export default function PlaybookModule({ user, manage }) {
+export default function PlaybookModule({ user, manage, hideChrome }) {
   const [items, setItems] = useState([])
   const [clubName, setClubName] = useState('')
   const [loading, setLoading] = useState(true)
@@ -184,15 +184,17 @@ export default function PlaybookModule({ user, manage }) {
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
       {/* Header band — club identity + tabs */}
-      <div style={{ backgroundColor: FOREST, borderBottom: `2px solid ${GOLD}` }} className="text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4">
-          <div className="mb-4">
-            <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: '#C9A84C' }}>{clubName || 'Golf Maintenance'}</p>
-            <h1 className="font-display text-2xl font-semibold mt-0.5">Playbook</h1>
-            <p className="font-body text-[12px] opacity-75 mt-0.5">Procedures, people &amp; supplies — everything in one place.</p>
+      {!hideChrome && (
+        <div style={{ backgroundColor: FOREST, borderBottom: `2px solid ${GOLD}` }} className="text-white">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4">
+            <div className="mb-4">
+              <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: '#C9A84C' }}>{clubName || 'Golf Maintenance'}</p>
+              <h1 className="font-display text-2xl font-semibold mt-0.5">Playbook</h1>
+              <p className="font-body text-[12px] opacity-75 mt-0.5">Procedures, people &amp; supplies — everything in one place.</p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-16">
         {/* Search — spans all four sections */}
