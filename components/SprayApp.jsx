@@ -48,6 +48,7 @@ import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import WeeklyReport from '@/components/WeeklyReport'
 import HocEditor from '@/components/HocEditor'
+import WettingAgent from '@/components/WettingAgent'
 import Tournament from '@/components/Tournament'
 import CourseMap from '@/components/CourseMap'
 import IrrigationParts from '@/components/IrrigationParts'
@@ -265,6 +266,7 @@ const NAV_MANAGER = [
   ] },
   { title: 'Agronomy', items: [
     { id: 'gdd', label: 'GDD & Timing', m: 'turf', r: 'gdd' },
+    { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting' },
     { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
     { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil' },
     { id: 'clippings', label: 'Clipping Yields', m: 'turf', r: 'clippings' },
@@ -7131,6 +7133,10 @@ function TurfPerformanceModule({ user, nav, hideChrome }) {
         {route === 'gdd' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <GddPgrTab daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} hasLocation={turf.location?.lat != null} courseInfo={turf.courseInfo} onSaveTargets={(pgrTargets) => saveTurfCourse({ pgrTargets })} />
+        )}
+        {route === 'wetting' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <WettingAgent daily={daily} areas={turf.areas} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} />
         )}
         {route === 'clippings' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
