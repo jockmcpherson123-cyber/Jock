@@ -6,8 +6,7 @@
 // Print it, save it as a PDF, or email it to an assistant in one click.
 import { useState, useEffect, useMemo, useRef } from 'react'
 import * as db from '@/lib/db'
-import { forecastWatch, pestWatch } from '@/lib/pests'
-import { Printer, Download, Mail, Loader2, Calendar, Thermometer, Scissors, Gauge, Sprout, AlertTriangle } from 'lucide-react'
+import { Printer, Download, Mail, Loader2, Calendar, Thermometer, Scissors, Gauge, Sprout } from 'lucide-react'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -240,12 +239,6 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     clipsThis.forEach((c) => { byArea[c.area] = (byArea[c.area] || 0) + Number(c.volume || 0) })
     return { unit, byArea, total: round(clipsThis.reduce((a, c) => a + Number(c.volume || 0), 0), 1) }
   })()
-
-  // "What to watch" next week: disease pressure from the forecast + seasonal pests.
-  const siteGrasses = Array.isArray(courseInfo.siteGrasses) ? courseInfo.siteGrasses : []
-  const diseaseWatch = useMemo(() => forecastWatch(daily, iso(W.nextMon), siteGrasses, 7), [daily, W, siteGrasses.join(',')])
-  const pestNow = useMemo(() => pestWatch(iso(W.nextMon)).filter((p) => p.tone === 'now').slice(0, 4), [W])
-  const bandColor = (b) => (b === 'high' ? '#DC2626' : b === 'moderate' ? '#D97706' : '#3A6B4A')
 
   // Trend data (recent readings) for the little charts — aggregated per date.
   const speedTrend = useMemo(() => {
@@ -571,34 +564,6 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
                 {r.precipProb != null && <p className="font-body text-[8.5px]" style={{ color: r.precipProb >= 50 ? '#2563EB' : '#94A3B8' }}>{round(r.precipProb)}%</p>}
               </div>
             ))}
-          </div>
-        )}
-
-        {/* What to watch — disease pressure (forecast) + seasonal pests */}
-        {(diseaseWatch.length > 0 || pestNow.length > 0) && (
-          <div className="avoid-break">
-            <H icon={AlertTriangle}>What to watch — next week</H>
-            {diseaseWatch.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-1.5">
-                {diseaseWatch.map((d) => (
-                  <span key={d.id} className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5" style={{ backgroundColor: `${bandColor(d.band)}14`, border: `1px solid ${bandColor(d.band)}40` }}>
-                    <span className="font-body text-[11px] font-bold" style={{ color: bandColor(d.band) }}>{d.label}</span>
-                    <span className="font-body text-[9px] font-bold uppercase" style={{ color: bandColor(d.band) }}>{d.band}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-            {pestNow.length > 0 && (
-              <div className="rounded-lg border border-black/5 overflow-hidden">
-                {pestNow.map((p) => (
-                  <div key={p.id} className="flex gap-2 px-2.5 py-1 border-t border-black/5 first:border-t-0">
-                    <span className="font-body text-[11px] font-bold text-slate-700 w-28 shrink-0">{p.label}</span>
-                    <span className="font-body text-[10.5px] text-slate-500 flex-1 min-w-0">{p.cue}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <p className="font-body text-[8.5px] text-slate-300 mt-1">Directional outlook from published temperature/leaf-wetness thresholds &amp; seasonal pest windows — confirm with scouting.</p>
           </div>
         )}
 
