@@ -54,6 +54,7 @@ export async function GET(request) {
       club: courseInfo.clubName || '',
       wetting: courseInfo.wetting || {},
       areas: Object.keys(data?.areas || {}),
+      courses: (courseInfo.courses || []).map((c) => c && c.name).filter(Boolean),
       location,
     }, { headers: noStore })
   }

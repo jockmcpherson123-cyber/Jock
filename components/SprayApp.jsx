@@ -6400,9 +6400,9 @@ function CrewQRModal({ courseInfo, saveCourse, onClose }) {
 // QR that opens the crew's no-login Field Data page — moisture, clippings,
 // greens speed and scouting entry only. The club key rides in the link.
 function DataQRModal({ courseInfo, saveCourse, onClose }) {
-  const [img, setImg] = useState('')
-  const [url, setUrl] = useState('')
+  const [codes, setCodes] = useState([]) // [{ label, url, img }]
   const club = courseInfo?.clubName || 'Golf Course'
+  const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -6412,38 +6412,49 @@ function DataQRModal({ courseInfo, saveCourse, onClose }) {
         try { await saveCourse({ partsKey: key }) } catch (e) { console.error(e) }
       }
       const origin = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin
-      const link = `${origin}/data?k=${key}`
-      const q = await qrDataUrl(link, { width: 520 })
-      if (!cancelled) { setImg(q); setUrl(link) }
+      // One QR per course when there are two+, otherwise a single all-courses code.
+      const targets = courseNames.length >= 2
+        ? courseNames.map((c) => ({ label: c, url: `${origin}/data?k=${key}&course=${encodeURIComponent(c)}` }))
+        : [{ label: 'Field Data', url: `${origin}/data?k=${key}` }]
+      const withImgs = await Promise.all(targets.map(async (t) => ({ ...t, img: await qrDataUrl(t.url, { width: 520 }) })))
+      if (!cancelled) setCodes(withImgs)
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const print = () => {
+  const print = (label, img) => {
     if (!img) return
     const iframe = document.createElement('iframe')
     Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
     document.body.appendChild(iframe)
     const doc = iframe.contentWindow.document
     doc.open()
-    doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in}body{margin:0;font-family:Arial;text-align:center;padding:30px}h1{font-family:Georgia,serif;color:#16291F;font-size:26px;margin:0 0 4px}.sub{color:#3A6B4A;font-weight:700;font-size:14px;margin-bottom:20px}img{width:3.4in;height:3.4in}.foot{color:#888;font-size:12px;margin-top:14px}</style></head><body><h1>${club.replace(/[&<>"]/g, '')} — Field Data</h1><div class="sub">Scan with your phone camera</div><img src="${img}"><div class="foot">Moisture · Clippings · Greens Speed · Scouting</div></body></html>`)
+    doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in}body{margin:0;font-family:Arial;text-align:center;padding:30px}h1{font-family:Georgia,serif;color:#16291F;font-size:26px;margin:0 0 4px}.sub{color:#3A6B4A;font-weight:700;font-size:14px;margin-bottom:20px}img{width:3.4in;height:3.4in}.foot{color:#888;font-size:12px;margin-top:14px}</style></head><body><h1>${club.replace(/[&<>"]/g, '')} — ${String(label).replace(/[&<>"]/g, '')} Data</h1><div class="sub">Scan with your phone camera</div><img src="${img}"><div class="foot">Moisture · Clippings · Greens Speed · Scouting</div></body></html>`)
     doc.close()
     setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }, 300)
   }
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full sm:max-w-md shadow-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl w-full sm:max-w-xl shadow-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-white" style={{ borderBottom: '1px solid #EEF0EC' }}>
           <p className="font-display text-base font-bold" style={{ color: FOREST }}>Crew data QR</p>
           <button onClick={onClose} className="text-slate-400"><X size={18} /></button>
         </div>
-        <div className="p-4 text-center">
-          <p className="font-body text-[12px] text-slate-500 mb-3">Post this in the shop or let the crew scan it off your screen. It opens straight to data entry on their phone — moisture, clippings, greens speed and scouting — <b>no login, nothing else.</b></p>
-          {img ? <img src={img} alt="Field data QR" className="w-48 h-48 mx-auto" /> : <div className="w-48 h-48 mx-auto flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={22} /></div>}
-          {url && <p className="font-body text-[10.5px] text-slate-400 mt-2 break-all">{url}</p>}
-          <button onClick={print} disabled={!img} className="mt-3 font-body text-xs font-bold px-4 py-2 rounded-full inline-flex items-center gap-1.5 disabled:opacity-40" style={{ color: FOREST, border: '1px solid #CBD5E1' }}><Printer size={13} /> Print</button>
+        <div className="p-4">
+          <p className="font-body text-[12px] text-slate-500 mb-3">{codes.length > 1 ? 'A separate code per course — the crew scans their own and lands straight on that course’s greens.' : 'The crew scans this to open data entry on their phone.'} No login, nothing else reachable.</p>
+          <div className={`grid gap-3 ${codes.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+            {codes.length ? codes.map((c) => (
+              <div key={c.label} className="rounded-2xl border border-slate-100 p-4 text-center flex flex-col items-center">
+                <p className="font-body text-sm font-bold" style={{ color: FOREST }}>{c.label}</p>
+                <p className="font-body text-[11px] text-slate-400 mb-2">Moisture · Clippings · Speed · Scouting</p>
+                <img src={c.img} alt={`${c.label} data QR`} className="w-40 h-40" />
+                <p className="font-body text-[10px] text-slate-400 mt-2 break-all">{c.url}</p>
+                <button onClick={() => print(c.label, c.img)} className="mt-3 font-body text-xs font-bold px-3.5 py-2 rounded-full inline-flex items-center gap-1.5" style={{ color: FOREST, border: '1px solid #CBD5E1' }}><Printer size={13} /> Print</button>
+              </div>
+            )) : <div className="w-full h-48 flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={22} /></div>}
+          </div>
         </div>
       </div>
     </div>
@@ -7082,7 +7093,14 @@ function taskErrorText(e) {
 function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse, onClip, onClipDel, onSpeed, onSpeedDel, onScout, onScoutUpd, onScoutDel }) {
   const [tab, setTab] = useState('moisture')
   const [qrOpen, setQrOpen] = useState(false)
+  const courseNames = (Array.isArray(turf.courseInfo?.courses) ? turf.courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)
+  const [course, setCourse] = useState('')
   const tabs = [['moisture', 'Moisture'], ['clippings', 'Clipping Yields'], ['speed', 'Greens Speed'], ['scouting', 'Scouting']]
+
+  // Scope the area pickers to the selected course (Blue/Gold), by first-word match.
+  const cTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+  const areas = !course ? turf.areas : Object.fromEntries(Object.entries(turf.areas || {}).filter(([name]) => cTok(name) === cTok(course)))
+
   return (
     <div className="max-w-5xl">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
@@ -7094,17 +7112,28 @@ function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse
           <QrCode size={14} /> Crew QR
         </button>
       </div>
-      <div className="flex gap-1.5 my-4 flex-wrap">
+
+      {/* Course sections — Blue / Gold */}
+      {courseNames.length >= 2 && (
+        <div className="flex gap-1.5 mt-4 flex-wrap">
+          <button onClick={() => setCourse('')} className="font-body text-xs font-bold px-3.5 py-2 rounded-full transition" style={course === '' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>All</button>
+          {courseNames.map((c) => (
+            <button key={c} onClick={() => setCourse(c)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full transition" style={course === c ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{c}</button>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-1.5 mt-3 mb-4 flex-wrap">
         {tabs.map(([k, lab]) => (
           <button key={k} onClick={() => setTab(k)} className="font-body text-sm font-bold px-4 py-2 rounded-full transition"
             style={tab === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{lab}</button>
         ))}
       </div>
 
-      {tab === 'moisture' && <WettingAgent daily={daily} areas={turf.areas} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} initialView="read" />}
-      {tab === 'clippings' && <ClippingsTab clippings={clippings} areas={turf.areas} courseInfo={turf.courseInfo} onAddMany={onClip} onDelete={onClipDel} />}
-      {tab === 'speed' && <GreensSpeedTab speeds={speeds} courseInfo={turf.courseInfo} onAddMany={onSpeed} onDelete={onSpeedDel} />}
-      {tab === 'scouting' && <ScoutingTab scouting={scouting} areas={turf.areas} courseInfo={turf.courseInfo} onAdd={onScout} onUpdate={onScoutUpd} onDelete={onScoutDel} />}
+      {tab === 'moisture' && <WettingAgent key={course || 'all'} daily={daily} areas={areas} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} initialView="read" courseFilter={course} />}
+      {tab === 'clippings' && <ClippingsTab key={course || 'all'} clippings={clippings} areas={areas} courseInfo={turf.courseInfo} onAddMany={onClip} onDelete={onClipDel} />}
+      {tab === 'speed' && <GreensSpeedTab key={course || 'all'} speeds={speeds} courseInfo={turf.courseInfo} onAddMany={onSpeed} onDelete={onSpeedDel} />}
+      {tab === 'scouting' && <ScoutingTab key={course || 'all'} scouting={scouting} areas={areas} courseInfo={turf.courseInfo} onAdd={onScout} onUpdate={onScoutUpd} onDelete={onScoutDel} />}
 
       {qrOpen && <DataQRModal courseInfo={turf.courseInfo} saveCourse={saveTurfCourse} onClose={() => setQrOpen(false)} />}
     </div>

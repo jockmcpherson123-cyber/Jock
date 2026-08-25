@@ -151,9 +151,10 @@ const STATUS_STYLE = {
   none: { label: 'No application', color: INK_3 },
 }
 
-export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, location = {}, onSaveCourse, initialView }) {
+export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, location = {}, onSaveCourse, initialView, courseFilter }) {
   const wetting = courseInfo.wetting || {}
-  const greens = wetting.greens || []
+  const cTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+  const greens = (wetting.greens || []).filter((g) => !courseFilter || cTok(g.course) === cTok(courseFilter))
   const courses = (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).filter((c) => c && c.name)
   const products = { ...DEFAULT_PRODUCTS, ...(wetting.products || {}) }
 

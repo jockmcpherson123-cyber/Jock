@@ -35,6 +35,11 @@ function distanceFt(a, b) {
 }
 const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2))
 
+// Course matching — a green/area belongs to a course if it starts with the
+// course's first word (e.g. "Blue" → "Blue Greens", green.course "Blue Course").
+const tok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+const inCourse = (name, course) => !course || tok(name) === tok(course)
+
 async function postCrew(k, payload) {
   const r = await fetch('/api/crew', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ k, ...payload }) })
   const j = await r.json().catch(() => ({}))
@@ -45,9 +50,11 @@ async function postCrew(k, payload) {
 function FieldData() {
   const sp = useSearchParams()
   const k = sp.get('k')
+  const lockedCourse = sp.get('course') || ''
   const [cfg, setCfg] = useState(null)
   const [state, setState] = useState('loading') // loading | ok | denied | error
   const [tab, setTab] = useState('moisture')
+  const [course, setCourse] = useState(lockedCourse)
   const [toast, setToast] = useState(null)
 
   const load = useCallback(async () => {
@@ -69,23 +76,35 @@ function FieldData() {
   if (state === 'error') return <Center>Couldn’t load. Try again.</Center>
 
   const tabs = [['moisture', 'Moisture'], ['clippings', 'Clippings'], ['speed', 'Greens Speed'], ['scouting', 'Scouting']]
+  const courses = cfg.courses || []
+  // Scope everything to the chosen course.
+  const areas = (cfg.areas || []).filter((a) => inCourse(a, course))
+  const wetting = { ...(cfg.wetting || {}), greens: (cfg.wetting?.greens || []).filter((g) => inCourse(g.course, course)) }
+
   return (
     <div style={{ minHeight: '100vh', background: '#EEF1EE' }}>
       <div style={{ background: FOREST }} className="text-white px-4 py-3 sticky top-0 z-10">
         {cfg.club && <p className="font-body text-[10px] tracking-[0.22em] uppercase" style={{ color: GOLD }}>{cfg.club}</p>}
-        <p className="font-display text-lg font-semibold">Field Data</p>
+        <p className="font-display text-lg font-semibold">Field Data{course ? ` — ${course}` : ''}</p>
       </div>
       <div className="max-w-xl mx-auto px-3 py-3">
+        {/* Course picker — hidden when the QR already locked one in */}
+        {!lockedCourse && courses.length > 1 && (
+          <div className="flex gap-1.5 mb-3 overflow-x-auto no-scrollbar [&>*]:shrink-0 pb-1">
+            <CourseChip on={course === ''} onClick={() => setCourse('')}>All</CourseChip>
+            {courses.map((c) => <CourseChip key={c} on={course === c} onClick={() => setCourse(c)}>{c}</CourseChip>)}
+          </div>
+        )}
         <div className="flex gap-1.5 mb-3 overflow-x-auto no-scrollbar [&>*]:shrink-0 pb-1">
           {tabs.map(([key, lab]) => (
             <button key={key} onClick={() => setTab(key)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap"
               style={tab === key ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{lab}</button>
           ))}
         </div>
-        {tab === 'moisture' && <MoistureForm k={k} wetting={cfg.wetting || {}} onSaved={flash} />}
-        {tab === 'clippings' && <SimpleReading k={k} areas={cfg.areas || []} action="clipping" label="Clipping volume" unit="mL" onSaved={flash} />}
-        {tab === 'speed' && <SimpleReading k={k} areas={cfg.areas || []} action="greenspeed" label="Stimp (ft)" onSaved={flash} />}
-        {tab === 'scouting' && <ScoutForm k={k} areas={cfg.areas || []} onSaved={flash} />}
+        {tab === 'moisture' && <MoistureForm k={k} wetting={wetting} onSaved={flash} />}
+        {tab === 'clippings' && <SimpleReading k={k} areas={areas} action="clipping" label="Clipping volume" unit="mL" onSaved={flash} />}
+        {tab === 'speed' && <SimpleReading k={k} areas={areas} action="greenspeed" label="Stimp (ft)" onSaved={flash} />}
+        {tab === 'scouting' && <ScoutForm k={k} areas={areas} onSaved={flash} />}
       </div>
       {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: INK }}>{toast}</div>}
     </div>
@@ -265,6 +284,9 @@ function ScoutForm({ k, areas, onSaved }) {
   )
 }
 
+function CourseChip({ on, onClick, children }) {
+  return <button onClick={onClick} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap" style={on ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{children}</button>
+}
 function Card({ children }) {
   return <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>{children}</div>
 }
