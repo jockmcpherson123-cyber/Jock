@@ -151,13 +151,13 @@ const STATUS_STYLE = {
   none: { label: 'No application', color: INK_3 },
 }
 
-export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, location = {}, onSaveCourse }) {
+export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, location = {}, onSaveCourse, initialView }) {
   const wetting = courseInfo.wetting || {}
   const greens = wetting.greens || []
   const courses = (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).filter((c) => c && c.name)
   const products = { ...DEFAULT_PRODUCTS, ...(wetting.products || {}) }
 
-  const [view, setView] = useState('overview')
+  const [view, setView] = useState(initialView || 'overview')
   const [logOpen, setLogOpen] = useState(false)
 
   // Persist a patch onto courseInfo.wetting.
@@ -172,6 +172,13 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
     return m
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [greens, wetting, daily])
+
+  // Calibrate: lock a product's GDD lifespan to what it actually reached when a
+  // green started fading — turns the guess into your course's real number.
+  const setLifespan = (product, gdd) => {
+    const cur = (wetting.products || {})[product] || products[product] || FALLBACK_PROD
+    save({ products: { ...(wetting.products || {}), [product]: { ...cur, gddLife: Math.round(gdd) } } })
+  }
 
   return (
     <div className="max-w-5xl">
@@ -193,7 +200,7 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
       </div>
 
       {view === 'overview' && (
-        <Overview greens={greens} models={models} courses={courses} onLog={() => setLogOpen(true)} onSetup={() => setView('setup')} onRead={() => setView('read')} />
+        <Overview greens={greens} models={models} courses={courses} onLog={() => setLogOpen(true)} onSetup={() => setView('setup')} onRead={() => setView('read')} onCalibrate={setLifespan} />
       )}
       {view === 'read' && (
         <TakeReadings greens={greens} models={models} products={products} location={location} onSave={save} wetting={wetting} />
@@ -211,7 +218,7 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
 }
 
 // ── OVERVIEW ────────────────────────────────────────────────────────────────
-function Overview({ greens, models, courses, onLog, onSetup, onRead }) {
+function Overview({ greens, models, courses, onLog, onSetup, onRead, onCalibrate }) {
   if (!greens.length) {
     return (
       <div className="paper-card p-6 text-center" style={{ borderLeft: `3px solid ${GOLD}` }}>
@@ -266,13 +273,13 @@ function Overview({ greens, models, courses, onLog, onSetup, onRead }) {
 
       {/* per-green cards */}
       <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))' }}>
-        {greens.map((g) => <GreenCard key={g.id} green={g} m={models[g.id]} />)}
+        {greens.map((g) => <GreenCard key={g.id} green={g} m={models[g.id]} onCalibrate={onCalibrate} />)}
       </div>
     </div>
   )
 }
 
-function GreenCard({ green, m }) {
+function GreenCard({ green, m, onCalibrate }) {
   const s = STATUS_STYLE[m?.status || 'none']
   const calPct = m?.prod ? Math.min(100, Math.round((m.calDays / m.prod.calDays) * 100)) : 0
   const gddPct = m?.gddPct != null ? Math.min(100, Math.round(m.gddPct * 100)) : 0
@@ -322,6 +329,13 @@ function GreenCard({ green, m }) {
             </div>
             {trend.length > 1 && <Spark values={trend} className="ml-auto" />}
           </div>
+
+          {/* Calibrate — when it's fading, lock the lifespan to the GDD it actually reached */}
+          {onCalibrate && (m.status === 'fading' || m.status === 'reapply') && m.gdd > 0 && m.gdd !== m.prod.gddLife && (
+            <button onClick={() => onCalibrate(m.app.product, m.gdd)} className="w-full px-4 py-2.5 flex items-center justify-center gap-1.5 font-body text-[12px] font-bold" style={{ borderTop: `1px solid ${HAIR}`, color: FOREST, backgroundColor: '#FBF6E6' }}>
+              <Crosshair size={13} style={{ color: GOLD }} /> Set {m.app.product} lifespan to {m.gdd} GDD
+            </button>
+          )}
         </>
       )}
     </div>

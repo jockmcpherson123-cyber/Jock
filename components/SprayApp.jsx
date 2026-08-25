@@ -265,15 +265,13 @@ const NAV_MANAGER = [
     { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
   ] },
   { title: 'Agronomy', items: [
+    { id: 'data', label: 'Field Data', m: 'turf', r: 'data' },
     { id: 'gdd', label: 'GDD & Timing', m: 'turf', r: 'gdd' },
     { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting' },
     { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
     { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil' },
-    { id: 'clippings', label: 'Clipping Yields', m: 'turf', r: 'clippings' },
-    { id: 'speed', label: 'Greens Speed', m: 'turf', r: 'speed' },
     { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc' },
     { id: 'practices', label: 'Practices', m: 'turf', r: 'practices' },
-    { id: 'scouting', label: 'Scouting', m: 'turf', r: 'scouting' },
     { id: 'reference', label: 'Reference', m: 'turf', r: 'knowledge' },
   ] },
   { title: 'Course & Crew', items: [
@@ -6399,6 +6397,59 @@ function CrewQRModal({ courseInfo, saveCourse, onClose }) {
   )
 }
 
+// QR that opens the crew's no-login Field Data page — moisture, clippings,
+// greens speed and scouting entry only. The club key rides in the link.
+function DataQRModal({ courseInfo, saveCourse, onClose }) {
+  const [img, setImg] = useState('')
+  const [url, setUrl] = useState('')
+  const club = courseInfo?.clubName || 'Golf Course'
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      let key = courseInfo?.partsKey
+      if (!key) {
+        key = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)).replace(/-/g, '')
+        try { await saveCourse({ partsKey: key }) } catch (e) { console.error(e) }
+      }
+      const origin = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin
+      const link = `${origin}/data?k=${key}`
+      const q = await qrDataUrl(link, { width: 520 })
+      if (!cancelled) { setImg(q); setUrl(link) }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const print = () => {
+    if (!img) return
+    const iframe = document.createElement('iframe')
+    Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
+    document.body.appendChild(iframe)
+    const doc = iframe.contentWindow.document
+    doc.open()
+    doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.5in}body{margin:0;font-family:Arial;text-align:center;padding:30px}h1{font-family:Georgia,serif;color:#16291F;font-size:26px;margin:0 0 4px}.sub{color:#3A6B4A;font-weight:700;font-size:14px;margin-bottom:20px}img{width:3.4in;height:3.4in}.foot{color:#888;font-size:12px;margin-top:14px}</style></head><body><h1>${club.replace(/[&<>"]/g, '')} — Field Data</h1><div class="sub">Scan with your phone camera</div><img src="${img}"><div class="foot">Moisture · Clippings · Greens Speed · Scouting</div></body></html>`)
+    doc.close()
+    setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }, 300)
+  }
+
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full sm:max-w-md shadow-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-white" style={{ borderBottom: '1px solid #EEF0EC' }}>
+          <p className="font-display text-base font-bold" style={{ color: FOREST }}>Crew data QR</p>
+          <button onClick={onClose} className="text-slate-400"><X size={18} /></button>
+        </div>
+        <div className="p-4 text-center">
+          <p className="font-body text-[12px] text-slate-500 mb-3">Post this in the shop or let the crew scan it off your screen. It opens straight to data entry on their phone — moisture, clippings, greens speed and scouting — <b>no login, nothing else.</b></p>
+          {img ? <img src={img} alt="Field data QR" className="w-48 h-48 mx-auto" /> : <div className="w-48 h-48 mx-auto flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={22} /></div>}
+          {url && <p className="font-body text-[10.5px] text-slate-400 mt-2 break-all">{url}</p>}
+          <button onClick={print} disabled={!img} className="mt-3 font-body text-xs font-bold px-4 py-2 rounded-full inline-flex items-center gap-1.5 disabled:opacity-40" style={{ color: FOREST, border: '1px solid #CBD5E1' }}><Printer size={13} /> Print</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // The daily job board — who's doing what today. Fetches its own tasks by date.
 function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, courses = [], crew = {}, boardMessage = '', onSaveMessage }) {
   const [date, setDate] = useState(localDateISO())
@@ -7024,6 +7075,42 @@ function taskErrorText(e) {
 // ════════════════════════════════════════════════════════════════════════
 //  TURF PERFORMANCE MODULE — scaffold only (features come in a later phase).
 // ════════════════════════════════════════════════════════════════════════
+// ── FIELD DATA HUB ──────────────────────────────────────────────────────────
+// One place for everything the crew collects on morning maintenance — moisture,
+// clipping yields, greens speed, scouting. This is also what the crew's no-login
+// QR page mirrors. Managers get a "Crew QR" button to print/share the link.
+function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse, onClip, onClipDel, onSpeed, onSpeedDel, onScout, onScoutUpd, onScoutDel }) {
+  const [tab, setTab] = useState('moisture')
+  const [qrOpen, setQrOpen] = useState(false)
+  const tabs = [['moisture', 'Moisture'], ['clippings', 'Clipping Yields'], ['speed', 'Greens Speed'], ['scouting', 'Scouting']]
+  return (
+    <div className="max-w-5xl">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
+        <div>
+          <h2 className="font-display text-lg font-semibold" style={{ color: '#1b2420' }}>Field Data</h2>
+          <p className="font-body text-xs" style={{ color: INK_3 }}>Everything the crew records on morning rounds — in one place.</p>
+        </div>
+        <button onClick={() => setQrOpen(true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 text-white" style={{ backgroundColor: FOREST }}>
+          <QrCode size={14} /> Crew QR
+        </button>
+      </div>
+      <div className="flex gap-1.5 my-4 flex-wrap">
+        {tabs.map(([k, lab]) => (
+          <button key={k} onClick={() => setTab(k)} className="font-body text-sm font-bold px-4 py-2 rounded-full transition"
+            style={tab === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{lab}</button>
+        ))}
+      </div>
+
+      {tab === 'moisture' && <WettingAgent daily={daily} areas={turf.areas} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} initialView="read" />}
+      {tab === 'clippings' && <ClippingsTab clippings={clippings} areas={turf.areas} courseInfo={turf.courseInfo} onAddMany={onClip} onDelete={onClipDel} />}
+      {tab === 'speed' && <GreensSpeedTab speeds={speeds} courseInfo={turf.courseInfo} onAddMany={onSpeed} onDelete={onSpeedDel} />}
+      {tab === 'scouting' && <ScoutingTab scouting={scouting} areas={turf.areas} courseInfo={turf.courseInfo} onAdd={onScout} onUpdate={onScoutUpd} onDelete={onScoutDel} />}
+
+      {qrOpen && <DataQRModal courseInfo={turf.courseInfo} saveCourse={saveTurfCourse} onClose={() => setQrOpen(false)} />}
+    </div>
+  )
+}
+
 function TurfPerformanceModule({ user, nav, hideChrome }) {
   const [route, setRoute] = useState(nav?.route || 'dashboard')
   useEffect(() => { if (nav?.route) setRoute(nav.route) }, [nav])
@@ -7137,6 +7224,19 @@ function TurfPerformanceModule({ user, nav, hideChrome }) {
         {route === 'wetting' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <WettingAgent daily={daily} areas={turf.areas} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} />
+        )}
+        {route === 'data' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <FieldDataHub
+              clippings={clippings} speeds={speeds} scouting={scouting} daily={daily} turf={turf} saveTurfCourse={saveTurfCourse}
+              onClip={async (list) => { await db.addClippings(list); await reloadClippings() }}
+              onClipDel={async (id) => { await db.deleteClipping(id); await reloadClippings() }}
+              onSpeed={async (list) => { await db.addGreensSpeeds(list); await reloadSpeeds() }}
+              onSpeedDel={async (id) => { await db.deleteGreensSpeed(id); await reloadSpeeds() }}
+              onScout={async (s) => { await db.addScouting(s); await reloadScouting() }}
+              onScoutUpd={async (id, patch) => { await db.updateScouting(id, patch); await reloadScouting() }}
+              onScoutDel={async (id) => { await db.deleteScouting(id); await reloadScouting() }}
+            />
         )}
         {route === 'clippings' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
