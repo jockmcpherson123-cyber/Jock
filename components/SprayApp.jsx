@@ -350,7 +350,7 @@ export default function SprayApp({ user }) {
 
         {/* Slide-out drawer — iPad portrait / phone */}
         {drawer && (
-          <div className="lg:hidden fixed inset-0 z-50 flex" onClick={() => setDrawer(false)}>
+          <div className="lg:hidden fixed inset-0 flex" style={{ zIndex: 2000 }} onClick={() => setDrawer(false)}>
             <div className="absolute inset-0" style={{ backgroundColor: 'rgba(10,20,14,0.55)' }} />
             <div className="relative w-60 max-w-[82%] h-full flex flex-col shadow-2xl" style={{ backgroundColor: FOREST }} onClick={(e) => e.stopPropagation()}>
               <Rail onPick={pick} />
