@@ -277,7 +277,6 @@ const NAV_MANAGER = [
   { title: 'Course & Crew', items: [
     { id: 'irrmap', label: 'Irrigation Map', m: 'map', r: 'map' },
     { id: 'parts', label: 'Parts', m: 'map', r: 'parts' },
-    { id: 'mowing', label: 'Mowing', m: 'board', r: 'mowing' },
     { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
     { id: 'playbook', label: 'Playbook', m: 'playbook', r: null },
     { id: 'tournament', label: 'Tournament', m: 'tournament', r: null },
@@ -301,7 +300,6 @@ const NAV_CREW = [
   ] },
   { title: 'Course', items: [
     { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
-    { id: 'mowing', label: 'Mowing', m: 'board', r: 'mowing' },
     { id: 'playbook', label: 'Playbook', m: 'playbook', r: null },
   ] },
 ]
@@ -6193,7 +6191,8 @@ function WhiteboardModule({ user, nav, hideChrome }) {
   const [drawer, setDrawer] = useState(false)
   const [qrOpen, setQrOpen] = useState(false)
 
-  useEffect(() => { (async () => { try { setSettings(await db.fetchSettings()) } catch (e) { console.error(e) } })() }, [])
+  const [wbLoaded, setWbLoaded] = useState(false)
+  useEffect(() => { (async () => { try { setSettings(await db.fetchSettings()) } catch (e) { console.error(e) } finally { setWbLoaded(true) } })() }, [])
 
   const courseInfo = settings.courseInfo || {}
   const jobTypes = courseInfo.jobTypes && courseInfo.jobTypes.length ? courseInfo.jobTypes : DEFAULT_JOBS
@@ -6313,8 +6312,13 @@ function WhiteboardModule({ user, nav, hideChrome }) {
                     style={mowSub === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{lab}</button>
                 ))}
               </div>
-              {mowSub === 'routes' && <MowingRoutes courses={courses} courseInfo={courseInfo} roster={roster} manage={manage} onSave={saveCourse} />}
-              {mowSub === 'directions' && <MowingDirections courses={courses} courseInfo={courseInfo} manage={manage} onSave={saveCourse} />}
+              {!wbLoaded ? (
+                <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+              ) : mowSub === 'routes' ? (
+                <MowingRoutes courses={courses} courseInfo={courseInfo} roster={roster} manage={manage} onSave={saveCourse} />
+              ) : (
+                <MowingDirections courses={courses} courseInfo={courseInfo} manage={manage} onSave={saveCourse} />
+              )}
             </div>
           )}
           {section === 'insights' && <WhiteboardInsights />}
