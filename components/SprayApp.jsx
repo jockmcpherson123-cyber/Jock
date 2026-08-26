@@ -2685,7 +2685,11 @@ function SignaturePad({ value, onChange }) {
 
 // ── SHEET VIEWER ──────────────────────────────────────────────────────────
 function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, directorPins = {}, location, courseInfo, manage, approve }) {
+  // TEMP (testing): let the manager tick tanks + log sprays too. The crew normally
+  // owns the fill/tick flow; restore this to `!manage` to hide it from managers.
+  const canFill = true
   const [confirmDel, setConfirmDel] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const [sig, setSig] = useState('')
   const [dirPin, setDirPin] = useState('')
   const [dirSig, setDirSig] = useState('')
@@ -2803,22 +2807,35 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
 
   return (
     <div className="pt-6 pb-10 max-w-7xl mx-auto">
-      <div className="no-print flex items-center justify-between mb-5">
-        <button onClick={onBack} className="font-body text-sm font-medium text-slate-400">← Back</button>
-        <div className="flex items-center gap-3">
+      <div className="no-print flex items-center justify-between gap-2 mb-5">
+        <button onClick={onBack} className="font-body text-sm font-medium text-slate-400 shrink-0">← Back</button>
+        <div className="flex items-center gap-2 sm:gap-3">
           <StatusPill status={sheet.status} />
-          <button onClick={saveNow} className="font-body text-sm font-medium" style={{ color: FERN }}>Save</button>
-          <button onClick={printRecord} className="font-body text-sm font-medium" style={{ color: FOREST }}>Print</button>
-          <button onClick={exportPdf} disabled={pdfBusy} className="font-body text-sm font-medium disabled:opacity-50" style={{ color: FOREST }}>{pdfBusy ? 'PDF…' : 'Export PDF'}</button>
-          {manage && onSprayAgain && (
-            <button onClick={onSprayAgain} className="font-body text-sm font-medium" style={{ color: FOREST }} title="Start a new sheet with this same mix & rates">Spray again</button>
-          )}
           {manage && (
-            <button onClick={onEdit} className="font-body text-sm font-medium" style={{ color: FERN }}>Edit</button>
+            <button onClick={onEdit} className="font-body text-sm font-semibold px-3 py-1.5 rounded-full" style={{ color: FERN, border: `1px solid ${FERN}` }}>Edit</button>
           )}
-          {manage && onDelete && (
-            <button onClick={() => setConfirmDel(true)} className="font-body text-sm font-medium text-red-500">Delete</button>
-          )}
+          {/* Everything else tucked into one tidy menu */}
+          <div className="relative">
+            <button onClick={() => setMenuOpen((o) => !o)} className="font-body text-sm font-semibold px-2.5 py-1.5 rounded-full flex items-center gap-1" style={{ color: FOREST, border: `1px solid ${HAIR}` }} aria-label="More actions">
+              More <ChevronDown size={14} />
+            </button>
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 mt-1 z-50 w-44 rounded-xl shadow-xl py-1" style={{ backgroundColor: 'white', border: `1px solid ${HAIR}` }}>
+                  {[
+                    ['Save', () => saveNow(), FERN],
+                    ['Print', () => printRecord(), FOREST],
+                    [pdfBusy ? 'Exporting…' : 'Export PDF', () => exportPdf(), FOREST],
+                    ...(manage && onSprayAgain ? [['Spray again', () => onSprayAgain(), FOREST]] : []),
+                    ...(manage && onDelete ? [['Delete', () => setConfirmDel(true), '#DC2626']] : []),
+                  ].map(([label, fn, color]) => (
+                    <button key={label} onClick={() => { setMenuOpen(false); fn() }} className="w-full text-left font-body text-sm px-4 py-2 hover:bg-slate-50" style={{ color }}>{label}</button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -2894,7 +2911,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
               </div>
             </div>
 
-            {tankCount > 1 && !manage && (
+            {tankCount > 1 && canFill && (
               <div className="mb-2 rounded-xl px-2.5 py-2" style={{ backgroundColor: '#F0F6F2' }}>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="font-body text-[10px] font-bold uppercase tracking-wide mr-1" style={{ color: FERN }}>Tanks</span>
@@ -2936,7 +2953,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
                 const measure = !manage && measureOut(amt, unit, productJug(prodInfo))
                 return (
                   <div key={p.id} className="py-2.5 flex items-center gap-2.5 font-body">
-                    {!manage && (
+                    {canFill && (
                       <button onClick={() => toggleCheck(p.id)} className="shrink-0" aria-label="Confirm in tank">
                         <span className="w-6 h-6 rounded-md border flex items-center justify-center transition" style={checked ? { backgroundColor: FERN, borderColor: FERN } : { borderColor: '#CBD5E1', backgroundColor: 'white' }}>
                           {checked && <Check size={14} className="text-white" />}
@@ -3191,7 +3208,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
                     <button onClick={reopen} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full text-slate-500 border border-slate-200">Reopen (back to To Spray)</button>
                   </div>
                 </div>
-              ) : (!manage && productIds.length > 0 && !allTanksDone) ? (
+              ) : (canFill && productIds.length > 0 && !allTanksDone) ? (
                 // Still spraying — keep the sign-off (weather + signature) tucked
                 // away until the last tank is ticked off, then it appears below.
                 // (A sheet with no products has nothing to tick, so we skip
