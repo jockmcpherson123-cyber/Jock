@@ -76,12 +76,14 @@ function weekWindows(today = new Date()) {
   return { thisMon, thisSun, nextMon, nextSun, today: d }
 }
 
-export default function WeeklyReport({ daily = [], clippings = [], practices = [], speeds = [], areas = {}, courseInfo = {}, onSaveCourse, userEmail = '', userName = '' }) {
+export default function WeeklyReport({ daily = [], clippings = [], practices = [], speeds = [], areas = {}, courseInfo = {}, onSaveCourse, userEmail = '', userName = '', courseFilter = '' }) {
   const [apps, setApps] = useState([])
   const [fertSheets, setFertSheets] = useState([])
   const [program, setProgram] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [course, setCourse] = useState(() => (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)[0] || '')
+  const [course, setCourse] = useState(() => courseFilter || (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)[0] || '')
+  // The global course bar jumps the report to a specific course when one is picked.
+  useEffect(() => { if (courseFilter) setCourse(courseFilter) }, [courseFilter])
   const [recipient, setRecipient] = useState(courseInfo.reportRecipient || '')
   const [sender, setSender] = useState(courseInfo.reportSender || courseInfo.directorName || userName || '')
   const [notes, setNotes] = useState(courseInfo.reportNotes || '')

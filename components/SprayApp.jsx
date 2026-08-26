@@ -265,13 +265,13 @@ const NAV_MANAGER = [
     { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
   ] },
   { title: 'Agronomy', items: [
-    { id: 'data', label: 'Field Data', m: 'turf', r: 'data' },
-    { id: 'gdd', label: 'GDD & Timing', m: 'turf', r: 'gdd' },
-    { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting' },
+    { id: 'data', label: 'Field Data', m: 'turf', r: 'data', follow: true },
+    { id: 'gdd', label: 'GDD & Timing', m: 'turf', r: 'gdd', follow: true },
+    { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting', follow: true },
     { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
-    { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil' },
-    { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc' },
-    { id: 'practices', label: 'Practices', m: 'turf', r: 'practices' },
+    { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true },
+    { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc', follow: true },
+    { id: 'practices', label: 'Practices', m: 'turf', r: 'practices', follow: true },
     { id: 'reference', label: 'Reference', m: 'turf', r: 'knowledge' },
   ] },
   { title: 'Course & Crew', items: [
@@ -282,7 +282,7 @@ const NAV_MANAGER = [
     { id: 'tournament', label: 'Tournament', m: 'tournament', r: null },
   ] },
   { title: 'Reports', items: [
-    { id: 'weekly', label: 'Weekly Report', m: 'turf', r: 'report' },
+    { id: 'weekly', label: 'Weekly Report', m: 'turf', r: 'report', follow: true },
     { id: 'season', label: 'Season Reports', m: 'spray', r: 'reports' },
     { id: 'weather', label: 'Weather', m: 'spray', r: 'weather' },
   ] },
@@ -323,6 +323,18 @@ export default function SprayApp({ user }) {
   const [sel, setSel] = useState(initial)
   const [seq, setSeq] = useState(0)
   const [drawer, setDrawer] = useState(false)
+  // The property's courses (name + colour) and club name, for the course bar and
+  // the sidebar brand. Fetched once here so the bar is one global control.
+  const [courses, setCourses] = useState([])
+  const [clubName, setClubName] = useState('')
+  const [course, setCourse] = useState('') // '' = All
+  useEffect(() => { (async () => {
+    try {
+      const s = await db.fetchSettings()
+      setCourses(((s.courseInfo?.courses) || []).filter((c) => c && c.name))
+      setClubName(s.courseInfo?.clubName || '')
+    } catch (e) { console.error(e) }
+  })() }, [])
 
   // A stable nav token — only changes when the user actually picks a sidebar item,
   // so modules re-sync their internal route on a click (and on a re-click) but not
@@ -330,11 +342,12 @@ export default function SprayApp({ user }) {
   const nav = React.useMemo(() => ({ route: sel.r, seq }), [sel.r, seq])
 
   const pick = (item) => { setSel(item); setSeq((s) => s + 1); setDrawer(false) }
+  const showCourseBar = !!sel.follow && courses.length >= 2
 
   const Rail = ({ onPick }) => (
     <SidebarRail
       groups={groups} bottom={bottom} activeId={sel.id} onPick={onPick}
-      clubName={user.clubName} user={user}
+      clubName={clubName || user.clubName} user={user}
     />
   )
 
@@ -365,9 +378,21 @@ export default function SprayApp({ user }) {
             <span className="font-display text-[15px] font-semibold truncate" style={{ color: FOREST }}>{sel.label}</span>
           </div>
 
+          {/* Course bar — the one global All / Blue / Gold selector. Colours come
+              from Property Setup. Shows only on course-aware screens; ignores the
+              rest. Defaults to All so nothing is hidden until you pick a course. */}
+          {showCourseBar && (
+            <div className="flex items-stretch h-10 shrink-0 border-b overflow-x-auto no-scrollbar" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
+              <CourseTab label="All" on={course === ''} onClick={() => setCourse('')} />
+              {courses.map((c) => (
+                <CourseTab key={c.name} label={c.name} color={c.color} on={course === c.name} onClick={() => setCourse(c.name)} />
+              ))}
+            </div>
+          )}
+
           <div className="flex-1 min-w-0">
             {sel.m === 'spray' ? <SprayOpsModule user={user} nav={nav} hideChrome homeMode={!!sel.home} />
-              : sel.m === 'turf' ? <TurfPerformanceModule user={user} nav={nav} hideChrome />
+              : sel.m === 'turf' ? <TurfPerformanceModule user={user} nav={nav} hideChrome course={sel.follow ? course : ''} />
               : sel.m === 'playbook' ? <PlaybookModule user={user} manage={manage} hideChrome />
               : sel.m === 'tournament' ? <Tournament />
               : sel.m === 'map' ? <IrrigationModule user={user} manage={manage} nav={nav} hideChrome />
@@ -376,6 +401,19 @@ export default function SprayApp({ user }) {
         </div>
       </div>
     </ErrorBoundary>
+  )
+}
+
+// One tab in the colour course bar. Active tab carries the course's own colour
+// as an underline + dot, so you can always see which course you're in.
+function CourseTab({ label, color, on, onClick }) {
+  const accent = color || FERN
+  return (
+    <button onClick={onClick} className="flex items-center gap-2 px-4 shrink-0 font-body text-[13px] whitespace-nowrap transition"
+      style={{ fontWeight: on ? 800 : 600, color: on ? INK : INK_2, borderBottom: `3px solid ${on ? accent : 'transparent'}` }}>
+      {color && <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />}
+      {label}
+    </button>
   )
 }
 
@@ -7269,14 +7307,12 @@ function taskErrorText(e) {
 // One place for everything the crew collects on morning maintenance — moisture,
 // clipping yields, greens speed, scouting. This is also what the crew's no-login
 // QR page mirrors. Managers get a "Crew QR" button to print/share the link.
-function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse, onClip, onClipDel, onSpeed, onSpeedDel, onScout, onScoutUpd, onScoutDel }) {
+function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse, course = '', onClip, onClipDel, onSpeed, onSpeedDel, onScout, onScoutUpd, onScoutDel }) {
   const [tab, setTab] = useState('moisture')
   const [qrOpen, setQrOpen] = useState(false)
-  const courseNames = (Array.isArray(turf.courseInfo?.courses) ? turf.courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)
-  const [course, setCourse] = useState('')
   const tabs = [['moisture', 'Moisture'], ['clippings', 'Clipping Yields'], ['speed', 'Greens Speed'], ['scouting', 'Scouting']]
 
-  // Scope the area pickers to the selected course (Blue/Gold), by first-word match.
+  // The course comes from the global course bar; scope the area pickers to it.
   const cTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
   const areas = !course ? turf.areas : Object.fromEntries(Object.entries(turf.areas || {}).filter(([name]) => cTok(name) === cTok(course)))
 
@@ -7284,7 +7320,7 @@ function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse
     <div className="max-w-5xl">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
         <div>
-          <h2 className="font-display text-lg font-semibold" style={{ color: '#1b2420' }}>Field Data</h2>
+          <h2 className="font-display text-lg font-semibold" style={{ color: '#1b2420' }}>Field Data{course ? ` — ${course}` : ''}</h2>
           <p className="font-body text-xs" style={{ color: INK_3 }}>Everything the crew records on morning rounds — in one place.</p>
         </div>
         <button onClick={() => setQrOpen(true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 text-white" style={{ backgroundColor: FOREST }}>
@@ -7292,17 +7328,7 @@ function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse
         </button>
       </div>
 
-      {/* Course sections — Blue / Gold */}
-      {courseNames.length >= 2 && (
-        <div className="flex gap-1.5 mt-4 flex-wrap">
-          <button onClick={() => setCourse('')} className="font-body text-xs font-bold px-3.5 py-2 rounded-full transition" style={course === '' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>All</button>
-          {courseNames.map((c) => (
-            <button key={c} onClick={() => setCourse(c)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full transition" style={course === c ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{c}</button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex gap-1.5 mt-3 mb-4 flex-wrap">
+      <div className="flex gap-1.5 mt-4 mb-4 flex-wrap">
         {tabs.map(([k, lab]) => (
           <button key={k} onClick={() => setTab(k)} className="font-body text-sm font-bold px-4 py-2 rounded-full transition"
             style={tab === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{lab}</button>
@@ -7319,9 +7345,13 @@ function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse
   )
 }
 
-function TurfPerformanceModule({ user, nav, hideChrome }) {
+function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
   const [route, setRoute] = useState(nav?.route || 'dashboard')
   useEffect(() => { if (nav?.route) setRoute(nav.route) }, [nav])
+  // Scope the areas passed to each tab to the selected course (by first-word
+  // match), so the course bar filters what the agronomy screens show and enter.
+  const cTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+  const scopeAreas = (areas) => (!course ? areas : Object.fromEntries(Object.entries(areas || {}).filter(([n]) => cTok(n) === cTok(course))))
   const [turf, setTurf] = useState({ location: null, sheets: [], products: [], areas: {} })
   const [daily, setDaily] = useState([])
   const [clippings, setClippings] = useState([])
@@ -7415,28 +7445,28 @@ function TurfPerformanceModule({ user, nav, hideChrome }) {
         {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} products={turf.products} />}
         {route === 'report' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <WeeklyReport daily={daily} clippings={clippings} practices={practices} speeds={speeds} areas={turf.areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} userEmail={user?.email} userName={user?.fullName} />
+          : <WeeklyReport daily={daily} clippings={clippings} practices={practices} speeds={speeds} areas={turf.areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} userEmail={user?.email} userName={user?.fullName} courseFilter={course} />
         )}
         {route === 'hoc' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <div className="max-w-3xl">
               <h2 className="font-display text-lg font-semibold text-slate-900 mb-1">Height of Cut</h2>
               <p className="font-body text-xs text-slate-400 mb-3">Your maintained height of cut per surface. Edited here or on the Weekly Report — both stay in sync.</p>
-              <HocEditor courseInfo={turf.courseInfo} areas={turf.areas} practices={practices} onSaveCourse={saveTurfCourse} />
+              <HocEditor courseInfo={turf.courseInfo} areas={scopeAreas(turf.areas)} practices={practices} onSaveCourse={saveTurfCourse} />
             </div>
         )}
         {route === 'gdd' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <GddPgrTab daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} hasLocation={turf.location?.lat != null} courseInfo={turf.courseInfo} onSaveTargets={(pgrTargets) => saveTurfCourse({ pgrTargets })} />
+          : <GddPgrTab daily={daily} sheets={turf.sheets} products={turf.products} areas={scopeAreas(turf.areas)} hasLocation={turf.location?.lat != null} courseInfo={turf.courseInfo} onSaveTargets={(pgrTargets) => saveTurfCourse({ pgrTargets })} />
         )}
         {route === 'wetting' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <WettingAgent daily={daily} areas={turf.areas} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} />
+          : <WettingAgent daily={daily} areas={scopeAreas(turf.areas)} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} courseFilter={course} />
         )}
         {route === 'data' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <FieldDataHub
-              clippings={clippings} speeds={speeds} scouting={scouting} daily={daily} turf={turf} saveTurfCourse={saveTurfCourse}
+              clippings={clippings} speeds={speeds} scouting={scouting} daily={daily} turf={turf} saveTurfCourse={saveTurfCourse} course={course}
               onClip={async (list) => { await db.addClippings(list); await reloadClippings() }}
               onClipDel={async (id) => { await db.deleteClipping(id); await reloadClippings() }}
               onSpeed={async (list) => { await db.addGreensSpeeds(list); await reloadSpeeds() }}
@@ -7458,14 +7488,14 @@ function TurfPerformanceModule({ user, nav, hideChrome }) {
         )}
         {route === 'soil' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <SoilTestsTab soilTests={soilTests} areas={turf.areas} grassTypes={turf.grassTypes || []} soilTypes={turf.soilTypes || []} courseInfo={turf.courseInfo}
+          : <SoilTestsTab soilTests={soilTests} areas={scopeAreas(turf.areas)} grassTypes={turf.grassTypes || []} soilTypes={turf.soilTypes || []} courseInfo={turf.courseInfo}
               onAdd={async (t) => { await db.addSoilTest(t); await reloadSoilTests() }}
               onUpdate={async (t) => { await db.updateSoilTest(t); await reloadSoilTests() }}
               onDelete={async (id) => { await db.deleteSoilTest(id); await reloadSoilTests() }} />
         )}
         {route === 'practices' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <PracticesTab practices={practices} areas={turf.areas}
+          : <PracticesTab practices={practices} areas={scopeAreas(turf.areas)}
               onAddMany={async (list) => { await db.addCulturalPractices(list); await reloadPractices() }}
               onDelete={async (id) => { await db.deleteCulturalPractice(id); await reloadPractices() }} />
         )}
