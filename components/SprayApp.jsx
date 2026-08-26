@@ -7365,9 +7365,9 @@ function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse
       </div>
 
       {tab === 'moisture' && <WettingAgent key={course || 'all'} daily={daily} areas={areas} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} initialView="read" courseFilter={course} />}
-      {tab === 'clippings' && <ClippingsTab key={course || 'all'} clippings={clippings} areas={areas} courseInfo={turf.courseInfo} onAddMany={onClip} onDelete={onClipDel} />}
-      {tab === 'speed' && <GreensSpeedTab key={course || 'all'} speeds={speeds} courseInfo={turf.courseInfo} onAddMany={onSpeed} onDelete={onSpeedDel} />}
-      {tab === 'scouting' && <ScoutingTab key={course || 'all'} scouting={scouting} areas={areas} courseInfo={turf.courseInfo} onAdd={onScout} onUpdate={onScoutUpd} onDelete={onScoutDel} />}
+      {tab === 'clippings' && <ClippingsTab key={course || 'all'} clippings={clippings} areas={areas} courseInfo={turf.courseInfo} onAddMany={onClip} onDelete={onClipDel} courseFilter={course} />}
+      {tab === 'speed' && <GreensSpeedTab key={course || 'all'} speeds={speeds} courseInfo={turf.courseInfo} onAddMany={onSpeed} onDelete={onSpeedDel} courseFilter={course} />}
+      {tab === 'scouting' && <ScoutingTab key={course || 'all'} scouting={scouting} areas={areas} courseInfo={turf.courseInfo} onAdd={onScout} onUpdate={onScoutUpd} onDelete={onScoutDel} courseFilter={course} />}
 
       {qrOpen && <DataQRModal courseInfo={turf.courseInfo} saveCourse={saveTurfCourse} onClose={() => setQrOpen(false)} />}
     </div>
@@ -8286,11 +8286,17 @@ function saveErrorText(e, migration) {
 const clipErrorText = (e) => saveErrorText(e, 'supabase/phase10.sql')
 const practiceErrorText = (e) => saveErrorText(e, 'supabase/phase11.sql')
 
-function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
+function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete, courseFilter = '' }) {
   const greenOptions = greenOptionsFor(courseInfo)
   const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
-  const hasCourses = courseNames.length >= 2
-  const [courseTab, setCourseTab] = useState(courseNames[0] || 'all')
+  const cfTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+  // The global course bar drives the course when one is picked; only fall back to
+  // internal course tabs on "All".
+  const barCourse = courseFilter ? (courseNames.find((n) => cfTok(n) === cfTok(courseFilter)) || courseFilter) : ''
+  const hasCourses = courseNames.length >= 2 && !barCourse
+  const [courseTab, setCourseTab] = useState(barCourse || courseNames[0] || 'all')
+  useEffect(() => { if (barCourse) setCourseTab(barCourse) }, [barCourse])
+  const shortGreen = (g) => { const c = courseNames.find((n) => g.startsWith(n)); return c ? g.slice(c.length).trim() : g }
   // Greens shown in the picker for the active course tab (kept fully separate so
   // Blue and Gold never mix). "Other" holds the practice/putting greens.
   const pickerGreens = !hasCourses ? greenOptions
@@ -8354,7 +8360,7 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete }) {
             <div className="grid grid-cols-2 gap-2 mt-1">
               {[...selected].sort(sortGreens).map((g) => (
                 <div key={g} className="flex items-center gap-2">
-                  <span className="font-body text-xs font-semibold text-slate-600 w-28 shrink-0 truncate" title={g}>{g.replace('Green ', '')}</span>
+                  <span className="font-body text-xs font-semibold text-slate-600 w-28 shrink-0 truncate" title={g}>{shortGreen(g)}</span>
                   <input type="number" step="any" value={vols[g] ?? ''} onChange={(e) => setVol(g, e.target.value)} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="0" />
                 </div>
               ))}
@@ -8442,11 +8448,15 @@ const speedErrorText = (e) => saveErrorText(e, 'supabase/phase18.sql')
 // ── GREENS SPEED (STIMPMETER) ───────────────────────────────────────────────
 // Log each green's speed (feet) by date. The win is consistency: the day's
 // spread across greens (fastest vs slowest) matters as much as the average.
-function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete }) {
+function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter = '' }) {
   const greenOptions = greenOptionsFor(courseInfo)
   const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
-  const hasCourses = courseNames.length >= 2
-  const [courseTab, setCourseTab] = useState(courseNames[0] || 'all')
+  const cfTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+  const barCourse = courseFilter ? (courseNames.find((n) => cfTok(n) === cfTok(courseFilter)) || courseFilter) : ''
+  const hasCourses = courseNames.length >= 2 && !barCourse
+  const [courseTab, setCourseTab] = useState(barCourse || courseNames[0] || 'all')
+  useEffect(() => { if (barCourse) setCourseTab(barCourse) }, [barCourse])
+  const shortGreen = (g) => { const c = courseNames.find((n) => g.startsWith(n)); return c ? g.slice(c.length).trim() : g }
   const pickerGreens = !hasCourses ? greenOptions
     : courseTab === 'other' ? greenOptions.filter((g) => !courseNames.some((n) => g.startsWith(n)))
     : greenOptions.filter((g) => g.startsWith(courseTab))
@@ -8512,7 +8522,7 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete }) {
             <div className="grid grid-cols-2 gap-2 mt-1">
               {[...selected].sort(sortGreens).map((g) => (
                 <div key={g} className="flex items-center gap-2">
-                  <span className="font-body text-xs font-semibold text-slate-600 w-28 shrink-0 truncate" title={g}>{g.replace('Green ', '')}</span>
+                  <span className="font-body text-xs font-semibold text-slate-600 w-28 shrink-0 truncate" title={g}>{shortGreen(g)}</span>
                   <input type="number" step="0.1" inputMode="decimal" value={vals[g] ?? ''} onChange={(e) => setVal(g, e.target.value)} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-base font-body bg-white" placeholder="10.5" />
                 </div>
               ))}
