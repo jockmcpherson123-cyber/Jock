@@ -8357,11 +8357,11 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete, cours
         {selected.length > 0 && (
           <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F8FAF9' }}>
             <FieldLabel>Volume per green ({unit})</FieldLabel>
-            <div className="grid grid-cols-2 gap-2 mt-1">
+            <div className="grid gap-2 mt-1" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(112px,1fr))' }}>
               {[...selected].sort(sortGreens).map((g) => (
-                <div key={g} className="flex items-center gap-2">
-                  <span className="font-body text-xs font-semibold text-slate-600 w-28 shrink-0 truncate" title={g}>{shortGreen(g)}</span>
-                  <input type="number" step="any" value={vols[g] ?? ''} onChange={(e) => setVol(g, e.target.value)} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="0" />
+                <div key={g}>
+                  <span className="block font-body text-[11px] font-semibold text-slate-500 mb-1 truncate" title={g}>{shortGreen(g)}</span>
+                  <input type="number" inputMode="decimal" step="any" value={vols[g] ?? ''} onChange={(e) => setVol(g, e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base font-semibold tnum bg-white text-center" placeholder="0" />
                 </div>
               ))}
             </div>
@@ -8519,11 +8519,11 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter 
         {selected.length > 0 && (
           <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: '#F8FAF9' }}>
             <FieldLabel>Speed per green (feet)</FieldLabel>
-            <div className="grid grid-cols-2 gap-2 mt-1">
+            <div className="grid gap-2 mt-1" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(112px,1fr))' }}>
               {[...selected].sort(sortGreens).map((g) => (
-                <div key={g} className="flex items-center gap-2">
-                  <span className="font-body text-xs font-semibold text-slate-600 w-28 shrink-0 truncate" title={g}>{shortGreen(g)}</span>
-                  <input type="number" step="0.1" inputMode="decimal" value={vals[g] ?? ''} onChange={(e) => setVal(g, e.target.value)} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-2 text-base font-body bg-white" placeholder="10.5" />
+                <div key={g}>
+                  <span className="block font-body text-[11px] font-semibold text-slate-500 mb-1 truncate" title={g}>{shortGreen(g)}</span>
+                  <input type="number" step="0.1" inputMode="decimal" value={vals[g] ?? ''} onChange={(e) => setVal(g, e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base font-semibold tnum bg-white text-center" placeholder="10.5" />
                 </div>
               ))}
             </div>
