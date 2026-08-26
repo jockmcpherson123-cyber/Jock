@@ -267,9 +267,8 @@ const NAV_MANAGER = [
   ] },
   { title: 'Agronomy', items: [
     { id: 'data', label: 'Field Data', m: 'turf', r: 'data', follow: true },
-    { id: 'gdd', label: 'GDD & Timing', m: 'turf', r: 'gdd', follow: true },
+    { id: 'gdd', label: 'GDD & Growth', m: 'turf', r: 'gdd', follow: true },
     { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting', follow: true },
-    { id: 'growth', label: 'Growth', m: 'turf', r: 'growth', follow: true },
     { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
     { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true },
     { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc', follow: true },
@@ -7487,15 +7486,15 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         )}
         {route === 'gdd' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <GddPgrTab daily={daily} sheets={turf.sheets} products={turf.products} areas={scopeAreas(turf.areas)} hasLocation={turf.location?.lat != null} courseInfo={turf.courseInfo} onSaveTargets={(pgrTargets) => saveTurfCourse({ pgrTargets })} />
+          : <GddGrowthTab
+              daily={daily} clippings={clippings} sheets={turf.sheets} products={turf.products}
+              areas={turf.areas} scopedAreas={scopeAreas(turf.areas)} hasLocation={turf.location?.lat != null}
+              courseInfo={turf.courseInfo} course={course}
+              onSaveTargets={(pgrTargets) => saveTurfCourse({ pgrTargets })} onSaveCourse={saveTurfCourse} />
         )}
         {route === 'wetting' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <WettingAgent daily={daily} areas={scopeAreas(turf.areas)} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} courseFilter={course} />
-        )}
-        {route === 'growth' && (
-          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <Growth daily={daily} clippings={clippings} sheets={turf.sheets} products={turf.products} areas={turf.areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} courseFilter={course} />
         )}
         {route === 'data' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
@@ -7954,6 +7953,26 @@ function Kv({ label, value, accent }) {
 
 // Season GDD, plus GDD accumulated since each area's last growth-regulator
 // application (base 32°F) against a reapply target — the Primo/Anuew model.
+// GDD & Growth — the two sides of the same story on one screen: the GDD timing
+// (when to reapply, per-product suppression curves) and the Growth Management
+// read (clip volume vs. Growth Potential, program suppression).
+function GddGrowthTab({ daily, clippings, sheets, products, areas, scopedAreas, hasLocation, courseInfo, course, onSaveTargets, onSaveCourse }) {
+  const [tab, setTab] = useState('timing')
+  return (
+    <div>
+      <div className="flex gap-1.5 mb-5">
+        {[['timing', 'Timing'], ['growth', 'Growth']].map(([k, lab]) => (
+          <button key={k} onClick={() => setTab(k)} className="font-body text-sm font-bold px-4 py-2 rounded-full transition"
+            style={tab === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{lab}</button>
+        ))}
+      </div>
+      {tab === 'timing'
+        ? <GddPgrTab daily={daily} sheets={sheets} products={products} areas={scopedAreas} hasLocation={hasLocation} courseInfo={courseInfo} onSaveTargets={onSaveTargets} />
+        : <Growth daily={daily} clippings={clippings} sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} onSaveCourse={onSaveCourse} courseFilter={course} />}
+    </div>
+  )
+}
+
 function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {}, onSaveTargets }) {
   const pgrTargets = courseInfo.pgrTargets || {}
   const [editTargets, setEditTargets] = useState(false)
