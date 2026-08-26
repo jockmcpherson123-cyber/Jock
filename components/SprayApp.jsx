@@ -953,6 +953,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
             onSeeAll={() => setRoute('list')}
             onCreateFromProgram={createSheetFromProgram}
             onGoWeather={() => setRoute('weather')}
+            onGo={(r) => setRoute(r)}
           />
         )}
         {route === 'list' && (
@@ -1311,7 +1312,7 @@ function writeWxCache(lat, lng, day, patch) {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
-function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, courseInfo, onGoWeather, homeMode }) {
+function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, courseInfo, onGoWeather, onGo, homeMode }) {
   // Home is a read-only overview — the create-a-spray-sheet affordances live on
   // the Annual Program and Spray Sheets screens, not here.
   const create = manage && !homeMode
@@ -1446,10 +1447,10 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
       {/* Stats cluster — one connected instrument panel, scans across full width */}
       <div className="paper-card stat-cluster grid grid-cols-4 overflow-hidden">
-        <StatCard icon={<ClipboardList size={16} />} label="Pending Approval" value={pending.length} accent={pending.length > 0 ? '#B45309' : FERN} />
-        <StatCard icon={<ShieldCheck size={16} />} label="Approved" value={approved.length} accent={FERN} />
-        <StatCard icon={<Droplet size={16} />} label="Today" value={todaySheets.length} accent={GOLD} />
-        <StatCard icon={<AlertTriangle size={16} />} label="Low Stock" value={lowStock.length} accent={lowStock.length > 0 ? '#DC2626' : FERN} />
+        <StatCard icon={<ClipboardList size={16} />} label="Pending Approval" value={pending.length} accent={pending.length > 0 ? '#B45309' : FERN} onClick={onGo ? () => onGo('list') : undefined} />
+        <StatCard icon={<ShieldCheck size={16} />} label="Approved" value={approved.length} accent={FERN} onClick={onGo ? () => onGo('list') : undefined} />
+        <StatCard icon={<Droplet size={16} />} label="Today" value={todaySheets.length} accent={GOLD} onClick={onGo ? () => onGo('list') : undefined} />
+        <StatCard icon={<AlertTriangle size={16} />} label="Low Stock" value={lowStock.length} accent={lowStock.length > 0 ? '#DC2626' : FERN} onClick={onGo ? () => onGo(manage ? 'chemicals' : 'inventory') : undefined} />
       </div>
 
       {/* Wide split — the day's work in a broad main column, quick-glance boxes
@@ -1586,14 +1587,16 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
 // One cell of the instrument-panel stat cluster (the wrapping .paper-card and
 // hairline dividers live in the Dashboard grid).
-function StatCard({ icon, label, value, accent }) {
-  return (
-    <div className="p-4">
-      <div className="flex items-center gap-1.5 mb-2" style={{ color: accent }}>{icon}</div>
+function StatCard({ icon, label, value, accent, onClick }) {
+  const inner = (
+    <>
+      <div className="flex items-center gap-1.5 mb-2" style={{ color: accent }}>{icon}{onClick && <ChevronRight size={13} className="ml-auto" style={{ color: INK_3 }} />}</div>
       <p className="font-display text-3xl font-semibold tnum" style={{ color: FOREST }}>{value}</p>
       <p className="font-body text-[11px] mt-0.5 leading-tight" style={{ color: INK_3 }}>{label}</p>
-    </div>
+    </>
   )
+  if (onClick) return <button onClick={onClick} className="p-4 text-left w-full transition hover:bg-black/[0.02] active:bg-black/[0.04]">{inner}</button>
+  return <div className="p-4">{inner}</div>
 }
 
 // Morning briefing strip: live conditions + today's 6am–noon spray window, plus
