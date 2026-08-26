@@ -301,6 +301,8 @@ function typeColor(type) {
 
 export default function AnnualProgram({ areas, products = [], sheets = [], location, courseInfo = {}, onProductsChanged, onCreateSheet }) {
   const [programs, setPrograms] = useState([])
+  const [toolsOpen, setToolsOpen] = useState(false)   // import/build menu
+  const [seasonOpen, setSeasonOpen] = useState(false) // season-management menu
   // Weather that feeds the Living Calendar's live status. Best-effort — the plan
   // still shows without it (growth triggers just read "waiting on data").
   const [season, setSeason] = useState([])
@@ -953,22 +955,28 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               <Plus size={14} /> Add Application
             </button>
           )}
-          {activeProgram && (
-            <>
-              <button onClick={downloadFlatTemplate} className="font-body text-[11px] font-bold px-3 py-2 rounded-full border" style={{ color: FERN, borderColor: '#E2E8F0', backgroundColor: 'white' }}>Template</button>
-              <input ref={flatFileRef} type="file" accept=".xlsx,.xls" onChange={onFlatFile} className="hidden" />
-              <button onClick={() => flatFileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
-                <Upload size={14} /> Import Sprays
-              </button>
-            </>
-          )}
+          <input ref={flatFileRef} type="file" accept=".xlsx,.xls" onChange={onFlatFile} className="hidden" />
           <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFileChosen} className="hidden" />
-          <button onClick={() => fileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
-            <Upload size={14} /> Full Plan
-          </button>
-          <button onClick={openBuildSetup} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 text-white" style={{ backgroundColor: FERN }}>
-            <Sparkles size={14} /> Build from Models
-          </button>
+          {/* Everything else — import / build — tucked into one menu */}
+          <div className="relative">
+            <button onClick={() => setToolsOpen((o) => !o)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ color: FOREST, border: `1px solid ${'#E2E8F0'}`, backgroundColor: 'white' }}>
+              <Sparkles size={13} /> Build / Import <ChevronDown size={13} />
+            </button>
+            {toolsOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setToolsOpen(false)} />
+                <div className="absolute right-0 mt-1 z-50 w-52 rounded-xl shadow-xl py-1 bg-white" style={{ border: '1px solid #E2E8F0' }}>
+                  {[
+                    ['Build from Models', () => openBuildSetup(), true],
+                    ['Import full plan (Excel)', () => fileRef.current?.click(), true],
+                    ...(activeProgram ? [['Import sprays (Excel)', () => flatFileRef.current?.click(), true], ['Download blank template', () => downloadFlatTemplate(), true]] : []),
+                  ].map(([label, fn]) => (
+                    <button key={label} onClick={() => { setToolsOpen(false); fn() }} className="w-full text-left font-body text-sm px-4 py-2 hover:bg-slate-50" style={{ color: FOREST }}>{label}</button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1405,22 +1413,26 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                 )}
               </button>
             ))}
-            <button onClick={startNewProgram} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FOREST, border: '1px solid rgba(0,0,0,0.08)' }}>
-              <Plus size={13} /> New Season
-            </button>
-            {activeProgram && (
-              <button onClick={startEditProgram} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
-                <Pencil size={12} /> Edit season
+            {/* Season management — one small menu instead of four buttons */}
+            <div className="relative">
+              <button onClick={() => setSeasonOpen((o) => !o)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FOREST, border: '1px solid rgba(0,0,0,0.08)' }}>
+                <CalendarDays size={13} /> Season <ChevronDown size={12} />
               </button>
-            )}
-            {activeProgram && (
-              <button onClick={startCopy} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FERN, border: '1px solid rgba(0,0,0,0.08)' }}>
-                <CalendarPlus size={13} /> Roll forward
-              </button>
-            )}
-            <button onClick={openBuild} className="font-body text-xs font-bold px-3 py-1.5 rounded-full transition flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
-              <Sparkles size={13} /> Build from last year
-            </button>
+              {seasonOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setSeasonOpen(false)} />
+                  <div className="absolute left-0 mt-1 z-50 w-48 rounded-xl shadow-xl py-1 bg-white" style={{ border: '1px solid #E2E8F0' }}>
+                    {[
+                      ['New season', () => startNewProgram(), true],
+                      ...(activeProgram ? [['Edit season', () => startEditProgram(), true], ['Roll forward', () => startCopy(), true]] : []),
+                      ['Build from last year', () => openBuild(), true],
+                    ].map(([label, fn]) => (
+                      <button key={label} onClick={() => { setSeasonOpen(false); fn() }} className="w-full text-left font-body text-sm px-4 py-2 hover:bg-slate-50" style={{ color: FOREST }}>{label}</button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Off-year dates (old template dates pulled in on import) */}
