@@ -257,11 +257,11 @@ class ErrorBoundary extends React.Component {
 // maps to a module (m) and the route/section within it (r). This replaced the old
 // top module-switcher + per-module tab strips.
 const NAV_MANAGER = [
-  { items: [{ id: 'home', label: 'Home', m: 'spray', r: 'dashboard', home: true, icon: BarChart3 }] },
+  { items: [{ id: 'home', label: 'Home', m: 'spray', r: 'dashboard', home: true, icon: BarChart3, follow: true }] },
   { title: 'Spray Program', items: [
-    { id: 'program', label: 'Annual Program', m: 'spray', r: 'program' },
-    { id: 'sheets', label: 'Spray Sheets', m: 'spray', r: 'list' },
-    { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert' },
+    { id: 'program', label: 'Annual Program', m: 'spray', r: 'program', follow: true },
+    { id: 'sheets', label: 'Spray Sheets', m: 'spray', r: 'list', follow: true },
+    { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert', follow: true },
     { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
   ] },
   { title: 'Agronomy', items: [
@@ -391,7 +391,7 @@ export default function SprayApp({ user }) {
           )}
 
           <div className="flex-1 min-w-0">
-            {sel.m === 'spray' ? <SprayOpsModule user={user} nav={nav} hideChrome homeMode={!!sel.home} />
+            {sel.m === 'spray' ? <SprayOpsModule user={user} nav={nav} hideChrome homeMode={!!sel.home} course={sel.follow ? course : ''} />
               : sel.m === 'turf' ? <TurfPerformanceModule user={user} nav={nav} hideChrome course={sel.follow ? course : ''} />
               : sel.m === 'playbook' ? <PlaybookModule user={user} manage={manage} hideChrome />
               : sel.m === 'tournament' ? <Tournament />
@@ -514,7 +514,7 @@ function IrrigationModule({ user, manage, nav, hideChrome }) {
 }
 
 // ── SPRAY OPS MODULE ──────────────────────────────────────────────────────
-function SprayOpsModule({ user, nav, hideChrome, homeMode }) {
+function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   const manage = canManage(user.role)
   const [route, setRoute] = useState(nav?.route || (canManage(user.role) ? 'dashboard' : 'tospray'))
   // Re-sync the internal route when the sidebar picks a Spray-Ops screen.
@@ -862,10 +862,17 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode }) {
     setRoute('edit')
   }
 
-  const pending = sheets.filter((s) => s.status === 'pending')
-  const approved = sheets.filter((s) => s.status === 'approved')
+  // Scope the displayed sheets to the course picked in the global course bar
+  // (by first-word match on the sheet's area). This filters the view only —
+  // the underlying sheet data and all actions stay untouched.
+  const cTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+  const inCourse = (area) => !course || cTok(area) === cTok(course)
+  const scopeAreas = (a) => (!course ? a : Object.fromEntries(Object.entries(a || {}).filter(([n]) => cTok(n) === cTok(course))))
+  const visibleSheets = course ? sheets.filter((s) => inCourse(s.area)) : sheets
+  const pending = visibleSheets.filter((s) => s.status === 'pending')
+  const approved = visibleSheets.filter((s) => s.status === 'approved')
   const today = localDateISO()
-  const todaySheets = sheets.filter((s) => s.date === today)
+  const todaySheets = visibleSheets.filter((s) => s.date === today)
 
   if (loading) {
     return (
@@ -936,8 +943,8 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode }) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-24">
         {route === 'dashboard' && (
           <Dashboard
-            sheets={sheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
-            manage={manage} programApps={programApps} location={location} courseInfo={courseInfo}
+            sheets={visibleSheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
+            manage={manage} programApps={course ? programApps.filter((a) => inCourse(a.area)) : programApps} location={location} courseInfo={courseInfo}
             homeMode={homeMode}
             onOpen={(s) => { setActiveSheet(s); setRoute('view') }}
             onNew={newSheet}
@@ -947,13 +954,13 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode }) {
           />
         )}
         {route === 'list' && (
-          <SheetList sheets={sheets} manage={manage} variant="manage" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} onDelete={removeSheet} onImportHistory={importHistory} />
+          <SheetList sheets={visibleSheets} manage={manage} variant="manage" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} onDelete={removeSheet} onImportHistory={importHistory} />
         )}
         {route === 'tospray' && (
-          <SheetList sheets={sheets} manage={manage} variant="tospray" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
+          <SheetList sheets={visibleSheets} manage={manage} variant="tospray" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
         )}
         {route === 'records' && (
-          <SheetList sheets={sheets} manage={manage} variant="records" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
+          <SheetList sheets={visibleSheets} manage={manage} variant="records" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
         )}
         {route === 'edit' && activeSheet && manage && (
           <SheetEditor
@@ -1031,9 +1038,9 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode }) {
           <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? saveProduct : undefined} />
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} products={products} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
-        {route === 'program' && manage && <AnnualProgram areas={areas} products={products} sheets={sheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
+        {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} onSaveSettings={saveSettings} />}
-        {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} />}
+        {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} courseFilter={course} />}
         {route === 'settings' && manage && (
           <SettingsPage
             areas={areas} operators={operators} directors={directors} targets={targets}
@@ -1051,8 +1058,9 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode }) {
 // Granular fert applications, per area — the digital version of the club's
 // Excel fert sheets. Pick an area (its per-section square footage is built in),
 // a product + rate + bag size, and it works out lbs, bags and cost per section.
-function FertSheets({ manage, courseInfo }) {
+function FertSheets({ manage, courseInfo, courseFilter = '' }) {
   const [sheets, setSheets] = useState([])
+  const fcTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
   const [loading, setLoading] = useState(true)
   const [active, setActive] = useState(null) // sheet object being viewed/edited
   const [toast, setToast] = useState(null)
@@ -1091,16 +1099,16 @@ function FertSheets({ manage, courseInfo }) {
         <SectionHeader title="Fertilizer Sheets" subtitle="Granular fert applications by area — lbs, bags and cost worked out per section" noMargin />
         {manage && <button onClick={() => setActive(blank())} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={14} /> New fert sheet</button>}
       </div>
-      {sheets.length === 0 ? (
+      {(courseFilter ? sheets.filter((s) => fcTok(s.area) === fcTok(courseFilter)) : sheets).length === 0 ? (
         <div className="paper-card p-10 text-center">
           <Sprout className="mx-auto mb-3" size={28} style={{ color: HAIR }} />
-          <p className="font-body text-sm mb-1" style={{ color: INK_3 }}>No fert sheets yet.</p>
+          <p className="font-body text-sm mb-1" style={{ color: INK_3 }}>{courseFilter ? `No ${courseFilter} fert sheets yet.` : 'No fert sheets yet.'}</p>
           <p className="font-body text-xs mb-4" style={{ color: INK_3 }}>Start one for any area — the square footage of every green/tee/hole is already built in.</p>
           {manage && <button onClick={() => setActive(blank())} className="font-body text-xs font-semibold px-4 py-2 rounded-full text-white" style={{ backgroundColor: FOREST }}>Create your first fert sheet</button>}
         </div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-          {sheets.map((s) => {
+          {(courseFilter ? sheets.filter((s) => fcTok(s.area) === fcTok(courseFilter)) : sheets).map((s) => {
             const c = computeFert(s)
             return (
               <button key={s.id} onClick={() => setActive(s)} className="paper-card p-4 text-left hover:shadow-md transition">
