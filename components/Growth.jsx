@@ -46,10 +46,15 @@ const meanC = (d) => (d.tMax != null && d.tMin != null ? ((d.tMax + d.tMin) / 2 
 export default function Growth({ daily = [], clippings = [], sheets = [], products = [], areas = {}, courseInfo = {}, onSaveCourse, courseFilter = '' }) {
   const growth = courseInfo.growth || {}
   const pgrTargets = courseInfo.pgrTargets || {}
-  const warm = (courseInfo.siteGrasses || []).some((g) => WARM.some((w) => String(g).toLowerCase().includes(w)))
 
   const inCourse = (n) => !courseFilter || tok(n) === tok(courseFilter)
   const greensAreas = Object.keys(areas).filter((n) => isGreens(n) && inCourse(n))
+
+  // Cool- vs warm-season curve, judged by the greens' OWN grass (this screen is
+  // about the greens) — falling back to the site grasses only if none is set.
+  const greensGrasses = greensAreas.flatMap((n) => areas[n]?.grasses || [])
+  const grassPool = greensGrasses.length ? greensGrasses : (courseInfo.siteGrasses || [])
+  const warm = grassPool.some((g) => WARM.some((w) => String(g).toLowerCase().includes(w)))
 
   // ── Growth Potential series (this year → today) ──────────────────────────
   const year = String(new Date().getFullYear())
