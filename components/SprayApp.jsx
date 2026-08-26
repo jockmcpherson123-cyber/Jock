@@ -15,7 +15,7 @@ import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, ChevronUp, ChevronDown, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
   Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target, Scissors, Gauge, Trophy,
-  Sun, CloudSun, CloudDrizzle, CloudSnow, CloudFog, CloudLightning, QrCode, Printer,
+  Sun, CloudSun, CloudDrizzle, CloudSnow, CloudFog, CloudLightning, QrCode, Printer, Bug,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -7469,7 +7469,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-24 pt-6">
         {route === 'dashboard' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} clippings={clippings} soilTests={soilTests} practices={practices} speeds={speeds} hasLocation={turf.location?.lat != null} onGo={setRoute} />
+          : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} clippings={clippings} soilTests={soilTests} practices={practices} speeds={speeds} soilSeries={soilSeries} hasLocation={turf.location?.lat != null} onGo={setRoute} />
         )}
         {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} products={turf.products} />}
         {route === 'report' && (
@@ -9517,10 +9517,28 @@ function TimingTab({ soilSeries, hasLocation, products = [] }) {
 // The Turf Performance home — an at-a-glance roll-up of everything the other
 // tabs track (GDD, growth-reg timing, clippings, soil, practices), each tile
 // tappable to jump into the detail tab.
-function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, clippings = [], soilTests = [], practices = [], speeds = [], hasLocation, onGo }) {
+function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, clippings = [], soilTests = [], practices = [], speeds = [], soilSeries = [], hasLocation, onGo }) {
   const PGR_TARGET = 360 // classic greens reapply target (base 32°F)
   const gddSeries = gddFromDaily(daily)
   const seasonGdd = gddSeries.length ? gddSeries[gddSeries.length - 1].acc : 0
+
+  // Pre-emergent nudge — the nearest actionable germination window, so Home
+  // flags it without opening the Timing tab. Only surfaces when it's in season
+  // and the soil is close to (or past) the germination threshold.
+  const preemNow = currentSoilTemp(soilSeries)
+  const preemRate = soilRate(soilSeries)
+  const PREEM_IDS = ['crabgrass', 'goosegrass', 'fallpreem']
+  let preem = null
+  if (preemNow != null) {
+    const month = new Date().getMonth() + 1
+    const rankProj = (p) => (p.crossed ? 0 : p.overdue ? 1 : (p.applyDays ?? 999))
+    const cands = TIMING_WINDOWS
+      .filter((w) => PREEM_IDS.includes(w.id) && w.months.includes(month))
+      .map((w) => ({ w, proj: projectWindow(w, preemNow, preemRate, new Date()) }))
+      .filter((x) => x.proj && !x.proj.stalled)
+      .sort((a, b) => rankProj(a.proj) - rankProj(b.proj))
+    preem = cands[0] || null
+  }
 
   // Growth-reg timing — GDD since each area's last growth-suppressing spray.
   const supMap = suppressionMap(products)
@@ -9573,6 +9591,35 @@ function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, cli
         <p className="font-display text-3xl font-bold mt-0.5">{hasLocation ? Math.round(seasonGdd).toLocaleString() : '—'}</p>
         <p className="font-body text-[11px] opacity-70 mt-0.5">{hasLocation ? `Accumulated since Jan 1 · ${daily.length} days of weather` : 'Add your course location in Settings to track GDD'}</p>
       </button>
+
+      {preem && (() => {
+        const { w, proj } = preem
+        let tone, head, line
+        if (proj.crossed) {
+          tone = { bg: '#FDECEA', fg: '#B23A2E', dot: '#B23A2E' }
+          head = `${w.label} · germination underway`
+          line = `Soil already past ~${w.threshold}°F. A pre-emergent now only catches un-germinated seed — treat young plants post-emergent.`
+        } else if (proj.overdue) {
+          tone = { bg: '#FEF3DD', fg: '#92660D', dot: '#B7791F' }
+          head = `${w.label} · apply now`
+          line = `Soil crosses ~${w.threshold}°F in ~${proj.daysToThreshold} days (est. ${fmtDate(proj.thresholdDate)}). You're inside the ${proj.lead}-day watering-in lead.`
+        } else {
+          tone = { bg: '#EAF2FB', fg: '#1E5BB8', dot: '#2563EB' }
+          head = `${w.label} · apply by ${fmtDate(proj.applyByDate)}`
+          line = `Soil crosses ~${w.threshold}°F in ~${proj.daysToThreshold} days (est. ${fmtDate(proj.thresholdDate)}). Apply ~${proj.applyDays} days out to water in first.`
+        }
+        return (
+          <button onClick={() => onGo('timing')} className="w-full text-left rounded-2xl p-4 shadow-sm flex items-start gap-3 hover:shadow-md transition" style={{ backgroundColor: tone.bg }}>
+            <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ backgroundColor: '#fff', color: tone.fg }}><Bug size={16} /></span>
+            <div className="min-w-0 flex-1">
+              <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: tone.fg }}>Pre-emergent window{preemRate != null && !proj.crossed ? ` · soil ${preemRate > 0 ? '+' : ''}${preemRate}°/day` : ''}</p>
+              <p className="font-body text-sm font-semibold text-slate-800 mt-0.5">{head}</p>
+              <p className="font-body text-[12px] text-slate-500 leading-relaxed mt-0.5">{line}</p>
+            </div>
+            <ChevronRight size={18} className="text-slate-300 shrink-0 mt-1" />
+          </button>
+        )
+      })()}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Tile
