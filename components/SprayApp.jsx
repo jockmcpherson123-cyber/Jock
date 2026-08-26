@@ -49,6 +49,7 @@ import AnnualProgram from '@/components/AnnualProgram'
 import WeeklyReport from '@/components/WeeklyReport'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
+import Growth from '@/components/Growth'
 import Tournament from '@/components/Tournament'
 import CourseMap from '@/components/CourseMap'
 import IrrigationParts from '@/components/IrrigationParts'
@@ -268,6 +269,7 @@ const NAV_MANAGER = [
     { id: 'data', label: 'Field Data', m: 'turf', r: 'data', follow: true },
     { id: 'gdd', label: 'GDD & Timing', m: 'turf', r: 'gdd', follow: true },
     { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting', follow: true },
+    { id: 'growth', label: 'Growth', m: 'turf', r: 'growth', follow: true },
     { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
     { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true },
     { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc', follow: true },
@@ -7470,6 +7472,10 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         {route === 'wetting' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <WettingAgent daily={daily} areas={scopeAreas(turf.areas)} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} courseFilter={course} />
+        )}
+        {route === 'growth' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <Growth daily={daily} clippings={clippings} sheets={turf.sheets} products={turf.products} areas={turf.areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} courseFilter={course} />
         )}
         {route === 'data' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
