@@ -26,7 +26,7 @@ import * as db from '@/lib/db'
 import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate, buildRainYear, weatherCodeInfo } from '@/lib/weather'
 import { fungicideLogByArea } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
-import { applicationTimings, openWindows, soilTrend, currentSoilTemp, TIMING_WINDOWS } from '@/lib/soiltiming'
+import { applicationTimings, openWindows, soilTrend, currentSoilTemp, soilRate, projectWindow, TIMING_WINDOWS } from '@/lib/soiltiming'
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
 import { FERT_AREAS, fertArea } from '@/lib/fertAreas'
 import { computeFert, parseAnalysis, fmtNum } from '@/lib/fert'
@@ -9390,8 +9390,11 @@ function TimingTab({ soilSeries, hasLocation, products = [] }) {
   if (!hasLocation) return <ComingSoonCard title="Set your location first" desc="Soil temperature comes from your course location. Add it in Spray Ops → Settings → Location, then come back." />
   const soilNow = currentSoilTemp(soilSeries)
   const trend = soilTrend(soilSeries)
+  const rate = soilRate(soilSeries)
+  const now = new Date()
+  const WIN_BY_ID = Object.fromEntries(TIMING_WINDOWS.map((w) => [w.id, w]))
   // Show every window here (including out-of-season), so the whole list is visible.
-  const timings = applicationTimings(soilNow, trend, new Date(), {}, true)
+  const timings = applicationTimings(soilNow, trend, now, {}, true)
   const recent = (soilSeries || []).slice(-30).map((d) => ({ date: d.date, value: d.soil != null ? d.soil : d.temp }))
 
   return (
@@ -9428,6 +9431,42 @@ function TimingTab({ soilSeries, hasLocation, products = [] }) {
                   </span>
                 </div>
                 <p className="font-body text-[11px] text-slate-400">Trigger ~{t.threshold}°F ({t.direction === 'falling' ? 'cooling' : 'warming'}){t.months ? ` · ${monthRange(t.months)}` : ''} · {t.note}</p>
+                {(() => {
+                  // Predictive countdown for pre-emergent windows — project when the
+                  // soil crosses the germination threshold and the apply-by date.
+                  if (t.status === 'offseason') return null
+                  const w = WIN_BY_ID[t.id]
+                  const proj = projectWindow(w, soilNow, rate, now)
+                  if (!proj) return null
+                  let tone, title, line
+                  if (proj.crossed) {
+                    const rising = t.direction !== 'falling'
+                    tone = { bg: '#FDECEA', fg: '#B23A2E', dot: '#B23A2E' }
+                    title = rising ? 'Germination underway' : 'Flush underway'
+                    line = `Soil is already ${rising ? 'at/above' : 'at/below'} ~${t.threshold}°F. A pre-emergent now only catches seed that hasn’t germinated — treat young plants with a post-emergent.`
+                  } else if (proj.stalled) {
+                    return null // soil isn't moving toward the threshold — nothing to project
+                  } else if (proj.overdue) {
+                    tone = { bg: '#FEF3DD', fg: '#92660D', dot: '#B7791F' }
+                    title = 'Apply now'
+                    line = `Soil crosses ~${t.threshold}°F in ~${proj.daysToThreshold} days (est. ${fmtDate(proj.thresholdDate)}). You're inside the ${proj.lead}-day watering-in lead — get it down now.`
+                  } else {
+                    tone = { bg: '#EAF2FB', fg: '#1E5BB8', dot: '#2563EB' }
+                    title = `Apply by ${fmtDate(proj.applyByDate)}`
+                    line = `Soil crosses ~${t.threshold}°F in ~${proj.daysToThreshold} days (est. ${fmtDate(proj.thresholdDate)}). Apply ~${proj.applyDays} days out so it's watered in first.`
+                  }
+                  return (
+                    <div className="mt-1.5 rounded-lg p-2 flex gap-2" style={{ backgroundColor: tone.bg }}>
+                      <span className="w-1.5 h-1.5 rounded-full mt-1 shrink-0" style={{ backgroundColor: tone.dot }} />
+                      <div className="min-w-0">
+                        <p className="font-body text-[11px] font-bold" style={{ color: tone.fg }}>{title}{rate != null && !proj.crossed ? ` · soil ${rate > 0 ? '+' : ''}${rate}°/day` : ''}</p>
+                        <p className="font-body text-[11px] text-slate-600 leading-relaxed mt-0.5">{line}</p>
+                        {w.split && !proj.crossed && <p className="font-body text-[10px] text-slate-500 mt-0.5">Split app: follow up ~3–4 weeks later to extend control through the germination window.</p>}
+                        {w.phenology && <p className="font-body text-[10px] text-slate-400 mt-0.5">🌱 {w.phenology}</p>}
+                      </div>
+                    </div>
+                  )
+                })()}
                 {(() => {
                   const active = t.status === 'now' || t.status === 'soon'
                   const body = active ? t.control : t.watch
