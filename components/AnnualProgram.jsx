@@ -299,7 +299,8 @@ function typeColor(type) {
   }[type] || '#94A3B8'
 }
 
-export default function AnnualProgram({ areas, products = [], sheets = [], location, courseInfo = {}, onProductsChanged, onCreateSheet }) {
+export default function AnnualProgram({ areas, products = [], sheets = [], location, courseInfo = {}, onProductsChanged, onCreateSheet, courseFilter = '' }) {
+  const apTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
   const [programs, setPrograms] = useState([])
   const [toolsOpen, setToolsOpen] = useState(false)   // import/build menu
   const [seasonOpen, setSeasonOpen] = useState(false) // season-management menu
@@ -331,7 +332,10 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     }, statusCtx)
   }
   const [activeProgram, setActiveProgram] = useState(null)
-  const [apps, setApps] = useState([])
+  const [allApps, setAllApps] = useState([])
+  // Scope every derived view (This Week, calendar, by-area) to the course picked
+  // in the global course bar — matched on the first word of the area name.
+  const apps = courseFilter ? allApps.filter((a) => apTok(a.area) === apTok(courseFilter)) : allApps
   const [loading, setLoading] = useState(true)
   const [areaFilter, setAreaFilter] = useState('all')
   const [imp, setImp] = useState(null) // import flow state
@@ -382,7 +386,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
       const existing = await db.fetchApplications(programId)
       for (const a of existing) await db.deleteApplication(a.id)
       await db.bulkInsertApplications(programId, toApplications(tuned))
-      if (activeProgram?.id === programId) setApps(await db.fetchApplications(programId))
+      if (activeProgram?.id === programId) setAllApps(await db.fetchApplications(programId))
       showToast('Program tuned to your site climate')
     } catch { /* leave the normals version in place */ }
   }
@@ -406,7 +410,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     setBusy(true)
     try {
       await db.bulkInsertApplications(activeProgram.id, flatPrev.apps)
-      setApps(await db.fetchApplications(activeProgram.id))
+      setAllApps(await db.fetchApplications(activeProgram.id))
       setFlatPrev(null)
       showToast(`Imported ${flatPrev.count} planned application${flatPrev.count !== 1 ? 's' : ''}`)
     } catch (e) {
@@ -445,7 +449,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
       setPrograms(list)
       if (list.length > 0) {
         setActiveProgram(list[0])
-        setApps(await db.fetchApplications(list[0].id))
+        setAllApps(await db.fetchApplications(list[0].id))
       }
     } catch (e) {
       console.error(e)
@@ -458,7 +462,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     setActiveProgram(p)
     setAreaFilter('all')
     try {
-      setApps(await db.fetchApplications(p.id))
+      setAllApps(await db.fetchApplications(p.id))
     } catch (e) {
       console.error(e)
     }
@@ -523,7 +527,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
       await db.deleteProgram(p.id)
       showToast('Program deleted')
       await loadPrograms()
-      if (activeProgram?.id === p.id) { setActiveProgram(null); setApps([]) }
+      if (activeProgram?.id === p.id) { setActiveProgram(null); setAllApps([]) }
     } catch (e) {
       console.error(e)
       showToast('Could not delete program')
@@ -601,7 +605,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
         basis: inlineEdit.basis || 'oz / M', type: inlineEdit.type || null,
         target: inlineEdit.target || null, trigger: inlineEdit.trigger || { mode: 'date' },
       })
-      setApps(await db.fetchApplications(activeProgram.id))
+      setAllApps(await db.fetchApplications(activeProgram.id))
       setInlineEdit(null)
       showToast('Spray updated')
     } catch (e) {
@@ -647,7 +651,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
       for (const id of editApp.originalIds || []) {
         if (!keptIds.has(id)) await db.deleteApplication(id)
       }
-      setApps(await db.fetchApplications(activeProgram.id))
+      setAllApps(await db.fetchApplications(activeProgram.id))
       setEditApp(null)
       showToast('Planned spray saved')
     } catch (e) {
@@ -664,7 +668,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     setBusy(true)
     try {
       for (const id of editApp.originalIds) await db.deleteApplication(id)
-      setApps(await db.fetchApplications(activeProgram.id))
+      setAllApps(await db.fetchApplications(activeProgram.id))
       setEditApp(null)
       showToast('Planned spray removed')
     } catch (e) {
@@ -690,7 +694,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
       for (const a of toFix) {
         await db.upsertApplication({ ...a, programId: activeProgram.id, plannedDate: `${yr}-${a.plannedDate.slice(5)}` })
       }
-      setApps(await db.fetchApplications(activeProgram.id))
+      setAllApps(await db.fetchApplications(activeProgram.id))
       showToast(`Dates moved into ${yr}`)
     } catch (e) {
       console.error(e)

@@ -1040,7 +1040,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
           <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? saveProduct : undefined} />
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} products={products} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
-        {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} />}
+        {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} courseFilter={course} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} onSaveSettings={saveSettings} />}
         {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} courseFilter={course} />}
         {route === 'settings' && manage && (
