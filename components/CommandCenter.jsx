@@ -13,6 +13,7 @@ import * as db from '@/lib/db'
 import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, gddSince, weatherCodeInfo } from '@/lib/weather'
 import { sheetApplied } from '@/lib/applied'
 import { localDateISO } from '@/lib/dates'
+import { fmtStimp } from '@/lib/greenspeed'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -233,7 +234,7 @@ function CourseCard({ course, metrics, state, onPatch }) {
 
       {/* Live stats */}
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <Stat icon={Gauge} label="Greens speed" value={metrics.speed ? metrics.speed.avg.toFixed(2) : '—'} unit="ft" />
+        <Stat icon={Gauge} label="Greens speed" value={metrics.speed ? fmtStimp(metrics.speed.avg) : '—'} unit="" />
         <Stat icon={Sprout} label="Height of cut" value={metrics.hoc ? String(metrics.hoc).replace(/\s*in$/i, '') : '—'} unit="in" />
         <EditStat label="Moisture tgt" value={moist} unit="% VWC" onCommit={(v) => { setMoist(v); onPatch({ moistureTgt: v }) }} onChange={setMoist} placeholder="—" />
       </div>

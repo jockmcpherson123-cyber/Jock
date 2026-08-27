@@ -7,6 +7,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { localDateISO } from '@/lib/dates'
+import { stimpToFeet } from '@/lib/greenspeed'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -103,7 +104,7 @@ function FieldData() {
         </div>
         {tab === 'moisture' && <MoistureForm k={k} wetting={wetting} onSaved={flash} />}
         {tab === 'clippings' && <SimpleReading k={k} areas={areas} action="clipping" label="Clipping volume" unit="mL" onSaved={flash} />}
-        {tab === 'speed' && <SimpleReading k={k} areas={areas} action="greenspeed" label="Stimp (ft)" onSaved={flash} />}
+        {tab === 'speed' && <SimpleReading k={k} areas={areas} action="greenspeed" label="Stimp reading (ft &amp; in)" onSaved={flash} />}
         {tab === 'scouting' && <ScoutForm k={k} areas={areas} onSaved={flash} />}
       </div>
       {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: INK }}>{toast}</div>}
@@ -209,21 +210,34 @@ function MoistureSheet({ k, green, onSaved }) {
 function SimpleReading({ k, areas, action, label, unit, onSaved }) {
   const greenAreas = areas.filter((a) => /green/i.test(a))
   const list = greenAreas.length ? greenAreas : areas
+  const isSpeed = action === 'greenspeed'
   const [area, setArea] = useState(list[0] || '')
   const [value, setValue] = useState('')
+  const [ft, setFt] = useState('')   // greens speed: feet
+  const [inch, setInch] = useState('') // greens speed: inches
   const [busy, setBusy] = useState(false)
 
   if (!list.length) return <Card><p className="font-body text-sm" style={{ color: INK_2 }}>No areas set up yet.</p></Card>
 
   const submit = async () => {
-    const num = Number(value)
-    if (!area || !Number.isFinite(num) || busy) return
+    if (!area || busy) return
+    let row, saidValue
+    if (isSpeed) {
+      if ((ft === '' || ft == null) && (inch === '' || inch == null)) return
+      const speed = stimpToFeet(ft, inch)
+      row = { area, speed }
+      saidValue = `${Number(ft) || 0}'${Number(inch) || 0}"`
+    } else {
+      const num = Number(value)
+      if (!Number.isFinite(num) || value === '') return
+      row = { area, volume: num, unit }
+      saidValue = `${value}${unit ? ' ' + unit : ''}`
+    }
     setBusy(true)
     try {
-      const row = action === 'clipping' ? { area, volume: num, unit } : { area, speed: num }
       await postCrew(k, { action, rows: [row] })
-      onSaved(`${area}: ${value}${unit ? ' ' + unit : ''} saved`)
-      setValue('')
+      onSaved(`${area}: ${saidValue} saved`)
+      setValue(''); setFt(''); setInch('')
     } catch (e) { onSaved(`Couldn’t save — ${e.message}`) }
     setBusy(false)
   }
@@ -235,8 +249,17 @@ function SimpleReading({ k, areas, action, label, unit, onSaved }) {
         {list.map((a) => <option key={a} value={a}>{a}</option>)}
       </select>
       <label className="block font-body text-[12px] font-semibold mb-1" style={{ color: INK_2 }}>{label}</label>
-      <input inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} placeholder={label}
-        className="w-full rounded-lg px-3 py-2.5 text-base mb-4" style={{ border: `1px solid ${HAIR}`, background: 'white', color: INK }} />
+      {isSpeed ? (
+        <div className="flex items-center gap-2 mb-4">
+          <input inputMode="numeric" value={ft} onChange={(e) => setFt(e.target.value)} placeholder="9" className="w-full min-w-0 rounded-lg px-3 py-2.5 text-base text-center" style={{ border: `1px solid ${HAIR}`, background: 'white', color: INK }} />
+          <span className="font-body text-base" style={{ color: INK_2 }}>ft</span>
+          <input inputMode="numeric" value={inch} onChange={(e) => setInch(e.target.value)} placeholder="10" className="w-full min-w-0 rounded-lg px-3 py-2.5 text-base text-center" style={{ border: `1px solid ${HAIR}`, background: 'white', color: INK }} />
+          <span className="font-body text-base" style={{ color: INK_2 }}>in</span>
+        </div>
+      ) : (
+        <input inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} placeholder={label}
+          className="w-full rounded-lg px-3 py-2.5 text-base mb-4" style={{ border: `1px solid ${HAIR}`, background: 'white', color: INK }} />
+      )}
       <button onClick={submit} disabled={busy} className="w-full py-3 rounded-xl text-base font-bold font-body text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save'}</button>
     </Card>
   )

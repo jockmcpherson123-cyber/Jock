@@ -7,6 +7,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import * as db from '@/lib/db'
 import { Printer, Download, Mail, Loader2, Calendar, Thermometer, Scissors, Gauge, Sprout } from 'lucide-react'
+import { fmtStimp } from '@/lib/greenspeed'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
@@ -231,8 +232,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const speedStat = (() => {
     const vals = speedsThis.map((s) => Number(s.speed)).filter((n) => !isNaN(n))
     if (!vals.length) return null
-    const f2 = (x) => Number(x).toFixed(2) // Stimp keeps hundredths (9.10, not 9.1)
-    return { avg: f2(avg(vals)), min: f2(Math.min(...vals)), max: f2(Math.max(...vals)), n: vals.length }
+    return { avg: avg(vals), min: Math.min(...vals), max: Math.max(...vals), n: vals.length }
   })()
 
   const clipStat = (() => {
@@ -257,8 +257,8 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
 
   // Displayed this-week numbers: logged data wins; otherwise the quick-fill value.
   const mv = (k) => (manual[k] != null && String(manual[k]).trim() !== '' ? String(manual[k]).trim() : null)
-  const dStimpAvg = speedStat ? `${speedStat.avg}'` : (mv('stimpAvg') ? `${mv('stimpAvg')}'` : '—')
-  const dStimpRange = speedStat ? `${speedStat.min}–${speedStat.max}` : (mv('stimpRange') || '—')
+  const dStimpAvg = speedStat ? fmtStimp(speedStat.avg) : (mv('stimpAvg') ? `${mv('stimpAvg')}'` : '—')
+  const dStimpRange = speedStat ? `${fmtStimp(speedStat.min)}–${fmtStimp(speedStat.max)}` : (mv('stimpRange') || '—')
   const dClip = clipStat ? `${clipStat.total}` : (mv('clippings') || '—')
   const dClipUnit = clipStat ? clipStat.unit : (mv('clippings') ? (mv('clipUnit') || 'L') : '')
   const dHigh = twx.n ? `${round(twx.avgHigh)}°` : (mv('wxHigh') ? `${mv('wxHigh')}°` : '—')
