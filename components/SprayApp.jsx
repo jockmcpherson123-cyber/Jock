@@ -273,6 +273,7 @@ const NAV_MANAGER = [
     { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting', follow: true },
     { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
     { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true, noAll: true },
+    { id: 'om', label: 'Organic Matter', m: 'turf', r: 'om', follow: true, noAll: true },
     { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc', follow: true },
     { id: 'practices', label: 'Practices', m: 'turf', r: 'practices', follow: true, noAll: true },
     { id: 'reference', label: 'Reference', m: 'turf', r: 'knowledge' },
@@ -7534,6 +7535,10 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
               onUpdate={async (t) => { await db.updateSoilTest(t); await reloadSoilTests() }}
               onDelete={async (id) => { await db.deleteSoilTest(id); await reloadSoilTests() }} />
         )}
+        {route === 'om' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <OrganicMatterTab courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} courseFilter={course} />
+        )}
         {route === 'practices' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <PracticesTab practices={practices} areas={scopeAreas(turf.areas)}
@@ -8690,6 +8695,226 @@ function SpeedRow({ c, onUpdate, onDelete }) {
       <button onClick={start} className="font-display text-base font-bold text-slate-900 shrink-0 hover:opacity-70 transition" title="Tap to edit">{fmtStimp(c.speed)}</button>
       <button onClick={start} className="text-slate-300 hover:text-slate-600 transition shrink-0" aria-label="Edit"><Pencil size={14} /></button>
       <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+    </div>
+  )
+}
+
+// ── ORGANIC MATTER (the greens "2-4-6" test) ────────────────────────────────
+// Lab OM% by depth segment (0–2", 2–4", 4–6") per green, tracked over time. The
+// top 0–2" drives surface firmness and thatch; you manage it down over years
+// with sand topdressing and aeration, so the trend is the whole point. Stored in
+// courseInfo.om (no separate table) as [{ id, area, date, method, d02, d24, d46, notes }].
+const omTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+const omNum = (v) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v))
+
+function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) {
+  const om = Array.isArray(courseInfo.om) ? courseInfo.om : []
+  const courseNames = (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
+  const greenOptions = greenOptionsFor(courseInfo).filter((g) => !courseFilter || omTok(g) === omTok(courseFilter))
+  const shortGreen = (g) => { const c = courseNames.find((n) => g.startsWith(n)); return c ? g.slice(c.length).trim() : g }
+
+  const [date, setDate] = useState(localDateISO())
+  const [method, setMethod] = useState('440') // LOI 360°C or 440°C
+  const [selected, setSelected] = useState([])
+  const [vals, setVals] = useState({}) // green -> { d02, d24, d46 }
+  const [notes, setNotes] = useState('')
+  const [msg, setMsg] = useState(null)
+
+  const scoped = courseFilter ? om.filter((r) => omTok(r.area) === omTok(courseFilter)) : om
+  const target = courseInfo.omTarget != null ? courseInfo.omTarget : ''
+
+  const toggleGreen = (g) => setSelected((p) => (p.includes(g) ? p.filter((x) => x !== g) : [...p, g]))
+  const setDepth = (g, part, v) => setVals((p) => ({ ...p, [g]: { ...(p[g] || {}), [part]: v } }))
+  const hasAny = (g) => { const v = vals[g] || {}; return [v.d02, v.d24, v.d46].some((x) => x !== '' && x != null) }
+  const entries = selected.filter(hasAny)
+
+  const save = () => {
+    if (!entries.length) return
+    const rows = entries.map((g) => ({ id: uid(), area: g, date, method, d02: omNum(vals[g].d02), d24: omNum(vals[g].d24), d46: omNum(vals[g].d46), notes }))
+    onSaveCourse({ om: [...om, ...rows] })
+    setVals({}); setNotes('')
+    setMsg({ type: 'ok', text: `Logged ${rows.length} green${rows.length !== 1 ? 's' : ''}.` })
+  }
+  const updateRow = (id, patch) => onSaveCourse({ om: om.map((r) => (r.id === id ? { ...r, ...patch } : r)) })
+  const removeRow = (id) => onSaveCourse({ om: om.filter((r) => r.id !== id) })
+
+  // Group latest-first by green for the summary cards.
+  const byArea = {}
+  scoped.forEach((r) => { (byArea[r.area] = byArea[r.area] || []).push(r) })
+  const areaList = Object.keys(byArea).sort(sortGreens)
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div>
+        <h2 className="font-display text-lg font-semibold text-slate-900">Organic Matter{courseFilter ? ` — ${courseFilter}` : ''}</h2>
+        <p className="font-body text-xs text-slate-400 mt-0.5">The greens “2-4-6” test — OM% by depth (0–2&quot;, 2–4&quot;, 4–6&quot;). The top 0–2&quot; drives surface firmness and thatch; watch it trend down as you topdress and aerate.</p>
+      </div>
+
+      {/* Surface target */}
+      <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm flex items-end gap-3 flex-wrap">
+        <div>
+          <FieldLabel>Surface (0–2&quot;) target OM%</FieldLabel>
+          <input inputMode="decimal" defaultValue={target} onBlur={(e) => onSaveCourse({ omTarget: e.target.value.trim() === '' ? null : Number(e.target.value) })} placeholder="e.g. 4" className="w-28 border border-slate-200 rounded-lg px-3 py-2 text-base font-body tnum" />
+        </div>
+        <p className="font-body text-[11px] text-slate-400 flex-1 min-w-[180px]">A goal for the top 0–2&quot;. Many sand-based greens programs aim to hold ~3–5% and manage anything higher down slowly — set yours and the trend shows a target line.</p>
+      </div>
+
+      {/* Log form */}
+      <div className="bg-white rounded-2xl border-2 p-4 shadow-sm" style={{ borderColor: GOLD }}>
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Log OM test</p>
+        <p className="font-body text-[11px] text-slate-400 mb-3">Pick the greens on the report, then enter each depth's OM%. Logs the whole report at once.</p>
+
+        <FieldLabel>Greens</FieldLabel>
+        <div className="mt-1 mb-3">
+          <PeoplePicker options={greenOptions} selected={selected} onToggle={toggleGreen} placeholder="Search greens — e.g. 5, 12, 15…" max={40} />
+        </div>
+
+        {selected.length > 0 && (
+          <div className="rounded-xl p-3 mb-3 space-y-2" style={{ backgroundColor: '#F8FAF9' }}>
+            <div className="grid gap-2 items-center" style={{ gridTemplateColumns: '1fr repeat(3, 72px)' }}>
+              <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Green</span>
+              <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 text-center">0–2&quot;</span>
+              <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 text-center">2–4&quot;</span>
+              <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 text-center">4–6&quot;</span>
+            </div>
+            {[...selected].sort(sortGreens).map((g) => (
+              <div key={g} className="grid gap-2 items-center" style={{ gridTemplateColumns: '1fr repeat(3, 72px)' }}>
+                <span className="font-body text-[13px] font-semibold text-slate-700 truncate" title={g}>{shortGreen(g)}</span>
+                {['d02', 'd24', 'd46'].map((d) => (
+                  <input key={d} type="number" step="0.01" inputMode="decimal" value={vals[g]?.[d] ?? ''} onChange={(e) => setDepth(g, d, e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-base font-semibold tnum bg-white text-center" placeholder="—" />
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex gap-3 flex-wrap mb-3">
+          <div>
+            <FieldLabel>Date</FieldLabel>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body" />
+          </div>
+          <div>
+            <FieldLabel>Method</FieldLabel>
+            <div className="flex gap-1.5">
+              {['360', '440'].map((m) => (
+                <button key={m} type="button" onClick={() => setMethod(m)} className="font-body text-xs font-bold px-3 py-2.5 rounded-xl transition" style={method === m ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.1)' }}>LOI {m}°</button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="mb-3">
+          <FieldLabel>Notes (optional)</FieldLabel>
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body" placeholder="e.g. Brookside file #28489" />
+        </div>
+        {msg && <div className="rounded-xl px-3 py-2 mb-2 font-body text-[12px] font-semibold" style={{ backgroundColor: '#E8F3EC', color: FERN }}>{msg.text}</div>}
+        <button onClick={save} disabled={!entries.length} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
+          {entries.length ? `Log ${entries.length} green${entries.length !== 1 ? 's' : ''}` : 'Enter at least one depth to save'}
+        </button>
+      </div>
+
+      {/* Per-green summary + trend */}
+      {areaList.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No organic-matter tests logged yet.</div>
+      ) : (
+        <div className="space-y-3">
+          {areaList.map((area) => {
+            const rows = [...byArea[area]].sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+            const latest = rows[rows.length - 1]
+            const surfSeries = rows.filter((r) => r.d02 != null).map((r) => ({ date: r.date, value: r.d02 }))
+            return (
+              <div key={area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
+                  <p className="font-body text-[11px] text-slate-400">{rows.length} test{rows.length !== 1 ? 's' : ''} · latest {fmtDate(latest.date)}{latest.method ? ` · LOI ${latest.method}°` : ''}</p>
+                </div>
+                <OmProfile row={latest} target={target !== '' ? Number(target) : null} />
+                {surfSeries.length >= 2 && (
+                  <div className="mt-3">
+                    <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Surface 0–2&quot; OM · trend</p>
+                    <TrendChart points={surfSeries} unit="%" baseline={0} refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null} />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* History */}
+      {scoped.length > 0 && (
+        <div>
+          <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">All tests</p>
+          <div className="space-y-2">
+            {[...scoped].sort((a, b) => (b.date || '').localeCompare(a.date || '') || sortGreens(a.area, b.area)).map((r) => (
+              <OmRow key={r.id} r={r} onUpdate={updateRow} onDelete={removeRow} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// The depth profile — three bars (0–2 / 2–4 / 4–6) on a shared 0→max scale so
+// the surface vs. deeper contrast reads at a glance.
+function OmProfile({ row, target }) {
+  const depths = [['0–2"', row.d02, true], ['2–4"', row.d24, false], ['4–6"', row.d46, false]]
+  const scaleMax = Math.max(6, ...depths.map((d) => Number(d[1]) || 0)) * 1.1
+  return (
+    <div className="space-y-1.5">
+      {depths.map(([label, v, surf]) => {
+        const val = v == null ? null : Number(v)
+        const over = surf && target != null && val != null && val > target
+        const color = over ? '#B7791F' : surf ? FERN : '#9CA3AF'
+        return (
+          <div key={label} className="flex items-center gap-2">
+            <span className="font-body text-[11px] font-semibold text-slate-500 w-10 shrink-0 tnum">{label}</span>
+            <div className="flex-1 h-5 rounded" style={{ backgroundColor: '#F1F4F1', position: 'relative', overflow: 'hidden' }}>
+              {val != null && <div className="h-full rounded" style={{ width: `${Math.max(2, (val / scaleMax) * 100)}%`, backgroundColor: color }} />}
+            </div>
+            <span className="font-body text-[13px] font-bold tnum w-12 text-right shrink-0" style={{ color: over ? '#B7791F' : '#1A1A16' }}>{val != null ? `${val}%` : '—'}</span>
+          </div>
+        )
+      })}
+      {target != null && row.d02 != null && Number(row.d02) > target && (
+        <p className="font-body text-[11px]" style={{ color: '#B7791F' }}>Surface is above your {target}% target — keep topdressing and aerating to bring it down.</p>
+      )}
+    </div>
+  )
+}
+
+// One history row — tap to edit the three depths, or delete.
+function OmRow({ r, onUpdate, onDelete }) {
+  const [edit, setEdit] = useState(false)
+  const [d02, setD02] = useState(r.d02 ?? '')
+  const [d24, setD24] = useState(r.d24 ?? '')
+  const [d46, setD46] = useState(r.d46 ?? '')
+  const start = () => { setD02(r.d02 ?? ''); setD24(r.d24 ?? ''); setD46(r.d46 ?? ''); setEdit(true) }
+  const save = () => { onUpdate(r.id, { d02: omNum(d02), d24: omNum(d24), d46: omNum(d46) }); setEdit(false) }
+  if (edit) {
+    return (
+      <div className="bg-white rounded-2xl border p-3 shadow-sm flex items-center gap-2 flex-wrap" style={{ borderColor: FERN }}>
+        <span className="font-body text-sm font-semibold text-slate-800 flex-1 min-w-[100px]">{r.area} · {fmtDate(r.date)}</span>
+        {[[d02, setD02], [d24, setD24], [d46, setD46]].map(([v, set], i) => (
+          <input key={i} type="number" step="0.01" inputMode="decimal" value={v} onChange={(e) => set(e.target.value)} className="w-16 border border-slate-200 rounded-lg px-2 py-2 text-base font-semibold tnum text-center" />
+        ))}
+        <button onClick={save} className="w-8 h-8 rounded-full flex items-center justify-center text-white" style={{ backgroundColor: FERN }} aria-label="Save"><Check size={16} /></button>
+        <button onClick={() => setEdit(false)} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" aria-label="Cancel"><X size={16} /></button>
+      </div>
+    )
+  }
+  return (
+    <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="font-body text-sm font-semibold text-slate-800 truncate">{r.area}</p>
+        <p className="font-body text-[11px] text-slate-400">{fmtDate(r.date)}{r.method ? ` · LOI ${r.method}°` : ''}{r.notes ? ` · ${r.notes}` : ''}</p>
+      </div>
+      <p className="font-body text-[13px] tnum text-slate-700 shrink-0">
+        <span className="font-bold text-slate-900">{r.d02 != null ? `${r.d02}%` : '—'}</span>
+        <span className="text-slate-400"> · {r.d24 != null ? `${r.d24}` : '—'} · {r.d46 != null ? `${r.d46}` : '—'}</span>
+      </p>
+      <button onClick={start} className="text-slate-300 hover:text-slate-600 transition shrink-0" aria-label="Edit"><Pencil size={14} /></button>
+      <button onClick={() => onDelete(r.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
     </div>
   )
 }
