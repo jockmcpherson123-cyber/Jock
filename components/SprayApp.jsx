@@ -281,6 +281,7 @@ const NAV_MANAGER = [
     { id: 'irrmap', label: 'Irrigation Map', m: 'map', r: 'map' },
     { id: 'parts', label: 'Parts', m: 'map', r: 'parts' },
     { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
+    { id: 'training', label: 'Training', m: 'spray', r: 'training' },
     { id: 'playbook', label: 'Playbook', m: 'playbook', r: null },
     { id: 'tournament', label: 'Tournament', m: 'tournament', r: null },
   ] },
@@ -1050,6 +1051,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} courseFilter={course} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} onSaveSettings={saveSettings} />}
         {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} courseFilter={course} />}
+        {route === 'training' && manage && <TrainingTab sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
           <SettingsPage
             areas={areas} operators={operators} directors={directors} targets={targets}
@@ -2484,6 +2486,63 @@ function seasonReportHTML(allSheets, products, areas, courseInfo = {}, year) {
     <table style="${tbl}"><thead><tr style="background:#16291F"><th style="${TH}">Date</th><th style="${TH}">Area</th><th style="${TH}">Products</th><th style="${TH}">Status</th></tr></thead><tbody>${log}</tbody></table>
 
     <p style="font-size:9px;color:#888;margin-top:16px;text-align:center">Generated ${esc(new Date().toLocaleString())} · ${esc(courseInfo.clubName || '')} ${esc(year)} Season Report</p>
+  </div>`
+}
+
+// Intern training worksheet — the SAME sheet the crew uses, but the rate is
+// blanked so trainees work it BACKWARDS from the amount per tank, with room to
+// research what each product is and what it does. `opts.answers` fills in the
+// rate + product info for the trainer's answer key.
+function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opts = {}) {
+  const answers = !!opts.answers
+  const L = 'border:1px solid #ccc;padding:5px 8px;background:#F0F0EA;font-weight:700;font-size:10px'
+  const V = 'border:1px solid #ccc;padding:5px 8px;font-size:11px'
+  const tbl = 'width:100%;border-collapse:collapse;margin-bottom:12px'
+  const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p) => {
+    const prodInfo = products.find((pr) => pr.name === p.product) || {}
+    const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
+    const total = amt != null ? Math.round(amt * (sheet.tanks || 1) * 10) / 10 : null
+    return { ...p, amt, total, unit, prodInfo }
+  })
+  const line = '__________________________'
+  const blocks = rows.map((p, i) => {
+    const rateCell = answers
+      ? `<b>${esc(p.rate)}</b> ${esc(p.basis || '')}`
+      : '______ per ______'
+    const info = answers
+      ? `<div style="font-size:10px;color:#333;margin-top:5px"><b>Type:</b> ${esc(p.prodInfo.type || '—')} &nbsp;·&nbsp; <b>AI:</b> ${esc(p.prodInfo.activeIngredient || '—')}${(p.prodInfo.targets && p.prodInfo.targets.length) ? ` &nbsp;·&nbsp; <b>For:</b> ${esc(p.prodInfo.targets.join(', '))}` : ''}</div>`
+      : `<div style="font-size:10.5px;margin-top:7px">What is it (type)? ${line}</div>
+         <div style="font-size:10.5px;margin-top:7px">What does it do? ${line}${line.slice(0, 12)}</div>`
+    const mathBox = answers ? '' : `<div style="font-size:10px;margin-top:7px;color:#555">Work the rate <b>backwards</b> from Amount/Tank — show your math:</div><div style="border:1px solid #bbb;border-radius:3px;height:66px;margin-top:3px"></div>`
+    return `<div style="border:1px solid #ccc;border-radius:4px;padding:8px 10px;margin-bottom:9px;break-inside:avoid;page-break-inside:avoid">
+      <table style="width:100%;border-collapse:collapse;font-size:12px"><tbody><tr>
+        <td style="font-weight:700;width:38%">${i + 1}. ${esc(p.product)}</td>
+        <td style="width:22%">Amount/Tank: <b>${p.amt ?? '—'} ${esc(p.unit || '')}</b></td>
+        <td style="width:18%">Total: <b>${p.total ?? '—'} ${esc(p.unit || '')}</b></td>
+        <td style="width:22%">Rate: ${rateCell}</td>
+      </tr></tbody></table>
+      ${info}${mathBox}
+    </div>`
+  }).join('')
+
+  const g = (v) => (v == null || v === '' ? '—' : esc(v))
+  return `<div style="font-family:Arial,sans-serif;color:#111">
+    <div style="text-align:center;border-bottom:2px solid #16291F;padding-bottom:9px;margin-bottom:12px">
+      <div style="font-size:18px;font-weight:700">${esc(courseInfo.clubName || 'Golf Club')}</div>
+      <div style="font-size:12px;color:#555">${esc(courseInfo.deptName || 'Grounds Operations')} — Spray Sheet · Intern Training Worksheet${answers ? ' (ANSWER KEY)' : ''}</div>
+    </div>
+    <table style="${tbl}"><tbody>
+      <tr><td style="${L}">Trainee</td><td style="${V}">${answers ? '—' : '________________________'}</td><td style="${L}">Date</td><td style="${V}">${answers ? esc(sheet.date) : '____________'}</td></tr>
+      <tr><td style="${L}">Area</td><td style="${V}">${g(sheet.area)}</td><td style="${L}">Setup / Sprayer</td><td style="${V}">${g(area.name)}</td></tr>
+      <tr><td style="${L}">Gal / Acre</td><td style="${V}">${g(area.sprayRate)}</td><td style="${L}">Tank size</td><td style="${V}">${area.galTank ? esc(area.galTank) + ' gal' : '—'}</td></tr>
+      <tr><td style="${L}">Sq ft / Tank</td><td style="${V}">${area.sqft ? Number(area.sqft).toLocaleString() : '—'}</td><td style="${L}">Tanks</td><td style="${V}">${g(sheet.tanks)}</td></tr>
+      <tr><td style="${L}">Nozzle</td><td style="${V}">${g(area.nozzle)}</td><td style="${L}">PSI / Gear</td><td style="${V}">${g(area.psi)}${area.gear ? ' · ' + esc(area.gear) : ''}</td></tr>
+    </tbody></table>
+    <div style="border:1px solid #C9A84C;background:#FBF6E7;border-radius:4px;padding:8px 10px;margin-bottom:12px;font-size:11px">
+      <b>Your task:</b> For each product — (1) identify what it <b>is</b> (type) and what it <b>does</b>, and (2) work the <b>rate</b> backwards from the Amount/Tank using the setup figures above. Show your math.
+    </div>
+    ${blocks}
+    <p style="font-size:9px;color:#888;margin-top:14px;text-align:center">${answers ? 'Answer key · ' : 'Training worksheet · '}${esc(courseInfo.clubName || '')} — printed ${esc(new Date().toLocaleDateString())}</p>
   </div>`
 }
 
@@ -8693,6 +8752,48 @@ function SpeedRow({ c, onUpdate, onDelete }) {
       <button onClick={start} className="font-display text-base font-bold text-slate-900 shrink-0 hover:opacity-70 transition" title="Tap to edit">{fmtStimp(c.speed)}</button>
       <button onClick={start} className="text-slate-300 hover:text-slate-600 transition shrink-0" aria-label="Edit"><Pencil size={14} /></button>
       <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+    </div>
+  )
+}
+
+// Training — print any spray sheet as an intern worksheet (rate blanked, room to
+// research the product and work the rate backwards), plus a trainer answer key.
+function TrainingTab({ sheets = [], products = [], areas = {}, courseInfo = {} }) {
+  const [q, setQ] = useState('')
+  const list = [...(sheets || [])].filter((s) => (s.products || []).some((p) => p.product)).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  const shown = q ? list.filter((s) => `${s.area} ${s.date}`.toLowerCase().includes(q.toLowerCase())) : list
+  const printFor = (s, answers) => {
+    const area = resolveArea(areas, s.area) || areas[Object.keys(areas)[0]] || {}
+    printRecordHTML(sheetTrainingHTML(s, area, products, courseInfo, { answers }))
+  }
+  return (
+    <div className="max-w-3xl space-y-4">
+      <div>
+        <h2 className="font-display text-lg font-semibold text-slate-900">Training</h2>
+        <p className="font-body text-xs text-slate-400 mt-0.5">Print any spray sheet as an intern worksheet — the rate is blanked so they work it <b>backwards</b> from the amount per tank, with space to research what each product is and does. Print the answer key for yourself.</p>
+      </div>
+      <div className="bg-white rounded-2xl border-2 p-3 shadow-sm" style={{ borderColor: GOLD }}>
+        <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ backgroundColor: '#F8FAF9' }}>
+          <Search size={15} className="text-slate-400 shrink-0" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search sheets — area or date…" className="w-full bg-transparent outline-none font-body text-sm" />
+        </div>
+      </div>
+      {shown.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No spray sheets yet — build one in Spray Sheets and it'll show here to print for training.</div>
+      ) : (
+        <div className="space-y-2">
+          {shown.map((s) => (
+            <div key={s.id} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3 flex-wrap">
+              <div className="min-w-0 flex-1">
+                <p className="font-body text-sm font-semibold text-slate-800 truncate">{s.area}</p>
+                <p className="font-body text-[11px] text-slate-400">{fmtDate(s.date)} · {(s.products || []).filter((p) => p.product).length} products{s.operator ? ` · ${s.operator}` : ''}</p>
+              </div>
+              <button onClick={() => printFor(s, false)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}><Printer size={13} />Worksheet</button>
+              <button onClick={() => printFor(s, true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full shrink-0" style={{ color: FOREST, border: '1px solid #E2E8F0' }}>Answer key</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
