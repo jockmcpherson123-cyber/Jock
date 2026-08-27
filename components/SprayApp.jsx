@@ -268,13 +268,13 @@ const NAV_MANAGER = [
     { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
   ] },
   { title: 'Agronomy', items: [
-    { id: 'data', label: 'Field Data', m: 'turf', r: 'data', follow: true },
-    { id: 'gdd', label: 'GDD & Growth', m: 'turf', r: 'gdd', follow: true },
+    { id: 'data', label: 'Field Data', m: 'turf', r: 'data', follow: true, noAll: true },
+    { id: 'gdd', label: 'GDD & Growth', m: 'turf', r: 'gdd', follow: true, noAll: true },
     { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting', follow: true },
     { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
-    { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true },
+    { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true, noAll: true },
     { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc', follow: true },
-    { id: 'practices', label: 'Practices', m: 'turf', r: 'practices', follow: true },
+    { id: 'practices', label: 'Practices', m: 'turf', r: 'practices', follow: true, noAll: true },
     { id: 'reference', label: 'Reference', m: 'turf', r: 'knowledge' },
   ] },
   { title: 'Course & Crew', items: [
@@ -346,6 +346,11 @@ export default function SprayApp({ user }) {
 
   const pick = (item) => { setSel(item); setSeq((s) => s + 1); setDrawer(false) }
   const showCourseBar = !!sel.follow && courses.length >= 2
+  // Screens flagged noAll always show one course — never the mixed "All" view.
+  // If we land on one while "All" is active, snap to the first course.
+  useEffect(() => {
+    if (sel.noAll && course === '' && courses.length >= 2) setCourse(courses[0].name)
+  }, [sel, course, courses])
 
   const Rail = ({ onPick }) => (
     <SidebarRail
@@ -386,7 +391,7 @@ export default function SprayApp({ user }) {
               rest. Defaults to All so nothing is hidden until you pick a course. */}
           {showCourseBar && (
             <div className="flex items-stretch h-10 shrink-0 border-b overflow-x-auto no-scrollbar" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
-              <CourseTab label="All" on={course === ''} onClick={() => setCourse('')} />
+              {!sel.noAll && <CourseTab label="All" on={course === ''} onClick={() => setCourse('')} />}
               {courses.map((c) => (
                 <CourseTab key={c.name} label={c.name} color={c.color} on={course === c.name} onClick={() => setCourse(c.name)} />
               ))}
@@ -8038,7 +8043,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
   // Per-product suppression-curve model (GreenKeeper-style): for each area with a
   // regulating spray, walk each product's own curve at the area's GDD-since.
   const areaSurface = (name) => { const s = String(name || '').toLowerCase(); if (s.includes('green')) return 'green'; if (s.includes('tee')) return 'tee'; if (s.includes('fairway') || s.includes("f'way") || s.includes('fwy')) return 'fairway'; if (s.includes('rough')) return 'rough'; return 'green' }
-  const modelRows = Object.keys(regProdByArea).map((area) => {
+  const modelRows = Object.keys(regProdByArea).filter((area) => areas[area] !== undefined).map((area) => {
     const sk = areaSurface(area)
     const prods = Object.entries(regProdByArea[area]).map(([name, date]) => {
       const prod = (products || []).find((p) => p.name === name) || { name }
