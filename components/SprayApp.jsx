@@ -8213,7 +8213,7 @@ function TrendChart({ points = [], color = FERN, height = 120, unit = '', showAv
     .filter((p) => p.value != null && p.value !== '' && !isNaN(Number(p.value)))
     .map((p) => ({ date: p.date, value: Number(p.value) }))
   if (data.length === 0) return <p className="font-body text-[11px] text-slate-400">No data yet.</p>
-  const W = 320, padL = 6, padR = 6, padT = 14, padB = 4
+  const W = 560, padL = 6, padR = 6, padT = 14, padB = 4
   const vals = data.map((d) => d.value)
   const ref = refLine && refLine.value != null && !isNaN(Number(refLine.value)) ? Number(refLine.value) : null
   const scaleVals = ref != null ? [...vals, ref] : vals // keep the reference line in view
@@ -8227,7 +8227,7 @@ function TrendChart({ points = [], color = FERN, height = 120, unit = '', showAv
   const mean = vals.reduce((s, v) => s + v, 0) / n
   const last = data[n - 1]
   return (
-    <div style={{ maxWidth: 560 }}>
+    <div style={{ maxWidth: 760 }}>
       <svg viewBox={`0 0 ${W} ${height}`} width="100%" style={{ display: 'block', overflow: 'visible' }}>
         {ref != null && (
           <>

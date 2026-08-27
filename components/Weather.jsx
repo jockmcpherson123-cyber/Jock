@@ -780,7 +780,7 @@ function HourlyGraph({ raw, forecast }) {
         </div>
       )}
 
-      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full block" style={{ touchAction: 'none' }}
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full block" style={{ touchAction: 'none', maxWidth: 760 }}
         onPointerDown={onMove} onPointerMove={(e) => { if (e.buttons || e.pointerType === 'touch') onMove(e) }}>
         {/* 6am–noon spray window shading */}
         <rect x={x(6)} y={6} width={x(12) - x(6)} height={H - 26} fill="#3A6B4A" opacity="0.07" />
