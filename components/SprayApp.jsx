@@ -2552,26 +2552,6 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
   for (let i = 0; i < cells.length; i += 2) grid += `<tr>${cells[i]}${cells[i + 1] || '<td style="width:50%"></td>'}</tr>`
   const productsTable = `<table style="width:100%;border-collapse:collapse">${grid}</table>`
 
-  // "Check your math" — calibration + measure-out (the More-math additions).
-  const measureOutStr = (t, unit) => {
-    if (t == null) return '—'
-    const u = String(unit || '').toLowerCase()
-    if ((u === 'oz' || u === 'fl oz') && t >= 128) return `${Math.floor(t / 128)} gal + ${Math.round(t % 128)} oz`
-    return `${t} ${esc(unit || '')}`
-  }
-  const measureRows = rows.map((p) => `<tr>
-    <td style="padding:4px 0;font-size:12px;color:${FOR}">${esc(p.product)}</td>
-    <td style="padding:4px 0;font-size:12px;text-align:right;white-space:nowrap">Total <b>${p.total ?? '—'} ${esc(p.unit || '')}</b> &nbsp;→&nbsp; ${answers ? `<b style="color:${FOR}">${measureOutStr(p.total, p.unit)}</b>` : blank(120)}</td>
-  </tr>`).join('')
-  const mathCard = `<div style="${'background:#fff;border:1px solid ' + LINE + ';border-radius:12px;margin-bottom:9px'};padding:9px 14px">
-    <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};margin-bottom:6px">Check your math</div>
-    <div style="font-size:11.5px;color:${FOR}"><b>1. Sprayer calibration.</b> Verify the ${g(area.sprayRate)} gal/acre.
-      <span style="color:${MUT};font-size:10.5px">GPA = (5,940 × GPM per nozzle) ÷ (MPH × nozzle spacing in.). Show your work:</span></div>
-    <div style="border:1px solid ${LINE};border-radius:6px;height:${answers ? '24' : '40'}px;margin:4px 0 9px">${answers ? `<div style="padding:5px 8px;font-size:11px;color:${FOR}">Should come out to ≈ ${g(area.sprayRate)} gal/ac.</div>` : ''}</div>
-    <div style="font-size:11.5px;color:${FOR};margin-bottom:2px"><b>2. Measure-out.</b> How do you physically measure each product's total for the job?</div>
-    <table style="width:100%;border-collapse:collapse"><tbody>${measureRows}</tbody></table>
-  </div>`
-
   const card = `background:#fff;border:1px solid ${LINE};border-radius:12px;margin-bottom:9px`
   return `<div style="font-family:Arial,Helvetica,sans-serif;color:#1A1A16;background:#F7F5EF;padding:16px">
     <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px">
@@ -2591,8 +2571,6 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
 
     <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};margin:2px 0 4px">Products</div>
     ${productsTable}
-    <div style="height:9px"></div>
-    ${mathCard}
     <p style="font-size:9px;color:${MUT};margin-top:6px;text-align:center">${answers ? 'Answer key' : 'Training worksheet'} · ${esc(courseInfo.clubName || '')} — printed ${esc(new Date().toLocaleDateString())}</p>
   </div>`
 }
