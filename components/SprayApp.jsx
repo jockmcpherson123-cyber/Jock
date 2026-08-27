@@ -273,7 +273,6 @@ const NAV_MANAGER = [
     { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting', follow: true },
     { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
     { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true, noAll: true },
-    { id: 'om', label: 'Organic Matter', m: 'turf', r: 'om', follow: true, noAll: true },
     { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc', follow: true },
     { id: 'practices', label: 'Practices', m: 'turf', r: 'practices', follow: true, noAll: true },
     { id: 'reference', label: 'Reference', m: 'turf', r: 'knowledge' },
@@ -7530,14 +7529,13 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         )}
         {route === 'soil' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <SoilTestsTab soilTests={soilTests} areas={scopeAreas(turf.areas)} grassTypes={turf.grassTypes || []} soilTypes={turf.soilTypes || []} courseInfo={turf.courseInfo}
-              onAdd={async (t) => { await db.addSoilTest(t); await reloadSoilTests() }}
-              onUpdate={async (t) => { await db.updateSoilTest(t); await reloadSoilTests() }}
-              onDelete={async (id) => { await db.deleteSoilTest(id); await reloadSoilTests() }} />
-        )}
-        {route === 'om' && (
-          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <OrganicMatterTab courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} courseFilter={course} />
+          : <SoilLabScreen course={course}
+              soilTab={<SoilTestsTab soilTests={soilTests} areas={scopeAreas(turf.areas)} grassTypes={turf.grassTypes || []} soilTypes={turf.soilTypes || []} courseInfo={turf.courseInfo}
+                onAdd={async (t) => { await db.addSoilTest(t); await reloadSoilTests() }}
+                onUpdate={async (t) => { await db.updateSoilTest(t); await reloadSoilTests() }}
+                onDelete={async (id) => { await db.deleteSoilTest(id); await reloadSoilTests() }} />}
+              omTab={<OrganicMatterTab courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} courseFilter={course} />}
+            />
         )}
         {route === 'practices' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
@@ -8695,6 +8693,23 @@ function SpeedRow({ c, onUpdate, onDelete }) {
       <button onClick={start} className="font-display text-base font-bold text-slate-900 shrink-0 hover:opacity-70 transition" title="Tap to edit">{fmtStimp(c.speed)}</button>
       <button onClick={start} className="text-slate-300 hover:text-slate-600 transition shrink-0" aria-label="Edit"><Pencil size={14} /></button>
       <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+    </div>
+  )
+}
+
+// Soil-lab screen — one home for the two lab reports off the same sample:
+// fertility (MLSN nutrients) and organic matter by depth.
+function SoilLabScreen({ soilTab, omTab }) {
+  const [view, setView] = useState('fertility')
+  return (
+    <div>
+      <div className="flex gap-1.5 mb-4">
+        {[['fertility', 'Fertility · MLSN'], ['om', 'Organic Matter']].map(([k, label]) => (
+          <button key={k} onClick={() => setView(k)} className="font-body text-sm font-bold px-4 py-2 rounded-full transition"
+            style={view === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.1)' }}>{label}</button>
+        ))}
+      </div>
+      {view === 'fertility' ? soilTab : omTab}
     </div>
   )
 }
