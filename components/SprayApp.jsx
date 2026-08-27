@@ -15,7 +15,7 @@ import {
   Plus, Trash2, Calendar, User, ShieldCheck, Loader2, Droplet, CloudUpload,
   Check, ChevronRight, ChevronUp, ChevronDown, Cloud, Sprout, ClipboardList, TrendingUp, AlertTriangle,
   Package, Truck, MapPin, Sparkles, Wind, Thermometer, Search, X, Info, Menu, BarChart3, UserPlus, Clock, CloudRain, Image as ImageIcon, BookOpen, Target, Scissors, Gauge, Trophy,
-  Sun, CloudSun, CloudDrizzle, CloudSnow, CloudFog, CloudLightning, QrCode, Printer, Bug,
+  Sun, CloudSun, CloudDrizzle, CloudSnow, CloudFog, CloudLightning, QrCode, Printer, Bug, Pencil,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -35,7 +35,7 @@ import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { modelForProduct, regulationStatus, suppressionAt, combinedSuppression, surfaceCol, withTargets, PGR_MODELS, PHASE_STYLE } from '@/lib/pgrmodel'
 import { localDateISO } from '@/lib/dates'
 import { useMeasuredWidth } from '@/lib/useMeasuredWidth'
-import { fmtStimp, stimpToFeet } from '@/lib/greenspeed'
+import { fmtStimp, stimpToFeet, feetToParts } from '@/lib/greenspeed'
 import { mixPlan } from '@/lib/mix'
 import { sheetApplied } from '@/lib/applied'
 import { SearchSelect, MultiSelect } from '@/components/pickers'
@@ -7338,7 +7338,7 @@ function taskErrorText(e) {
 // One place for everything the crew collects on morning maintenance — moisture,
 // clipping yields, greens speed, scouting. This is also what the crew's no-login
 // QR page mirrors. Managers get a "Crew QR" button to print/share the link.
-function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse, course = '', onClip, onClipDel, onSpeed, onSpeedDel, onScout, onScoutUpd, onScoutDel }) {
+function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse, course = '', onClip, onClipDel, onSpeed, onSpeedUpd, onSpeedDel, onScout, onScoutUpd, onScoutDel }) {
   const [tab, setTab] = useState('moisture')
   const [qrOpen, setQrOpen] = useState(false)
   const tabs = [['moisture', 'Moisture'], ['clippings', 'Clipping Yields'], ['speed', 'Greens Speed'], ['scouting', 'Scouting']]
@@ -7368,7 +7368,7 @@ function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse
 
       {tab === 'moisture' && <WettingAgent key={course || 'all'} daily={daily} areas={areas} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} initialView="read" courseFilter={course} />}
       {tab === 'clippings' && <ClippingsTab key={course || 'all'} clippings={clippings} areas={areas} courseInfo={turf.courseInfo} onAddMany={onClip} onDelete={onClipDel} courseFilter={course} />}
-      {tab === 'speed' && <GreensSpeedTab key={course || 'all'} speeds={speeds} courseInfo={turf.courseInfo} onAddMany={onSpeed} onDelete={onSpeedDel} courseFilter={course} />}
+      {tab === 'speed' && <GreensSpeedTab key={course || 'all'} speeds={speeds} courseInfo={turf.courseInfo} onAddMany={onSpeed} onUpdate={onSpeedUpd} onDelete={onSpeedDel} courseFilter={course} />}
       {tab === 'scouting' && <ScoutingTab key={course || 'all'} scouting={scouting} areas={areas} courseInfo={turf.courseInfo} onAdd={onScout} onUpdate={onScoutUpd} onDelete={onScoutDel} courseFilter={course} />}
 
       {qrOpen && <DataQRModal courseInfo={turf.courseInfo} saveCourse={saveTurfCourse} onClose={() => setQrOpen(false)} />}
@@ -7505,6 +7505,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
               onClip={async (list) => { await db.addClippings(list); await reloadClippings() }}
               onClipDel={async (id) => { await db.deleteClipping(id); await reloadClippings() }}
               onSpeed={async (list) => { await db.addGreensSpeeds(list); await reloadSpeeds() }}
+              onSpeedUpd={async (id, patch) => { await db.updateGreensSpeed(id, patch); await reloadSpeeds() }}
               onSpeedDel={async (id) => { await db.deleteGreensSpeed(id); await reloadSpeeds() }}
               onScout={async (s) => { await db.addScouting(s); await reloadScouting() }}
               onScoutUpd={async (id, patch) => { await db.updateScouting(id, patch); await reloadScouting() }}
@@ -7538,6 +7539,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <GreensSpeedTab speeds={speeds} courseInfo={turf.courseInfo}
               onAddMany={async (list) => { await db.addGreensSpeeds(list); await reloadSpeeds() }}
+              onUpdate={async (id, patch) => { await db.updateGreensSpeed(id, patch); await reloadSpeeds() }}
               onDelete={async (id) => { await db.deleteGreensSpeed(id); await reloadSpeeds() }} />
         )}
         {route === 'scouting' && (
@@ -8457,7 +8459,7 @@ const speedErrorText = (e) => saveErrorText(e, 'supabase/phase18.sql')
 // ── GREENS SPEED (STIMPMETER) ───────────────────────────────────────────────
 // Log each green's speed (feet) by date. The win is consistency: the day's
 // spread across greens (fastest vs slowest) matters as much as the average.
-function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter = '' }) {
+function GreensSpeedTab({ speeds, courseInfo, onAddMany, onUpdate, onDelete, courseFilter = '' }) {
   const greenOptions = greenOptionsFor(courseInfo)
   const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
   const cfTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
@@ -8622,18 +8624,58 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter 
         ) : (
           <div className="space-y-2">
             {shown.map((c) => (
-              <div key={c.id} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="font-body text-sm font-semibold text-slate-800 truncate">{c.area}</p>
-                  <p className="font-body text-[11px] text-slate-400">{fmtDate(c.date)}{c.notes ? ` · ${c.notes}` : ''}</p>
-                </div>
-                <p className="font-display text-base font-bold text-slate-900 shrink-0">{fmtStimp(c.speed)}</p>
-                <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
-              </div>
+              <SpeedRow key={c.id} c={c} onUpdate={onUpdate} onDelete={onDelete} />
             ))}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// One greens-speed history row — tap the reading to fix a mistyped Stimp (ft + in).
+function SpeedRow({ c, onUpdate, onDelete }) {
+  const [edit, setEdit] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const parts = feetToParts(c.speed)
+  const [ft, setFt] = useState(String(parts.ft))
+  const [inch, setInch] = useState(String(parts.inch))
+
+  const start = () => { const p = feetToParts(c.speed); setFt(String(p.ft)); setInch(String(p.inch)); setEdit(true) }
+  const save = async () => {
+    if (busy) return
+    setBusy(true)
+    try { await onUpdate(c.id, { speed: stimpToFeet(ft, inch) }); setEdit(false) } catch (e) { console.error(e) }
+    setBusy(false)
+  }
+
+  if (edit) {
+    return (
+      <div className="bg-white rounded-2xl border p-3 shadow-sm flex items-center gap-3" style={{ borderColor: FERN }}>
+        <div className="min-w-0 flex-1">
+          <p className="font-body text-sm font-semibold text-slate-800 truncate">{c.area}</p>
+          <p className="font-body text-[11px] text-slate-400">{fmtDate(c.date)}</p>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <input type="number" inputMode="numeric" value={ft} onChange={(e) => setFt(e.target.value)} className="w-14 border border-slate-200 rounded-lg px-2 py-2 text-base font-semibold tnum text-center" />
+          <span className="font-body text-sm text-slate-400">'</span>
+          <input type="number" inputMode="numeric" min="0" max="11" value={inch} onChange={(e) => setInch(e.target.value)} className="w-14 border border-slate-200 rounded-lg px-2 py-2 text-base font-semibold tnum text-center" />
+          <span className="font-body text-sm text-slate-400">"</span>
+        </div>
+        <button onClick={save} disabled={busy} className="w-8 h-8 rounded-full flex items-center justify-center text-white shrink-0 disabled:opacity-50" style={{ backgroundColor: FERN }} aria-label="Save"><Check size={16} /></button>
+        <button onClick={() => setEdit(false)} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 shrink-0" aria-label="Cancel"><X size={16} /></button>
+      </div>
+    )
+  }
+  return (
+    <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="font-body text-sm font-semibold text-slate-800 truncate">{c.area}</p>
+        <p className="font-body text-[11px] text-slate-400">{fmtDate(c.date)}{c.notes ? ` · ${c.notes}` : ''}</p>
+      </div>
+      <button onClick={start} className="font-display text-base font-bold text-slate-900 shrink-0 hover:opacity-70 transition" title="Tap to edit">{fmtStimp(c.speed)}</button>
+      <button onClick={start} className="text-slate-300 hover:text-slate-600 transition shrink-0" aria-label="Edit"><Pencil size={14} /></button>
+      <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
     </div>
   )
 }
