@@ -2519,15 +2519,25 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
   for (let i = 0; i < specCells.length; i += 3) specRows += `<tr>${specCells.slice(i, i + 3).join('')}</tr>`
 
   const wline = 'border-bottom:1px solid #C7C5BE;height:16px'
+  const blank = (w) => `<span style="display:inline-block;border-bottom:1px solid #C7C5BE;min-width:${w}px">&nbsp;</span>`
   const productBlocks = rows.map((p, i) => {
-    const rate = answers ? `<b style="color:${FOR}">${esc(p.rate)} ${esc(p.basis || '')}</b>` : `<span style="color:${MUT}">________ per ________</span>`
+    const a = p.prodInfo.analysis || {}
+    const isFert = (Number(a.n) || 0) + (Number(a.p) || 0) + (Number(a.k) || 0) > 0
+    const npkStr = isFert ? `${a.n || 0}-${a.p || 0}-${a.k || 0}` : ''
+    const rate = answers ? `<b style="color:${FOR}">${esc(p.rate)} ${esc(p.basis || '')}</b>` : `<span style="color:${MUT}">______ per ______</span>`
+    const group = answers ? `<b style="color:${FOR}">${esc(p.prodInfo.moaGroup || '—')}</b>` : blank(70)
+    const forVal = answers ? `<b style="color:${FOR}">${esc(p.target || (p.prodInfo.targets || []).join(', ') || '—')}</b>` : blank(230)
+    // Mode-of-action group + what it's spraying for.
+    const moaLine = `<div style="font-size:11.5px;margin-top:4px;color:${FOR}">Rate: ${rate} &nbsp;&nbsp;·&nbsp;&nbsp; Group (FRAC/HRAC/PGR): ${group}</div>
+      <div style="font-size:11.5px;margin-top:5px;color:${FOR}">Spraying for: ${forVal}</div>
+      ${isFert ? `<div style="font-size:11.5px;margin-top:5px;color:${FOR}">Analysis ${esc(npkStr)} &nbsp;→&nbsp; lbs N / 1,000 ft²: ${answers ? blank(50) : blank(70)}</div>` : ''}`
     const writeArea = answers
-      ? `<div style="margin-top:6px;font-size:11px;color:#333"><b>Type:</b> ${esc(p.prodInfo.type || '—')} &nbsp;·&nbsp; <b>AI:</b> ${esc(p.prodInfo.activeIngredient || '—')}${(p.prodInfo.targets && p.prodInfo.targets.length) ? `<br><b>For:</b> ${esc(p.prodInfo.targets.join(', '))}` : ''}</div>`
-      : `<div style="margin-top:8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${MUT}">Product &amp; how it works</div>
+      ? `<div style="margin-top:6px;font-size:11px;color:#333"><b>Type:</b> ${esc(p.prodInfo.type || '—')} &nbsp;·&nbsp; <b>AI:</b> ${esc(p.prodInfo.activeIngredient || '—')}</div>`
+      : `<div style="margin-top:9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${MUT}">Product &amp; how it works</div>
          <div style="${wline};margin-top:10px"></div><div style="${wline};margin-top:14px"></div>
          <div style="display:flex;gap:10px;margin-top:12px;align-items:flex-start">
            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${MUT};padding-top:4px;white-space:nowrap">Rate math</div>
-           <div style="flex:1;border:1px solid ${LINE};border-radius:6px;height:58px"></div>
+           <div style="flex:1;border:1px solid ${LINE};border-radius:6px;height:56px"></div>
          </div>`
     return `<div style="padding:11px 0;border-top:1px solid #EDEBE5;break-inside:avoid;page-break-inside:avoid">
       <table style="width:100%;border-collapse:collapse"><tbody><tr>
@@ -2537,10 +2547,30 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
           <span style="display:inline-block;min-width:64px;text-align:center">${p.total ?? '—'} ${esc(p.unit || '')}</span>
         </td>
       </tr></tbody></table>
-      <div style="font-size:12px;margin-top:3px;color:${FOR}">Rate: ${rate}</div>
+      ${moaLine}
       ${writeArea}
     </div>`
   }).join('')
+
+  // "Check your math" — calibration + measure-out (the More-math additions).
+  const measureOutStr = (t, unit) => {
+    if (t == null) return '—'
+    const u = String(unit || '').toLowerCase()
+    if ((u === 'oz' || u === 'fl oz') && t >= 128) return `${Math.floor(t / 128)} gal + ${Math.round(t % 128)} oz`
+    return `${t} ${esc(unit || '')}`
+  }
+  const measureRows = rows.map((p) => `<tr>
+    <td style="padding:4px 0;font-size:12px;color:${FOR}">${esc(p.product)}</td>
+    <td style="padding:4px 0;font-size:12px;text-align:right;white-space:nowrap">Total <b>${p.total ?? '—'} ${esc(p.unit || '')}</b> &nbsp;→&nbsp; ${answers ? `<b style="color:${FOR}">${measureOutStr(p.total, p.unit)}</b>` : blank(120)}</td>
+  </tr>`).join('')
+  const mathCard = `<div style="${'background:#fff;border:1px solid ' + LINE + ';border-radius:12px;margin-bottom:12px'};padding:12px 14px">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};margin-bottom:8px">Check your math</div>
+    <div style="font-size:12px;color:${FOR}"><b>1. Sprayer calibration.</b> Verify the ${g(area.sprayRate)} gal/acre.<br>
+      <span style="color:${MUT};font-size:11px">GPA = (5,940 × GPM per nozzle) ÷ (MPH × nozzle spacing in inches). Show your work:</span></div>
+    <div style="border:1px solid ${LINE};border-radius:6px;height:${answers ? '30' : '64'}px;margin:5px 0 12px">${answers ? `<div style="padding:6px 8px;font-size:11px;color:${FOR}">Should come out to ≈ ${g(area.sprayRate)} gal/ac.</div>` : ''}</div>
+    <div style="font-size:12px;color:${FOR};margin-bottom:3px"><b>2. Measure-out.</b> How do you physically measure each product's total for the job?</div>
+    <table style="width:100%;border-collapse:collapse"><tbody>${measureRows}</tbody></table>
+  </div>`
 
   const card = `background:#fff;border:1px solid ${LINE};border-radius:12px;margin-bottom:12px`
   return `<div style="font-family:Arial,Helvetica,sans-serif;color:#1A1A16;background:#F7F5EF;padding:20px">
@@ -2569,6 +2599,7 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
       </tr></tbody></table>
       ${productBlocks}
     </div>
+    ${mathCard}
     <p style="font-size:9px;color:${MUT};margin-top:6px;text-align:center">${answers ? 'Answer key' : 'Training worksheet'} · ${esc(courseInfo.clubName || '')} — printed ${esc(new Date().toLocaleDateString())}</p>
   </div>`
 }
