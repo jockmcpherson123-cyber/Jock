@@ -8186,7 +8186,7 @@ function SuppressionCurve({ model, gdd, surfaceKind }) {
   const path = Array.from({ length: n + 1 }, (_, i) => { const g = (maxG * i) / n; const s = suppressionAt(model, g, surfaceKind); return `${i ? 'L' : 'M'}${xAt(g).toFixed(1)},${yAt(s).toFixed(1)}` }).join(' ')
   const curX = xAt(gdd)
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" style={{ display: 'block' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" style={{ display: 'block', maxWidth: 560 }}>
       {/* zero (regulation gone) line */}
       <line x1="0" y1={midY} x2={W} y2={midY} stroke="#E2E8F0" strokeWidth="1" strokeDasharray="3 3" />
       {/* reapply target line */}
@@ -8227,7 +8227,7 @@ function TrendChart({ points = [], color = FERN, height = 120, unit = '', showAv
   const mean = vals.reduce((s, v) => s + v, 0) / n
   const last = data[n - 1]
   return (
-    <div>
+    <div style={{ maxWidth: 560 }}>
       <svg viewBox={`0 0 ${W} ${height}`} width="100%" style={{ display: 'block', overflow: 'visible' }}>
         {ref != null && (
           <>

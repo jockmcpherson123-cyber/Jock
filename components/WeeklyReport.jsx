@@ -36,7 +36,7 @@ function TrendLine({ points, color = FERN }) {
   const line = points.map((p, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)},${yAt(p.v).toFixed(1)}`).join(' ')
   const area = `${line} L${xAt(points.length - 1).toFixed(1)},${(PADT + ih).toFixed(1)} L${xAt(0).toFixed(1)},${(PADT + ih).toFixed(1)} Z`
   return (
-    <svg viewBox={`0 0 ${VBW} ${VBH}`} width="100%" style={{ height: 'auto', display: 'block' }} preserveAspectRatio="none">
+    <svg viewBox={`0 0 ${VBW} ${VBH}`} width="100%" style={{ height: 'auto', display: 'block', maxWidth: 560 }} preserveAspectRatio="none">
       <path d={area} fill={`${color}18`} />
       <path d={line} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
       {points.map((p, i) => <circle key={i} cx={xAt(i)} cy={yAt(p.v)} r="2.1" fill={color} />)}
@@ -54,7 +54,7 @@ function TrendBars({ points, color = '#2563EB' }) {
   const bw = Math.min(26, (iw / points.length) * 0.7)
   const xAt = (i) => PADX + (i + 0.5) / points.length * iw
   return (
-    <svg viewBox={`0 0 ${VBW} ${VBH}`} width="100%" style={{ height: 'auto', display: 'block' }} preserveAspectRatio="none">
+    <svg viewBox={`0 0 ${VBW} ${VBH}`} width="100%" style={{ height: 'auto', display: 'block', maxWidth: 560 }} preserveAspectRatio="none">
       {points.map((p, i) => {
         const h = (p.v / hi) * ih
         return <rect key={i} x={xAt(i) - bw / 2} y={PADT + ih - h} width={bw} height={Math.max(1, h)} rx="1.5" fill={color} opacity="0.85" />

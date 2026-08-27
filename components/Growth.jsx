@@ -345,7 +345,7 @@ function GrowthChart({ gpSeries, modeledSeries, clipRows }) {
   }
   return (
     <div style={{ overflowX: 'auto' }}>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 420, display: 'block' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 420, maxWidth: 760, display: 'block' }}>
         {[0, 0.5, 1].map((g) => <line key={g} x1={padL} x2={W - padR} y1={yv(g)} y2={yv(g)} stroke={HAIR} strokeWidth="1" />)}
         <path d={area} fill="rgba(58,107,74,0.13)" />
         <path d={line} fill="none" stroke={FERN} strokeWidth="2" strokeLinejoin="round" />
