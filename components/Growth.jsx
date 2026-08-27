@@ -15,7 +15,7 @@
 // curves (lib/pgrmodel), spray history and the daily weather. Course-aware.
 import { useState } from 'react'
 import { useMeasuredWidth } from '@/lib/useMeasuredWidth'
-import { TrendingUp, TrendingDown, Info, Leaf, Activity } from 'lucide-react'
+import { TrendingUp, TrendingDown, Info, Leaf, Activity, ChevronDown } from 'lucide-react'
 import { gddSince } from '@/lib/weather'
 import { localDateISO } from '@/lib/dates'
 import { suppressionKind } from '@/lib/pgr'
@@ -149,7 +149,10 @@ export default function Growth({ daily = [], clippings = [], sheets = [], produc
   return (
     <div className="max-w-5xl">
       <h2 className="font-display text-lg font-semibold" style={{ color: INK }}>Growth Management{courseFilter ? ` — ${courseFilter}` : ''}</h2>
-      <p className="font-body text-xs mb-4" style={{ color: INK_3 }}>Growth Potential is the backdrop; the PGR program is the read-out. Measured on greens, modeled on the big areas.</p>
+      <p className="font-body text-xs mb-3" style={{ color: INK_3 }}>Growth Potential is the backdrop; the PGR program is the read-out. Measured on greens, modeled on the big areas.</p>
+
+      <HowToRead unit={unit} />
+
 
       {/* Surface selector */}
       {surfList.length > 1 && (
@@ -261,6 +264,44 @@ export default function Growth({ daily = [], clippings = [], sheets = [], produc
             </div>
             <span className="font-body text-[12px] pb-2" style={{ color: INK_3 }}>{unit} per reading</span>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Plain-language guide to the Growth view — collapsible, remembers its state.
+function HowToRead({ unit = 'L' }) {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem('growthHelpOpen') !== '0' } catch { return true }
+  })
+  const toggle = () => { setOpen((v) => { const n = !v; try { localStorage.setItem('growthHelpOpen', n ? '1' : '0') } catch { /* ignore */ } return n }) }
+  const Row = ({ term, children }) => (
+    <div className="flex gap-2">
+      <span className="shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: FERN }} />
+      <p className="font-body text-[13px] leading-relaxed" style={{ color: INK }}><b>{term}</b> — {children}</p>
+    </div>
+  )
+  return (
+    <div className="paper-card mb-4 overflow-hidden" style={{ padding: 0 }}>
+      <button onClick={toggle} className="w-full flex items-center gap-2 px-4 py-3 text-left">
+        <Info size={16} style={{ color: FERN }} />
+        <span className="font-body text-sm font-bold" style={{ color: INK }}>How to read this</span>
+        <ChevronDown size={16} className="ml-auto transition-transform" style={{ color: INK_3, transform: open ? 'rotate(180deg)' : 'none' }} />
+      </button>
+      {open && (
+        <div className="px-4 pb-4 pt-1 space-y-2.5" style={{ borderTop: `1px solid ${HAIR}` }}>
+          <p className="font-body text-[13px] leading-relaxed pt-2" style={{ color: INK_2 }}>
+            One question: <b>how fast is the grass trying to grow, and how much is your PGR holding it back?</b> Think of it as a car —
+            temperature is the gas pedal, your growth regulator is the brake, and the clippings are the speedometer.
+          </p>
+          <Row term="Growth Potential · today">the weather's vote — 0–100% of how much the plant <i>could</i> grow at today's temperature (a published turf model). High = warm and wanting to run; “low sugar” means it's cool or heat-stressed and making little energy.</Row>
+          <Row term="Clip volume · 5-day avg">the real ground truth on greens — how much you're actually mowing off, averaged over 5 days. Set a target range at the bottom of the page and this tile flags whether you're in it.</Row>
+          <Row term="Modeled growth · now">Growth Potential minus what your PGR is suppressing — the estimate of how hard the surface is really pushing today. On fairways and rough (where you don't collect clippings) this is your only read.</Row>
+          <Row term="Total clip-yield suppression">how much less you're clipping right now because of your growth regulators — all products combined (e.g. 14% fewer clippings than unregulated).</Row>
+          <Row term={`Est. clippings without PGRs (${unit})`}>what you'd be cutting if you weren't spraying — the mowing workload the program is saving you.</Row>
+          <Row term="Product table">each regulator's share of the suppression, with an arrow showing whether its effect is climbing (fresh spray) or fading (reapply due).</Row>
+          <Row term="Growth Potential · this season">the green line is the weather-driven growth curve across the year; the blue dots are your actual clipping readings, so you can see whether real growth is tracking the model. On modeled surfaces a gold line shows growth after the PGR.</Row>
         </div>
       )}
     </div>
