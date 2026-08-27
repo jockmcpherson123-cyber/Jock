@@ -115,7 +115,7 @@ export default function CommandCentre() {
     if (cs.length) {
       const day = cs.map((s) => s.date).sort().pop()
       const vals = cs.filter((s) => s.date === day).map((s) => Number(s.speed))
-      if (vals.length) speed = { avg: Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10, day }
+      if (vals.length) speed = { avg: Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100, day }
     }
     // Height of cut — from this course's greens area.
     let hoc = ''
@@ -233,7 +233,7 @@ function CourseCard({ course, metrics, state, onPatch }) {
 
       {/* Live stats */}
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <Stat icon={Gauge} label="Greens speed" value={metrics.speed ? metrics.speed.avg : '—'} unit="ft" />
+        <Stat icon={Gauge} label="Greens speed" value={metrics.speed ? metrics.speed.avg.toFixed(2) : '—'} unit="ft" />
         <Stat icon={Sprout} label="Height of cut" value={metrics.hoc ? String(metrics.hoc).replace(/\s*in$/i, '') : '—'} unit="in" />
         <EditStat label="Moisture tgt" value={moist} unit="% VWC" onCommit={(v) => { setMoist(v); onPatch({ moistureTgt: v }) }} onChange={setMoist} placeholder="—" />
       </div>

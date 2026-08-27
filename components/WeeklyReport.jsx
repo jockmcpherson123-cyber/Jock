@@ -231,7 +231,8 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const speedStat = (() => {
     const vals = speedsThis.map((s) => Number(s.speed)).filter((n) => !isNaN(n))
     if (!vals.length) return null
-    return { avg: round(avg(vals), 1), min: round(Math.min(...vals), 1), max: round(Math.max(...vals), 1), n: vals.length }
+    const f2 = (x) => Number(x).toFixed(2) // Stimp keeps hundredths (9.10, not 9.1)
+    return { avg: f2(avg(vals)), min: f2(Math.min(...vals)), max: f2(Math.max(...vals)), n: vals.length }
   })()
 
   const clipStat = (() => {

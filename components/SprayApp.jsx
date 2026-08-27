@@ -8460,6 +8460,8 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter 
   const greenOptions = greenOptionsFor(courseInfo)
   const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
   const cfTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+  // Stimp readings carry hundredths (a 9.10 is not a 9.1) — always show 2 decimals.
+  const ftFmt = (v) => (v == null || v === '' || isNaN(Number(v)) ? '—' : Number(v).toFixed(2))
   const barCourse = courseFilter ? (courseNames.find((n) => cfTok(n) === cfTok(courseFilter)) || courseFilter) : ''
   const hasCourses = courseNames.length >= 2 && !barCourse
   const [courseTab, setCourseTab] = useState(barCourse || courseNames[0] || 'all')
@@ -8502,7 +8504,7 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter 
   const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null
   const fast = nums.length ? Math.max(...nums) : null
   const slow = nums.length ? Math.min(...nums) : null
-  const spread = fast != null ? Math.round((fast - slow) * 10) / 10 : null
+  const spread = fast != null ? Math.round((fast - slow) * 100) / 100 : null
   const fastGreen = latestSet.find((s) => Number(s.speed) === fast)
   const slowGreen = latestSet.find((s) => Number(s.speed) === slow)
 
@@ -8535,7 +8537,7 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter 
               {[...selected].sort(sortGreens).map((g) => (
                 <div key={g}>
                   <span className="block font-body text-[11px] font-semibold text-slate-500 mb-1 truncate" title={g}>{shortGreen(g)}</span>
-                  <input type="number" step="0.1" inputMode="decimal" value={vals[g] ?? ''} onChange={(e) => setVal(g, e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base font-semibold tnum bg-white text-center" placeholder="10.5" />
+                  <input type="number" step="0.01" inputMode="decimal" value={vals[g] ?? ''} onChange={(e) => setVal(g, e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base font-semibold tnum bg-white text-center" placeholder="10.50" />
                 </div>
               ))}
             </div>
@@ -8567,17 +8569,17 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter 
           <div className="flex items-center justify-between">
             <div>
               <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Average speed · {fmtDate(latestDate)}</p>
-              <p className="font-display text-3xl font-bold mt-0.5">{avg.toFixed(1)} <span className="text-lg font-semibold opacity-80">ft</span></p>
+              <p className="font-display text-3xl font-bold mt-0.5">{avg.toFixed(2)} <span className="text-lg font-semibold opacity-80">ft</span></p>
             </div>
             <div className="text-right">
               <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Spread</p>
-              <p className="font-display text-2xl font-bold mt-0.5">{spread === 0 ? 'Even' : `${spread} ft`}</p>
+              <p className="font-display text-2xl font-bold mt-0.5">{spread === 0 ? 'Even' : `${spread.toFixed(2)} ft`}</p>
               <p className="font-body text-[10px] opacity-70">{nums.length} green{nums.length !== 1 ? 's' : ''}</p>
             </div>
           </div>
           {spread > 0 && fastGreen && slowGreen && (
             <p className="font-body text-[11px] opacity-80 mt-2 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.15)' }}>
-              Fastest {fastGreen.area.replace('Green ', '')} ({fast.toFixed(1)}) · Slowest {slowGreen.area.replace('Green ', '')} ({slow.toFixed(1)})
+              Fastest {fastGreen.area.replace('Green ', '')} ({fast.toFixed(2)}) · Slowest {slowGreen.area.replace('Green ', '')} ({slow.toFixed(2)})
             </p>
           )}
         </div>
@@ -8593,7 +8595,7 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter 
               <div key={area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-2">
                   <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
-                  <p className="font-body text-[10px] text-slate-400">{recent.length} reading{recent.length !== 1 ? 's' : ''} · latest {latest?.speed} ft</p>
+                  <p className="font-body text-[10px] text-slate-400">{recent.length} reading{recent.length !== 1 ? 's' : ''} · latest {ftFmt(latest?.speed)} ft</p>
                 </div>
                 <TrendChart points={recent.map((c) => ({ date: c.date, value: c.speed }))} unit="ft" />
               </div>
@@ -8620,7 +8622,7 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter 
                   <p className="font-body text-sm font-semibold text-slate-800 truncate">{c.area}</p>
                   <p className="font-body text-[11px] text-slate-400">{fmtDate(c.date)}{c.notes ? ` · ${c.notes}` : ''}</p>
                 </div>
-                <p className="font-display text-base font-bold text-slate-900 shrink-0">{c.speed} <span className="font-body text-[11px] font-medium text-slate-400">ft</span></p>
+                <p className="font-display text-base font-bold text-slate-900 shrink-0">{ftFmt(c.speed)} <span className="font-body text-[11px] font-medium text-slate-400">ft</span></p>
                 <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
               </div>
             ))}
@@ -9668,7 +9670,7 @@ function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, cli
       <button onClick={() => onGo('speed')} className="w-full bg-white rounded-2xl border border-black/5 p-4 shadow-sm flex items-center gap-3 text-left hover:shadow-md transition">
         <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#F0F6F2', color: FERN }}><Gauge size={16} /></span>
         <div className="min-w-0 flex-1">
-          <p className="font-body text-sm font-semibold text-slate-800">Greens Speed{speedAvg != null ? ` · ${speedAvg.toFixed(1)} ft avg` : ''}</p>
+          <p className="font-body text-sm font-semibold text-slate-800">Greens Speed{speedAvg != null ? ` · ${speedAvg.toFixed(2)} ft avg` : ''}</p>
           <p className="font-body text-[12px] text-slate-400">{speedAvg != null ? `${speedNums.length} green${speedNums.length !== 1 ? 's' : ''} · ${daysAgo(speedDate)}` : 'Log Stimpmeter readings to track consistency'}</p>
         </div>
         <ChevronRight size={18} className="text-slate-300 shrink-0" />
