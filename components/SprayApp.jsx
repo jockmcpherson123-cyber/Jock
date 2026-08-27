@@ -2512,9 +2512,9 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
     ['Nozzle', area.nozzle], ['PSI', area.psi], ['Gal / Tank', area.galTank],
     ['Spray Rate', area.sprayRate ? `${area.sprayRate} gal/ac` : null], ['Sq Ft', area.sqft ? Number(area.sqft).toLocaleString() : null], ['Acres', acres],
   ]
-  const specCells = specs.map(([l, v]) => `<td style="padding:7px 10px;vertical-align:top;width:33%">
-    <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT}">${esc(l)}</div>
-    <div style="font-size:14px;font-weight:700;color:${FOR};margin-top:1px">${g(v)}</div></td>`)
+  const specCells = specs.map(([l, v]) => `<td style="padding:3px 9px;vertical-align:middle;width:33%;white-space:nowrap">
+    <span style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT}">${esc(l)}</span>
+    <span style="font-size:12px;font-weight:700;color:${FOR};margin-left:6px">${g(v)}</span></td>`)
   let specRows = ''
   for (let i = 0; i < specCells.length; i += 3) specRows += `<tr>${specCells.slice(i, i + 3).join('')}</tr>`
 
@@ -2531,11 +2531,11 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
     const forVal = answers ? `<b style="color:${FOR}">${esc(p.target || (p.prodInfo.targets || []).join(', ') || '—')}</b>` : blank(120)
     const write = answers
       ? `<div style="margin-top:5px;font-size:10px;color:#333"><b>Type:</b> ${esc(p.prodInfo.type || '—')} · <b>AI:</b> ${esc(p.prodInfo.activeIngredient || '—')}</div>`
-      : `<div style="margin-top:5px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:${MUT}">Product &amp; how it works</div>
-         <div style="${wline};margin-top:7px"></div><div style="${wline};margin-top:10px"></div>
-         <div style="margin-top:6px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:${MUT}">Rate math</div>
-         <div style="border:1px solid ${LINE};border-radius:5px;height:34px;margin-top:3px"></div>`
-    return `<div style="border:1px solid ${LINE};border-radius:8px;padding:7px 9px">
+      : `<div style="margin-top:4px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:${MUT}">Product &amp; how it works</div>
+         <div style="${wline};margin-top:6px"></div><div style="${wline};margin-top:9px"></div>
+         <div style="margin-top:5px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:${MUT}">Rate math</div>
+         <div style="border:1px solid ${LINE};border-radius:5px;height:24px;margin-top:2px"></div>`
+    return `<div style="border:1px solid ${LINE};border-radius:8px;padding:6px 8px">
       <table style="width:100%;border-collapse:collapse"><tbody><tr>
         <td style="font-size:13px;font-weight:700;color:${FOR}">${i + 1}. ${esc(p.product)}</td>
         <td style="text-align:right;font-size:11px;font-weight:700;color:${FOR};white-space:nowrap">${p.amt ?? '—'} / ${p.total ?? '—'} ${esc(p.unit || '')}</td>
@@ -2547,7 +2547,7 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
       ${write}
     </div>`
   }
-  const cells = rows.map((p, i) => `<td style="width:50%;vertical-align:top;padding:4px">${cellHtml(p, i)}</td>`)
+  const cells = rows.map((p, i) => `<td style="width:50%;vertical-align:top;padding:3px">${cellHtml(p, i)}</td>`)
   let grid = ''
   for (let i = 0; i < cells.length; i += 2) grid += `<tr>${cells[i]}${cells[i + 1] || '<td style="width:50%"></td>'}</tr>`
   const productsTable = `<table style="width:100%;border-collapse:collapse">${grid}</table>`
@@ -2561,11 +2561,11 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
       </div>
       <div style="text-align:right;font-size:11px;color:${MUT}">Trainee ____________________<br>Date __________</div>
     </div>
-    <div style="font-size:12px;color:${MUT};margin-bottom:12px">Intern worksheet${answers ? ' · ANSWER KEY' : ''}</div>
+    <div style="font-size:11px;color:${MUT};margin-bottom:8px">Intern worksheet${answers ? ' · ANSWER KEY' : ''}</div>
 
-    <div style="${card};padding:2px 2px"><table style="width:100%;border-collapse:collapse"><tbody>${specRows}</tbody></table></div>
+    <div style="${card};padding:2px 2px;margin-bottom:7px"><table style="width:100%;border-collapse:collapse"><tbody>${specRows}</tbody></table></div>
 
-    <div style="border:1px solid ${GLD};background:#FBF6E7;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:#5B4A16">
+    <div style="border:1px solid ${GLD};background:#FBF6E7;border-radius:9px;padding:7px 11px;margin-bottom:8px;font-size:11px;color:#5B4A16">
       <b>Your task:</b> for each product, write down <b>what it is and how it works</b>, then work the <b>rate</b> backwards from the amount per tank (show your math).
     </div>
 
