@@ -2520,37 +2520,37 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
 
   const wline = 'border-bottom:1px solid #C7C5BE;height:13px'
   const blank = (w) => `<span style="display:inline-block;border-bottom:1px solid #C7C5BE;min-width:${w}px">&nbsp;</span>`
-  const productBlocks = rows.map((p, i) => {
+  // Two-column product cards — fills the page width and roughly halves the height
+  // so it prints wide on a single page instead of a tall skinny column.
+  const cellHtml = (p, i) => {
     const a = p.prodInfo.analysis || {}
     const isFert = (Number(a.n) || 0) + (Number(a.p) || 0) + (Number(a.k) || 0) > 0
     const npkStr = isFert ? `${a.n || 0}-${a.p || 0}-${a.k || 0}` : ''
     const rate = answers ? `<b style="color:${FOR}">${esc(p.rate)} ${esc(p.basis || '')}</b>` : `<span style="color:${MUT}">______ per ______</span>`
-    const group = answers ? `<b style="color:${FOR}">${esc(p.prodInfo.moaGroup || '—')}</b>` : blank(70)
-    const forVal = answers ? `<b style="color:${FOR}">${esc(p.target || (p.prodInfo.targets || []).join(', ') || '—')}</b>` : blank(230)
-    // Mode-of-action group + what it's spraying for.
-    const moaLine = `<div style="font-size:11.5px;margin-top:4px;color:${FOR}">Rate: ${rate} &nbsp;&nbsp;·&nbsp;&nbsp; Group (FRAC/HRAC/PGR): ${group}</div>
-      <div style="font-size:11.5px;margin-top:5px;color:${FOR}">Spraying for: ${forVal}</div>
-      ${isFert ? `<div style="font-size:11.5px;margin-top:5px;color:${FOR}">Analysis ${esc(npkStr)} &nbsp;→&nbsp; lbs N / 1,000 ft²: ${answers ? blank(50) : blank(70)}</div>` : ''}`
-    const writeArea = answers
-      ? `<div style="margin-top:6px;font-size:11px;color:#333"><b>Type:</b> ${esc(p.prodInfo.type || '—')} &nbsp;·&nbsp; <b>AI:</b> ${esc(p.prodInfo.activeIngredient || '—')}</div>`
-      : `<div style="margin-top:6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${MUT}">Product &amp; how it works</div>
-         <div style="${wline};margin-top:8px"></div><div style="${wline};margin-top:11px"></div>
-         <div style="display:flex;gap:10px;margin-top:8px;align-items:flex-start">
-           <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${MUT};padding-top:3px;white-space:nowrap">Rate math</div>
-           <div style="flex:1;border:1px solid ${LINE};border-radius:6px;height:40px"></div>
-         </div>`
-    return `<div style="padding:8px 0;border-top:1px solid #EDEBE5;break-inside:avoid;page-break-inside:avoid">
+    const group = answers ? `<b style="color:${FOR}">${esc(p.prodInfo.moaGroup || '—')}</b>` : blank(55)
+    const forVal = answers ? `<b style="color:${FOR}">${esc(p.target || (p.prodInfo.targets || []).join(', ') || '—')}</b>` : blank(120)
+    const write = answers
+      ? `<div style="margin-top:5px;font-size:10px;color:#333"><b>Type:</b> ${esc(p.prodInfo.type || '—')} · <b>AI:</b> ${esc(p.prodInfo.activeIngredient || '—')}</div>`
+      : `<div style="margin-top:5px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:${MUT}">Product &amp; how it works</div>
+         <div style="${wline};margin-top:7px"></div><div style="${wline};margin-top:10px"></div>
+         <div style="margin-top:6px;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:${MUT}">Rate math</div>
+         <div style="border:1px solid ${LINE};border-radius:5px;height:34px;margin-top:3px"></div>`
+    return `<div style="border:1px solid ${LINE};border-radius:8px;padding:7px 9px">
       <table style="width:100%;border-collapse:collapse"><tbody><tr>
-        <td style="font-size:15px;font-weight:700;color:${FOR}">${i + 1}. ${esc(p.product)}</td>
-        <td style="text-align:right;white-space:nowrap;font-size:14px;font-weight:700;color:${FOR}">
-          <span style="display:inline-block;min-width:78px;text-align:center">${p.amt ?? '—'} ${esc(p.unit || '')}</span>
-          <span style="display:inline-block;min-width:64px;text-align:center">${p.total ?? '—'} ${esc(p.unit || '')}</span>
-        </td>
+        <td style="font-size:13px;font-weight:700;color:${FOR}">${i + 1}. ${esc(p.product)}</td>
+        <td style="text-align:right;font-size:11px;font-weight:700;color:${FOR};white-space:nowrap">${p.amt ?? '—'} / ${p.total ?? '—'} ${esc(p.unit || '')}</td>
       </tr></tbody></table>
-      ${moaLine}
-      ${writeArea}
+      <div style="font-size:8px;color:${MUT};text-transform:uppercase;letter-spacing:.04em;text-align:right;margin-top:-1px">amt/tank · total</div>
+      <div style="font-size:11px;margin-top:4px;color:${FOR}">Rate: ${rate}</div>
+      <div style="font-size:11px;margin-top:3px;color:${FOR}">Group: ${group} &nbsp;·&nbsp; For: ${forVal}</div>
+      ${isFert ? `<div style="font-size:11px;margin-top:3px;color:${FOR}">${esc(npkStr)} → lbs N/1,000: ${blank(48)}</div>` : ''}
+      ${write}
     </div>`
-  }).join('')
+  }
+  const cells = rows.map((p, i) => `<td style="width:50%;vertical-align:top;padding:4px">${cellHtml(p, i)}</td>`)
+  let grid = ''
+  for (let i = 0; i < cells.length; i += 2) grid += `<tr>${cells[i]}${cells[i + 1] || '<td style="width:50%"></td>'}</tr>`
+  const productsTable = `<table style="width:100%;border-collapse:collapse">${grid}</table>`
 
   // "Check your math" — calibration + measure-out (the More-math additions).
   const measureOutStr = (t, unit) => {
@@ -2589,16 +2589,9 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
       <b>Your task:</b> for each product, write down <b>what it is and how it works</b>, then work the <b>rate</b> backwards from the amount per tank (show your math).
     </div>
 
-    <div style="${card};padding:4px 14px 10px">
-      <table style="width:100%;border-collapse:collapse;padding-top:8px"><tbody><tr>
-        <td style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};padding:10px 0 2px">Products</td>
-        <td style="text-align:right;white-space:nowrap;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};padding:10px 0 2px">
-          <span style="display:inline-block;min-width:78px;text-align:center">Amt / Tank</span>
-          <span style="display:inline-block;min-width:64px;text-align:center">Total</span>
-        </td>
-      </tr></tbody></table>
-      ${productBlocks}
-    </div>
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};margin:2px 0 4px">Products</div>
+    ${productsTable}
+    <div style="height:9px"></div>
     ${mathCard}
     <p style="font-size:9px;color:${MUT};margin-top:6px;text-align:center">${answers ? 'Answer key' : 'Training worksheet'} · ${esc(courseInfo.clubName || '')} — printed ${esc(new Date().toLocaleDateString())}</p>
   </div>`
