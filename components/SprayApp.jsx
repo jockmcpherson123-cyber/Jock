@@ -8220,7 +8220,7 @@ function SuppressionCurve({ model, gdd, surfaceKind }) {
 // Reusable mini line chart (pure SVG, no libraries). Feed it points in time order
 // and it draws a filled trend line with a dashed average and an emphasized latest
 // point — used for clipping yields and available for any other metric.
-function TrendChart({ points = [], color = FERN, height = 150, unit = '', showAvg = true, refLine = null }) {
+function TrendChart({ points = [], color = FERN, height = 150, unit = '', showAvg = true, refLine = null, baseline = null }) {
   const [wrapRef, W] = useMeasuredWidth(560)
   const data = points
     .filter((p) => p.value != null && p.value !== '' && !isNaN(Number(p.value)))
@@ -8229,8 +8229,17 @@ function TrendChart({ points = [], color = FERN, height = 150, unit = '', showAv
   const padL = 6, padR = 6, padT = 14, padB = 4
   const vals = data.map((d) => d.value)
   const ref = refLine && refLine.value != null && !isNaN(Number(refLine.value)) ? Number(refLine.value) : null
-  const scaleVals = ref != null ? [...vals, ref] : vals // keep the reference line in view
-  const min = Math.min(...scaleVals), max = Math.max(...scaleVals)
+  const scaleVals = [...vals]
+  if (ref != null) scaleVals.push(ref) // keep the reference line in view
+  if (baseline != null) scaleVals.push(baseline) // anchor the axis (e.g. 0 for volumes)
+  let min = Math.min(...scaleVals), max = Math.max(...scaleVals)
+  // Pad the range so points don't hug the top/bottom edges (which reads as
+  // "broken" when a small change fills the whole height). With a baseline the
+  // bottom stays anchored so the slope reflects the true size of the change.
+  const spanPad = (max - min) * 0.12 || Math.abs(max) * 0.1 || 1
+  max += spanPad
+  if (baseline != null) min = Math.min(min, baseline)
+  else min -= spanPad
   const range = max - min || Math.abs(max) || 1
   const n = data.length
   const X = (i) => padL + (n === 1 ? (W - padL - padR) / 2 : (i / (n - 1)) * (W - padL - padR))
@@ -8423,7 +8432,7 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete, cours
                   <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
                   <p className="font-body text-[10px] text-slate-400">{recent.length} log{recent.length !== 1 ? 's' : ''} · latest {latest?.volume} {latest?.unit}</p>
                 </div>
-                <TrendChart points={recent.map((c) => ({ date: c.date, value: c.volume }))} unit={latest?.unit || ''} />
+                <TrendChart points={recent.map((c) => ({ date: c.date, value: c.volume }))} unit={latest?.unit || ''} baseline={0} />
               </div>
             )
           })}
