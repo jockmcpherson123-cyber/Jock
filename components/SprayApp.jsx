@@ -2495,54 +2495,81 @@ function seasonReportHTML(allSheets, products, areas, courseInfo = {}, year) {
 // rate + product info for the trainer's answer key.
 function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opts = {}) {
   const answers = !!opts.answers
-  const L = 'border:1px solid #ccc;padding:5px 8px;background:#F0F0EA;font-weight:700;font-size:10px'
-  const V = 'border:1px solid #ccc;padding:5px 8px;font-size:11px'
-  const tbl = 'width:100%;border-collapse:collapse;margin-bottom:12px'
+  const FOR = '#16291F', MUT = '#8A8984', LINE = '#E2E0DB', GLD = '#C9A84C'
+  const g = (v) => (v == null || v === '' ? '—' : esc(v))
+  const acres = area.sqft ? (area.sqft / 43560).toFixed(2) : null
+
   const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p) => {
     const prodInfo = products.find((pr) => pr.name === p.product) || {}
     const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, area.sqft, p.forceGal)
     const total = amt != null ? Math.round(amt * (sheet.tanks || 1) * 10) / 10 : null
     return { ...p, amt, total, unit, prodInfo }
   })
-  const line = '__________________________'
-  const blocks = rows.map((p, i) => {
-    const rateCell = answers
-      ? `<b>${esc(p.rate)}</b> ${esc(p.basis || '')}`
-      : '______ per ______'
-    const info = answers
-      ? `<div style="font-size:10px;color:#333;margin-top:5px"><b>Type:</b> ${esc(p.prodInfo.type || '—')} &nbsp;·&nbsp; <b>AI:</b> ${esc(p.prodInfo.activeIngredient || '—')}${(p.prodInfo.targets && p.prodInfo.targets.length) ? ` &nbsp;·&nbsp; <b>For:</b> ${esc(p.prodInfo.targets.join(', '))}` : ''}</div>`
-      : `<div style="font-size:10.5px;margin-top:7px">What is it (type)? ${line}</div>
-         <div style="font-size:10.5px;margin-top:7px">What does it do? ${line}${line.slice(0, 12)}</div>`
-    const mathBox = answers ? '' : `<div style="font-size:10px;margin-top:7px;color:#555">Work the rate <b>backwards</b> from Amount/Tank — show your math:</div><div style="border:1px solid #bbb;border-radius:3px;height:66px;margin-top:3px"></div>`
-    return `<div style="border:1px solid #ccc;border-radius:4px;padding:8px 10px;margin-bottom:9px;break-inside:avoid;page-break-inside:avoid">
-      <table style="width:100%;border-collapse:collapse;font-size:12px"><tbody><tr>
-        <td style="font-weight:700;width:38%">${i + 1}. ${esc(p.product)}</td>
-        <td style="width:22%">Amount/Tank: <b>${p.amt ?? '—'} ${esc(p.unit || '')}</b></td>
-        <td style="width:18%">Total: <b>${p.total ?? '—'} ${esc(p.unit || '')}</b></td>
-        <td style="width:22%">Rate: ${rateCell}</td>
+
+  // Spec grid — the setup figures a trainee needs to work the rate back.
+  const specs = [
+    ['Date', sheet.date], ['Applicator', sheet.operator], ['Tanks', sheet.tanks],
+    ['Nozzle', area.nozzle], ['PSI', area.psi], ['Gal / Tank', area.galTank],
+    ['Spray Rate', area.sprayRate ? `${area.sprayRate} gal/ac` : null], ['Sq Ft', area.sqft ? Number(area.sqft).toLocaleString() : null], ['Acres', acres],
+  ]
+  const specCells = specs.map(([l, v]) => `<td style="padding:7px 10px;vertical-align:top;width:33%">
+    <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT}">${esc(l)}</div>
+    <div style="font-size:14px;font-weight:700;color:${FOR};margin-top:1px">${g(v)}</div></td>`)
+  let specRows = ''
+  for (let i = 0; i < specCells.length; i += 3) specRows += `<tr>${specCells.slice(i, i + 3).join('')}</tr>`
+
+  const wline = 'border-bottom:1px solid #C7C5BE;height:16px'
+  const productBlocks = rows.map((p, i) => {
+    const rate = answers ? `<b style="color:${FOR}">${esc(p.rate)} ${esc(p.basis || '')}</b>` : `<span style="color:${MUT}">________ per ________</span>`
+    const writeArea = answers
+      ? `<div style="margin-top:6px;font-size:11px;color:#333"><b>Type:</b> ${esc(p.prodInfo.type || '—')} &nbsp;·&nbsp; <b>AI:</b> ${esc(p.prodInfo.activeIngredient || '—')}${(p.prodInfo.targets && p.prodInfo.targets.length) ? `<br><b>For:</b> ${esc(p.prodInfo.targets.join(', '))}` : ''}</div>`
+      : `<div style="margin-top:8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${MUT}">Product &amp; how it works</div>
+         <div style="${wline};margin-top:10px"></div><div style="${wline};margin-top:14px"></div>
+         <div style="display:flex;gap:10px;margin-top:12px;align-items:flex-start">
+           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${MUT};padding-top:4px;white-space:nowrap">Rate math</div>
+           <div style="flex:1;border:1px solid ${LINE};border-radius:6px;height:58px"></div>
+         </div>`
+    return `<div style="padding:11px 0;border-top:1px solid #EDEBE5;break-inside:avoid;page-break-inside:avoid">
+      <table style="width:100%;border-collapse:collapse"><tbody><tr>
+        <td style="font-size:15px;font-weight:700;color:${FOR}">${i + 1}. ${esc(p.product)}</td>
+        <td style="text-align:right;white-space:nowrap;font-size:14px;font-weight:700;color:${FOR}">
+          <span style="display:inline-block;min-width:78px;text-align:center">${p.amt ?? '—'} ${esc(p.unit || '')}</span>
+          <span style="display:inline-block;min-width:64px;text-align:center">${p.total ?? '—'} ${esc(p.unit || '')}</span>
+        </td>
       </tr></tbody></table>
-      ${info}${mathBox}
+      <div style="font-size:12px;margin-top:3px;color:${FOR}">Rate: ${rate}</div>
+      ${writeArea}
     </div>`
   }).join('')
 
-  const g = (v) => (v == null || v === '' ? '—' : esc(v))
-  return `<div style="font-family:Arial,sans-serif;color:#111">
-    <div style="text-align:center;border-bottom:2px solid #16291F;padding-bottom:9px;margin-bottom:12px">
-      <div style="font-size:18px;font-weight:700">${esc(courseInfo.clubName || 'Golf Club')}</div>
-      <div style="font-size:12px;color:#555">${esc(courseInfo.deptName || 'Grounds Operations')} — Spray Sheet · Intern Training Worksheet${answers ? ' (ANSWER KEY)' : ''}</div>
+  const card = `background:#fff;border:1px solid ${LINE};border-radius:12px;margin-bottom:12px`
+  return `<div style="font-family:Arial,Helvetica,sans-serif;color:#1A1A16;background:#F7F5EF;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px">
+      <div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:${GLD}">${esc(courseInfo.clubName || 'Golf Club')} · Training</div>
+        <div style="font-size:24px;font-weight:800;color:${FOR};line-height:1.1">${g(sheet.area)}</div>
+      </div>
+      <div style="text-align:right;font-size:11px;color:${MUT}">Trainee ____________________<br>Date __________</div>
     </div>
-    <table style="${tbl}"><tbody>
-      <tr><td style="${L}">Trainee</td><td style="${V}">${answers ? '—' : '________________________'}</td><td style="${L}">Date</td><td style="${V}">${answers ? esc(sheet.date) : '____________'}</td></tr>
-      <tr><td style="${L}">Area</td><td style="${V}">${g(sheet.area)}</td><td style="${L}">Setup / Sprayer</td><td style="${V}">${g(area.name)}</td></tr>
-      <tr><td style="${L}">Gal / Acre</td><td style="${V}">${g(area.sprayRate)}</td><td style="${L}">Tank size</td><td style="${V}">${area.galTank ? esc(area.galTank) + ' gal' : '—'}</td></tr>
-      <tr><td style="${L}">Sq ft / Tank</td><td style="${V}">${area.sqft ? Number(area.sqft).toLocaleString() : '—'}</td><td style="${L}">Tanks</td><td style="${V}">${g(sheet.tanks)}</td></tr>
-      <tr><td style="${L}">Nozzle</td><td style="${V}">${g(area.nozzle)}</td><td style="${L}">PSI / Gear</td><td style="${V}">${g(area.psi)}${area.gear ? ' · ' + esc(area.gear) : ''}</td></tr>
-    </tbody></table>
-    <div style="border:1px solid #C9A84C;background:#FBF6E7;border-radius:4px;padding:8px 10px;margin-bottom:12px;font-size:11px">
-      <b>Your task:</b> For each product — (1) identify what it <b>is</b> (type) and what it <b>does</b>, and (2) work the <b>rate</b> backwards from the Amount/Tank using the setup figures above. Show your math.
+    <div style="font-size:12px;color:${MUT};margin-bottom:12px">Intern worksheet${answers ? ' · ANSWER KEY' : ''}</div>
+
+    <div style="${card};padding:2px 2px"><table style="width:100%;border-collapse:collapse"><tbody>${specRows}</tbody></table></div>
+
+    <div style="border:1px solid ${GLD};background:#FBF6E7;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:#5B4A16">
+      <b>Your task:</b> for each product, write down <b>what it is and how it works</b>, then work the <b>rate</b> backwards from the amount per tank (show your math).
     </div>
-    ${blocks}
-    <p style="font-size:9px;color:#888;margin-top:14px;text-align:center">${answers ? 'Answer key · ' : 'Training worksheet · '}${esc(courseInfo.clubName || '')} — printed ${esc(new Date().toLocaleDateString())}</p>
+
+    <div style="${card};padding:4px 14px 10px">
+      <table style="width:100%;border-collapse:collapse;padding-top:8px"><tbody><tr>
+        <td style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};padding:10px 0 2px">Products</td>
+        <td style="text-align:right;white-space:nowrap;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};padding:10px 0 2px">
+          <span style="display:inline-block;min-width:78px;text-align:center">Amt / Tank</span>
+          <span style="display:inline-block;min-width:64px;text-align:center">Total</span>
+        </td>
+      </tr></tbody></table>
+      ${productBlocks}
+    </div>
+    <p style="font-size:9px;color:${MUT};margin-top:6px;text-align:center">${answers ? 'Answer key' : 'Training worksheet'} · ${esc(courseInfo.clubName || '')} — printed ${esc(new Date().toLocaleDateString())}</p>
   </div>`
 }
 
