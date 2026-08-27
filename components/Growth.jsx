@@ -14,6 +14,7 @@
 // Reuses what the app already has: clipping yields, the PGR/DMI suppression
 // curves (lib/pgrmodel), spray history and the daily weather. Course-aware.
 import { useState } from 'react'
+import { useMeasuredWidth } from '@/lib/useMeasuredWidth'
 import { TrendingUp, TrendingDown, Info, Leaf, Activity } from 'lucide-react'
 import { gddSince } from '@/lib/weather'
 import { localDateISO } from '@/lib/dates'
@@ -322,7 +323,8 @@ function GpTile({ gpPct, warm }) {
 
 // GP area (0–100%) over the season; optional modeled "after PGR" line and clip dots.
 function GrowthChart({ gpSeries, modeledSeries, clipRows }) {
-  const W = 640, H = 150, padL = 4, padR = 4, padT = 8, padB = 18
+  const [wrapRef, W] = useMeasuredWidth(760)
+  const H = 170, padL = 4, padR = 4, padT = 8, padB = 18
   const iw = W - padL - padR, ih = H - padT - padB
   const dates = gpSeries.map((d) => d.date)
   const t0 = new Date(dates[0] + 'T00:00:00').getTime()
@@ -344,8 +346,8 @@ function GrowthChart({ gpSeries, modeledSeries, clipRows }) {
     cur.setMonth(cur.getMonth() + 1)
   }
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 420, maxWidth: 760, display: 'block' }}>
+    <div ref={wrapRef}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
         {[0, 0.5, 1].map((g) => <line key={g} x1={padL} x2={W - padR} y1={yv(g)} y2={yv(g)} stroke={HAIR} strokeWidth="1" />)}
         <path d={area} fill="rgba(58,107,74,0.13)" />
         <path d={line} fill="none" stroke={FERN} strokeWidth="2" strokeLinejoin="round" />

@@ -34,6 +34,7 @@ import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget, diseas
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { modelForProduct, regulationStatus, suppressionAt, combinedSuppression, surfaceCol, withTargets, PGR_MODELS, PHASE_STYLE } from '@/lib/pgrmodel'
 import { localDateISO } from '@/lib/dates'
+import { useMeasuredWidth } from '@/lib/useMeasuredWidth'
 import { mixPlan } from '@/lib/mix'
 import { sheetApplied } from '@/lib/applied'
 import { SearchSelect, MultiSelect } from '@/components/pickers'
@@ -8173,32 +8174,35 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
 // where you are today and the reapply line. Above the zero line = regulated,
 // below = rebound growth.
 function SuppressionCurve({ model, gdd, surfaceKind }) {
+  const [wrapRef, W] = useMeasuredWidth(560)
   if (!model) return null
   const target = model.gdd[surfaceCol(surfaceKind)] || model.gdd.green
   if (!target) return null
   const maxG = target * 2
-  const W = 320, H = 66, padT = 8, padB = 16
+  const H = 88, padT = 12, padB = 20
   const midY = (padT + (H - padB)) / 2
   const amp = ((H - padB) - padT) / 2
   const xAt = (g) => (Math.min(g, maxG) / maxG) * W
   const yAt = (s) => midY - (s / model.peak) * amp
-  const n = 48
+  const n = 96
   const path = Array.from({ length: n + 1 }, (_, i) => { const g = (maxG * i) / n; const s = suppressionAt(model, g, surfaceKind); return `${i ? 'L' : 'M'}${xAt(g).toFixed(1)},${yAt(s).toFixed(1)}` }).join(' ')
   const curX = xAt(gdd)
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" style={{ display: 'block', maxWidth: 560 }}>
-      {/* zero (regulation gone) line */}
-      <line x1="0" y1={midY} x2={W} y2={midY} stroke="#E2E8F0" strokeWidth="1" strokeDasharray="3 3" />
-      {/* reapply target line */}
-      <line x1={xAt(target)} y1={padT} x2={xAt(target)} y2={H - padB} stroke="#CBD5E1" strokeWidth="1" />
-      <text x={xAt(target)} y={H - 4} fontSize="8" fill="#94A3B8" textAnchor="middle" fontFamily="system-ui">reapply</text>
-      {/* suppression curve */}
-      <path d={path} fill="none" stroke={FERN} strokeWidth="2" />
-      {/* you-are-here */}
-      <line x1={curX} y1={padT} x2={curX} y2={H - padB} stroke="#B07A16" strokeWidth="1.5" />
-      <circle cx={curX} cy={yAt(suppressionAt(model, gdd, surfaceKind))} r="3.5" fill="#B07A16" />
-      <text x={Math.min(curX, W - 14)} y="7" fontSize="8" fill="#B07A16" textAnchor="middle" fontFamily="system-ui">today</text>
-    </svg>
+    <div ref={wrapRef}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
+        {/* zero (regulation gone) line */}
+        <line x1="0" y1={midY} x2={W} y2={midY} stroke="#E2E8F0" strokeWidth="1" strokeDasharray="3 3" />
+        {/* reapply target line */}
+        <line x1={xAt(target)} y1={padT} x2={xAt(target)} y2={H - padB} stroke="#CBD5E1" strokeWidth="1" />
+        <text x={xAt(target)} y={H - 6} fontSize="10" fill="#94A3B8" textAnchor="middle" fontFamily="system-ui">reapply</text>
+        {/* suppression curve */}
+        <path d={path} fill="none" stroke={FERN} strokeWidth="2" />
+        {/* you-are-here */}
+        <line x1={curX} y1={padT} x2={curX} y2={H - padB} stroke="#B07A16" strokeWidth="1.5" />
+        <circle cx={curX} cy={yAt(suppressionAt(model, gdd, surfaceKind))} r="4" fill="#B07A16" />
+        <text x={Math.min(Math.max(curX, 16), W - 16)} y="9" fontSize="10" fill="#B07A16" textAnchor="middle" fontFamily="system-ui">today</text>
+      </svg>
+    </div>
   )
 }
 
@@ -8208,12 +8212,13 @@ function SuppressionCurve({ model, gdd, surfaceKind }) {
 // Reusable mini line chart (pure SVG, no libraries). Feed it points in time order
 // and it draws a filled trend line with a dashed average and an emphasized latest
 // point — used for clipping yields and available for any other metric.
-function TrendChart({ points = [], color = FERN, height = 120, unit = '', showAvg = true, refLine = null }) {
+function TrendChart({ points = [], color = FERN, height = 150, unit = '', showAvg = true, refLine = null }) {
+  const [wrapRef, W] = useMeasuredWidth(560)
   const data = points
     .filter((p) => p.value != null && p.value !== '' && !isNaN(Number(p.value)))
     .map((p) => ({ date: p.date, value: Number(p.value) }))
-  if (data.length === 0) return <p className="font-body text-[11px] text-slate-400">No data yet.</p>
-  const W = 560, padL = 6, padR = 6, padT = 14, padB = 4
+  if (data.length === 0) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">No data yet.</p>
+  const padL = 6, padR = 6, padT = 14, padB = 4
   const vals = data.map((d) => d.value)
   const ref = refLine && refLine.value != null && !isNaN(Number(refLine.value)) ? Number(refLine.value) : null
   const scaleVals = ref != null ? [...vals, ref] : vals // keep the reference line in view
@@ -8227,8 +8232,8 @@ function TrendChart({ points = [], color = FERN, height = 120, unit = '', showAv
   const mean = vals.reduce((s, v) => s + v, 0) / n
   const last = data[n - 1]
   return (
-    <div style={{ maxWidth: 760 }}>
-      <svg viewBox={`0 0 ${W} ${height}`} width="100%" style={{ display: 'block', overflow: 'visible' }}>
+    <div ref={wrapRef}>
+      <svg viewBox={`0 0 ${W} ${height}`} width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
         {ref != null && (
           <>
             <line x1={padL} x2={W - padR} y1={Y(ref)} y2={Y(ref)} stroke={refLine.color || '#DC2626'} strokeWidth="1" strokeDasharray="2 2" />
