@@ -8337,9 +8337,12 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete, cours
     setBusy(false)
   }
 
-  const shown = filter === 'all' ? clippings : clippings.filter((c) => c.area === filter)
+  // Scope the history to the course bar (Blue/Gold), matched by first word of the
+  // green's name. "All" (no barCourse) shows everything.
+  const scoped = barCourse ? clippings.filter((c) => cfTok(c.area) === cfTok(barCourse)) : clippings
+  const shown = filter === 'all' ? scoped : scoped.filter((c) => c.area === filter)
   const byArea = {}
-  clippings.forEach((c) => { (byArea[c.area] = byArea[c.area] || []).push(c) })
+  scoped.forEach((c) => { (byArea[c.area] = byArea[c.area] || []).push(c) })
 
   return (
     <div className="space-y-4">
@@ -8488,9 +8491,13 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter 
     setBusy(false)
   }
 
+  // Scope every summary/history readout to the course bar (Blue/Gold), matched by
+  // the first word of the green's name. "All" (no barCourse) shows everything.
+  const scoped = barCourse ? speeds.filter((s) => cfTok(s.area) === cfTok(barCourse)) : speeds
+
   // Latest reading date and its spread across greens (consistency).
-  const latestDate = speeds.length ? speeds.map((s) => s.date).sort().pop() : null
-  const latestSet = latestDate ? speeds.filter((s) => s.date === latestDate && s.speed != null) : []
+  const latestDate = scoped.length ? scoped.map((s) => s.date).sort().pop() : null
+  const latestSet = latestDate ? scoped.filter((s) => s.date === latestDate && s.speed != null) : []
   const nums = latestSet.map((s) => Number(s.speed)).filter((n) => !isNaN(n))
   const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null
   const fast = nums.length ? Math.max(...nums) : null
@@ -8499,9 +8506,9 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onDelete, courseFilter 
   const fastGreen = latestSet.find((s) => Number(s.speed) === fast)
   const slowGreen = latestSet.find((s) => Number(s.speed) === slow)
 
-  const shown = filter === 'all' ? speeds : speeds.filter((c) => c.area === filter)
+  const shown = filter === 'all' ? scoped : scoped.filter((c) => c.area === filter)
   const byArea = {}
-  speeds.forEach((c) => { (byArea[c.area] = byArea[c.area] || []).push(c) })
+  scoped.forEach((c) => { (byArea[c.area] = byArea[c.area] || []).push(c) })
 
   return (
     <div className="space-y-4">
