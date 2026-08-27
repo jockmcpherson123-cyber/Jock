@@ -2518,7 +2518,7 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
   let specRows = ''
   for (let i = 0; i < specCells.length; i += 3) specRows += `<tr>${specCells.slice(i, i + 3).join('')}</tr>`
 
-  const wline = 'border-bottom:1px solid #C7C5BE;height:16px'
+  const wline = 'border-bottom:1px solid #C7C5BE;height:13px'
   const blank = (w) => `<span style="display:inline-block;border-bottom:1px solid #C7C5BE;min-width:${w}px">&nbsp;</span>`
   const productBlocks = rows.map((p, i) => {
     const a = p.prodInfo.analysis || {}
@@ -2533,13 +2533,13 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
       ${isFert ? `<div style="font-size:11.5px;margin-top:5px;color:${FOR}">Analysis ${esc(npkStr)} &nbsp;→&nbsp; lbs N / 1,000 ft²: ${answers ? blank(50) : blank(70)}</div>` : ''}`
     const writeArea = answers
       ? `<div style="margin-top:6px;font-size:11px;color:#333"><b>Type:</b> ${esc(p.prodInfo.type || '—')} &nbsp;·&nbsp; <b>AI:</b> ${esc(p.prodInfo.activeIngredient || '—')}</div>`
-      : `<div style="margin-top:9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${MUT}">Product &amp; how it works</div>
-         <div style="${wline};margin-top:10px"></div><div style="${wline};margin-top:14px"></div>
-         <div style="display:flex;gap:10px;margin-top:12px;align-items:flex-start">
-           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${MUT};padding-top:4px;white-space:nowrap">Rate math</div>
-           <div style="flex:1;border:1px solid ${LINE};border-radius:6px;height:56px"></div>
+      : `<div style="margin-top:6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${MUT}">Product &amp; how it works</div>
+         <div style="${wline};margin-top:8px"></div><div style="${wline};margin-top:11px"></div>
+         <div style="display:flex;gap:10px;margin-top:8px;align-items:flex-start">
+           <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${MUT};padding-top:3px;white-space:nowrap">Rate math</div>
+           <div style="flex:1;border:1px solid ${LINE};border-radius:6px;height:40px"></div>
          </div>`
-    return `<div style="padding:11px 0;border-top:1px solid #EDEBE5;break-inside:avoid;page-break-inside:avoid">
+    return `<div style="padding:8px 0;border-top:1px solid #EDEBE5;break-inside:avoid;page-break-inside:avoid">
       <table style="width:100%;border-collapse:collapse"><tbody><tr>
         <td style="font-size:15px;font-weight:700;color:${FOR}">${i + 1}. ${esc(p.product)}</td>
         <td style="text-align:right;white-space:nowrap;font-size:14px;font-weight:700;color:${FOR}">
@@ -2563,17 +2563,17 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
     <td style="padding:4px 0;font-size:12px;color:${FOR}">${esc(p.product)}</td>
     <td style="padding:4px 0;font-size:12px;text-align:right;white-space:nowrap">Total <b>${p.total ?? '—'} ${esc(p.unit || '')}</b> &nbsp;→&nbsp; ${answers ? `<b style="color:${FOR}">${measureOutStr(p.total, p.unit)}</b>` : blank(120)}</td>
   </tr>`).join('')
-  const mathCard = `<div style="${'background:#fff;border:1px solid ' + LINE + ';border-radius:12px;margin-bottom:12px'};padding:12px 14px">
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};margin-bottom:8px">Check your math</div>
-    <div style="font-size:12px;color:${FOR}"><b>1. Sprayer calibration.</b> Verify the ${g(area.sprayRate)} gal/acre.<br>
-      <span style="color:${MUT};font-size:11px">GPA = (5,940 × GPM per nozzle) ÷ (MPH × nozzle spacing in inches). Show your work:</span></div>
-    <div style="border:1px solid ${LINE};border-radius:6px;height:${answers ? '30' : '64'}px;margin:5px 0 12px">${answers ? `<div style="padding:6px 8px;font-size:11px;color:${FOR}">Should come out to ≈ ${g(area.sprayRate)} gal/ac.</div>` : ''}</div>
-    <div style="font-size:12px;color:${FOR};margin-bottom:3px"><b>2. Measure-out.</b> How do you physically measure each product's total for the job?</div>
+  const mathCard = `<div style="${'background:#fff;border:1px solid ' + LINE + ';border-radius:12px;margin-bottom:9px'};padding:9px 14px">
+    <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};margin-bottom:6px">Check your math</div>
+    <div style="font-size:11.5px;color:${FOR}"><b>1. Sprayer calibration.</b> Verify the ${g(area.sprayRate)} gal/acre.
+      <span style="color:${MUT};font-size:10.5px">GPA = (5,940 × GPM per nozzle) ÷ (MPH × nozzle spacing in.). Show your work:</span></div>
+    <div style="border:1px solid ${LINE};border-radius:6px;height:${answers ? '24' : '40'}px;margin:4px 0 9px">${answers ? `<div style="padding:5px 8px;font-size:11px;color:${FOR}">Should come out to ≈ ${g(area.sprayRate)} gal/ac.</div>` : ''}</div>
+    <div style="font-size:11.5px;color:${FOR};margin-bottom:2px"><b>2. Measure-out.</b> How do you physically measure each product's total for the job?</div>
     <table style="width:100%;border-collapse:collapse"><tbody>${measureRows}</tbody></table>
   </div>`
 
-  const card = `background:#fff;border:1px solid ${LINE};border-radius:12px;margin-bottom:12px`
-  return `<div style="font-family:Arial,Helvetica,sans-serif;color:#1A1A16;background:#F7F5EF;padding:20px">
+  const card = `background:#fff;border:1px solid ${LINE};border-radius:12px;margin-bottom:9px`
+  return `<div style="font-family:Arial,Helvetica,sans-serif;color:#1A1A16;background:#F7F5EF;padding:16px">
     <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px">
       <div>
         <div style="font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:${GLD}">${esc(courseInfo.clubName || 'Golf Club')} · Training</div>
@@ -8822,7 +8822,8 @@ function TrainingTab({ sheets = [], products = [], areas = {}, courseInfo = {} }
   const shown = q ? list.filter((s) => `${s.area} ${s.date}`.toLowerCase().includes(q.toLowerCase())) : list
   const printFor = (s, answers) => {
     const area = resolveArea(areas, s.area) || areas[Object.keys(areas)[0]] || {}
-    printRecordHTML(sheetTrainingHTML(s, area, products, courseInfo, { answers }))
+    // Scale-to-fit one page (same one-page printer the spray record uses).
+    printRecordSinglePage(sheetTrainingHTML(s, area, products, courseInfo, { answers }))
   }
   return (
     <div className="max-w-3xl space-y-4">
