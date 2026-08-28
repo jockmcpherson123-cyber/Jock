@@ -216,34 +216,38 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
               )
             })}
 
-            {/* Planned from the program (one card per area) */}
-            {Object.entries(plannedByArea).map(([area, items]) => (
-              <div key={area} className="paper-card p-4 flex items-center justify-between gap-3" style={{ borderColor: '#E8CE92' }}>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: GOLD }} />
-                    <p className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{area}</p>
-                    <span className="font-body text-[10px]" style={{ color: INK_3 }}>planned</span>
+            {/* Planned from the program (one card per area) — press the whole card
+                to open it as an editable spray sheet, dated this day. */}
+            {Object.entries(plannedByArea).map(([area, items]) => {
+              const Card = onCreateFromProgram ? 'button' : 'div'
+              return (
+                <Card key={area} onClick={onCreateFromProgram ? () => onCreateFromProgram(items) : undefined} className="w-full text-left paper-card p-4 flex items-center justify-between gap-3" style={{ borderColor: '#E8CE92' }}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: GOLD }} />
+                      <p className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{area}</p>
+                      <span className="font-body text-[10px]" style={{ color: INK_3 }}>planned</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {items.map((a, i) => {
+                        const code = moaOf[a.product]
+                        return (
+                          <span key={i} className="font-body text-[11px] px-2 py-0.5 rounded-md flex items-center gap-1" style={{ backgroundColor: '#FBF6E7', color: '#92660D' }}>
+                            {a.product}
+                            {code && <span className="font-bold opacity-70" style={{ fontSize: '9px' }}>· {code}</span>}
+                          </span>
+                        )
+                      })}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {items.map((a, i) => {
-                      const code = moaOf[a.product]
-                      return (
-                        <span key={i} className="font-body text-[11px] px-2 py-0.5 rounded-md flex items-center gap-1" style={{ backgroundColor: '#FBF6E7', color: '#92660D' }}>
-                          {a.product}
-                          {code && <span className="font-bold opacity-70" style={{ fontSize: '9px' }}>· {code}</span>}
-                        </span>
-                      )
-                    })}
-                  </div>
-                </div>
-                {onCreateFromProgram && (
-                  <button onClick={() => onCreateFromProgram(items)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white shrink-0 flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
-                    <Plus size={13} /> Create sheet
-                  </button>
-                )}
-              </div>
-            ))}
+                  {onCreateFromProgram && (
+                    <span className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white shrink-0 flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
+                      <Plus size={13} /> Open &amp; edit
+                    </span>
+                  )}
+                </Card>
+              )
+            })}
           </div>
         )}
       </div>
