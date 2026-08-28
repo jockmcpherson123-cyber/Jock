@@ -270,7 +270,7 @@ const NAV_MANAGER = [
   { title: 'Agronomy', items: [
     { id: 'data', label: 'Field Data', m: 'turf', r: 'data', follow: true, noAll: true },
     { id: 'gdd', label: 'GDD & Growth', m: 'turf', r: 'gdd', follow: true, noAll: true },
-    { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting', follow: true },
+    { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting', follow: true, noAll: true },
     { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
     { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true, noAll: true },
     { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc', follow: true },

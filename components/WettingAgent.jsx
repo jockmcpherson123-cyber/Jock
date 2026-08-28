@@ -301,7 +301,23 @@ function GreenCard({ green, m, onCalibrate }) {
       </div>
 
       {!m?.app ? (
-        <div className="px-4 py-5 font-body text-[12.5px]" style={{ color: INK_3 }}>No application logged yet.</div>
+        m?.current ? (
+          <div className="px-4 py-3">
+            <div className="flex items-end gap-6 flex-wrap">
+              <div>
+                <div className="font-body text-[10px] font-bold uppercase tracking-widest" style={{ color: INK_3 }}>Avg moisture</div>
+                <div className="font-display text-[19px] font-semibold tnum" style={{ color: INK }}>{m.current.avg != null ? `${m.current.avg}` : '—'}<span className="font-body text-[11px] font-semibold" style={{ color: INK_2 }}>{m.current.avg != null ? ' %VWC' : ''}</span></div>
+              </div>
+              <div>
+                <div className="font-body text-[10px] font-bold uppercase tracking-widest" style={{ color: INK_3 }}>Uniformity</div>
+                <div className="font-display text-[19px] font-semibold tnum" style={{ color: INK }}>{m.current.cv != null ? `${m.current.cv}%` : '—'}<span className="font-body text-[11px] font-semibold" style={{ color: INK_3 }}> CV</span></div>
+              </div>
+            </div>
+            <p className="font-body text-[11.5px] mt-1.5" style={{ color: INK_3 }}>Last reading {fmtShort(m.current.date)} · no wetting-agent application logged yet.</p>
+          </div>
+        ) : (
+          <div className="px-4 py-5 font-body text-[12.5px]" style={{ color: INK_3 }}>No application logged yet.</div>
+        )
       ) : (
         <>
           <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 1, backgroundColor: HAIR }}>
