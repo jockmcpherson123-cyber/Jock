@@ -193,8 +193,8 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
       </div>
 
       {/* sub-nav */}
-      <div className="flex gap-1.5 mb-5">
-        {[['overview', 'Overview'], ['read', 'Take readings'], ['setup', 'Setup']].map(([k, lab]) => (
+      <div className="flex gap-1.5 mb-5 flex-wrap">
+        {[['overview', 'Overview'], ['read', 'Take readings'], ['history', 'History'], ['setup', 'Setup']].map(([k, lab]) => (
           <button key={k} onClick={() => setView(k)} className="font-body text-sm font-bold px-4 py-2 rounded-full transition"
             style={view === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{lab}</button>
         ))}
@@ -205,6 +205,9 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
       )}
       {view === 'read' && (
         <TakeReadings greens={greens} models={models} products={products} location={location} onSave={save} wetting={wetting} />
+      )}
+      {view === 'history' && (
+        <History greens={greens} wetting={wetting} onSave={save} />
       )}
       {view === 'setup' && (
         <Setup greens={greens} products={products} courses={courses} onSave={save} wetting={wetting} />
@@ -587,7 +590,11 @@ function ReadingSheet({ green, model, location, wetting, onSave }) {
     if (!s.n) return
     // persist any newly-captured coordinates back onto the green
     const greens = (wetting.greens || []).map((g) => (g.id === green.id ? { ...g, points } : g))
-    const reading = { id: uid(), greenId: green.id, date: localDateISO(), values: points.map((p) => Number(vals[p.id])).filter(Number.isFinite), avg: s.avg, cv: s.cv }
+    // Store per-point values (with coordinates) so History can redraw the map.
+    const pointReads = points
+      .filter((p) => vals[p.id] !== '' && vals[p.id] != null && Number.isFinite(Number(vals[p.id])))
+      .map((p) => ({ label: p.label, lat: p.lat ?? null, lng: p.lng ?? null, value: Number(vals[p.id]) }))
+    const reading = { id: uid(), greenId: green.id, date: localDateISO(), values: pointReads.map((pr) => pr.value), avg: s.avg, cv: s.cv, pointReads }
     onSave({ greens, readings: [...(wetting.readings || []), reading] })
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
@@ -757,6 +764,76 @@ function Setup({ greens, products, courses, onSave, wetting }) {
           <input value={newProd} onChange={(e) => setNewProd(e.target.value)} placeholder="Add another product…" className="flex-1 rounded-lg px-3 py-2.5 text-sm font-body" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }} />
           <button onClick={addProd} className="font-body text-xs font-bold px-4 py-2.5 rounded-lg text-white flex items-center gap-1.5" style={{ backgroundColor: FERN }}><Plus size={14} /> Add</button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── HISTORY ─────────────────────────────────────────────────────────────────
+// Every past collection, newest first, by green + date — tap one to see its
+// moisture map (if points were GPS-set) and the per-point values.
+function History({ greens, wetting, onSave }) {
+  const nameOf = (id) => greens.find((g) => g.id === id)?.name || 'Green'
+  const reads = [...(wetting.readings || [])].sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.id).localeCompare(String(a.id)))
+  const [openId, setOpenId] = useState(reads[0]?.id || null)
+  const [filter, setFilter] = useState('all')
+  const shown = filter === 'all' ? reads : reads.filter((r) => r.greenId === filter)
+
+  const del = (id) => onSave({ readings: (wetting.readings || []).filter((r) => r.id !== id) })
+
+  if (!reads.length) return <div className="paper-card p-6 text-center font-body text-sm" style={{ color: INK_3 }}>No collections logged yet. Take a reading in <b>Take readings</b> and it'll show up here.</div>
+
+  return (
+    <div>
+      {greens.length > 1 && (
+        <div className="flex gap-1.5 mb-3 flex-wrap">
+          <button onClick={() => setFilter('all')} className="font-body text-xs font-bold px-3 py-1.5 rounded-full" style={filter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>All greens</button>
+          {greens.map((g) => (
+            <button key={g.id} onClick={() => setFilter(g.id)} className="font-body text-xs font-bold px-3 py-1.5 rounded-full" style={filter === g.id ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{g.name}</button>
+          ))}
+        </div>
+      )}
+      <div className="space-y-2">
+        {shown.map((r) => {
+          const open = openId === r.id
+          const pr = (r.pointReads || []).filter((x) => x.lat != null && x.lng != null)
+          const pts = pr.map((x, i) => ({ id: 'p' + i, label: x.label || `Point ${i + 1}`, lat: x.lat, lng: x.lng }))
+          const vmap = Object.fromEntries(pr.map((x, i) => ['p' + i, x.value]))
+          const list = (r.pointReads && r.pointReads.length) ? r.pointReads : (r.values || []).map((v, i) => ({ label: `Point ${i + 1}`, value: v }))
+          return (
+            <div key={r.id} className="paper-card overflow-hidden" style={{ padding: 0 }}>
+              <button onClick={() => setOpenId(open ? null : r.id)} className="w-full flex items-center gap-3 px-4 py-3 text-left">
+                <Droplet size={15} style={{ color: FERN }} className="shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-sm font-semibold" style={{ color: INK }}>{nameOf(r.greenId)}</p>
+                  <p className="font-body text-[11.5px]" style={{ color: INK_3 }}>{fmtShort(r.date)} · {(r.values || []).length} points</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="font-display text-base font-semibold tnum" style={{ color: INK }}>{r.avg != null ? `${r.avg}%` : '—'}</p>
+                  <p className="font-body text-[10.5px]" style={{ color: INK_3 }}>{r.cv != null ? `${r.cv}% spread` : ''}</p>
+                </div>
+                <ChevronRight size={16} style={{ color: INK_3, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} className="shrink-0" />
+              </button>
+              {open && (
+                <div className="px-4 pb-4" style={{ borderTop: `1px solid ${HAIR}` }}>
+                  {pts.length >= 1 && (
+                    <div className="mt-3 rounded-xl p-2" style={{ backgroundColor: '#F6F8F5', border: `1px solid ${HAIR}` }}>
+                      <GreenMap points={pts} vals={vmap} pos={null} nextId={null} heatOn={true} />
+                    </div>
+                  )}
+                  <div className="grid gap-x-4 gap-y-1 mt-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))' }}>
+                    {list.map((x, i) => (
+                      <div key={i} className="flex items-center justify-between font-body text-[12.5px] px-2 py-1 rounded" style={{ backgroundColor: PAPER }}>
+                        <span style={{ color: INK_2 }}>{x.label}</span><span className="font-semibold tnum" style={{ color: INK }}>{x.value}%</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={() => { if (confirm('Delete this collection?')) del(r.id) }} className="mt-3 font-body text-[11.5px] font-bold flex items-center gap-1" style={{ color: RED }}><Trash2 size={13} /> Delete collection</button>
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
