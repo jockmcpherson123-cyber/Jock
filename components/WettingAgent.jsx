@@ -419,6 +419,66 @@ function TakeReadings({ greens, models, location, onSave, wetting }) {
   )
 }
 
+// Project a cloud of lat/lng points into an SVG box (equirectangular, north-up).
+function buildProjection(coordPts, W, H, pad) {
+  const k = Math.cos((coordPts[0].lat * Math.PI) / 180)
+  const xs = coordPts.map((p) => p.lng * k)
+  const ys = coordPts.map((p) => -p.lat)
+  let minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys)
+  let spanX = maxX - minX, spanY = maxY - minY
+  const MIN = 1e-6
+  if (spanX < MIN) { minX -= MIN; maxX += MIN; spanX = 2 * MIN }
+  if (spanY < MIN) { minY -= MIN; maxY += MIN; spanY = 2 * MIN }
+  const scale = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY)
+  const offX = (W - spanX * scale) / 2
+  const offY = (H - spanY * scale) / 2
+  return (p) => ({ x: offX + (p.lng * k - minX) * scale, y: offY + (-p.lat - minY) * scale })
+}
+
+// Top-down map of the green's reading points: logged (green ✓), the next point
+// to walk to (gold), pending (outline), and your live GPS dot (blue) with a
+// dashed line to the next point. Tap a point to jump to its input.
+function GreenMap({ points, vals, pos, nextId, onPick }) {
+  const coordPts = points.filter((p) => p.lat != null && p.lng != null)
+  if (!coordPts.length) return null
+  const W = 320, H = 210, pad = 30
+  const toXY = buildProjection(coordPts, W, H, pad)
+  const mapped = coordPts.map((p) => ({ ...p, ...toXY(p) }))
+  const xsM = mapped.map((m) => m.x), ysM = mapped.map((m) => m.y)
+  const cx = (Math.min(...xsM) + Math.max(...xsM)) / 2, cy = (Math.min(...ysM) + Math.max(...ysM)) / 2
+  const rx = Math.min((Math.max(...xsM) - Math.min(...xsM)) / 2 + pad * 0.95, W / 2 - 2)
+  const ry = Math.min((Math.max(...ysM) - Math.min(...ysM)) / 2 + pad * 0.95, H / 2 - 2)
+  const posXY = pos ? toXY(pos) : null
+  const nextXY = nextId ? mapped.find((m) => m.id === nextId) : null
+  const numOf = (p, i) => { const m = String(p.label || '').match(/\d+/); return m ? m[0] : String(i + 1) }
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', maxWidth: 460, margin: '0 auto' }}>
+      <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="#E7F0E8" stroke="#CFE0D2" strokeWidth="1.5" />
+      {posXY && nextXY && <line x1={posXY.x} y1={posXY.y} x2={nextXY.x} y2={nextXY.y} stroke={GOLD} strokeWidth="1.5" strokeDasharray="4 3" />}
+      {mapped.map((m, i) => {
+        const logged = vals[m.id] !== '' && vals[m.id] != null
+        const isNext = m.id === nextId
+        const fill = logged ? FERN : isNext ? GOLD : 'white'
+        const stroke = logged ? FERN : isNext ? GOLD : FOREST
+        const txt = logged || isNext ? 'white' : FOREST
+        return (
+          <g key={m.id} onClick={() => onPick?.(m.id)} style={{ cursor: 'pointer' }}>
+            <circle cx={m.x} cy={m.y} r={isNext ? 13 : 11} fill={fill} stroke={stroke} strokeWidth={isNext ? 2.5 : 1.5} />
+            <text x={m.x} y={m.y + 3.6} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={txt} fontFamily="Inter,system-ui,sans-serif">{logged ? '✓' : numOf(m, i)}</text>
+          </g>
+        )
+      })}
+      {posXY && (
+        <>
+          <circle cx={posXY.x} cy={posXY.y} r="11" fill="#2563EB" fillOpacity="0.15" />
+          <circle cx={posXY.x} cy={posXY.y} r="5" fill="#2563EB" stroke="white" strokeWidth="2" />
+        </>
+      )}
+      <text x={W - 8} y="15" textAnchor="end" fontSize="9" fontWeight="700" fill={INK_3} fontFamily="Inter,system-ui,sans-serif">N ↑</text>
+    </svg>
+  )
+}
+
 function ReadingSheet({ green, model, location, wetting, onSave }) {
   // Build the point rows from the green's saved points (or a default count).
   const initialPoints = green.points && green.points.length
@@ -442,14 +502,23 @@ function ReadingSheet({ green, model, location, wetting, onSave }) {
     return () => { if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current) }
   }, [])
 
+  const inputRefs = useRef({})
   const setVal = (id, v) => setVals((prev) => ({ ...prev, [id]: v }))
   const capture = (id) => {
     if (!pos) return
     setPoints((prev) => prev.map((p) => (p.id === id ? { ...p, lat: pos.lat, lng: pos.lng } : p)))
   }
-  // next un-entered point that has coordinates → the one to walk to
-  const nextPoint = points.find((p) => p.lat != null && (vals[p.id] === '' || vals[p.id] == null))
+  const focusPoint = (id) => { const el = inputRefs.current[id]; if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus() } }
+  // The next point to walk to = the NEAREST un-entered point (so the route stops
+  // being random). Falls back to the first un-entered point without GPS.
+  const unlogged = points.filter((p) => p.lat != null && (vals[p.id] === '' || vals[p.id] == null))
+  const nextPoint = (() => {
+    if (!unlogged.length) return null
+    if (pos) { let best = null, bd = Infinity; for (const p of unlogged) { const d = distanceFt(pos, p) ?? Infinity; if (d < bd) { bd = d; best = p } } return best }
+    return unlogged[0]
+  })()
   const nextDist = nextPoint && pos ? distanceFt(pos, nextPoint) : null
+  const mapReady = points.some((p) => p.lat != null)
 
   const s = stats(points.map((p) => vals[p.id]))
   const entered = points.filter((p) => vals[p.id] !== '' && vals[p.id] != null).length
@@ -467,6 +536,16 @@ function ReadingSheet({ green, model, location, wetting, onSave }) {
 
   return (
     <div className="paper-card p-4">
+      {/* Top-down map of the green — where to walk next, at a glance */}
+      {mapReady && (
+        <div className="mb-3 rounded-xl p-2" style={{ backgroundColor: '#F6F8F5', border: `1px solid ${HAIR}` }}>
+          <GreenMap points={points} vals={vals} pos={pos} nextId={nextPoint?.id} onPick={focusPoint} />
+          <p className="font-body text-[10.5px] text-center mt-1" style={{ color: INK_3 }}>
+            <span style={{ color: GOLD, fontWeight: 700 }}>●</span> next &nbsp; <span style={{ color: FERN, fontWeight: 700 }}>●</span> logged &nbsp; <span style={{ color: '#2563EB', fontWeight: 700 }}>●</span> you · tap a point to enter it
+          </p>
+        </div>
+      )}
+
       {/* GPS guidance strip */}
       <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg" style={{ backgroundColor: BAND }}>
         {geoErr ? (
@@ -502,9 +581,10 @@ function ReadingSheet({ green, model, location, wetting, onSave }) {
               </button>
               {p.lat != null && <span className="font-body text-[10px] tnum shrink-0" style={{ color: INK_3 }}>{dist != null ? `${dist}ft` : 'GPS'}</span>}
               <input
+                ref={(el) => { inputRefs.current[p.id] = el }}
                 inputMode="decimal" value={vals[p.id] ?? ''} onChange={(e) => setVal(p.id, e.target.value)}
                 placeholder="%VWC"
-                className="ml-auto w-24 rounded-lg px-3 py-2 text-sm font-body tnum text-right" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }} />
+                className="ml-auto w-24 rounded-lg px-3 py-2 text-sm font-body tnum text-right" style={{ border: isNext ? `1px solid ${GOLD}` : `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }} />
             </div>
           )
         })}
