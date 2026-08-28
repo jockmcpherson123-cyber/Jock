@@ -435,47 +435,105 @@ function buildProjection(coordPts, W, H, pad) {
   return (p) => ({ x: offX + (p.lng * k - minX) * scale, y: offY + (-p.lat - minY) * scale })
 }
 
-// Top-down map of the green's reading points: logged (green ✓), the next point
-// to walk to (gold), pending (outline), and your live GPS dot (blue) with a
-// dashed line to the next point. Tap a point to jump to its input.
-function GreenMap({ points, vals, pos, nextId, onPick }) {
+// Moisture colour ramp: 0 = dry (red) · 0.5 = mid (green) · 1 = wet (blue).
+function heatRGB(t) {
+  const u = Math.max(0, Math.min(1, t))
+  const lerp = (a, b, k) => a + (b - a) * k
+  const red = [211, 63, 58], grn = [76, 175, 80], blu = [43, 108, 176]
+  const [a, b, k] = u < 0.5 ? [red, grn, u / 0.5] : [grn, blu, (u - 0.5) / 0.5]
+  return [lerp(a[0], b[0], k), lerp(a[1], b[1], k), lerp(a[2], b[2], k)]
+}
+
+// Top-down moisture map: the green's reading points on a soft heatmap of their
+// %VWC (blue wet → red dry, IDW-interpolated), value markers coloured to match,
+// the next point to walk to (gold ring), your live GPS dot, and a colour scale.
+// Tap a point to jump to its input.
+function GreenMap({ points, vals, pos, nextId, onPick, heatOn }) {
   const coordPts = points.filter((p) => p.lat != null && p.lng != null)
-  if (!coordPts.length) return null
+  const canvasRef = useRef(null)
   const W = 320, H = 210, pad = 30
-  const toXY = buildProjection(coordPts, W, H, pad)
-  const mapped = coordPts.map((p) => ({ ...p, ...toXY(p) }))
+  const toXY = coordPts.length ? buildProjection(coordPts, W, H, pad) : null
+  const mapped = toXY ? coordPts.map((p) => ({ ...p, ...toXY(p), val: (vals[p.id] !== '' && vals[p.id] != null && Number.isFinite(Number(vals[p.id]))) ? Number(vals[p.id]) : null })) : []
+  const valued = mapped.filter((m) => m.val != null)
+  const lo = valued.length ? Math.min(...valued.map((m) => m.val)) : 0
+  const hi = valued.length ? Math.max(...valued.map((m) => m.val)) : 1
+  const span = hi - lo || 1
+  const tOf = (v) => (v - lo) / span
+
   const xsM = mapped.map((m) => m.x), ysM = mapped.map((m) => m.y)
-  const cx = (Math.min(...xsM) + Math.max(...xsM)) / 2, cy = (Math.min(...ysM) + Math.max(...ysM)) / 2
-  const rx = Math.min((Math.max(...xsM) - Math.min(...xsM)) / 2 + pad * 0.95, W / 2 - 2)
-  const ry = Math.min((Math.max(...ysM) - Math.min(...ysM)) / 2 + pad * 0.95, H / 2 - 2)
-  const posXY = pos ? toXY(pos) : null
+  const cx = mapped.length ? (Math.min(...xsM) + Math.max(...xsM)) / 2 : W / 2
+  const cy = mapped.length ? (Math.min(...ysM) + Math.max(...ysM)) / 2 : H / 2
+  const rx = mapped.length ? Math.min((Math.max(...xsM) - Math.min(...xsM)) / 2 + pad * 0.95, W / 2 - 2) : W / 2 - 8
+  const ry = mapped.length ? Math.min((Math.max(...ysM) - Math.min(...ysM)) / 2 + pad * 0.95, H / 2 - 2) : H / 2 - 8
+  const posXY = pos && toXY ? toXY(pos) : null
   const nextXY = nextId ? mapped.find((m) => m.id === nextId) : null
   const numOf = (p, i) => { const m = String(p.label || '').match(/\d+/); return m ? m[0] : String(i + 1) }
+
+  // Paint the base green + IDW heatmap onto the canvas, clipped to the green.
+  useEffect(() => {
+    const cv = canvasRef.current
+    if (!cv) return
+    const ctx = cv.getContext('2d')
+    ctx.clearRect(0, 0, W, H)
+    ctx.save()
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.closePath()
+    ctx.fillStyle = '#E3EEDF'; ctx.fill(); ctx.clip()
+    if (heatOn && valued.length >= 3) {
+      const step = 5
+      for (let gy = 0; gy < H; gy += step) {
+        for (let gx = 0; gx < W; gx += step) {
+          let num = 0, den = 0
+          for (const m of valued) { const dx = gx - m.x, dy = gy - m.y; const d2 = dx * dx + dy * dy + 4; const w = 1 / (d2 * d2); num += w * m.val; den += w }
+          const [r, g, b] = heatRGB(tOf(num / den))
+          ctx.fillStyle = `rgba(${r | 0},${g | 0},${b | 0},0.72)`
+          ctx.fillRect(gx, gy, step, step)
+        }
+      }
+    }
+    ctx.restore()
+  }, [heatOn, cx, cy, rx, ry, lo, hi, JSON.stringify(valued.map((m) => [m.x, m.y, m.val]))]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!coordPts.length) return null
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', maxWidth: 460, margin: '0 auto' }}>
-      <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="#E7F0E8" stroke="#CFE0D2" strokeWidth="1.5" />
-      {posXY && nextXY && <line x1={posXY.x} y1={posXY.y} x2={nextXY.x} y2={nextXY.y} stroke={GOLD} strokeWidth="1.5" strokeDasharray="4 3" />}
-      {mapped.map((m, i) => {
-        const logged = vals[m.id] !== '' && vals[m.id] != null
-        const isNext = m.id === nextId
-        const fill = logged ? FERN : isNext ? GOLD : 'white'
-        const stroke = logged ? FERN : isNext ? GOLD : FOREST
-        const txt = logged || isNext ? 'white' : FOREST
-        return (
-          <g key={m.id} onClick={() => onPick?.(m.id)} style={{ cursor: 'pointer' }}>
-            <circle cx={m.x} cy={m.y} r={isNext ? 13 : 11} fill={fill} stroke={stroke} strokeWidth={isNext ? 2.5 : 1.5} />
-            <text x={m.x} y={m.y + 3.6} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={txt} fontFamily="Inter,system-ui,sans-serif">{logged ? '✓' : numOf(m, i)}</text>
-          </g>
-        )
-      })}
-      {posXY && (
-        <>
-          <circle cx={posXY.x} cy={posXY.y} r="11" fill="#2563EB" fillOpacity="0.15" />
-          <circle cx={posXY.x} cy={posXY.y} r="5" fill="#2563EB" stroke="white" strokeWidth="2" />
-        </>
-      )}
-      <text x={W - 8} y="15" textAnchor="end" fontSize="9" fontWeight="700" fill={INK_3} fontFamily="Inter,system-ui,sans-serif">N ↑</text>
-    </svg>
+    <div style={{ position: 'relative', maxWidth: 460, margin: '0 auto' }}>
+      <canvas ref={canvasRef} width={W} height={H} style={{ width: '100%', display: 'block', borderRadius: 10, filter: 'blur(3px)' }} />
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, display: 'block' }}>
+        <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke="#CFE0D2" strokeWidth="1.5" />
+        {posXY && nextXY && <line x1={posXY.x} y1={posXY.y} x2={nextXY.x} y2={nextXY.y} stroke={GOLD} strokeWidth="1.5" strokeDasharray="4 3" />}
+        {mapped.map((m, i) => {
+          const isNext = m.id === nextId
+          const has = m.val != null
+          const [r, g, b] = has ? heatRGB(tOf(m.val)) : [255, 255, 255]
+          const fill = has ? `rgb(${r | 0},${g | 0},${b | 0})` : 'white'
+          const stroke = isNext ? GOLD : has ? 'white' : FOREST
+          const label = has ? String(Math.round(m.val * 10) / 10) : numOf(m, i)
+          return (
+            <g key={m.id} onClick={() => onPick?.(m.id)} style={{ cursor: 'pointer' }}>
+              <circle cx={m.x} cy={m.y} r={isNext ? 13 : 11} fill={fill} stroke={stroke} strokeWidth={isNext ? 3 : 1.5} />
+              <text x={m.x} y={m.y + 3.4} textAnchor="middle" fontSize={has ? 9 : 10.5} fontWeight="700" fill={has ? 'white' : FOREST} fontFamily="Inter,system-ui,sans-serif" style={{ paintOrder: 'stroke', stroke: has ? 'rgba(0,0,0,0.25)' : 'none', strokeWidth: 0.5 }}>{label}</text>
+            </g>
+          )
+        })}
+        {posXY && (
+          <>
+            <circle cx={posXY.x} cy={posXY.y} r="11" fill="#2563EB" fillOpacity="0.15" />
+            <circle cx={posXY.x} cy={posXY.y} r="5" fill="#2563EB" stroke="white" strokeWidth="2" />
+          </>
+        )}
+        {/* colour scale (wet top → dry bottom) */}
+        {heatOn && valued.length >= 2 && (
+          <>
+            <defs><linearGradient id="wa-scale" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="rgb(43,108,176)" /><stop offset="0.5" stopColor="rgb(76,175,80)" /><stop offset="1" stopColor="rgb(211,63,58)" />
+            </linearGradient></defs>
+            <rect x={W - 16} y="18" width="8" height={H - 46} rx="4" fill="url(#wa-scale)" />
+            <text x={W - 12} y="14" textAnchor="middle" fontSize="8" fontWeight="700" fill={INK_3} fontFamily="Inter,system-ui,sans-serif">{Math.round(hi * 10) / 10}</text>
+            <text x={W - 12} y={H - 22} textAnchor="middle" fontSize="8" fontWeight="700" fill={INK_3} fontFamily="Inter,system-ui,sans-serif">{Math.round(lo * 10) / 10}</text>
+          </>
+        )}
+        <text x="10" y="15" fontSize="9" fontWeight="700" fill={INK_3} fontFamily="Inter,system-ui,sans-serif">N ↑</text>
+      </svg>
+    </div>
   )
 }
 
@@ -519,6 +577,8 @@ function ReadingSheet({ green, model, location, wetting, onSave }) {
   })()
   const nextDist = nextPoint && pos ? distanceFt(pos, nextPoint) : null
   const mapReady = points.some((p) => p.lat != null)
+  const [heatOn, setHeatOn] = useState(true)
+  const valuedCount = points.filter((p) => vals[p.id] !== '' && vals[p.id] != null).length
 
   const s = stats(points.map((p) => vals[p.id]))
   const entered = points.filter((p) => vals[p.id] !== '' && vals[p.id] != null).length
@@ -539,10 +599,15 @@ function ReadingSheet({ green, model, location, wetting, onSave }) {
       {/* Top-down map of the green — where to walk next, at a glance */}
       {mapReady && (
         <div className="mb-3 rounded-xl p-2" style={{ backgroundColor: '#F6F8F5', border: `1px solid ${HAIR}` }}>
-          <GreenMap points={points} vals={vals} pos={pos} nextId={nextPoint?.id} onPick={focusPoint} />
-          <p className="font-body text-[10.5px] text-center mt-1" style={{ color: INK_3 }}>
-            <span style={{ color: GOLD, fontWeight: 700 }}>●</span> next &nbsp; <span style={{ color: FERN, fontWeight: 700 }}>●</span> logged &nbsp; <span style={{ color: '#2563EB', fontWeight: 700 }}>●</span> you · tap a point to enter it
-          </p>
+          <GreenMap points={points} vals={vals} pos={pos} nextId={nextPoint?.id} onPick={focusPoint} heatOn={heatOn} />
+          <div className="flex items-center justify-center gap-3 mt-1.5 flex-wrap">
+            <button onClick={() => setHeatOn((v) => !v)} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5" style={heatOn ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: heatOn ? 'white' : INK_3, display: 'inline-block' }} /> {heatOn ? 'Heatmap on' : 'Show heatmap'}
+            </button>
+            <span className="font-body text-[10.5px]" style={{ color: INK_3 }}>
+              {valuedCount >= 3 ? <><span style={{ color: '#2b6cb0', fontWeight: 700 }}>■</span> wet &nbsp; <span style={{ color: '#4CAF50', fontWeight: 700 }}>■</span> mid &nbsp; <span style={{ color: '#d33f3a', fontWeight: 700 }}>■</span> dry · tap a point to enter it</> : 'Log 3+ points to see the heatmap · tap a point to enter it'}
+            </span>
+          </div>
         </div>
       )}
 
