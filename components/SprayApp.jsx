@@ -2331,7 +2331,7 @@ function reiHours(str) {
   const n = parseFloat(m[1])
   return /^d/i.test(m[2]) ? n * 24 : n
 }
-function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], courseInfo = {}) {
+function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], courseInfo = {}, location = {}) {
 
   // Partial fill is folded straight into each product's TOTAL so the sheet stays
   // one connected list (no separate extra-spray table).
@@ -2392,7 +2392,7 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
   }
 
   const sigArea = (v) => v ? `<img src="${v}" style="height:32px;max-width:100%;display:block;margin:6px 0 3px" />` : `<div style="border-bottom:1px solid #C7C5BE;height:26px;margin:6px 0 3px"></div>`
-  const appliedDate = sheet.completedAt ? new Date(sheet.completedAt).toLocaleDateString() : '—'
+  const appliedDate = sheet.completedAt ? new Date(sheet.completedAt).toLocaleString() : '—'
   const approvedDate = sheet.directorDate ? new Date(sheet.directorDate).toLocaleString() : '—'
   const submitted = sheet.createdAt ? `Submitted by ${esc(sheet.operator || '—')} · ${esc(new Date(sheet.createdAt).toLocaleDateString())}` : ''
   const partialNote = hasPartial ? `<div style="font-size:10px;color:${MUT};margin:6px 0 0">Totals include the ${esc(partialGal)} gal partial fill (${sheet.tanks || 1} full tank${(sheet.tanks || 1) !== 1 ? 's' : ''} + ${esc(partialGal)} gal).</div>` : ''
@@ -2404,6 +2404,7 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
         <div style="font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:${GLD}">${esc(courseInfo.clubName || 'Golf Club')} · Spray Record</div>
         <div style="font-size:26px;font-weight:800;color:${FOR};line-height:1.05">${g(sheet.area)}</div>
         <div style="font-size:12px;color:${MUT};margin-top:2px">${esc(niceDate)}</div>
+        ${location.address ? `<div style="font-size:11px;color:${MUT};margin-top:1px">${esc(courseInfo.clubName ? courseInfo.clubName + ' · ' : '')}${esc(location.address)}</div>` : ''}
       </div>
       <div style="text-align:right">${statusPill}</div>
     </div>
@@ -2931,7 +2932,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
   // Print / export this one record — built as isolated HTML so only this sheet
   // is ever output (fixes the "other sheets show up" + blank-PDF bugs).
   const [pdfBusy, setPdfBusy] = useState(false)
-  const buildRecordHtml = () => sheetRecordHTML(sheet, area, products, sheetTargets, courseInfo)
+  const buildRecordHtml = () => sheetRecordHTML(sheet, area, products, sheetTargets, courseInfo, location)
   const printRecord = () => printRecordSinglePage(buildRecordHtml())
   const exportPdf = async () => {
     setPdfBusy(true)
