@@ -757,6 +757,17 @@ function Setup({ greens, products, courses, onSave, wetting }) {
         <p className="font-body text-[11.5px] mt-2" style={{ color: INK_3 }}>Set the actual GPS spots on the green from <b>Take readings</b> — stand on each point and tap “Set”.</p>
       </div>
 
+      {/* Satellite map (Mapbox) */}
+      <div className="paper-card p-4">
+        <h3 className="font-display text-base font-semibold mb-1" style={{ color: INK }}>Satellite map</h3>
+        <p className="font-body text-[12.5px] mb-3" style={{ color: INK_3 }}>Paste a Mapbox <b>public token</b> (starts with <code>pk.</code>) and each green's aerial shows behind the moisture heatmap. Free tier is plenty — the image is fetched once per green. Get one free at mapbox.com → Account → Tokens.</p>
+        <input
+          defaultValue={wetting.mapboxToken || ''} onBlur={(e) => onSave({ mapboxToken: e.target.value.trim() })}
+          placeholder="pk.eyJ1Ijoi…" spellCheck={false} autoCapitalize="off" autoCorrect="off"
+          className="w-full rounded-lg px-3 py-2.5 text-sm font-body" style={{ border: `1px solid ${wetting.mapboxToken ? FERN : HAIR}`, backgroundColor: 'white', color: INK }} />
+        <p className="font-body text-[11px] mt-1.5" style={{ color: INK_3 }}>{wetting.mapboxToken ? '✓ Token saved — satellite base will turn on once wired.' : 'No token yet — the map uses a plain green shape until you add one.'}</p>
+      </div>
+
       {/* Products */}
       <div className="paper-card p-4">
         <h3 className="font-display text-base font-semibold mb-1" style={{ color: INK }}>Wetting agents</h3>
