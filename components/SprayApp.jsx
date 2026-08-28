@@ -2660,18 +2660,27 @@ async function printRecordSinglePage(bodyHtml) {
   }
   if (!dataUrl) { printRecordHTML(bodyHtml); return }
 
-  const iframe = document.createElement('iframe')
-  Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
-  document.body.appendChild(iframe)
-  const doc = iframe.contentWindow.document
-  doc.open()
-  // max-height (9.6in) sits under a US-Letter printable height so the single
-  // image always fits one page on Letter or A4, aspect ratio preserved.
-  doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.4in;size:portrait}html,body{margin:0;padding:0}img{display:block;margin:0 auto;max-width:100%;max-height:9.6in}</style></head><body><img src="${dataUrl}"></body></html>`)
-  doc.close()
-  const go = () => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }
-  const img = doc.images[0]
-  if (img && !img.complete) { img.onload = go; img.onerror = go; setTimeout(go, 1500) } else { setTimeout(go, 250) }
+  // Print from the MAIN document, not an iframe: iOS Safari ignores an iframe's
+  // print() and paginates the whole page. A scoped @media-print rule hides the
+  // app and shows only the single fitted image (max-height keeps it to one page).
+  const style = document.createElement('style')
+  style.textContent = `#spa-print-image{display:none}
+    @media print{
+      body.spa-print-image *{visibility:hidden !important}
+      body.spa-print-image #spa-print-image, body.spa-print-image #spa-print-image *{visibility:visible !important}
+      body.spa-print-image #spa-print-image{display:block !important;position:absolute;left:0;top:0;width:100%}
+      body.spa-print-image #spa-print-image img{display:block;margin:0 auto;max-width:100%;max-height:9.6in}
+      @page{margin:0.4in;size:portrait}
+    }`
+  document.head.appendChild(style)
+  let box = document.getElementById('spa-print-image')
+  if (!box) { box = document.createElement('div'); box.id = 'spa-print-image'; document.body.appendChild(box) }
+  box.innerHTML = `<img src="${dataUrl}" alt="record" />`
+  const cleanup = () => { document.body.classList.remove('spa-print-image'); box.remove(); style.remove() }
+  const run = () => { document.body.classList.add('spa-print-image'); window.print(); setTimeout(cleanup, 800) }
+  const img = box.querySelector('img')
+  if (img.complete) setTimeout(run, 60)
+  else { img.onload = () => setTimeout(run, 30); img.onerror = run }
 }
 
 // Wait for any <img> in an element to finish loading (signatures are data URLs

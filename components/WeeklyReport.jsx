@@ -318,24 +318,26 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     setBusy('')
   }
 
-  // Print the same one-page image the PDF uses, so a busy report never spills
-  // to 2–3 pages the way the browser's own pagination does.
+  // Print the same one-page image the PDF uses, so a busy report never spills to
+  // 2–3 pages. Rendered into the MAIN document (not an iframe) because iOS Safari
+  // ignores an iframe's print() and paginates the whole page instead.
   async function onPrint() {
     setBusy('print')
     try {
       const canvas = await captureCanvas()
       const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
-      const iframe = document.createElement('iframe')
-      Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
-      document.body.appendChild(iframe)
-      const doc = iframe.contentWindow.document
-      doc.open()
-      doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>@page{size:A4 portrait;margin:8mm}html,body{margin:0;padding:0}img{display:block;margin:0 auto;max-width:100%;max-height:277mm}</style></head><body><img src="${dataUrl}"></body></html>`)
-      doc.close()
-      const go = () => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }
-      const img = doc.images[0]
-      if (img && !img.complete) { img.onload = go; img.onerror = go; setTimeout(go, 1500) } else { setTimeout(go, 200) }
-    } catch (e) { console.error(e); showToast('Could not build the print'); window.print() }
+      let holder = document.getElementById('wr-print-image')
+      if (!holder) { holder = document.createElement('div'); holder.id = 'wr-print-image'; document.body.appendChild(holder) }
+      holder.innerHTML = `<img src="${dataUrl}" alt="Weekly report" />`
+      const img = holder.querySelector('img')
+      const run = () => {
+        document.body.classList.add('wr-print-image')
+        window.print()
+        setTimeout(() => { document.body.classList.remove('wr-print-image'); holder.innerHTML = '' }, 800)
+      }
+      if (img.complete) setTimeout(run, 60)
+      else { img.onload = () => setTimeout(run, 30); img.onerror = run }
+    } catch (e) { console.error(e); showToast('Could not build the print') }
     setBusy('')
   }
 
@@ -390,7 +392,16 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   return (
     <div>
       {/* Print rules: only the report prints, sized to one A4 page. */}
-      <style>{`@page { size: A4 portrait; margin: 8mm; } @media print { html, body { background: #fff !important; } body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: 100% !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; } #weekly-report .avoid-break { break-inside: avoid; } .no-print, .empty-hide-print { display: none !important; } }
+      <style>{`@page { size: A4 portrait; margin: 8mm; }
+      #wr-print-image { display: none; }
+      @media print { html, body { background: #fff !important; } body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: 100% !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; } #weekly-report .avoid-break { break-inside: avoid; } .no-print, .empty-hide-print { display: none !important; } }
+      /* One-page image print (iOS-safe: prints the MAIN document, not an iframe). */
+      @media print {
+        body.wr-print-image #weekly-report { display: none !important; }
+        body.wr-print-image #wr-print-image { display: block !important; visibility: visible !important; position: absolute; left: 0; top: 0; width: 100%; }
+        body.wr-print-image #wr-print-image * { visibility: visible !important; }
+        body.wr-print-image #wr-print-image img { display: block; margin: 0 auto; max-width: 100%; max-height: 277mm; }
+      }
       /* Applied only while capturing the PDF/email image — hides edit chrome + blank rows. */
       .wr-capturing .no-print, .wr-capturing .empty-hide-print, .wr-capturing .cap-hide { display: none !important; }`}</style>
 
