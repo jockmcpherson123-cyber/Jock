@@ -332,8 +332,12 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
       const img = holder.querySelector('img')
       const run = () => {
         document.body.classList.add('wr-print-image')
+        // iOS Safari's window.print() returns before the sheet renders, so DON'T
+        // tear down on a timer — wait for afterprint (with a long safety net).
+        const done = () => { window.removeEventListener('afterprint', done); document.body.classList.remove('wr-print-image'); holder.innerHTML = '' }
+        window.addEventListener('afterprint', done)
+        setTimeout(done, 60000)
         window.print()
-        setTimeout(() => { document.body.classList.remove('wr-print-image'); holder.innerHTML = '' }, 800)
       }
       if (img.complete) setTimeout(run, 60)
       else { img.onload = () => setTimeout(run, 30); img.onerror = run }

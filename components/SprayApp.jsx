@@ -2676,8 +2676,10 @@ async function printRecordSinglePage(bodyHtml) {
   let box = document.getElementById('spa-print-image')
   if (!box) { box = document.createElement('div'); box.id = 'spa-print-image'; document.body.appendChild(box) }
   box.innerHTML = `<img src="${dataUrl}" alt="record" />`
-  const cleanup = () => { document.body.classList.remove('spa-print-image'); box.remove(); style.remove() }
-  const run = () => { document.body.classList.add('spa-print-image'); window.print(); setTimeout(cleanup, 800) }
+  const cleanup = () => { window.removeEventListener('afterprint', cleanup); document.body.classList.remove('spa-print-image'); box.remove(); style.remove() }
+  // iOS Safari's window.print() returns before the sheet renders — tear down on
+  // afterprint, not a timer, or the image is gone before it prints.
+  const run = () => { document.body.classList.add('spa-print-image'); window.addEventListener('afterprint', cleanup); setTimeout(cleanup, 60000); window.print() }
   const img = box.querySelector('img')
   if (img.complete) setTimeout(run, 60)
   else { img.onload = () => setTimeout(run, 30); img.onerror = run }
