@@ -2332,12 +2332,6 @@ function reiHours(str) {
   return /^d/i.test(m[2]) ? n * 24 : n
 }
 function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], courseInfo = {}) {
-  const L = 'border:1px solid #ccc;padding:5px 8px;background:#F0F0EA;font-weight:700;width:15%'
-  const V = 'border:1px solid #ccc;padding:5px 8px;width:35%'
-  const TH = 'border:1px solid #16291F;padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;color:#fff'
-  const R = 'border:1px solid #ccc;padding:5px 8px'
-  const tbl = 'width:100%;border-collapse:collapse;font-size:11px;margin-bottom:12px'
-  const blank = '_______________________'
 
   // Partial fill is folded straight into each product's TOTAL so the sheet stays
   // one connected list (no separate extra-spray table).
@@ -2354,59 +2348,105 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
     const total = amt !== null ? Math.round((amt * (sheet.tanks || 1) + partialAmt) * 10) / 10 : null
     return { ...p, amt, total, unit, epaReg: prodInfo.epaReg, ai: prodInfo.activeIngredient, rei: prodInfo.rei, signalWord: prodInfo.signalWord }
   })
-  const productRows = rows.map((p, i) => {
-    const forLine = (p.target && String(p.target).trim()) ? `<div style="font-size:9px;color:#3A6B4A;margin-top:1px">For: ${esc(p.target)}</div>` : ''
-    const meta = [p.epaReg && `EPA Reg&nbsp;# ${esc(p.epaReg)}`, p.ai && `AI: ${esc(p.ai)}`, p.rei && `REI: ${esc(p.rei)}`, p.signalWord && esc(p.signalWord)].filter(Boolean).join(' · ')
-    const metaLine = meta ? `<div style="font-size:9px;color:#666;margin-top:1px">${meta}</div>` : ''
-    return `<tr style="background:${i % 2 === 0 ? '#fff' : '#F5F5F0'}">
-    <td style="${R}"><b>${i + 1}.</b> ${esc(p.product)}${forLine}${metaLine}</td><td style="${R}">${esc(p.rate)}</td><td style="${R}">${esc(p.basis)}</td>
-    <td style="${R}">${p.amt ?? '—'} ${esc(p.unit || '')}</td><td style="${R};font-weight:700">${p.total ?? '—'} ${esc(p.unit || '')}</td></tr>`
-  }).join('')
-
   // Restricted-entry summary: the longest REI on the sheet, and — if signed off
   // with a parseable interval — the time the area is clear to re-enter.
   const maxRei = rows.reduce((mx, p) => { const h = reiHours(p.rei); return h != null && h > mx ? h : mx }, 0)
   const longestReiLabel = (rows.find((p) => reiHours(p.rei) === maxRei) || {}).rei || ''
-  let reiRow = ''
-  if (maxRei > 0) {
-    let clear = ''
-    if (sheet.completedAt) { const t = new Date(new Date(sheet.completedAt).getTime() + maxRei * 3600000); clear = ` — keep posted until <b>${esc(t.toLocaleString())}</b>` }
-    reiRow = `<table style="${tbl}"><tbody><tr><td style="${L};background:#FFF7E6">Restricted Entry</td><td style="${V}" colspan="3">Longest REI on this sheet: <b>${esc(longestReiLabel || `${maxRei} hours`)}</b>${clear}. Do not allow entry until the interval has passed.</td></tr></tbody></table>`
-  }
-  const partialNote = hasPartial ? `<div style="font-size:10px;color:#555;margin:-6px 0 12px">Totals include the ${esc(partialGal)} gal partial fill (${sheet.tanks || 1} full tank${(sheet.tanks || 1) !== 1 ? 's' : ''} + ${esc(partialGal)} gal).</div>` : ''
-  const sig = (v) => v ? `<img src="${v}" style="height:48px;max-width:100%" />` : blank
   const w = sheet.weather || {}
 
-  return `<div style="font-family:Arial,sans-serif;color:#111">
-    <div style="text-align:center;border-bottom:2px solid #16291F;padding-bottom:10px;margin-bottom:14px">
-      <div style="font-size:18px;font-weight:700">${esc(courseInfo.clubName || 'Golf Club')}</div>
-      <div style="font-size:12px;color:#555">${esc(courseInfo.deptName || 'Grounds Operations')} — Spray Record</div>
+  // ── Restyled record — matches the app's card aesthetic (see training sheet).
+  const FOR = '#16291F', MUT = '#8A8984', LN = '#E2E0DB', GLD = '#C9A84C'
+  const g = (v) => (v == null || v === '' ? '—' : esc(v))
+  const acres = area.sqft ? (area.sqft / 43560).toFixed(2) : null
+  const niceDate = (() => { try { return new Date(sheet.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) } catch { return sheet.date } })()
+  const card = `background:#fff;border:1px solid ${LN};border-radius:12px`
+
+  const specCell = (l, v) => `<td style="padding:6px 12px;vertical-align:middle;white-space:nowrap"><span style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT}">${esc(l)}</span> <span style="font-size:13px;font-weight:700;color:${FOR};margin-left:6px">${g(v)}</span></td>`
+  const weatherStr = [w.temp ? `${esc(w.temp)}°F` : null, w.wind ? `${esc(w.wind)} mph ${esc(w.windDir || '')}`.trim() : null, w.humidity ? `${esc(w.humidity)}% RH` : null].filter(Boolean).join(' · ') || '—'
+  const tanksStr = `${esc(sheet.tanks)}${area.galTank ? ` × ${esc(area.galTank)} gal` : ''}${hasPartial ? ` + ${esc(partialGal)} gal` : ''}`
+
+  const productRows = rows.map((p, i) => {
+    const meta = [p.target && String(p.target).trim() && `For: ${esc(p.target)}`, p.ai && `AI ${esc(p.ai)}`, p.epaReg && `EPA ${esc(p.epaReg)}`, p.rei && `REI ${esc(p.rei)}`, p.signalWord && esc(p.signalWord)].filter(Boolean).join(' · ')
+    return `<tr>
+      <td style="padding:8px 0;border-top:1px solid #EDEBE5">
+        <div style="font-size:14px;font-weight:700;color:${FOR}">${i + 1}. ${esc(p.product)}</div>
+        ${meta ? `<div style="font-size:10px;color:${MUT};margin-top:1px">${meta}</div>` : ''}
+      </td>
+      <td style="padding:8px 0;border-top:1px solid #EDEBE5;text-align:right;white-space:nowrap">
+        <span style="display:inline-block;min-width:96px;text-align:right;font-size:12px">${esc(p.rate)} ${esc(p.basis || '')}</span>
+        <span style="display:inline-block;min-width:80px;text-align:right;font-size:12px">${p.amt ?? '—'} ${esc(p.unit || '')}</span>
+        <span style="display:inline-block;min-width:72px;text-align:right;font-size:14px;font-weight:700;color:${FOR}">${p.total ?? '—'} ${esc(p.unit || '')}</span>
+      </td></tr>`
+  }).join('')
+
+  const approved = sheet.status === 'approved'
+  const statusPill = approved
+    ? `<span style="display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#2E7D46;background:#E3F1E8;border:1px solid #B9DCC6;border-radius:999px;padding:5px 12px">✓ Approved</span>`
+    : `<span style="display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#92660D;background:#FBF1DA;border:1px solid #EAD6A3;border-radius:999px;padding:5px 12px">Pending approval</span>`
+
+  let reiTxt = ''
+  if (maxRei > 0) {
+    let clear = ''
+    if (sheet.completedAt) { const t = new Date(new Date(sheet.completedAt).getTime() + maxRei * 3600000); clear = ` Keep posted until ${esc(t.toLocaleString())}.` }
+    reiTxt = `<b>Restricted entry — ${esc(longestReiLabel || `${maxRei} hours`)}.</b> Do not allow entry until the interval has passed.${clear} `
+  }
+
+  const sigArea = (v) => v ? `<img src="${v}" style="height:32px;max-width:100%;display:block;margin:6px 0 3px" />` : `<div style="border-bottom:1px solid #C7C5BE;height:26px;margin:6px 0 3px"></div>`
+  const appliedDate = sheet.completedAt ? new Date(sheet.completedAt).toLocaleDateString() : '—'
+  const approvedDate = sheet.directorDate ? new Date(sheet.directorDate).toLocaleString() : '—'
+  const submitted = sheet.createdAt ? `Submitted by ${esc(sheet.operator || '—')} · ${esc(new Date(sheet.createdAt).toLocaleDateString())}` : ''
+  const partialNote = hasPartial ? `<div style="font-size:10px;color:${MUT};margin:6px 0 0">Totals include the ${esc(partialGal)} gal partial fill (${sheet.tanks || 1} full tank${(sheet.tanks || 1) !== 1 ? 's' : ''} + ${esc(partialGal)} gal).</div>` : ''
+  const instr = (sheet.instructions && String(sheet.instructions).trim()) ? `<div style="font-size:11px;color:#5B6160;margin-bottom:10px"><b style="color:${FOR}">Instructions:</b> ${esc(sheet.instructions)}</div>` : ''
+
+  return `<div style="font-family:Arial,Helvetica,sans-serif;color:#1A1A16;background:#F7F5EF;padding:18px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+      <div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:${GLD}">${esc(courseInfo.clubName || 'Golf Club')} · Spray Record</div>
+        <div style="font-size:26px;font-weight:800;color:${FOR};line-height:1.05">${g(sheet.area)}</div>
+        <div style="font-size:12px;color:${MUT};margin-top:2px">${esc(niceDate)}</div>
+      </div>
+      <div style="text-align:right">${statusPill}</div>
     </div>
-    <table style="${tbl}"><tbody>
-      <tr><td style="${L}">Area</td><td style="${V}">${esc(sheet.area)}</td><td style="${L}">Date</td><td style="${V}">${esc(sheet.date)}</td></tr>
-      <tr><td style="${L}">Operator</td><td style="${V}">${esc(sheet.operator || '—')}</td><td style="${L}">Tanks</td><td style="${V}">${esc(sheet.tanks)}${area.galTank ? ` × ${esc(area.galTank)} gal` : ''}${hasPartial ? ` + ${esc(partialGal)} gal partial` : ''}</td></tr>
-      <tr><td style="${L}">Nozzle</td><td style="${V}">${esc(area.nozzle || '—')}</td><td style="${L}">PSI</td><td style="${V}">${esc(area.psi || '—')}</td></tr>
-      <tr><td style="${L}">Target</td><td style="${V}" colspan="3">${esc(sheetTargets.join(', ') || '—')}</td></tr>
-      <tr><td style="${L}">Weather</td><td style="${V}" colspan="3">${w.temp ? `${esc(w.temp)}°F` : '—'} · ${w.wind ? `${esc(w.wind)} mph wind` : '—'} · ${w.humidity ? `${esc(w.humidity)}% humidity` : '—'} · ${esc(w.windDir || '—')}</td></tr>
-    </tbody></table>
-    <table style="${tbl}"><thead><tr style="background:#16291F"><th style="${TH}">Product</th><th style="${TH}">Rate</th><th style="${TH}">Basis</th><th style="${TH}">Amt/Tank</th><th style="${TH}">Total</th></tr></thead><tbody>${productRows}</tbody></table>
-    ${partialNote}
-    <table style="${tbl}"><tbody>
-      <tr><td style="${L}">PPE</td><td style="${V}" colspan="3">${esc((sheet.ppe || []).join(', ') || '—')}</td></tr>
-      <tr><td style="${L}">Instructions</td><td style="${V}" colspan="3">${esc(sheet.instructions || '—')}</td></tr>
-    </tbody></table>
-    <table style="${tbl}"><tbody><tr><td style="${L};background:#FEF2F2">Safety Notice</td><td style="${V}" colspan="3">Check ALL nozzles before leaving maintenance area. Calculate rates BEFORE filling sprayer.</td></tr></tbody></table>
-    ${reiRow}
-    <table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>
-      <tr><td style="${L}">Applicator</td><td style="${V}">${esc(sheet.completedBy || sheet.operator || blank)}</td><td style="${L}">Date Applied</td><td style="${V}">${sheet.completedAt ? esc(new Date(sheet.completedAt).toLocaleString()) : blank}</td></tr>
-      <tr><td style="${L}">Pesticide Lic #</td><td style="${V}">${esc(sheet.applicatorPesticideLicense || '—')}</td><td style="${L}">Fertilizer Lic #</td><td style="${V}">${esc(sheet.applicatorFertilizerLicense || '—')}</td></tr>
-      <tr><td style="${L}">Applicator Signature</td><td style="${V}" colspan="3">${sig(sheet.applicatorSignature)}</td></tr>
-      <tr><td style="${L}">Superintendent</td><td style="${V}">${esc(sheet.operator || blank)}</td><td style="${L}">Date Submitted</td><td style="${V}">${sheet.createdAt ? esc(new Date(sheet.createdAt).toLocaleDateString()) : blank}</td></tr>
-      <tr><td style="${L}">Director Approval</td><td style="${V}">${esc(sheet.directorSig || blank)}</td><td style="${L}">Date Approved</td><td style="${V}">${sheet.directorDate ? esc(new Date(sheet.directorDate).toLocaleString()) : blank}</td></tr>
-      <tr><td style="${L}">Director Signature</td><td style="${V}" colspan="3">${sig(sheet.directorSignature)}</td></tr>
-      <tr><td style="${L}">Status</td><td style="${V}" colspan="3">${sheet.status === 'approved' ? 'APPROVED' : 'PENDING APPROVAL'}</td></tr>
-    </tbody></table>
-    <p style="font-size:9px;color:#888;margin-top:20px;text-align:center">Printed ${esc(new Date().toLocaleString())} — Sheet ID: ${esc(sheet.id)}</p>
+
+    <div style="${card};padding:2px;margin-bottom:10px"><table style="width:100%;border-collapse:collapse"><tbody>
+      <tr>${specCell('Applicator', sheet.operator)}${specCell('Tanks', tanksStr)}${specCell('Nozzle', area.nozzle)}</tr>
+      <tr>${specCell('PSI', area.psi)}${specCell('Spray Rate', area.sprayRate ? `${area.sprayRate} gal/ac` : null)}${specCell('Sq Ft', area.sqft ? Number(area.sqft).toLocaleString() : null)}</tr>
+      <tr>${specCell('Acres', acres)}${specCell('Weather', weatherStr)}<td style="padding:6px 12px"><span style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT}">Target</span> <span style="font-size:13px;font-weight:700;color:${FOR};margin-left:6px">${esc(sheetTargets.join(' · ') || '—')}</span></td></tr>
+    </tbody></table></div>
+
+    <div style="${card};padding:6px 14px 8px;margin-bottom:10px">
+      <table style="width:100%;border-collapse:collapse"><tbody>
+        <tr><td style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};padding:8px 0 4px">Product</td>
+        <td style="text-align:right;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};padding:8px 0 4px">
+          <span style="display:inline-block;min-width:96px;text-align:right">Rate</span><span style="display:inline-block;min-width:80px;text-align:right">Amt/Tank</span><span style="display:inline-block;min-width:72px;text-align:right">Total</span></td></tr>
+        ${productRows}
+      </tbody></table>
+      ${partialNote}
+    </div>
+
+    ${instr}
+    <div style="border:1px solid #E7C8A6;background:#FBF1E5;border-radius:10px;padding:9px 12px;margin-bottom:8px;font-size:11px;color:#7A4E1E">${reiTxt}Check ALL nozzles before leaving the maintenance area · calculate rates BEFORE filling the sprayer.</div>
+    <div style="font-size:11px;color:#5B6160;margin-bottom:10px"><b style="color:${FOR}">PPE:</b> ${esc((sheet.ppe || []).join(' · ') || '—')}</div>
+
+    <div style="display:flex;gap:10px">
+      <div style="flex:1;${card};padding:11px 14px">
+        <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};margin-bottom:4px">Applicator</div>
+        <div style="font-size:14px;font-weight:700;color:${FOR}">${g(sheet.completedBy || sheet.operator)}</div>
+        ${sigArea(sheet.applicatorSignature)}
+        <div style="font-size:10px;color:${MUT}">Signature</div>
+        <div style="font-size:11px;color:#1A1A16;margin-top:8px">Pesticide Lic # ${g(sheet.applicatorPesticideLicense)} &nbsp;·&nbsp; Fert Lic # ${g(sheet.applicatorFertilizerLicense)}</div>
+        <div style="font-size:11px;color:#1A1A16;margin-top:3px">Applied ${esc(appliedDate)}</div>
+      </div>
+      <div style="flex:1;${card};padding:11px 14px">
+        <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};margin-bottom:4px">Director approval</div>
+        <div style="font-size:14px;font-weight:700;color:${FOR}">${g(sheet.directorSig)}</div>
+        ${sigArea(sheet.directorSignature)}
+        <div style="font-size:10px;color:${MUT}">Signature</div>
+        <div style="font-size:11px;color:#1A1A16;margin-top:8px">Approved ${esc(approvedDate)}</div>
+      </div>
+    </div>
+
+    <p style="font-size:9px;color:${MUT};margin-top:10px;text-align:center">${submitted ? esc(submitted) + ' · ' : ''}${esc(courseInfo.clubName || '')} — Spray Record · printed ${esc(new Date().toLocaleDateString())} · Sheet ID ${esc(sheet.id)}</p>
   </div>`
 }
 
