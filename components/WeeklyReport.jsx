@@ -269,12 +269,11 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   // Capture the whole report as one image and scale it to fit a single A4 page.
   // Uses html-to-image (SVG foreignObject) so modern CSS colors (oklch/oklab
   // from Tailwind) render via the browser instead of a JS color parser.
-  async function makePdf() {
+  // Capture a COPY of the report rendered off-screen at a fixed page width, so
+  // the output is identical on any device (a narrow screen can't clip it) and
+  // the edit chrome/blank rows are hidden via the .wr-capturing class.
+  async function captureCanvas() {
     const { toCanvas } = await import('html-to-image')
-    const { jsPDF } = await import('jspdf')
-    // Capture a COPY of the report rendered off-screen at a fixed page width, so
-    // the output is identical on any device (a narrow screen can't clip it) and
-    // the edit chrome/blank rows are hidden via the .wr-capturing class.
     const CAP_W = 780
     const holder = document.createElement('div')
     holder.style.cssText = `position:fixed;left:-10000px;top:0;width:${CAP_W}px;padding:0;margin:0;background:#ffffff;z-index:-1;`
@@ -285,13 +284,17 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     clone.style.margin = '0'
     holder.appendChild(clone)
     document.body.appendChild(holder)
-    let canvas
     try {
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-      canvas = await toCanvas(clone, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true, width: CAP_W })
+      return await toCanvas(clone, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true, width: CAP_W })
     } finally {
       document.body.removeChild(holder)
     }
+  }
+
+  async function makePdf() {
+    const { jsPDF } = await import('jspdf')
+    const canvas = await captureCanvas()
     const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' })
     const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight()
     const m = 16
@@ -315,7 +318,26 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     setBusy('')
   }
 
-  function onPrint() { window.print() }
+  // Print the same one-page image the PDF uses, so a busy report never spills
+  // to 2–3 pages the way the browser's own pagination does.
+  async function onPrint() {
+    setBusy('print')
+    try {
+      const canvas = await captureCanvas()
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
+      const iframe = document.createElement('iframe')
+      Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
+      document.body.appendChild(iframe)
+      const doc = iframe.contentWindow.document
+      doc.open()
+      doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>@page{size:A4 portrait;margin:8mm}html,body{margin:0;padding:0}img{display:block;margin:0 auto;max-width:100%;max-height:277mm}</style></head><body><img src="${dataUrl}"></body></html>`)
+      doc.close()
+      const go = () => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }
+      const img = doc.images[0]
+      if (img && !img.complete) { img.onload = go; img.onerror = go; setTimeout(go, 1500) } else { setTimeout(go, 200) }
+    } catch (e) { console.error(e); showToast('Could not build the print'); window.print() }
+    setBusy('')
+  }
 
   async function onEmail() {
     if (!recipient) { showToast('Add a recipient email first'); return }
@@ -404,8 +426,8 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         <button onClick={onDownload} disabled={busy === 'pdf'} className="font-body text-sm font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 border disabled:opacity-50" style={{ color: FOREST, borderColor: FOREST }}>
           {busy === 'pdf' ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} PDF
         </button>
-        <button onClick={onPrint} className="font-body text-sm font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#E2E8F0' }}>
-          <Printer size={15} /> Print
+        <button onClick={onPrint} disabled={busy === 'print'} className="font-body text-sm font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 border disabled:opacity-50" style={{ color: FOREST, borderColor: '#E2E8F0' }}>
+          {busy === 'print' ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} Print
         </button>
       </div>
 
