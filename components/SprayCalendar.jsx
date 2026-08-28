@@ -115,26 +115,29 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
             const daySheets = sheetsByDate[c.key] || []
             const dayPlanned = programByDate[c.key] || []
 
-            // Build de-duplicated area labels for the day: actual sprays first
-            // (teal sprayed / green approved / amber pending), then planned (gold).
+            // Build de-duplicated area labels for the day, each carrying the action
+            // that opens it: actual sprays open the sheet; planned open as an
+            // editable sheet. Tap a label to jump straight into that spray.
             const labels = []
             const seen = new Set()
             daySheets.forEach((s) => {
               const a = shortArea(s.area)
-              if (a && !seen.has(a)) { seen.add(a); labels.push({ area: a, color: s.completed ? DONE : s.status === 'approved' ? FERN : PENDING }) }
+              if (a && !seen.has(a)) { seen.add(a); labels.push({ area: a, color: s.completed ? DONE : s.status === 'approved' ? FERN : PENDING, open: () => onOpenSheet?.(s) }) }
             })
-            dayPlanned.forEach((a) => {
-              const nm = shortArea(a.area)
-              if (nm && !seen.has(nm)) { seen.add(nm); labels.push({ area: nm, color: GOLD }) }
+            const plannedByAreaDay = {}
+            dayPlanned.forEach((a) => { (plannedByAreaDay[a.area] ||= []).push(a) })
+            Object.entries(plannedByAreaDay).forEach(([areaName, items]) => {
+              const nm = shortArea(areaName)
+              if (nm && !seen.has(nm)) { seen.add(nm); labels.push({ area: nm, color: GOLD, open: onCreateFromProgram ? () => onCreateFromProgram(items) : null }) }
             })
             const shown = labels.slice(0, 2)
             const extra = labels.length - shown.length
 
             return (
-              <button
+              <div
                 key={c.key}
                 onClick={() => setSelected(c.key)}
-                className="min-h-[3.25rem] sm:min-h-[4.5rem] rounded-lg flex flex-col items-stretch p-1 text-left transition overflow-hidden"
+                className="min-h-[3.25rem] sm:min-h-[4.5rem] rounded-lg flex flex-col items-stretch p-1 text-left transition overflow-hidden cursor-pointer"
                 style={{
                   backgroundColor: isSel ? '#EAF2EC' : 'transparent',
                   border: isToday ? `1px solid ${GOLD}` : '1px solid transparent',
@@ -144,14 +147,20 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
                 <span className="font-body text-[11px] font-semibold px-0.5 tnum" style={{ color: isSel ? FOREST : INK_2 }}>{c.d}</span>
                 <div className="mt-0.5 space-y-0.5 overflow-hidden">
                   {shown.map((it, i) => (
-                    <div key={i} className="flex items-center gap-1 rounded px-0.5" style={{ backgroundColor: `${it.color}18` }}>
+                    <div
+                      key={i}
+                      onClick={it.open ? (e) => { e.stopPropagation(); it.open() } : undefined}
+                      className={`flex items-center gap-1 rounded px-0.5 ${it.open ? 'cursor-pointer' : ''}`}
+                      style={{ backgroundColor: `${it.color}18` }}
+                      title={it.open ? `Open ${it.area}` : it.area}
+                    >
                       <span className="w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: it.color }} />
                       <span className="font-body text-[8px] leading-tight truncate" style={{ color: INK_2 }}>{it.area}</span>
                     </div>
                   ))}
                   {extra > 0 && <span className="font-body text-[8px] px-0.5" style={{ color: INK_3 }}>+{extra} more</span>}
                 </div>
-              </button>
+              </div>
             )
           })}
         </div>
