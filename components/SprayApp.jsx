@@ -58,6 +58,7 @@ import IrrigationParts from '@/components/IrrigationParts'
 import { qrDataUrl } from '@/lib/tournament'
 import SprayCalendar from '@/components/SprayCalendar'
 import Weather from '@/components/Weather'
+import ChemistryGuide from '@/components/ChemistryGuide'
 
 // Build the product's container/jug descriptor for measureOut (if one is set).
 const productJug = (prod) => (prod && prod.jugSize > 0 ? { size: Number(prod.jugSize), unit: prod.jugUnit || 'gal' } : null)
@@ -266,6 +267,7 @@ const NAV_MANAGER = [
     { id: 'sheets', label: 'Spray Sheets', m: 'spray', r: 'list', follow: true },
     { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert', follow: true },
     { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
+    { id: 'chemguide', label: 'Chemistry Guide', m: 'spray', r: 'chemguide' },
   ] },
   { title: 'Agronomy', items: [
     { id: 'data', label: 'Field Data', m: 'turf', r: 'data', follow: true, noAll: true },
@@ -300,6 +302,7 @@ const NAV_CREW = [
     { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert' },
     { id: 'inventory', label: 'Inventory', m: 'spray', r: 'inventory' },
     { id: 'documents', label: 'Labels & SDS', m: 'spray', r: 'documents' },
+    { id: 'chemguide', label: 'Chemistry Guide', m: 'spray', r: 'chemguide' },
     { id: 'weather', label: 'Weather', m: 'spray', r: 'weather' },
   ] },
   { title: 'Course', items: [
@@ -1041,6 +1044,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
             onSaveProduct={saveProduct} onDeleteProduct={removeProduct} onImport={importProductsFromSheet} onAddDelivery={addDelivery}
           />
         )}
+        {route === 'chemguide' && <ChemistryGuide />}
         {route === 'inventory' && !manage && (
           <Inventory products={products} deliveries={deliveries} onAddDelivery={addDelivery} />
         )}
