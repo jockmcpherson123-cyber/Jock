@@ -44,6 +44,9 @@ export async function POST(request) {
   const grassTypes = Array.isArray(body.grassTypes) ? body.grassTypes.filter(Boolean) : []
   // images: array of { media_type, data } where data is base64 (no data: prefix)
   const images = Array.isArray(body.images) ? body.images.slice(0, 4) : []
+  // guide mode: also draft a plain-English "how it works / why we use it" entry
+  // for the Chemistry Guide.
+  const guide = body.guide === true
 
   if (!name && images.length === 0) {
     return Response.json({ error: 'Give a product name or at least one label photo.' }, { status: 400 })
@@ -94,8 +97,27 @@ export async function POST(request) {
         enum: ['high', 'medium', 'low'],
         description: 'Your confidence in this extraction.',
       },
+      ...(guide ? {
+        category: {
+          type: 'string',
+          enum: ['Fungicide', 'Growth regulator', 'Plant defense', 'Fertility', 'Biological', 'Herbicide', 'Insecticide', 'Wetting agent', 'Other'],
+          description: 'Which class of chemistry this product is, for the Chemistry Guide.',
+        },
+        chip: {
+          type: 'string',
+          description: 'A 1–2 word tag for how it behaves, e.g. "Systemic", "Contact", "PGR", "Nitrogen", "Wetting agent". Empty string if unsure.',
+        },
+        howItWorks: {
+          type: 'string',
+          description: 'Two or three plain-English sentences explaining HOW this product works — its mode of action on the plant, pest, or in the soil, written for a crew member/intern, not a chemist. No rates. If uncertain, keep it general and factual.',
+        },
+        whyUseIt: {
+          type: 'string',
+          description: 'One or two plain-English sentences on WHY a superintendent would use it — what it controls or does, and where it fits. Empty string if unsure.',
+        },
+      } : {}),
     },
-    required: ['found', 'productName', 'activeIngredient', 'epaReg', 'moaGroup', 'signalWord', 'rei', 'phi', 'avoidGrasses', 'safetyNote', 'confidence'],
+    required: ['found', 'productName', 'activeIngredient', 'epaReg', 'moaGroup', 'signalWord', 'rei', 'phi', 'avoidGrasses', 'safetyNote', 'confidence', ...(guide ? ['category', 'chip', 'howItWorks', 'whyUseIt'] : [])],
     additionalProperties: false,
   }
 
@@ -117,7 +139,10 @@ export async function POST(request) {
       `The golf course tracks these grass types: ${grassTypes.length ? grassTypes.join(', ') : '(none configured)'}.\n` +
       `For avoidGrasses, list ONLY grasses from that set that this product could injure or is not safe/labeled for. ` +
       `Be conservative — only flag a grass when the label or well-established label guidance indicates real turf injury risk. ` +
-      `If you are unsure, leave avoidGrasses empty rather than guessing.`,
+      `If you are unsure, leave avoidGrasses empty rather than guessing.` +
+      (guide
+        ? `\n\nAlso write a short Chemistry Guide entry: pick the category, a one/two-word behaviour chip, a plain-English "how it works" (2–3 sentences, mode of action for a crew member — no rates), and a "why we use it". Base the how-it-works on the active ingredient's established mode of action. Keep it factual; if you are not sure of the exact chemistry, stay general rather than inventing specifics.`
+        : ''),
   })
 
   const client = new Anthropic({ apiKey })
