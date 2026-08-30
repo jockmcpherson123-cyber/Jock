@@ -3793,6 +3793,7 @@ function DocumentsLibrary({ products, manage, onSaveProduct }) {
   const filtered = products
     .filter((p) => p.name.toLowerCase().includes(q.toLowerCase()))
     .filter((p) => (missingOnly ? !(p.labelUrl && p.sdsUrl) : true))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true }))
 
   return (
     <div className="pt-6 pb-10">
@@ -4149,7 +4150,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       String(p.activeIngredient || '').toLowerCase().includes(q) ||
       String(p.moaGroup || '').toLowerCase().includes(q)
     )
-  })
+  }).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true }))
 
   return (
     <div className="pt-6 pb-10">
@@ -4644,7 +4645,9 @@ function Inventory({ products, deliveries, onAddDelivery }) {
   const [filter, setFilter] = useState('All')
 
   const lowStock = products.filter((p) => p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold)
-  const filtered = filter === 'All' ? products : products.filter((p) => p.type === filter)
+  const filtered = (filter === 'All' ? products : products.filter((p) => p.type === filter))
+    .slice()
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true }))
 
   const submitDelivery = () => {
     if (!draft.product || !draft.qty) return
