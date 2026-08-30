@@ -3664,17 +3664,25 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
 
   const apply = () => {
     if (!result) return
-    setDraft((d) => ({
-      ...d,
-      avoidGrasses: Array.isArray(result.avoidGrasses) ? result.avoidGrasses : (d.avoidGrasses || []),
-      activeIngredient: result.activeIngredient || d.activeIngredient || '',
-      epaReg: result.epaReg || d.epaReg || '',
-      moaGroup: result.moaGroup || d.moaGroup || '',
-      signalWord: result.signalWord || d.signalWord || '',
-      rei: result.rei || d.rei || '',
-      phi: result.phi || d.phi || '',
-      safetyNote: result.safetyNote || d.safetyNote || '',
-    }))
+    setDraft((d) => {
+      // Tag the safety-critical fields this scan fills as "verify vs. label".
+      const av = { ...(d.aiVerify || {}) }
+      if (result.epaReg && !d.epaReg) av.epaReg = true
+      if (result.moaGroup && !d.moaGroup) av.moaGroup = true
+      if (result.rei && !d.rei) av.rei = true
+      return {
+        ...d,
+        avoidGrasses: Array.isArray(result.avoidGrasses) ? result.avoidGrasses : (d.avoidGrasses || []),
+        activeIngredient: result.activeIngredient || d.activeIngredient || '',
+        epaReg: result.epaReg || d.epaReg || '',
+        moaGroup: result.moaGroup || d.moaGroup || '',
+        signalWord: result.signalWord || d.signalWord || '',
+        rei: result.rei || d.rei || '',
+        phi: result.phi || d.phi || '',
+        safetyNote: result.safetyNote || d.safetyNote || '',
+        aiVerify: av,
+      }
+    })
     setResult(null)
     setImages([])
     setImgCount(0)
@@ -3911,6 +3919,9 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   const AI_BLANK = (v) => v == null || v === ''
   const AI_NUM = (s) => { const n = parseFloat(s); return isNaN(n) ? null : n }
   const AI_LABELS = { activeIngredient: 'Active ingredient', activePct: 'Active %', manufacturer: 'Manufacturer', formulation: 'Formulation', signalWord: 'Signal word', rei: 'REI', moaGroup: 'Group', epaReg: 'EPA Reg #', labelMinM: 'Min oz/M', labelMaxM: 'Max oz/M', labelMinA: 'Min oz/A', labelMaxA: 'Max oz/A', sprayInterval: 'Interval (days)' }
+  // The safety-critical fields: when the AI fills one of these, we tag it
+  // "verify vs. label" until a human confirms it against the physical jug.
+  const AI_VERIFY_FIELDS = ['epaReg', 'labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA', 'rei', 'moaGroup', 'sprayInterval']
 
   const runAiEnrich = async () => {
     setAiBusy(true); setAiReview(null)
@@ -3953,11 +3964,28 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       ;['labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA', 'sprayInterval'].forEach((f) => { if (AI_NUM(res[f]) != null && AI_BLANK(draft[f])) fills[f] = AI_NUM(res[f]) })
       const n = Object.keys(fills).length
       if (n === 0) { setOneAiMsg({ text: 'Nothing to add — the blanks here are already filled in.', tone: 'ok' }); setOneAiBusy(false); return }
-      setDraft((d0) => ({ ...d0, ...fills }))
-      setOneAiMsg({ text: `Filled ${n} blank field${n !== 1 ? 's' : ''}. Double-check EPA Reg # and rates against the label.`, tone: 'ok' })
+      // Tag every safety-critical field the AI just filled as "verify vs. label".
+      const verifySet = {}
+      Object.keys(fills).forEach((f) => { if (AI_VERIFY_FIELDS.includes(f)) verifySet[f] = true })
+      setDraft((d0) => ({ ...d0, ...fills, aiVerify: { ...(d0.aiVerify || {}), ...verifySet } }))
+      const flagged = Object.keys(verifySet).length
+      setOneAiMsg({ text: `Filled ${n} blank field${n !== 1 ? 's' : ''}.${flagged ? ` ${flagged} rate/label field${flagged !== 1 ? 's are' : ' is'} tagged “verify vs. label” — confirm against the jug, then tap “checked”.` : ''}`, tone: 'ok' })
     } catch (e) { setOneAiMsg({ text: String(e?.message || e), tone: 'err' }) }
     setOneAiBusy(false)
   }
+
+  // Set a field's value and, if it was AI-tagged, clear that tag — a human just
+  // touched it, so it counts as verified.
+  const dropVerify = (av, field) => { if (!av || !av[field]) return av; const n = { ...av }; delete n[field]; return n }
+  const setField = (field, value) => setDraft((d) => ({ ...d, [field]: value, aiVerify: dropVerify(d.aiVerify, field) }))
+  const markChecked = (field) => setDraft((d) => ({ ...d, aiVerify: dropVerify(d.aiVerify, field) }))
+  // The little amber "AI — verify vs. label" pill shown beside a tagged field.
+  const verifyTag = (field) => (draft?.aiVerify?.[field] ? (
+    <span className="inline-flex items-center gap-1 ml-2 font-body text-[10px] font-bold px-2 py-0.5 rounded-full align-middle" style={{ backgroundColor: '#FBF1DA', color: '#92660D', border: '1px solid #EAD6A3' }}>
+      <Sparkles size={9} /> AI — verify vs. label
+      <button type="button" onClick={() => markChecked(field)} className="ml-0.5 underline">checked</button>
+    </span>
+  ) : null)
 
   const applyAiReview = async () => {
     if (!aiReview?.items) return
@@ -3966,7 +3994,9 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       for (const it of aiReview.items) {
         if (!it.include) continue
         const patch = {}
-        Object.entries(it.fills).forEach(([f, { value }]) => { patch[f] = value })
+        const verifySet = { ...(it.product.aiVerify || {}) }
+        Object.entries(it.fills).forEach(([f, { value, verify }]) => { patch[f] = value; if (verify || AI_VERIFY_FIELDS.includes(f)) verifySet[f] = true })
+        if (Object.keys(verifySet).length) patch.aiVerify = verifySet
         await onSaveProduct({ ...it.product, ...patch })
       }
     } catch (e) { console.error(e) }
@@ -4099,6 +4129,12 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       moaGroup: (draft.moaGroup || '').trim(),
       rotationDays: draft.rotationDays === '' || draft.rotationDays == null ? null : parseInt(draft.rotationDays, 10),
       sprayInterval: draft.sprayInterval === '' || draft.sprayInterval == null ? null : parseInt(draft.sprayInterval, 10),
+      // Keep the "verify vs. label" tags only for fields that still hold a value.
+      aiVerify: (() => {
+        const av = draft.aiVerify || {}
+        const keep = Object.keys(av).filter((f) => av[f] && !AI_BLANK(draft[f]))
+        return keep.length ? Object.fromEntries(keep.map((f) => [f, true])) : null
+      })(),
     }
     onSaveProduct(cleaned)
     cancelEdit()
@@ -4294,26 +4330,26 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
             </div>
             <div className="rounded-xl p-3" style={{ backgroundColor: '#FEF2F2' }}>
               <p className="font-body text-[11px] font-bold text-red-500 uppercase tracking-wide mb-2">Label Rate Range</p>
-              <p className="font-body text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">Per 1,000 sq ft</p>
+              <p className="font-body text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">Per 1,000 sq ft {verifyTag('labelMinM') || verifyTag('labelMaxM')}</p>
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div>
                   <FieldLabel>Min</FieldLabel>
-                  <input type="number" step="any" value={draft.labelMinM ?? ''} onChange={(e) => setDraft({ ...draft, labelMinM: e.target.value })} className="w-full border border-red-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="Optional" />
+                  <input type="number" step="any" value={draft.labelMinM ?? ''} onChange={(e) => setField('labelMinM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" />
                 </div>
                 <div>
                   <FieldLabel>Max</FieldLabel>
-                  <input type="number" step="any" value={draft.labelMaxM ?? ''} onChange={(e) => setDraft({ ...draft, labelMaxM: e.target.value })} className="w-full border border-red-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="Optional" />
+                  <input type="number" step="any" value={draft.labelMaxM ?? ''} onChange={(e) => setField('labelMaxM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" />
                 </div>
               </div>
-              <p className="font-body text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">Per Acre</p>
+              <p className="font-body text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">Per Acre {verifyTag('labelMinA') || verifyTag('labelMaxA')}</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <FieldLabel>Min</FieldLabel>
-                  <input type="number" step="any" value={draft.labelMinA ?? ''} onChange={(e) => setDraft({ ...draft, labelMinA: e.target.value })} className="w-full border border-red-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="Optional" />
+                  <input type="number" step="any" value={draft.labelMinA ?? ''} onChange={(e) => setField('labelMinA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" />
                 </div>
                 <div>
                   <FieldLabel>Max</FieldLabel>
-                  <input type="number" step="any" value={draft.labelMaxA ?? ''} onChange={(e) => setDraft({ ...draft, labelMaxA: e.target.value })} className="w-full border border-red-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="Optional" />
+                  <input type="number" step="any" value={draft.labelMaxA ?? ''} onChange={(e) => setField('labelMaxA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" />
                 </div>
               </div>
               <p className="font-body text-[10px] text-red-400 mt-2">Leave blank if not applicable. Rates outside this range show a red warning on spray sheets.</p>
@@ -4464,13 +4500,13 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                     <Select value={draft.signalWord || ''} onChange={(v) => setDraft({ ...draft, signalWord: v })} options={['', 'Caution', 'Warning', 'Danger']} />
                   </div>
                   <div>
-                    <FieldLabel>Re-entry (REI)</FieldLabel>
-                    <input value={draft.rei ?? ''} onChange={(e) => setDraft({ ...draft, rei: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 12 hours" />
+                    <FieldLabel>Re-entry (REI) {verifyTag('rei')}</FieldLabel>
+                    <input value={draft.rei ?? ''} onChange={(e) => setField('rei', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.rei ? '#EAD6A3' : '#E2E8F0'}` }} placeholder="e.g. 12 hours" />
                   </div>
                 </div>
                 <div className="mt-3">
-                  <FieldLabel>EPA Registration #</FieldLabel>
-                  <input value={draft.epaReg ?? ''} onChange={(e) => setDraft({ ...draft, epaReg: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 100-1234 (from the label — shows on the spray record)" />
+                  <FieldLabel>EPA Registration # {verifyTag('epaReg')}</FieldLabel>
+                  <input value={draft.epaReg ?? ''} onChange={(e) => setField('epaReg', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.epaReg ? '#EAD6A3' : '#E2E8F0'}` }} placeholder="e.g. 100-1234 (from the label — shows on the spray record)" />
                 </div>
               </div>
             </div>
@@ -4479,8 +4515,8 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               <p className="font-body text-[10px] text-slate-500 mb-2">The chemical group (FRAC for fungicides, HRAC herbicides, IRAC insecticides). The app warns if you spray the same group on an area again too soon.</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <FieldLabel>Chemical Group</FieldLabel>
-                  <input value={draft.moaGroup ?? ''} onChange={(e) => setDraft({ ...draft, moaGroup: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 11, P07, Group 4" />
+                  <FieldLabel>Chemical Group {verifyTag('moaGroup')}</FieldLabel>
+                  <input value={draft.moaGroup ?? ''} onChange={(e) => setField('moaGroup', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.moaGroup ? '#EAD6A3' : '#E2E8F0'}` }} placeholder="e.g. 11, P07, Group 4" />
                 </div>
                 <div>
                   <FieldLabel>Rotate After (days)</FieldLabel>
@@ -4512,8 +4548,8 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 <p className="font-body text-[10px] text-slate-500 mb-2">How many days this fungicide holds off disease. The Dashboard shows a shrinking bar per area and flags you before protection runs out. Leave blank to use the rotation days or a 14-day default.</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <FieldLabel>Spray Interval (days)</FieldLabel>
-                    <input type="number" step="1" value={draft.sprayInterval ?? ''} onChange={(e) => setDraft({ ...draft, sprayInterval: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="14" />
+                    <FieldLabel>Spray Interval (days) {verifyTag('sprayInterval')}</FieldLabel>
+                    <input type="number" step="1" value={draft.sprayInterval ?? ''} onChange={(e) => setField('sprayInterval', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.sprayInterval ? '#EAD6A3' : '#E2E8F0'}` }} placeholder="14" />
                   </div>
                 </div>
               </div>
@@ -4564,6 +4600,11 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               <div className="flex items-center gap-2">
                 <p className="font-body font-semibold text-sm text-slate-900 truncate">{p.name}</p>
                 <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{p.type}</span>
+                {p.aiVerify && Object.keys(p.aiVerify).length > 0 && (
+                  <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 inline-flex items-center gap-1" style={{ backgroundColor: '#FBF1DA', color: '#92660D' }} title="AI-filled fields not yet verified against the label">
+                    <Sparkles size={9} /> Verify {Object.keys(p.aiVerify).length}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-3 mt-1 font-body text-[11px] text-slate-400 flex-wrap">
                 <span>{p.rate ?? '—'} {p.basis}</span>
