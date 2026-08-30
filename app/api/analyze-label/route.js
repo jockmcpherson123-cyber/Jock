@@ -62,6 +62,16 @@ export async function POST(request) {
       },
       productName: { type: 'string', description: 'The product name as printed on the label.' },
       activeIngredient: { type: 'string', description: 'Active ingredient(s), or empty string if unknown.' },
+      epaReg: {
+        type: 'string',
+        description:
+          'EPA Registration Number exactly as printed (e.g. "100-1234" or "432-1514-59884"). Look for "EPA Reg. No." on the label. Empty string if not visible/unknown. Do NOT confuse with the EPA Establishment Number ("EPA Est. No.").',
+      },
+      moaGroup: {
+        type: 'string',
+        description:
+          'Resistance / mode-of-action group code if the product is a fungicide, herbicide or insecticide: FRAC group for fungicides (e.g. "FRAC 3", "FRAC M05"), HRAC group for herbicides (e.g. "HRAC 2"), IRAC group for insecticides. Empty string for fertilizers, biologicals, wetting agents, or if unknown.',
+      },
       signalWord: {
         type: 'string',
         enum: ['Caution', 'Warning', 'Danger', ''],
@@ -85,7 +95,7 @@ export async function POST(request) {
         description: 'Your confidence in this extraction.',
       },
     },
-    required: ['found', 'productName', 'activeIngredient', 'signalWord', 'rei', 'phi', 'avoidGrasses', 'safetyNote', 'confidence'],
+    required: ['found', 'productName', 'activeIngredient', 'epaReg', 'moaGroup', 'signalWord', 'rei', 'phi', 'avoidGrasses', 'safetyNote', 'confidence'],
     additionalProperties: false,
   }
 
@@ -103,6 +113,7 @@ export async function POST(request) {
     type: 'text',
     text:
       `${instruction}\n\n` +
+      `Also capture the EPA Registration Number ("EPA Reg. No.") exactly as printed — it is required for state pesticide records — and the resistance group code (FRAC/HRAC/IRAC) if this is a fungicide, herbicide or insecticide.\n` +
       `The golf course tracks these grass types: ${grassTypes.length ? grassTypes.join(', ') : '(none configured)'}.\n` +
       `For avoidGrasses, list ONLY grasses from that set that this product could injure or is not safe/labeled for. ` +
       `Be conservative — only flag a grass when the label or well-established label guidance indicates real turf injury risk. ` +

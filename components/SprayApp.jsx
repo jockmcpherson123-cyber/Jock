@@ -2451,8 +2451,48 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
       </div>
     </div>
 
-    <p style="font-size:9px;color:${MUT};margin-top:10px;text-align:center">${submitted ? esc(submitted) + ' · ' : ''}${esc(courseInfo.clubName || '')} — Spray Record · printed ${esc(new Date().toLocaleDateString())} · Sheet ID ${esc(sheet.id)}</p>
+    <div style="border:1px solid ${LN};border-radius:8px;background:#fff;padding:7px 12px;margin-top:10px;font-size:9.5px;color:${MUT};text-align:center">
+      Maryland pesticide application record — keep this record on file at least <b style="color:${FOR}">2 years</b> (COMAR 15.05.01) and make it available to the Maryland Department of Agriculture on request.
+    </div>
+    <p style="font-size:9px;color:${MUT};margin-top:6px;text-align:center">${submitted ? esc(submitted) + ' · ' : ''}${esc(courseInfo.clubName || '')} — Spray Record · printed ${esc(new Date().toLocaleDateString())} · Sheet ID ${esc(sheet.id)}</p>
   </div>`
+}
+
+// MDA record completeness — the fields a Maryland inspector expects on a
+// pesticide application record. Returns a list of what's missing so the
+// applicator can fix it BEFORE the record goes in the book. Advisory only —
+// it never blocks printing.
+const PESTICIDE_TYPES = ['Fungicide', 'Herbicide', 'Insecticide', 'Growth Reg']
+function recordGaps(sheet, area = {}, products = [], sheetTargets = []) {
+  const gaps = []
+  const rows = (sheet.products || []).filter((p) => p.product)
+  const pesticideRows = rows.filter((p) => {
+    const info = products.find((pr) => pr.name === p.product)
+    return info && PESTICIDE_TYPES.includes(info.type)
+  })
+  const hasPesticide = pesticideRows.length > 0
+
+  if (!sheet.area) gaps.push('Site / area treated')
+  if (!sheet.date) gaps.push('Application date')
+  if (!sheet.completedAt) gaps.push('Time / date applied (sign off the spray)')
+  if (!(sheet.completedBy || sheet.operator)) gaps.push('Applicator name')
+  if (!(area.sqft || area.acres)) gaps.push('Size of area treated (sq ft / acres)')
+  if (!sheetTargets || !sheetTargets.length) gaps.push('Target pest')
+
+  // EPA reg # is required on the record for each pesticide product.
+  const missingEpa = pesticideRows.filter((p) => {
+    const info = products.find((pr) => pr.name === p.product) || {}
+    return !String(info.epaReg || '').trim()
+  })
+  if (missingEpa.length) gaps.push(`EPA Reg. No. for: ${missingEpa.map((p) => p.product).join(', ')}`)
+
+  // Applicator certification number — pesticide licence when any pesticide is applied.
+  if (hasPesticide && !String(sheet.applicatorPesticideLicense || '').trim()) {
+    gaps.push('Applicator pesticide licence #')
+  }
+  if (!sheet.applicatorSignature) gaps.push('Applicator signature')
+
+  return gaps
 }
 
 // Build a one-tap board report for a whole season: spend, environmental impact
@@ -2948,6 +2988,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
   // is ever output (fixes the "other sheets show up" + blank-PDF bugs).
   const [pdfBusy, setPdfBusy] = useState(false)
   const buildRecordHtml = () => sheetRecordHTML(sheet, area, products, sheetTargets, courseInfo, location)
+  const gaps = recordGaps(sheet, area, products, sheetTargets)
   const printRecord = () => printRecordSinglePage(buildRecordHtml())
   const exportPdf = async () => {
     setPdfBusy(true)
@@ -2991,6 +3032,25 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
           </div>
         </div>
       </div>
+
+      {gaps.length > 0 && (
+        <div className="no-print mb-5 rounded-2xl p-4" style={{ backgroundColor: '#FBF1DA', border: '1px solid #EAD6A3' }}>
+          <div className="flex items-center gap-2 mb-1.5">
+            <AlertTriangle size={16} style={{ color: '#92660D' }} />
+            <p className="font-body text-[13px] font-bold" style={{ color: '#92660D' }}>For a Maryland inspection record, this is still missing:</p>
+          </div>
+          <ul className="font-body text-[12.5px] leading-relaxed" style={{ color: '#7A5A12' }}>
+            {gaps.map((g) => <li key={g} className="flex items-start gap-1.5"><span className="mt-[7px] w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: '#B08A2A' }} />{g}</li>)}
+          </ul>
+          <p className="font-body text-[11px] mt-2" style={{ color: '#92660D' }}>You can still print — this is a reminder, not a block. Add the EPA Reg. No. in the Chemical Library and licence #s in Settings → People.</p>
+        </div>
+      )}
+      {gaps.length === 0 && (sheet.completed || sheet.status === 'approved') && (
+        <div className="no-print mb-5 rounded-2xl px-4 py-3 flex items-center gap-2" style={{ backgroundColor: '#E3F1E8', border: '1px solid #B9DCC6' }}>
+          <Check size={16} style={{ color: '#2E7D46' }} />
+          <p className="font-body text-[12.5px] font-semibold" style={{ color: '#2E7D46' }}>Record is inspection-ready — all Maryland fields are filled in.</p>
+        </div>
+      )}
 
       {confirmDel && (
         <div className="no-print fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setConfirmDel(false)}>
@@ -3608,6 +3668,8 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
       ...d,
       avoidGrasses: Array.isArray(result.avoidGrasses) ? result.avoidGrasses : (d.avoidGrasses || []),
       activeIngredient: result.activeIngredient || d.activeIngredient || '',
+      epaReg: result.epaReg || d.epaReg || '',
+      moaGroup: result.moaGroup || d.moaGroup || '',
       signalWord: result.signalWord || d.signalWord || '',
       rei: result.rei || d.rei || '',
       phi: result.phi || d.phi || '',
@@ -3625,7 +3687,7 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
         <p className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: '#7C3AED' }}>Read the label with AI</p>
       </div>
       <p className="font-body text-[10px] text-slate-500 mb-2">
-        Snap a photo of the product label (or just use the name above) and the AI fills in grass-safety, signal word and re-entry time. <b>Always double-check against the physical label before you spray.</b>
+        Snap a photo of the product label (or just use the name above) and the AI fills in grass-safety, signal word, re-entry time, EPA registration number and resistance group. <b>Always double-check against the physical label before you spray.</b>
       </p>
       <div className="flex flex-wrap gap-2">
         <label className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border cursor-pointer flex items-center gap-1.5" style={{ backgroundColor: 'white', color: '#7C3AED', borderColor: '#DDD6FE' }}>
@@ -3645,6 +3707,8 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
           <p className="font-body text-[11px] font-bold text-slate-700 mb-2">Here's what the AI read — review, then apply:</p>
           <div className="space-y-1.5 font-body text-[11px] text-slate-600">
             {result.activeIngredient ? <div><b>Active ingredient:</b> {result.activeIngredient}</div> : null}
+            {result.epaReg ? <div><b>EPA Reg. No.:</b> {result.epaReg} <span className="text-slate-400">(required on state records — verify vs. label)</span></div> : null}
+            {result.moaGroup ? <div><b>Group:</b> {result.moaGroup}</div> : null}
             {result.signalWord ? <div><b>Signal word:</b> {result.signalWord}</div> : null}
             {result.rei ? <div><b>Re-entry (REI):</b> {result.rei}</div> : null}
             <div>
