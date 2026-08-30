@@ -463,15 +463,49 @@ function heatRGB(t) {
   return [lerp(a[0], b[0], k), lerp(a[1], b[1], k), lerp(a[2], b[2], k)]
 }
 
+// Web-Mercator projection (Mapbox uses 512-px tiles) so our overlay lines up
+// pixel-for-pixel with a Mapbox static satellite image at the same centre/zoom.
+const MERC_TILE = 512
+function mercY(lat) {
+  const s = Math.sin((lat * Math.PI) / 180)
+  return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)
+}
+function mercXY(lng, lat, z) {
+  const scale = MERC_TILE * Math.pow(2, z)
+  return { x: ((lng + 180) / 360) * scale, y: mercY(lat) * scale }
+}
+// Pick the zoom (fractional) that fits the green's points inside WxH with padding.
+function fitZoom(coordPts, W, H, pad) {
+  const lats = coordPts.map((p) => p.lat), lngs = coordPts.map((p) => p.lng)
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats)
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs)
+  const fracX = (maxLng - minLng) / 360
+  const fracY = Math.abs(mercY(maxLat) - mercY(minLat))
+  const eps = 1e-9, cand = []
+  if (fracX > eps) cand.push(Math.log2((W - 2 * pad) / (fracX * MERC_TILE)))
+  if (fracY > eps) cand.push(Math.log2((H - 2 * pad) / (fracY * MERC_TILE)))
+  let z = cand.length ? Math.min(...cand) : 19
+  z = Math.max(14, Math.min(20, z))
+  return { z, centerLng: (minLng + maxLng) / 2, centerLat: (minLat + maxLat) / 2 }
+}
+
 // Top-down moisture map: the green's reading points on a soft heatmap of their
 // %VWC (blue wet → red dry, IDW-interpolated), value markers coloured to match,
 // the next point to walk to (gold ring), your live GPS dot, and a colour scale.
+// With a Mapbox token, the green's satellite aerial sits behind the heatmap.
 // Tap a point to jump to its input.
-function GreenMap({ points, vals, pos, nextId, onPick, heatOn }) {
+function GreenMap({ points, vals, pos, nextId, onPick, heatOn, token }) {
   const coordPts = points.filter((p) => p.lat != null && p.lng != null)
   const canvasRef = useRef(null)
   const W = 320, H = 210, pad = 30
-  const toXY = coordPts.length ? buildProjection(coordPts, W, H, pad) : null
+  const useSat = !!(token && coordPts.length)
+  const sat = useSat ? fitZoom(coordPts, W, H, pad) : null
+  const satCenter = sat ? mercXY(sat.centerLng, sat.centerLat, sat.z) : null
+  const satXY = (p) => { const m = mercXY(p.lng, p.lat, sat.z); return { x: W / 2 + (m.x - satCenter.x), y: H / 2 + (m.y - satCenter.y) } }
+  const imageUrl = useSat
+    ? `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/${sat.centerLng},${sat.centerLat},${sat.z.toFixed(2)},0/${W}x${H}@2x?access_token=${encodeURIComponent(token)}&attribution=false&logo=false`
+    : null
+  const toXY = coordPts.length ? (useSat ? satXY : buildProjection(coordPts, W, H, pad)) : null
   const mapped = toXY ? coordPts.map((p) => ({ ...p, ...toXY(p), val: (vals[p.id] !== '' && vals[p.id] != null && Number.isFinite(Number(vals[p.id]))) ? Number(vals[p.id]) : null })) : []
   const valued = mapped.filter((m) => m.val != null)
   const lo = valued.length ? Math.min(...valued.map((m) => m.val)) : 0
@@ -496,28 +530,33 @@ function GreenMap({ points, vals, pos, nextId, onPick, heatOn }) {
     ctx.clearRect(0, 0, W, H)
     ctx.save()
     ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.closePath()
-    ctx.fillStyle = '#E3EEDF'; ctx.fill(); ctx.clip()
+    if (!useSat) { ctx.fillStyle = '#E3EEDF'; ctx.fill() }   // over satellite, let the aerial show
+    ctx.clip()
     if (heatOn && valued.length >= 3) {
       const step = 5
+      const alpha = useSat ? 0.58 : 0.72
       for (let gy = 0; gy < H; gy += step) {
         for (let gx = 0; gx < W; gx += step) {
           let num = 0, den = 0
           for (const m of valued) { const dx = gx - m.x, dy = gy - m.y; const d2 = dx * dx + dy * dy + 4; const w = 1 / (d2 * d2); num += w * m.val; den += w }
           const [r, g, b] = heatRGB(tOf(num / den))
-          ctx.fillStyle = `rgba(${r | 0},${g | 0},${b | 0},0.72)`
+          ctx.fillStyle = `rgba(${r | 0},${g | 0},${b | 0},${alpha})`
           ctx.fillRect(gx, gy, step, step)
         }
       }
     }
     ctx.restore()
-  }, [heatOn, cx, cy, rx, ry, lo, hi, JSON.stringify(valued.map((m) => [m.x, m.y, m.val]))]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [heatOn, useSat, cx, cy, rx, ry, lo, hi, JSON.stringify(valued.map((m) => [m.x, m.y, m.val]))]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!coordPts.length) return null
   return (
     <div style={{ position: 'relative', maxWidth: 460, margin: '0 auto' }}>
-      <canvas ref={canvasRef} width={W} height={H} style={{ width: '100%', display: 'block', borderRadius: 10, filter: 'blur(3px)' }} />
+      {imageUrl && (
+        <img src={imageUrl} alt="Green aerial" width={W} height={H} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', borderRadius: 10, display: 'block' }} />
+      )}
+      <canvas ref={canvasRef} width={W} height={H} style={{ position: 'relative', width: '100%', display: 'block', borderRadius: 10, filter: 'blur(3px)' }} />
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, display: 'block' }}>
-        <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke="#CFE0D2" strokeWidth="1.5" />
+        <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke={useSat ? 'rgba(255,255,255,0.55)' : '#CFE0D2'} strokeWidth="1.5" />
         {posXY && nextXY && <line x1={posXY.x} y1={posXY.y} x2={nextXY.x} y2={nextXY.y} stroke={GOLD} strokeWidth="1.5" strokeDasharray="4 3" />}
         {mapped.map((m, i) => {
           const isNext = m.id === nextId
@@ -550,7 +589,10 @@ function GreenMap({ points, vals, pos, nextId, onPick, heatOn }) {
             <text x={W - 12} y={H - 22} textAnchor="middle" fontSize="8" fontWeight="700" fill={INK_3} fontFamily="Inter,system-ui,sans-serif">{Math.round(lo * 10) / 10}</text>
           </>
         )}
-        <text x="10" y="15" fontSize="9" fontWeight="700" fill={INK_3} fontFamily="Inter,system-ui,sans-serif">N ↑</text>
+        <text x="10" y="15" fontSize="9" fontWeight="700" fill={useSat ? 'white' : INK_3} fontFamily="Inter,system-ui,sans-serif" style={{ paintOrder: 'stroke', stroke: useSat ? 'rgba(0,0,0,0.35)' : 'none', strokeWidth: 0.6 }}>N ↑</text>
+        {useSat && (
+          <text x="6" y={H - 5} fontSize="7" fill="white" fillOpacity="0.85" fontFamily="Inter,system-ui,sans-serif" style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.4)', strokeWidth: 0.5 }}>© Mapbox © Maxar</text>
+        )}
       </svg>
     </div>
   )
@@ -622,7 +664,7 @@ function ReadingSheet({ green, model, location, wetting, onSave }) {
       {/* Top-down map of the green — where to walk next, at a glance */}
       {mapReady && (
         <div className="mb-3 rounded-xl p-2" style={{ backgroundColor: '#F6F8F5', border: `1px solid ${HAIR}` }}>
-          <GreenMap points={points} vals={vals} pos={pos} nextId={nextPoint?.id} onPick={focusPoint} heatOn={heatOn} />
+          <GreenMap points={points} vals={vals} pos={pos} nextId={nextPoint?.id} onPick={focusPoint} heatOn={heatOn} token={wetting.mapboxToken} />
           <div className="flex items-center justify-center gap-3 mt-1.5 flex-wrap">
             <button onClick={() => setHeatOn((v) => !v)} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5" style={heatOn ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>
               <span style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: heatOn ? 'white' : INK_3, display: 'inline-block' }} /> {heatOn ? 'Heatmap on' : 'Show heatmap'}
@@ -765,7 +807,7 @@ function Setup({ greens, products, courses, onSave, wetting }) {
           defaultValue={wetting.mapboxToken || ''} onBlur={(e) => onSave({ mapboxToken: e.target.value.trim() })}
           placeholder="pk.eyJ1Ijoi…" spellCheck={false} autoCapitalize="off" autoCorrect="off"
           className="w-full rounded-lg px-3 py-2.5 text-sm font-body" style={{ border: `1px solid ${wetting.mapboxToken ? FERN : HAIR}`, backgroundColor: 'white', color: INK }} />
-        <p className="font-body text-[11px] mt-1.5" style={{ color: INK_3 }}>{wetting.mapboxToken ? '✓ Token saved — satellite base will turn on once wired.' : 'No token yet — the map uses a plain green shape until you add one.'}</p>
+        <p className="font-body text-[11px] mt-1.5" style={{ color: INK_3 }}>{wetting.mapboxToken ? '✓ Token saved — each green’s satellite aerial now shows behind the moisture heatmap.' : 'No token yet — the map uses a plain green shape until you add one.'}</p>
       </div>
 
       {/* Products */}
@@ -845,7 +887,7 @@ function History({ greens, wetting, onSave }) {
                 <div className="px-4 pb-4" style={{ borderTop: `1px solid ${HAIR}` }}>
                   {pts.length >= 1 && (
                     <div className="mt-3 rounded-xl p-2" style={{ backgroundColor: '#F6F8F5', border: `1px solid ${HAIR}` }}>
-                      <GreenMap points={pts} vals={vmap} pos={null} nextId={null} heatOn={true} />
+                      <GreenMap points={pts} vals={vmap} pos={null} nextId={null} heatOn={true} token={wetting.mapboxToken} />
                     </div>
                   )}
                   <div className="grid gap-x-4 gap-y-1 mt-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))' }}>
