@@ -3736,7 +3736,7 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
       if (result.epaReg && !d.epaReg) av.epaReg = true
       if (result.moaGroup && !d.moaGroup) av.moaGroup = true
       if (result.rei && !d.rei) av.rei = true
-      return {
+      const next = {
         ...d,
         avoidGrasses: Array.isArray(result.avoidGrasses) ? result.avoidGrasses : (d.avoidGrasses || []),
         activeIngredient: result.activeIngredient || d.activeIngredient || '',
@@ -3746,13 +3746,54 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
         rei: result.rei || d.rei || '',
         phi: result.phi || d.phi || '',
         safetyNote: result.safetyNote || d.safetyNote || '',
-        aiVerify: av,
       }
+      // Fill blank rate ranges from the label, tagged for verification.
+      ;['labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA'].forEach((f) => {
+        const v = parseFloat(result[f])
+        if (!isNaN(v) && (d[f] === '' || d[f] == null)) { next[f] = v; av[f] = true }
+      })
+      next.aiVerify = av
+      return next
     })
     setResult(null)
     setImages([])
     setImgCount(0)
   }
+
+  // Compare what the AI read on the label to what's already entered — the
+  // "triple check". Only fields present on BOTH sides count; a difference is
+  // flagged so a wrong entry (e.g. min 1 vs label 0.5) can't hide.
+  const norm = (v) => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ')
+  const numEq = (a, b) => { const x = parseFloat(a), y = parseFloat(b); return !isNaN(x) && !isNaN(y) && Math.abs(x - y) < 1e-9 }
+  const CHECK_FIELDS = [
+    { f: 'activeIngredient', label: 'Active ingredient', kind: 'text' },
+    { f: 'epaReg', label: 'EPA Reg. No.', kind: 'text' },
+    { f: 'moaGroup', label: 'Group', kind: 'text' },
+    { f: 'rei', label: 'REI', kind: 'text' },
+    { f: 'labelMinM', label: 'Rate min /M', kind: 'num' },
+    { f: 'labelMaxM', label: 'Rate max /M', kind: 'num' },
+    { f: 'labelMinA', label: 'Rate min /A', kind: 'num' },
+    { f: 'labelMaxA', label: 'Rate max /A', kind: 'num' },
+  ]
+  const labelChecks = result && result.found ? CHECK_FIELDS.map(({ f, label, kind }) => {
+    const labelVal = result[f]
+    const mine = draft[f]
+    const hasLabel = labelVal != null && String(labelVal).trim() !== '' && !(kind === 'num' && isNaN(parseFloat(labelVal)))
+    const hasMine = mine != null && String(mine).trim() !== ''
+    if (!hasLabel) return { f, label, status: 'nolabel' }
+    if (!hasMine) return { f, label, status: 'blank', labelVal }
+    const same = kind === 'num' ? numEq(mine, labelVal) : norm(mine).includes(norm(labelVal)) || norm(labelVal).includes(norm(mine))
+    return { f, label, status: same ? 'match' : 'differ', labelVal, mine }
+  }) : []
+  const differs = labelChecks.filter((c) => c.status === 'differ')
+  const blanks = labelChecks.filter((c) => c.status === 'blank')
+  const matches = labelChecks.filter((c) => c.status === 'match')
+  const useLabelValue = (f, val) => setDraft((d) => {
+    const av = { ...(d.aiVerify || {}) }
+    delete av[f] // adopting the label value = verified
+    const isNum = ['labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA'].includes(f)
+    return { ...d, [f]: isNum ? parseFloat(val) : val, aiVerify: av }
+  })
 
   return (
     <div className="rounded-xl p-3 border" style={{ backgroundColor: '#F5F3FF', borderColor: '#DDD6FE' }}>
@@ -3761,7 +3802,7 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
         <p className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: '#7C3AED' }}>Read the label with AI</p>
       </div>
       <p className="font-body text-[10px] text-slate-500 mb-2">
-        Snap a photo of the product label (or just use the name above) and the AI fills in grass-safety, signal word, re-entry time, EPA registration number and resistance group. <b>Always double-check against the physical label before you spray.</b>
+        Snap a photo of the product label (or just use the name above) and the AI fills in grass-safety, signal word, re-entry time, EPA registration number, resistance group and rate range — then <b>checks what you’ve already entered against the label</b> and flags anything that doesn’t match. <b>Always double-check against the physical label before you spray.</b>
       </p>
       <div className="flex flex-wrap gap-2">
         <label className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border cursor-pointer flex items-center gap-1.5" style={{ backgroundColor: 'white', color: '#7C3AED', borderColor: '#DDD6FE' }}>
@@ -3794,6 +3835,36 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
             {result.safetyNote ? <div className="text-amber-700"><b>Note:</b> {result.safetyNote}</div> : null}
             <div className="text-[10px] text-slate-400">AI confidence: {result.confidence || 'unknown'}</div>
           </div>
+
+          {/* Triple-check: label vs. what's already entered */}
+          {(differs.length > 0 || blanks.length > 0 || matches.length > 0) && (
+            <div className="mt-3 pt-3" style={{ borderTop: '1px solid #EEE' }}>
+              <p className="font-body text-[11px] font-bold text-slate-700 mb-1.5">Label check — AI vs. what you entered</p>
+              {differs.length > 0 ? (
+                <div className="space-y-1.5">
+                  {differs.map((c) => (
+                    <div key={c.f} className="rounded-lg px-2.5 py-2" style={{ backgroundColor: '#FDECEA', border: '1px solid #F5C6CB' }}>
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <AlertTriangle size={12} style={{ color: '#C0392B' }} />
+                        <span className="font-body text-[11px] font-bold" style={{ color: '#98271B' }}>{c.label} doesn’t match</span>
+                      </div>
+                      <p className="font-body text-[11px] text-slate-600">You have <b>{String(c.mine)}</b> · label says <b>{String(c.labelVal)}</b></p>
+                      <button type="button" onClick={() => useLabelValue(c.f, c.labelVal)} className="mt-1 font-body text-[10.5px] font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: '#C0392B', color: 'white' }}>Use label value ({String(c.labelVal)})</button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="font-body text-[11px] font-semibold mb-1" style={{ color: '#2E7D46' }}>✓ Everything you entered matches the label.</p>
+              )}
+              {blanks.length > 0 && (
+                <p className="font-body text-[10.5px] text-slate-500 mt-1.5">Label also has, and you’ve left blank: {blanks.map((c) => c.label).join(', ')}. Use “Apply to form” to fill them.</p>
+              )}
+              {matches.length > 0 && differs.length > 0 && (
+                <p className="font-body text-[10.5px] mt-1.5" style={{ color: '#2E7D46' }}>✓ Matches: {matches.map((c) => c.label).join(', ')}</p>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-2 mt-3">
             <button type="button" onClick={() => setResult(null)} className="flex-1 py-2 rounded-lg text-[11px] font-semibold font-body text-slate-500 border border-slate-200">Discard</button>
             <button type="button" onClick={apply} className="flex-1 py-2 rounded-lg text-[11px] font-bold font-body text-white" style={{ backgroundColor: '#7C3AED' }}>Apply to form</button>

@@ -82,6 +82,10 @@ export async function POST(request) {
       },
       rei: { type: 'string', description: 'Restricted-entry interval (e.g. "12 hours"), or empty string if unknown.' },
       phi: { type: 'string', description: 'Pre-harvest / turf re-entry note if stated, else empty string.' },
+      labelMinM: { type: 'string', description: 'LOWEST labeled application rate per 1,000 sq ft, across all listed uses/diseases, as a number string (e.g. "0.5"). Empty string if the label does not give a per-1,000-sq-ft rate.' },
+      labelMaxM: { type: 'string', description: 'HIGHEST labeled application rate per 1,000 sq ft, across all listed uses/diseases, as a number string (e.g. "4"). Empty string if not shown.' },
+      labelMinA: { type: 'string', description: 'LOWEST labeled application rate per acre, as a number string. Empty string if the label does not give a per-acre rate.' },
+      labelMaxA: { type: 'string', description: 'HIGHEST labeled application rate per acre, as a number string. Empty string if not shown.' },
       avoidGrasses: {
         type: 'array',
         items: { type: 'string', enum: grassEnum },
@@ -117,7 +121,7 @@ export async function POST(request) {
         },
       } : {}),
     },
-    required: ['found', 'productName', 'activeIngredient', 'epaReg', 'moaGroup', 'signalWord', 'rei', 'phi', 'avoidGrasses', 'safetyNote', 'confidence', ...(guide ? ['category', 'chip', 'howItWorks', 'whyUseIt'] : [])],
+    required: ['found', 'productName', 'activeIngredient', 'epaReg', 'moaGroup', 'signalWord', 'rei', 'phi', 'labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA', 'avoidGrasses', 'safetyNote', 'confidence', ...(guide ? ['category', 'chip', 'howItWorks', 'whyUseIt'] : [])],
     additionalProperties: false,
   }
 
@@ -136,6 +140,7 @@ export async function POST(request) {
     text:
       `${instruction}\n\n` +
       `Also capture the EPA Registration Number ("EPA Reg. No.") exactly as printed — it is required for state pesticide records — and the resistance group code (FRAC/HRAC/IRAC) if this is a fungicide, herbicide or insecticide.\n` +
+      `From the label's application-rate table, capture the LOWEST and HIGHEST labeled rate across ALL listed uses/diseases — per 1,000 sq ft (labelMinM/labelMaxM) and per acre (labelMinA/labelMaxA). Read the whole rate table; do not stop at the first row. If a unit is not given on the label, leave those two fields empty.\n` +
       `The golf course tracks these grass types: ${grassTypes.length ? grassTypes.join(', ') : '(none configured)'}.\n` +
       `For avoidGrasses, list ONLY grasses from that set that this product could injure or is not safe/labeled for. ` +
       `Be conservative — only flag a grass when the label or well-established label guidance indicates real turf injury risk. ` +
