@@ -11,8 +11,8 @@
 //  the label is the law.
 // ════════════════════════════════════════════════════════════════════════
 
-import React, { useMemo, useState } from 'react'
-import { Search, X, AlertTriangle, Info, ShieldCheck, Plus, Sparkles, Loader2, CloudUpload, Pencil, Trash2, Check } from 'lucide-react'
+import React, { useMemo, useState, useRef } from 'react'
+import { Search, X, AlertTriangle, Info, ShieldCheck, Plus, Sparkles, Loader2, CloudUpload, Pencil, Trash2, Check, Library } from 'lucide-react'
 import { CHEM_HUES, CHEM_JOBS, CHEM_SECTIONS, CHEM_ROTATION, CHEM_CATEGORIES, CHEM_EXTRA_SECTIONS } from '@/lib/chemistry'
 
 const FOREST = '#16291F'
@@ -233,16 +233,71 @@ function AddProductForm({ initial, grassTypes, onSave, onCancel }) {
   )
 }
 
-export default function ChemistryGuide({ courseInfo = {}, grassTypes = [], manage = false, onSave }) {
+// Map a Chemical Library product type to a guide category label.
+const TYPE_TO_CATEGORY = { Fungicide: 'Fungicide', Herbicide: 'Herbicide', Insecticide: 'Insecticide', 'Growth Reg': 'Growth regulator', Biological: 'Biological', 'Wetting Agent': 'Wetting agent', Fertilizer: 'Fertility' }
+
+export default function ChemistryGuide({ courseInfo = {}, products = [], grassTypes = [], manage = false, onSave }) {
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('all')
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState(null)   // user card being edited
+  const [bulk, setBulk] = useState(null)          // { total, done, running, error }
+  const bulkStop = useRef(false)
   const term = q.trim().toLowerCase()
 
   const userCards = Array.isArray(courseInfo?.chemGuide) ? courseInfo.chemGuide : []
 
   const persist = async (next) => { if (onSave) await onSave(next) }
+
+  // Products in the Chemical Library that don't yet have a guide card (by name).
+  const haveNames = new Set([
+    ...CHEM_SECTIONS.flatMap((s) => s.cards.map((c) => c.name.toLowerCase())),
+    ...userCards.map((c) => String(c.name || '').toLowerCase()),
+  ])
+  const missing = (products || []).filter((p) => p.name && !haveNames.has(String(p.name).toLowerCase()))
+
+  // Draft a card for every library product not already in the guide, via the AI
+  // label reader (guide mode). Runs a few at a time, saving as it goes.
+  const buildFromLibrary = async () => {
+    if (!missing.length) return
+    if (!confirm(`Draft Chemistry Guide entries for ${missing.length} product${missing.length !== 1 ? 's' : ''} from your Chemical Library? Each is a quick AI look-up (about a penny each) and lands as “Draft — review”.`)) return
+    bulkStop.current = false
+    setBulk({ total: missing.length, done: 0, running: true, error: null })
+    let added = [...userCards]
+    let done = 0
+    const queue = [...missing]
+    const worker = async () => {
+      while (queue.length && !bulkStop.current) {
+        const p = queue.shift()
+        try {
+          const res = await fetch('/api/analyze-label', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: p.name, grassTypes, guide: true }),
+          })
+          const json = await res.json()
+          const r = json.result
+          if (res.ok && r?.found) {
+            const catLabel = CHEM_CATEGORIES.some((c) => c.label === r.category) ? r.category : (TYPE_TO_CATEGORY[p.type] || 'Other')
+            const { sectionId, hue } = catToSection(catLabel)
+            added = added.filter((c) => c.name.toLowerCase() !== String(p.name).toLowerCase())
+            added.push({
+              id: 'cg_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+              sectionId, hueKey: hue, name: p.name, chip: r.chip || '', ai: r.activeIngredient || p.activeIngredient || '',
+              group: r.moaGroup || p.moaGroup || '', how: r.howItWorks || '', why: r.whyUseIt || '', note: '', verify: false,
+              epaReg: r.epaReg || p.epaReg || '', added: true, draft: true,
+            })
+          }
+        } catch { /* skip this one */ }
+        done += 1
+        setBulk((b) => (b ? { ...b, done } : b))
+      }
+    }
+    // limited concurrency
+    await Promise.all([worker(), worker(), worker()])
+    await persist(added)
+    setBulk((b) => (b ? { ...b, running: false } : b))
+    setTimeout(() => setBulk(null), 4000)
+  }
   const addCard = (card) => { persist([...userCards.filter((c) => c.id !== card.id), card]); setAdding(false); setEditing(null) }
   const removeCard = (id) => { if (confirm('Remove this product from the guide?')) persist(userCards.filter((c) => c.id !== id)) }
   const confirmCard = (id) => persist(userCards.map((c) => (c.id === id ? { ...c, draft: false } : c)))
@@ -290,9 +345,28 @@ export default function ChemistryGuide({ courseInfo = {}, grassTypes = [], manag
           <p className="font-body text-[13px] text-slate-500 mt-1 max-w-2xl">How every product in the program actually works — on the plant or in the soil — and why it’s on the sheet. For the crew, the interns, and anyone who wants the <em>why</em> behind the tank.</p>
         </div>
         {manage && !adding && !editing && (
-          <button onClick={() => setAdding(true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}><Plus size={14} /> Add a product</button>
+          <div className="flex flex-col items-end gap-1.5 shrink-0">
+            <button onClick={() => setAdding(true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}><Plus size={14} /> Add a product</button>
+            {missing.length > 0 && !bulk && (
+              <button onClick={buildFromLibrary} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 border" style={{ color: '#7C3AED', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}><Library size={13} /> Build {missing.length} from library</button>
+            )}
+          </div>
         )}
       </div>
+
+      {bulk && (
+        <div className="rounded-2xl p-4" style={{ backgroundColor: '#F7F4FD', border: '1px solid #D6C9F2' }}>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="font-body text-[13px] font-bold" style={{ color: '#6D28D9' }}>
+              {bulk.running ? <>Drafting from your library… {bulk.done} of {bulk.total}</> : <>Done — drafted {bulk.done} of {bulk.total}. Review each below and Confirm.</>}
+            </p>
+            {bulk.running && <button onClick={() => { bulkStop.current = true }} className="font-body text-[11px] font-bold text-slate-500 underline">Stop</button>}
+          </div>
+          <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: '#E4DBF5' }}>
+            <div className="h-full rounded-full transition-all" style={{ width: `${bulk.total ? Math.round((bulk.done / bulk.total) * 100) : 0}%`, backgroundColor: '#7C3AED' }} />
+          </div>
+        </div>
+      )}
 
       {(adding || editing) && manage && (
         <AddProductForm

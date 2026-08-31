@@ -1044,7 +1044,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
             onSaveProduct={saveProduct} onDeleteProduct={removeProduct} onImport={importProductsFromSheet} onAddDelivery={addDelivery}
           />
         )}
-        {route === 'chemguide' && <ChemistryGuide courseInfo={courseInfo} grassTypes={grassTypes} manage={manage} onSave={async (chemGuide) => { await saveSettings({ courseInfo: { ...courseInfo, chemGuide } }) }} />}
+        {route === 'chemguide' && <ChemistryGuide courseInfo={courseInfo} products={products} grassTypes={grassTypes} manage={manage} onSave={async (chemGuide) => { await saveSettings({ courseInfo: { ...courseInfo, chemGuide } }) }} />}
         {route === 'inventory' && !manage && (
           <Inventory products={products} deliveries={deliveries} onAddDelivery={addDelivery} />
         )}
