@@ -2064,7 +2064,7 @@ function Card({ children }) {
   return <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">{children}</div>
 }
 function FieldLabel({ children, noMargin }) {
-  return <label className={`font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block ${noMargin ? '' : 'mb-1.5'}`}>{children}</label>
+  return <label className={`spa-field-label font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block ${noMargin ? '' : 'mb-1.5'}`}>{children}</label>
 }
 // Every dropdown in the app is a type-to-search picker (see components/pickers).
 function Select({ value, onChange, options, placeholder }) {
@@ -4152,6 +4152,150 @@ function ChemicalHub({ products, grassTypes, deliveries, manage, onSaveProduct, 
   )
 }
 
+// ── ACTIVE-INGREDIENT EQUIVALENT CONVERTER ────────────────────────────────
+// Same active, different formulation/%? Match the ACTIVE INGREDIENT per area.
+// Dry products are dosed by WEIGHT (a.i. = weight × %); liquids by VOLUME
+// (a.i. = volume × lb a.i./gal). We convert both sides to pounds of active,
+// then back out the substitute's rate — and show every step of the math.
+const CONV_WEIGHT = { oz: 1 / 16, lb: 1, g: 1 / 453.59237, kg: 2.2046226 }        // → lb
+const CONV_VOLUME = { 'fl oz': 1 / 128, gal: 1, qt: 0.25, pt: 0.125, L: 0.26417205, mL: 0.00026417205 } // → gal
+const convMeasure = (u) => (u in CONV_VOLUME ? 'vol' : 'weight')
+const convUnits = ['oz', 'lb', 'fl oz', 'gal', 'qt', 'pt', 'g', 'kg', 'L', 'mL']
+const round3 = (n) => (!isFinite(n) ? null : Math.round(n * 1000) / 1000)
+const normAi = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '')
+
+function ActiveConverter({ products = [], onClose }) {
+  const list = [...products].sort((a, b) => String(a.name).localeCompare(String(b.name)))
+  const [fromName, setFromName] = useState('')
+  const [toName, setToName] = useState('')
+  const [amount, setAmount] = useState('')
+  const [fromUnit, setFromUnit] = useState('oz')
+  const [toUnit, setToUnit] = useState('fl oz')
+  const [fromPct, setFromPct] = useState('')
+  const [fromLbGal, setFromLbGal] = useState('')
+  const [toPct, setToPct] = useState('')
+  const [toLbGal, setToLbGal] = useState('')
+
+  const fromProd = list.find((p) => p.name === fromName)
+  const toProd = list.find((p) => p.name === toName)
+  const pick = (which, name) => {
+    const p = list.find((x) => x.name === name)
+    if (which === 'from') { setFromName(name); if (p?.unit) setFromUnit(p.unit); setFromPct(p?.activePct ?? ''); setFromLbGal('') }
+    else { setToName(name); if (p?.unit) setToUnit(p.unit); setToPct(p?.activePct ?? ''); setToLbGal('') }
+  }
+
+  const fromMeas = convMeasure(fromUnit)
+  const toMeas = convMeasure(toUnit)
+  const amt = parseFloat(amount)
+  const fPct = parseFloat(fromPct), fGal = parseFloat(fromLbGal)
+  const tPct = parseFloat(toPct), tGal = parseFloat(toLbGal)
+
+  // Need the right strength for each side's measure.
+  const fromReady = !isNaN(amt) && (fromMeas === 'weight' ? !isNaN(fPct) && fPct > 0 : !isNaN(fGal) && fGal > 0)
+  const toReady = toMeas === 'weight' ? !isNaN(tPct) && tPct > 0 : !isNaN(tGal) && tGal > 0
+
+  let aiLb = null, toAmt = null
+  const steps = []
+  if (fromReady) {
+    if (fromMeas === 'weight') {
+      const lb = amt * CONV_WEIGHT[fromUnit]
+      aiLb = lb * (fPct / 100)
+      steps.push(`Active in your rate: ${amt} ${fromUnit}${fromUnit !== 'lb' ? ` = ${round3(lb)} lb` : ''} × ${fPct}% = ${round3(aiLb)} lb active`)
+    } else {
+      const gal = amt * CONV_VOLUME[fromUnit]
+      aiLb = gal * fGal
+      steps.push(`Active in your rate: ${amt} ${fromUnit}${fromUnit !== 'gal' ? ` = ${round3(gal)} gal` : ''} × ${fGal} lb a.i./gal = ${round3(aiLb)} lb active`)
+    }
+  }
+  if (aiLb != null && toReady) {
+    if (toMeas === 'weight') {
+      const lb = aiLb / (tPct / 100)
+      toAmt = lb / CONV_WEIGHT[toUnit]
+      steps.push(`Same active in the substitute: ${round3(aiLb)} lb ÷ ${tPct}% = ${round3(lb)} lb product${toUnit !== 'lb' ? ` = ${round3(toAmt)} ${toUnit}` : ''}`)
+    } else {
+      const gal = aiLb / tGal
+      toAmt = gal / CONV_VOLUME[toUnit]
+      steps.push(`Same active in the substitute: ${round3(aiLb)} lb ÷ ${tGal} lb a.i./gal = ${round3(gal)} gal${toUnit !== 'gal' ? ` = ${round3(toAmt)} ${toUnit}` : ''}`)
+    }
+  }
+
+  const diffActive = fromProd?.activeIngredient && toProd?.activeIngredient && normAi(fromProd.activeIngredient) !== normAi(toProd.activeIngredient)
+
+  const strengthField = (meas, pct, setPct, lbGal, setLbGal) => meas === 'weight' ? (
+    <div><FieldLabel>% active (by weight)</FieldLabel><input type="number" step="any" value={pct} onChange={(e) => setPct(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="e.g. 40" /></div>
+  ) : (
+    <div><FieldLabel>lb active / gallon</FieldLabel><input type="number" step="any" value={lbGal} onChange={(e) => setLbGal(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="from label, e.g. 2" /></div>
+  )
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full sm:max-w-lg shadow-2xl max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #EEF0EC' }}>
+          <p className="font-display text-base font-bold flex items-center gap-1.5" style={{ color: FOREST }}><Gauge size={16} style={{ color: FERN }} /> Active-Ingredient Converter</p>
+          <button onClick={onClose} className="text-slate-400"><X size={18} /></button>
+        </div>
+        <div className="p-4 overflow-y-auto space-y-3">
+          <p className="font-body text-[12px] text-slate-500">Ran out of one product and switching to another with the <b>same active ingredient</b>? Match the active, not the ounces. Pick both and enter the rate you normally run.</p>
+
+          {/* FROM */}
+          <div className="rounded-xl p-3" style={{ backgroundColor: '#F1F7F2' }}>
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: FERN }}>What you normally use</p>
+            <FieldLabel>Product</FieldLabel>
+            <select value={fromName} onChange={(e) => pick('from', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white mb-2">
+              <option value="">Select…</option>
+              {list.map((p) => <option key={p.name} value={p.name}>{p.name}{p.activeIngredient ? ` — ${p.activeIngredient}` : ''}</option>)}
+            </select>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div><FieldLabel>Rate</FieldLabel><input type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="e.g. 10" /></div>
+              <div><FieldLabel>Unit</FieldLabel><select value={fromUnit} onChange={(e) => setFromUnit(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white">{convUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
+            </div>
+            {strengthField(fromMeas, fromPct, setFromPct, fromLbGal, setFromLbGal)}
+          </div>
+
+          {/* TO */}
+          <div className="rounded-xl p-3" style={{ backgroundColor: '#EFF6FF' }}>
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: '#2563EB' }}>What you're switching to</p>
+            <FieldLabel>Product</FieldLabel>
+            <select value={toName} onChange={(e) => pick('to', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white mb-2">
+              <option value="">Select…</option>
+              {list.map((p) => <option key={p.name} value={p.name}>{p.name}{p.activeIngredient ? ` — ${p.activeIngredient}` : ''}</option>)}
+            </select>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div><FieldLabel>Give me the rate in</FieldLabel><select value={toUnit} onChange={(e) => setToUnit(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white">{convUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
+              <div>{strengthField(toMeas, toPct, setToPct, toLbGal, setToLbGal)}</div>
+            </div>
+          </div>
+
+          {diffActive && (
+            <div className="rounded-lg px-3 py-2 font-body text-[11.5px] flex items-start gap-1.5" style={{ backgroundColor: '#FDECEA', color: '#98271B', border: '1px solid #F5C6CB' }}>
+              <AlertTriangle size={13} className="shrink-0 mt-0.5" /><span>These two have <b>different active ingredients</b> ({fromProd.activeIngredient} vs {toProd.activeIngredient}). Matching the active only makes sense for the <b>same</b> active — double-check you picked the right substitute.</span>
+            </div>
+          )}
+
+          {/* RESULT + MATH */}
+          {toAmt != null ? (
+            <div className="rounded-xl p-4 text-white" style={{ backgroundColor: FOREST }}>
+              <p className="font-body text-[11px] uppercase tracking-wide opacity-70">Use this much {toProd?.name || 'substitute'}</p>
+              <p className="font-display text-3xl font-bold mt-0.5">{round3(toAmt)} {toUnit}</p>
+              <p className="font-body text-[11px] opacity-70 mt-0.5">per the same area you were applying ({round3(aiLb)} lb active either way)</p>
+              <div className="mt-3 pt-3 space-y-1.5" style={{ borderTop: '1px solid rgba(255,255,255,0.15)' }}>
+                <p className="font-body text-[10px] font-bold uppercase tracking-wide opacity-70">The math</p>
+                {steps.map((s, i) => <p key={i} className="font-body text-[12px] leading-snug opacity-95">{i + 1}. {s}</p>)}
+              </div>
+            </div>
+          ) : (
+            <p className="font-body text-[12px] text-slate-400 text-center py-2">
+              {(!fromReady) ? 'Pick your product, rate, and its strength.' : (!toReady) ? 'Enter the substitute’s strength (% for dry, lb a.i./gal for liquid).' : 'Fill in both sides to see the equivalent rate.'}
+            </p>
+          )}
+
+          <p className="font-body text-[10.5px] text-slate-400">Dry products are measured by <b>weight</b> and use <b>% active</b>; liquids are measured by <b>volume</b> and use <b>lb active per gallon</b> (printed on the label, e.g. Dimension 2EW = 2). Annual limits are per active ingredient — a switch still counts toward the same cap. Verify against the label before you spray.</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeleteProduct, onImport }) {
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
@@ -4164,6 +4308,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   const [aiApplying, setAiApplying] = useState(false)
   const [oneAiBusy, setOneAiBusy] = useState(false)
   const [oneAiMsg, setOneAiMsg] = useState(null) // { text, tone: 'ok'|'warn'|'err' }
+  const [convOpen, setConvOpen] = useState(false)
   const fileRef = useRef(null)
   const editRef = useRef(null)
 
@@ -4449,11 +4594,16 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {aiBusy ? 'Reading…' : 'Auto-fill AI'}
             </button>
           )}
+          <button onClick={() => setConvOpen(true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border shrink-0" style={{ color: FOREST, borderColor: '#E2E8F0', backgroundColor: 'white' }}>
+            <Gauge size={14} /> A.I. Converter
+          </button>
           <button onClick={startNew} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
             <Plus size={14} /> Add Product
           </button>
         </div>
       </div>
+
+      {convOpen && <ActiveConverter products={products} onClose={() => setConvOpen(false)} />}
 
       {aiReview && (
         <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-3 sm:p-4" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={() => !aiApplying && setAiReview(null)}>
@@ -4587,7 +4737,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               <span>{oneAiMsg.text}{/not set up|ANTHROPIC/i.test(oneAiMsg.text) ? ' — say the word and I’ll walk you through adding the AI key.' : ''}</span>
             </div>
           )}
-          <div className="md:columns-2 md:gap-x-5 [&>div]:mb-3 [&>div]:break-inside-avoid">
+          <div className="space-y-2 [&_input]:!py-1.5 [&_.spa-field-label]:!mb-0.5">
             <div>
               <FieldLabel>Product Name</FieldLabel>
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} disabled={editing !== 'new'} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body disabled:bg-slate-50 disabled:text-slate-400" />
