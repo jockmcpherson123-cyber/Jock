@@ -4547,11 +4547,15 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
 
       {editing && draft && (
         <div ref={editRef} className="bg-white rounded-2xl border-2 p-4 mb-4 shadow-sm scroll-mt-4" style={{ borderColor: GOLD }}>
-          <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+          <div className="flex items-center justify-between gap-2 mb-3 flex-wrap sticky top-0 z-10 bg-white/95 backdrop-blur -mx-4 px-4 py-2 border-b border-slate-100">
             <p className="font-display text-base font-semibold text-slate-900">{editing === 'new' ? 'Add New Chemical' : `Edit ${editing}`}</p>
-            <button onClick={autofillOne} disabled={oneAiBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-50 shrink-0" style={{ color: '#6D4AC2', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}>
-              {oneAiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {oneAiBusy ? 'Reading…' : 'Autofill this product'}
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={autofillOne} disabled={oneAiBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-50 shrink-0" style={{ color: '#6D4AC2', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}>
+                {oneAiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {oneAiBusy ? 'Reading…' : 'Autofill'}
+              </button>
+              <button onClick={cancelEdit} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full text-slate-500 border border-slate-200 shrink-0">Cancel</button>
+              <button onClick={saveDraft} className="font-body text-xs font-bold px-4 py-2 rounded-full text-white shrink-0" style={{ backgroundColor: FOREST }}>Save</button>
+            </div>
           </div>
           {oneAiMsg && (
             <div className="rounded-lg px-3 py-2 mb-3 font-body text-[12px] flex items-start gap-1.5" style={oneAiMsg.tone === 'err' ? { backgroundColor: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA' } : oneAiMsg.tone === 'warn' ? { backgroundColor: '#FBF2E4', color: '#8A5A12', border: '1px solid #F0DFC0' } : { backgroundColor: '#F0F6F2', color: FERN, border: '1px solid #CFE3D6' }}>
