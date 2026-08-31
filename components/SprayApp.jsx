@@ -4218,13 +4218,38 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       if (AI_NUM(res.activePct) != null && AI_BLANK(draft.activePct)) fills.activePct = AI_NUM(res.activePct)
       ;['labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA', 'sprayInterval'].forEach((f) => { if (AI_NUM(res[f]) != null && AI_BLANK(draft[f])) fills[f] = AI_NUM(res[f]) })
       const n = Object.keys(fills).length
-      if (n === 0) { setOneAiMsg({ text: 'Nothing to add — the blanks here are already filled in.', tone: 'ok' }); setOneAiBusy(false); return }
       // Tag every safety-critical field the AI just filled as "verify vs. label".
       const verifySet = {}
       Object.keys(fills).forEach((f) => { if (AI_VERIFY_FIELDS.includes(f)) verifySet[f] = true })
-      setDraft((d0) => ({ ...d0, ...fills, aiVerify: { ...(d0.aiVerify || {}), ...verifySet } }))
-      const flagged = Object.keys(verifySet).length
-      setOneAiMsg({ text: `Filled ${n} blank field${n !== 1 ? 's' : ''}.${flagged ? ` ${flagged} rate/label field${flagged !== 1 ? 's are' : ' is'} tagged “verify vs. label” — confirm against the jug, then tap “checked”.` : ''}`, tone: 'ok' })
+      if (n > 0) setDraft((d0) => ({ ...d0, ...fills, aiVerify: { ...(d0.aiVerify || {}), ...verifySet } }))
+
+      // Also look up the official label + SDS links by web search, and fill any blank.
+      let gotDocs = false
+      try {
+        const dr = await fetch('/api/find-docs', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: draft.name || '', manufacturer: res.manufacturer || draft.manufacturer || '' }),
+        })
+        const dj = await dr.json().catch(() => ({}))
+        const docs = dj.result || {}
+        if ((docs.labelUrl && AI_BLANK(draft.labelUrl)) || (docs.sdsUrl && AI_BLANK(draft.sdsUrl))) {
+          gotDocs = true
+          setDraft((d0) => ({ ...d0, labelUrl: d0.labelUrl || docs.labelUrl || '', sdsUrl: d0.sdsUrl || docs.sdsUrl || '' }))
+        }
+      } catch { /* no docs is fine */ }
+
+      // Did the rate range come back empty? Common for generics — nudge to a photo.
+      const gotRates = ['labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA'].some((f) => f in fills)
+      const rateStillBlank = !gotRates && AI_BLANK(draft.labelMinM) && AI_BLANK(draft.labelMinA)
+      if (n === 0 && !gotDocs) {
+        setOneAiMsg({ text: `Nothing to add by name${rateStillBlank ? ' — for a generic, snap the label photo above and the AI reads the rate table and links straight off it.' : ' — the blanks here are already filled.'}`, tone: rateStillBlank ? 'warn' : 'ok' })
+      } else {
+        const flagged = Object.keys(verifySet).length
+        const bits = []
+        if (n > 0) bits.push(`filled ${n} field${n !== 1 ? 's' : ''}`)
+        if (gotDocs) bits.push('found label/SDS links')
+        setOneAiMsg({ text: `Done — ${bits.join(' and ')}.${flagged ? ' Rate/label fields are tagged “verify vs. label.”' : ''}${rateStillBlank ? ' No rate range by name — snap the label photo to read it off the table.' : ''}`, tone: 'ok' })
+      }
     } catch (e) { setOneAiMsg({ text: String(e?.message || e), tone: 'err' }) }
     setOneAiBusy(false)
   }
