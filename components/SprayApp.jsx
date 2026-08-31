@@ -4734,11 +4734,11 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
           )}
           {products.length > 0 && (
             <button onClick={runAiEnrich} disabled={aiBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border shrink-0 disabled:opacity-50" style={{ color: '#6D4AC2', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}>
-              {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {aiBusy ? 'Reading…' : 'Auto-fill AI'}
+              {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {aiBusy ? 'Reading…' : 'Fill all with AI'}
             </button>
           )}
           <button onClick={() => setConvOpen(true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border shrink-0" style={{ color: FOREST, borderColor: '#E2E8F0', backgroundColor: 'white' }}>
-            <Gauge size={14} /> A.I. Converter
+            <Gauge size={14} /> Rate Converter
           </button>
           <button onClick={startNew} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
             <Plus size={14} /> Add Product
@@ -4866,10 +4866,10 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       {editing && draft && (
         <div ref={editRef} className="bg-white rounded-2xl border-2 p-4 mb-4 shadow-sm scroll-mt-4" style={{ borderColor: GOLD }}>
           <div className="flex items-center justify-between gap-2 mb-3 flex-wrap sticky top-0 z-10 bg-white/95 backdrop-blur -mx-4 px-4 py-2 border-b border-slate-100">
-            <p className="font-display text-base font-semibold text-slate-900">{editing === 'new' ? 'Add New Chemical' : `Edit ${editing}`}</p>
+            <p className="font-display text-base font-semibold text-slate-900">{editing === 'new' ? 'Add Product' : `Edit ${editing}`}</p>
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={autofillOne} disabled={oneAiBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-50 shrink-0" style={{ color: '#6D4AC2', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}>
-                {oneAiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {oneAiBusy ? 'Reading…' : 'Autofill'}
+                {oneAiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {oneAiBusy ? 'Reading…' : 'Fill with AI'}
               </button>
               <button onClick={cancelEdit} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full text-slate-500 border border-slate-200 shrink-0">Cancel</button>
               <button onClick={saveDraft} className="font-body text-xs font-bold px-4 py-2 rounded-full text-white shrink-0" style={{ backgroundColor: FOREST }}>Save</button>
