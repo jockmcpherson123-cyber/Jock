@@ -4412,6 +4412,25 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
     </span>
   ) : null)
 
+  // Active ingredients — a product can carry more than one (premixes like
+  // azoxystrobin + difenoconazole), each with its own %. Stored as draft.actives;
+  // falls back to the legacy single activeIngredient/activePct for old products.
+  const draftActives = !draft ? [] : (Array.isArray(draft.actives) && draft.actives.length
+    ? draft.actives
+    : [{ name: draft.activeIngredient || '', pct: draft.activePct ?? '' }])
+  const setActive = (i, key, val) => setDraft((d) => {
+    const base = Array.isArray(d.actives) && d.actives.length ? d.actives : [{ name: d.activeIngredient || '', pct: d.activePct ?? '' }]
+    return { ...d, actives: base.map((a, idx) => (idx === i ? { ...a, [key]: val } : a)) }
+  })
+  const addActive = () => setDraft((d) => {
+    const base = Array.isArray(d.actives) && d.actives.length ? d.actives : [{ name: d.activeIngredient || '', pct: d.activePct ?? '' }]
+    return { ...d, actives: [...base, { name: '', pct: '' }] }
+  })
+  const removeActive = (i) => setDraft((d) => {
+    const base = Array.isArray(d.actives) && d.actives.length ? d.actives : [{ name: d.activeIngredient || '', pct: d.activePct ?? '' }]
+    return { ...d, actives: base.filter((_, idx) => idx !== i) }
+  })
+
   const applyAiReview = async () => {
     if (!aiReview?.items) return
     setAiApplying(true)
@@ -4547,13 +4566,27 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       nPerGal: draft.nPerGal === '' || draft.nPerGal == null ? 0 : parseFloat(draft.nPerGal),
       pPerGal: draft.pPerGal === '' || draft.pPerGal == null ? 0 : parseFloat(draft.pPerGal),
       kPerGal: draft.kPerGal === '' || draft.kPerGal == null ? 0 : parseFloat(draft.kPerGal),
-      activePct: draft.activePct === '' || draft.activePct == null ? null : parseFloat(draft.activePct),
       eiq: draft.eiq === '' || draft.eiq == null ? null : parseFloat(draft.eiq),
       ozPerCase: draft.ozPerCase === '' || draft.ozPerCase == null ? null : parseFloat(draft.ozPerCase),
       costPerCase: draft.costPerCase === '' || draft.costPerCase == null ? null : parseFloat(draft.costPerCase),
       moaGroup: (draft.moaGroup || '').trim(),
       rotationDays: draft.rotationDays === '' || draft.rotationDays == null ? null : parseInt(draft.rotationDays, 10),
       sprayInterval: draft.sprayInterval === '' || draft.sprayInterval == null ? null : parseInt(draft.sprayInterval, 10),
+      // Active ingredients: clean the list, and derive the combined name +
+      // total % so display / EIQ / converter keep working off one product.
+      ...(() => {
+        const raw = Array.isArray(draft.actives)
+          ? draft.actives
+          : (draft.activeIngredient || draft.activePct != null ? [{ name: draft.activeIngredient || '', pct: draft.activePct ?? '' }] : [])
+        const cleanedActives = raw
+          .map((a) => ({ name: String(a.name || '').trim(), pct: (a.pct === '' || a.pct == null) ? null : parseFloat(a.pct) }))
+          .filter((a) => a.name || a.pct != null)
+        const names = cleanedActives.map((a) => a.name).filter(Boolean).join(' + ')
+        const pctSum = cleanedActives.some((a) => a.pct != null)
+          ? Math.round(cleanedActives.reduce((s, a) => s + (a.pct || 0), 0) * 1000) / 1000
+          : null
+        return { actives: cleanedActives, activeIngredient: names, activePct: pctSum }
+      })(),
       // Keep the "verify vs. label" tags only for fields that still hold a value.
       aiVerify: (() => {
         const av = draft.aiVerify || {}
@@ -4913,15 +4946,22 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
             <div className="rounded-xl p-3" style={{ backgroundColor: '#F8FAFC' }}>
               <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: '#475569' }}>Label Facts</p>
               <div className="space-y-3">
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-2">
-                    <FieldLabel>Active Ingredient</FieldLabel>
-                    <input value={draft.activeIngredient ?? ''} onChange={(e) => setDraft({ ...draft, activeIngredient: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. Azoxystrobin" />
+                <div>
+                  <FieldLabel>Active Ingredient{draftActives.length > 1 ? 's' : ''}</FieldLabel>
+                  <div className="space-y-2">
+                    {draftActives.map((a, i) => (
+                      <div key={i} className="grid grid-cols-3 gap-2 items-center">
+                        <input value={a.name ?? ''} onChange={(e) => setActive(i, 'name', e.target.value)} className="col-span-2 w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder={i === 0 ? 'e.g. Azoxystrobin' : 'e.g. Difenoconazole'} />
+                        <div className="flex items-center gap-1">
+                          <input type="number" step="any" value={a.pct ?? ''} onChange={(e) => setActive(i, 'pct', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="% e.g. 20.3" />
+                          {draftActives.length > 1 && (
+                            <button type="button" onClick={() => removeActive(i)} className="text-red-400 p-1 shrink-0" aria-label="Remove active"><X size={15} /></button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <FieldLabel>Active %</FieldLabel>
-                    <input type="number" step="any" value={draft.activePct ?? ''} onChange={(e) => setDraft({ ...draft, activePct: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 20.3" />
-                  </div>
+                  <button type="button" onClick={addActive} className="mt-1.5 font-body text-[11px] font-bold flex items-center gap-1" style={{ color: FERN }}><Plus size={12} /> Add another active</button>
                 </div>
                 <div>
                   <FieldLabel>EIQ value (environmental impact)</FieldLabel>
