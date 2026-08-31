@@ -1008,6 +1008,22 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
             onDelete={() => removeSheet(activeSheet)}
             onSprayAgain={() => sprayAgain(activeSheet)}
             onApprove={approveSheet}
+            onAssignRig={async (rigId) => {
+              const snap = {
+                area: activeSheet.area || '', date: activeSheet.date || '',
+                applicator: activeSheet.completedBy || activeSheet.operator || '',
+                completedAt: activeSheet.completedAt || '',
+                targets: activeSheet.targets || (activeSheet.target ? [activeSheet.target] : []),
+                products: (activeSheet.products || []).filter((p) => p.product).map((p) => {
+                  const pr = products.find((x) => x.name === p.product) || {}
+                  return { name: p.product, activeIngredient: pr.activeIngredient || '', epaReg: pr.epaReg || '', signalWord: pr.signalWord || '', rei: pr.rei || '', labelUrl: pr.labelUrl || '' }
+                }),
+                assignedAt: new Date().toISOString(),
+              }
+              const rigMix = { ...(courseInfo.rigMix || {}), [rigId]: snap }
+              await saveSettings({ courseInfo: { ...courseInfo, rigMix } })
+              showToast('Set as this sprayer’s current mix')
+            }}
             onLogSpray={async (updated, opts = {}) => {
               try {
                 const saved = await db.updateSheet(updated)
@@ -2994,7 +3010,9 @@ function SignaturePad({ value, onChange }) {
 }
 
 // ── SHEET VIEWER ──────────────────────────────────────────────────────────
-function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, directorPins = {}, location, courseInfo, manage, approve }) {
+function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove, onAssignRig, onLogSpray, onRemoteSheet, products, areas, directors, operators = [], applicatorLicenses = {}, directorPins = {}, location, courseInfo, manage, approve }) {
+  const sprayers = Array.isArray(courseInfo?.sprayers) ? courseInfo.sprayers : []
+  const [rigPick, setRigPick] = useState(false)
   // TEMP (testing): let the manager tick tanks + log sprays too. The crew normally
   // owns the fill/tick flow; restore this to `!manage` to hide it from managers.
   const canFill = true
@@ -3148,6 +3166,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
                     ['Save', () => saveNow(), FERN],
                     ['Print', () => printRecord(), FOREST],
                     ['Tank label', () => printTankLabel(), FOREST],
+                    ...(manage && onAssignRig && sprayers.length ? [['Set as sprayer mix', () => setRigPick(true), FOREST]] : []),
                     [pdfBusy ? 'Exporting…' : 'Export PDF', () => exportPdf(), FOREST],
                     ...(manage && onSprayAgain ? [['Spray again', () => onSprayAgain(), FOREST]] : []),
                     ...(manage && onDelete ? [['Delete', () => setConfirmDel(true), '#DC2626']] : []),
@@ -3171,6 +3190,22 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
             {gaps.map((g) => <li key={g} className="flex items-start gap-1.5"><span className="mt-[7px] w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: '#B08A2A' }} />{g}</li>)}
           </ul>
           <p className="font-body text-[11px] mt-2" style={{ color: '#92660D' }}>You can still print — this is a reminder, not a block. Add the EPA Reg. No. in the Chemical Library and licence #s in Settings → People.</p>
+        </div>
+      )}
+      {rigPick && (
+        <div className="no-print fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setRigPick(false)}>
+          <div className="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <p className="font-display text-base font-bold text-slate-900 mb-1">Set this mix as a sprayer's current load</p>
+            <p className="font-body text-[12px] text-slate-500 mb-3">Scanning that sprayer's QR will show this mix. Which sprayer is it in?</p>
+            <div className="space-y-1.5 max-h-72 overflow-y-auto">
+              {sprayers.map((r) => (
+                <button key={r.id} onClick={() => { setRigPick(false); onAssignRig(r.id) }} className="w-full text-left font-body text-sm font-semibold px-3.5 py-2.5 rounded-xl border hover:bg-slate-50" style={{ borderColor: HAIR, color: FOREST }}>
+                  {r.name}{r.tank ? <span className="font-normal text-slate-400"> · {r.tank}</span> : ''}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setRigPick(false)} className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+          </div>
         </div>
       )}
       {gaps.length === 0 && (sheet.completed || sheet.status === 'approved') && (
@@ -5996,7 +6031,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       <SectionHeader title="Settings" subtitle="Manage people, areas, and club details — changes apply everywhere instantly" />
 
       <div className="flex gap-2 mt-4 mb-5 overflow-x-auto pb-1">
-        {[['property', 'Property Setup'], ['course', 'Course Info'], ['location', 'Location'], ['people', 'People'], ['areas', 'Sprayer Areas'], ['lists', 'Lists'], ['backup', 'Backup']].map(([k, l]) => (
+        {[['property', 'Property Setup'], ['course', 'Course Info'], ['location', 'Location'], ['people', 'People'], ['areas', 'Sprayer Areas'], ['sprayers', 'Sprayers'], ['lists', 'Lists'], ['backup', 'Backup']].map(([k, l]) => (
           <button key={k} onClick={() => setSection(k)} className="font-body text-xs font-semibold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={section === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
@@ -6008,6 +6043,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
       {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} onSave={onSave} />}
       {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassChoices} soilTypes={soilTypes} onSave={onSave} />}
+      {section === 'sprayers' && <SprayersSettings courseInfo={courseInfo} onSave={onSave} />}
       {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} soilTypes={soilTypes} courseInfo={courseInfo} onSave={onSave} />}
       {section === 'backup' && <BackupSettings courseInfo={courseInfo} />}
     </div>
@@ -6119,6 +6155,81 @@ function BackupSettings({ courseInfo = {} }) {
         )}
       </div>
       <p className="font-body text-[11px] text-slate-400 px-1">Tip: download a backup before a big change, and at the end of each season. The file is plain JSON — it opens in any text editor and can be handed to support to restore.</p>
+    </div>
+  )
+}
+
+// Sprayers / rigs — a registry of the club's spray machines, each with a
+// permanent QR sticker. Scanning a rig's QR opens a public page showing what's
+// currently mixed in it (set from a spray record) and links to the labels.
+function SprayersSettings({ courseInfo = {}, onSave }) {
+  const sprayers = Array.isArray(courseInfo.sprayers) ? courseInfo.sprayers : []
+  const [name, setName] = useState('')
+  const [tank, setTank] = useState('')
+  const [busy, setBusy] = useState(false)
+  const rigMix = courseInfo.rigMix || {}
+  const key = courseInfo.partsKey || ''
+
+  const save = (list, extra = {}) => onSave({ courseInfo: { ...courseInfo, sprayers: list, ...extra } })
+  const add = async () => {
+    if (!name.trim()) return
+    setBusy(true)
+    // A club key (shared with the crew QR) rides in each rig link; make one if absent.
+    const extra = key ? {} : { partsKey: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)).replace(/-/g, '').slice(0, 16) }
+    await save([...sprayers, { id: 'rig_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: name.trim(), tank: tank.trim() }], extra)
+    setName(''); setTank(''); setBusy(false)
+  }
+  const remove = (id) => { if (confirm('Remove this sprayer?')) save(sprayers.filter((r) => r.id !== id)) }
+
+  const rigUrl = (id) => `${typeof window !== 'undefined' ? window.location.origin : ''}/rig?k=${encodeURIComponent(courseInfo.partsKey || '')}&r=${encodeURIComponent(id)}`
+
+  const printLabels = async () => {
+    const withQr = await Promise.all(sprayers.map(async (r) => ({ r, qr: await qrDataUrl(rigUrl(r.id), { width: 260 }) })))
+    const cards = withQr.map(({ r, qr }) => `<div style="border:2px solid #16291F;border-radius:12px;padding:14px;text-align:center;width:250px;display:inline-block;margin:6px;vertical-align:top;font-family:Arial,sans-serif">
+      <div style="font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#C9A84C">${esc(courseInfo.clubName || 'Grounds')} · Sprayer</div>
+      <div style="font-size:20px;font-weight:800;color:#16291F;margin:2px 0 8px">${esc(r.name)}</div>
+      <img src="${qr}" style="width:180px;height:180px" />
+      <div style="font-size:10px;color:#6B6F6C;margin-top:6px">Scan to see the current mix &amp; labels</div>
+    </div>`).join('')
+    const html = `<div style="padding:14px">${cards}</div>`
+    printRecordSinglePage(html)
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <div className="bg-white rounded-2xl border border-black/5 p-5 shadow-sm">
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Sprayers &amp; rigs</p>
+        <p className="font-body text-[13px] text-slate-500 mb-4">Register each spray machine and print it a permanent QR sticker. From any spray record, tap <b>“Set as sprayer mix”</b> to tie that mix to a rig — then scanning the sticker shows what’s loaded and links to the labels.</p>
+
+        <div className="flex flex-wrap gap-2 items-end mb-4">
+          <div className="flex-1 min-w-[140px]"><FieldLabel>Sprayer name</FieldLabel><input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add() }} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. HD200 #1" /></div>
+          <div className="w-32"><FieldLabel>Tank size</FieldLabel><input value={tank} onChange={(e) => setTank(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 200 gal" /></div>
+          <button onClick={add} disabled={busy || !name.trim()} className="font-body text-sm font-bold px-4 py-2.5 rounded-xl text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>Add</button>
+        </div>
+
+        {sprayers.length === 0 ? (
+          <p className="font-body text-[12px] text-slate-400">No sprayers yet. Add your rigs above.</p>
+        ) : (
+          <div className="space-y-2">
+            {sprayers.map((r) => {
+              const mix = rigMix[r.id]
+              return (
+                <div key={r.id} className="flex items-center gap-3 rounded-xl border p-3" style={{ borderColor: HAIR }}>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-body text-sm font-semibold text-slate-900">{r.name}{r.tank ? <span className="font-normal text-slate-400"> · {r.tank}</span> : ''}</p>
+                    <p className="font-body text-[11px] text-slate-400 truncate">{mix ? `Loaded: ${mix.area || 'mix'} · ${(mix.products || []).map((p) => p.name).join(', ') || '—'}` : 'No mix assigned yet'}</p>
+                  </div>
+                  <button onClick={() => remove(r.id)} className="text-red-400 p-1.5 shrink-0"><Trash2 size={15} /></button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {sprayers.length > 0 && (
+          <button onClick={printLabels} className="mt-4 font-body text-sm font-bold px-4 py-2.5 rounded-full text-white flex items-center gap-2" style={{ backgroundColor: FOREST }}><QrCode size={15} /> Print QR labels</button>
+        )}
+      </div>
     </div>
   )
 }

@@ -72,6 +72,17 @@ export async function GET(request) {
     return Response.json({ courses: courseInfo.courses || [], courseInfo: safeCourseInfo(courseInfo), greensMowToday }, { headers: noStore })
   }
 
+  if (view === 'rig') {
+    // What's loaded in a sprayer: the registry + the mix snapshots set from the
+    // spray records. No login — just the club key, like the other crew views.
+    return Response.json({
+      club: courseInfo.clubName || '',
+      sprayers: courseInfo.sprayers || [],
+      rigMix: courseInfo.rigMix || {},
+      location,
+    }, { headers: noStore })
+  }
+
   // Default: the job board for one day.
   const date = sp.get('date')
   let q = supabase.from('crew_tasks').select('*')
