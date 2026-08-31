@@ -4587,7 +4587,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               <span>{oneAiMsg.text}{/not set up|ANTHROPIC/i.test(oneAiMsg.text) ? ' — say the word and I’ll walk you through adding the AI key.' : ''}</span>
             </div>
           )}
-          <div className="space-y-3">
+          <div className="md:columns-2 md:gap-x-5 [&>div]:mb-3 [&>div]:break-inside-avoid">
             <div>
               <FieldLabel>Product Name</FieldLabel>
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} disabled={editing !== 'new'} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body disabled:bg-slate-50 disabled:text-slate-400" />
@@ -4869,10 +4869,10 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               </div>
             </div>
 
-            <div className="flex gap-2 pt-1">
-              <button onClick={cancelEdit} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
-              <button onClick={saveDraft} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: FOREST }}>Save Product</button>
-            </div>
+          </div>
+          <div className="flex gap-2 pt-3 mt-1 border-t border-slate-100">
+            <button onClick={cancelEdit} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+            <button onClick={saveDraft} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: FOREST }}>Save Product</button>
           </div>
         </div>
       )}
