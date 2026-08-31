@@ -1340,6 +1340,53 @@ function writeWxCache(lat, lng, day, patch) {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
+// "Needs you today" — one prioritized action list at the top of Home so the
+// superintendent sees what actually needs doing without hunting through cards.
+// Rows link to the relevant screen where the app can navigate to it.
+const TODAY_TONE = {
+  warn: { bg: '#FBF1DA', fg: '#92660D', dot: '#B08A2A' },
+  bad: { bg: '#FEE2E2', fg: '#B91C1C', dot: '#DC2626' },
+  gold: { bg: '#FBF3DD', fg: '#92660D', dot: GOLD },
+  good: { bg: '#E8F3EC', fg: '#2E7D46', dot: '#2E7D46' },
+  info: { bg: '#EEF2FF', fg: '#4F46E5', dot: '#6366F1' },
+}
+function TodayList({ items }) {
+  if (!items.length) {
+    return (
+      <div className="paper-card p-4 flex items-center gap-2.5">
+        <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8F3EC' }}><Check size={16} style={{ color: '#2E7D46' }} /></span>
+        <p className="font-body text-sm font-semibold" style={{ color: FOREST }}>You’re all caught up — nothing needs you right now.</p>
+      </div>
+    )
+  }
+  return (
+    <div className="paper-card overflow-hidden">
+      <div className="px-4 pt-3 pb-1 flex items-center gap-2">
+        <span className="font-display text-sm font-semibold" style={{ color: FOREST }}>Needs you today</span>
+        <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: FOREST, color: 'white' }}>{items.length}</span>
+      </div>
+      <div>
+        {items.map((it) => {
+          const t = TODAY_TONE[it.tone] || TODAY_TONE.info
+          const Icon = it.Icon
+          const Wrap = it.action ? 'button' : 'div'
+          return (
+            <Wrap key={it.key} onClick={it.action} className="w-full text-left flex items-center gap-3 px-4 py-2.5" style={{ borderTop: '1px solid #EFEDE7', cursor: it.action ? 'pointer' : 'default' }}>
+              <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: t.bg }}><Icon size={14} style={{ color: t.fg }} /></span>
+              <div className="min-w-0 flex-1">
+                <p className="font-body text-[13px] font-semibold" style={{ color: FOREST }}>{it.label}</p>
+                {it.sub && <p className="font-body text-[11px] truncate" style={{ color: INK_3 }}>{it.sub}</p>}
+              </div>
+              {it.cta && it.action && <span className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full shrink-0" style={{ backgroundColor: t.bg, color: t.fg }}>{it.cta}</span>}
+              {it.action && !it.cta && <ChevronRight size={16} className="shrink-0" style={{ color: INK_3 }} />}
+            </Wrap>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, courseInfo, onGoWeather, onGo, homeMode }) {
   // Home is a read-only overview — the create-a-spray-sheet affordances live on
   // the Annual Program and Spray Sheets screens, not here.
@@ -1458,6 +1505,17 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   if (pgrAlerts > 0) attention.push({ label: `${pgrAlerts} PGR reapply due`, tone: 'warn' })
   if (lowStock.length > 0) attention.push({ label: `${lowStock.length} product${lowStock.length > 1 ? 's' : ''} low on stock`, tone: 'bad' })
 
+  // The consolidated "needs you today" list — same signals, one prioritized place.
+  const plural = (n) => (n === 1 ? '' : 's')
+  const pgrDue = pgrRows.filter((r) => r.status === 'due').length
+  const pgrSoon = pgrRows.filter((r) => r.status === 'soon').length
+  const todayItems = []
+  if (pending.length) todayItems.push({ key: 'appr', tone: 'warn', Icon: ClipboardList, label: `${pending.length} sheet${plural(pending.length)} awaiting approval`, sub: 'Not live on the crew’s iPads until you approve', cta: 'Review', action: onGo ? () => onGo('list') : undefined })
+  if (create && upcomingGroups.length) todayItems.push({ key: 'plan', tone: 'gold', Icon: Calendar, label: `${upcomingGroups.length} planned spray day${plural(upcomingGroups.length)} in the next 7 days`, sub: 'Turn the program into spray sheets — see below' })
+  if (pgrDue || pgrSoon) todayItems.push({ key: 'pgr', tone: pgrDue ? 'warn' : 'info', Icon: TrendingUp, label: [pgrDue && `${pgrDue} PGR reapply due`, pgrSoon && `${pgrSoon} coming soon`].filter(Boolean).join(' · '), sub: 'Growth-regulator timing — details below' })
+  if (openWins.length) todayItems.push({ key: 'soil', tone: 'good', Icon: Thermometer, label: `${openWins.length} soil-temp window${plural(openWins.length)} open`, sub: openWins.map((w) => w.label).join(', ') })
+  if (lowStock.length) todayItems.push({ key: 'stock', tone: 'bad', Icon: AlertTriangle, label: `${lowStock.length} product${plural(lowStock.length)} low on stock`, sub: lowStock.slice(0, 3).map((p) => p.name).join(', ') + (lowStock.length > 3 ? '…' : ''), cta: 'Order', action: onGo ? () => onGo('chemicals') : undefined })
+
   return (
     <div className="pt-6 space-y-6">
       {manage && (
@@ -1468,10 +1526,13 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
         </div>
       )}
 
-      {/* Morning briefing — spray window + needs-attention at a glance (full width) */}
+      {/* Morning briefing — spray window (the action list lives in TodayList below) */}
       {manage && (
-        <SprayWindowStrip current={wx.current} today={wx.todayWindow} hasLocation={hasLocation} attention={attention} onGoWeather={onGoWeather} />
+        <SprayWindowStrip current={wx.current} today={wx.todayWindow} hasLocation={hasLocation} attention={[]} onGoWeather={onGoWeather} />
       )}
+
+      {/* Needs you today — one prioritized action list */}
+      {manage && <TodayList items={todayItems} />}
 
       {/* Stats cluster — one connected instrument panel, scans across full width */}
       <div className="paper-card stat-cluster grid grid-cols-4 overflow-hidden">
