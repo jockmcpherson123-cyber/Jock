@@ -1340,6 +1340,52 @@ function writeWxCache(lat, lng, day, patch) {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
+// Quick Find — one search box on Home to jump straight to any past spray sheet
+// or product, instead of hunting through lists.
+function QuickFind({ sheets = [], products = [], onOpen, onGo }) {
+  const [q, setQ] = useState('')
+  const term = q.trim().toLowerCase()
+  const results = (() => {
+    if (term.length < 2) return []
+    const out = []
+    const sheetMatches = (sheets || []).filter((s) => {
+      const hay = `${s.area || ''} ${s.date || ''} ${(s.targets || []).join(' ')} ${(s.products || []).map((p) => p.product).join(' ')}`.toLowerCase()
+      return hay.includes(term)
+    }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 6)
+    sheetMatches.forEach((s) => out.push({ kind: 'sheet', key: 's' + s.id, label: s.area || 'Spray', sub: `${fmtDate(s.date)} · ${(s.products || []).filter((p) => p.product).map((p) => p.product).join(', ') || 'no products'}`, action: () => onOpen && onOpen(s) }))
+    const prodMatches = (products || []).filter((p) => `${p.name || ''} ${p.activeIngredient || ''} ${p.moaGroup || ''}`.toLowerCase().includes(term))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name))).slice(0, 5)
+    prodMatches.forEach((p) => out.push({ kind: 'product', key: 'p' + p.name, label: p.name, sub: [p.type, p.activeIngredient].filter(Boolean).join(' · '), action: () => onGo && onGo('chemicals') }))
+    return out
+  })()
+
+  return (
+    <div className="relative">
+      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: INK_3 }} />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Quick find — a spray sheet, area, or product…" className="w-full rounded-full pl-9 pr-9 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${HAIR}` }} />
+      {q && <button onClick={() => setQ('')} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: INK_3 }}><X size={15} /></button>}
+      {term.length >= 2 && (
+        <div className="absolute z-30 mt-1.5 w-full rounded-2xl shadow-xl overflow-hidden" style={{ backgroundColor: 'white', border: `1px solid ${HAIR}` }}>
+          {results.length === 0 ? (
+            <p className="font-body text-[12.5px] px-4 py-3" style={{ color: INK_3 }}>No matches for “{q}”.</p>
+          ) : results.map((r) => (
+            <button key={r.key} onClick={() => { r.action(); setQ('') }} className="w-full text-left flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-50" style={{ borderTop: '1px solid #F1EFE9' }}>
+              <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: r.kind === 'sheet' ? '#EFF6FF' : '#F0F6F2' }}>
+                {r.kind === 'sheet' ? <ClipboardList size={13} style={{ color: '#2563EB' }} /> : <Droplet size={13} style={{ color: FERN }} />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-body text-[13px] font-semibold truncate" style={{ color: FOREST }}>{r.label}</p>
+                <p className="font-body text-[11px] truncate" style={{ color: INK_3 }}>{r.sub}</p>
+              </div>
+              <span className="font-body text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1F1EE', color: INK_3 }}>{r.kind}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // "Needs you today" — one prioritized action list at the top of Home so the
 // superintendent sees what actually needs doing without hunting through cards.
 // Rows link to the relevant screen where the app can navigate to it.
@@ -1525,6 +1571,9 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
           </a>
         </div>
       )}
+
+      {/* Quick find — jump to any sheet or product */}
+      {manage && <QuickFind sheets={sheets} products={products} onOpen={onOpen} onGo={onGo} />}
 
       {/* Morning briefing — spray window (the action list lives in TodayList below) */}
       {manage && (
