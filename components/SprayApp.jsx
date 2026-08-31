@@ -4865,6 +4865,11 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                   </span>
                 )}
               </div>
+              {p.activeIngredient && (
+                <p className="font-body text-[11px] text-slate-500 mt-0.5 truncate" title={p.activeIngredient}>
+                  {p.activeIngredient}{p.moaGroup ? <span className="text-slate-400"> · {p.moaGroup}</span> : ''}
+                </p>
+              )}
               <div className="flex items-center gap-3 mt-1 font-body text-[11px] text-slate-400 flex-wrap">
                 <span>{p.rate ?? '—'} {p.basis}</span>
                 {(p.labelMaxM || p.labelMaxA || p.labelMinM || p.labelMinA) && (
