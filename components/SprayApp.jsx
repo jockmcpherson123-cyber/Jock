@@ -5785,7 +5785,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       <SectionHeader title="Settings" subtitle="Manage people, areas, and club details — changes apply everywhere instantly" />
 
       <div className="flex gap-2 mt-4 mb-5 overflow-x-auto pb-1">
-        {[['property', 'Property Setup'], ['course', 'Course Info'], ['location', 'Location'], ['people', 'People'], ['areas', 'Sprayer Areas'], ['lists', 'Lists']].map(([k, l]) => (
+        {[['property', 'Property Setup'], ['course', 'Course Info'], ['location', 'Location'], ['people', 'People'], ['areas', 'Sprayer Areas'], ['lists', 'Lists'], ['backup', 'Backup']].map(([k, l]) => (
           <button key={k} onClick={() => setSection(k)} className="font-body text-xs font-semibold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={section === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
@@ -5798,6 +5798,116 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} onSave={onSave} />}
       {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassChoices} soilTypes={soilTypes} onSave={onSave} />}
       {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} soilTypes={soilTypes} courseInfo={courseInfo} onSave={onSave} />}
+      {section === 'backup' && <BackupSettings courseInfo={courseInfo} />}
+    </div>
+  )
+}
+
+// Full-data backup — downloads everything the club has entered as one JSON
+// file, so the data is never trapped in the app. A commercial must-have: a
+// club can keep its own copy, move it, or hand it to support.
+function BackupSettings({ courseInfo = {} }) {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null) // { counts, error }
+
+  const exportAll = async () => {
+    setBusy(true); setResult(null)
+    try {
+      // Each dataset is fetched independently — one failing table never sinks
+      // the whole backup; it just records an error for that dataset.
+      const jobs = {
+        settings: () => db.fetchSettings(),
+        products: () => db.fetchProducts(),
+        sheets: () => db.fetchSheets(),
+        fertSheets: () => db.fetchFertSheets(),
+        clippings: () => db.fetchClippings(),
+        practices: () => db.fetchCulturalPractices(),
+        greensSpeeds: () => db.fetchGreensSpeeds(),
+        scouting: () => db.fetchScouting(),
+        soilTests: () => db.fetchSoilTests(),
+        deliveries: () => db.fetchDeliveries(),
+        parts: () => db.fetchParts(),
+        shapes: () => db.fetchShapes(),
+        playbook: () => db.fetchPlaybookItems(),
+        tournaments: () => db.fetchTournaments(),
+      }
+      const data = {}
+      const counts = {}
+      const errors = {}
+      await Promise.all(Object.entries(jobs).map(async ([key, fn]) => {
+        try {
+          const v = await fn()
+          data[key] = v
+          counts[key] = Array.isArray(v) ? v.length : (v ? 1 : 0)
+        } catch (e) { errors[key] = String(e?.message || e) }
+      }))
+      // Programs carry their applications separately — pull those too.
+      try {
+        const programs = await db.fetchPrograms()
+        data.programs = programs
+        counts.programs = Array.isArray(programs) ? programs.length : 0
+        const apps = []
+        for (const p of programs || []) {
+          try { const a = await db.fetchApplications(p.id); (a || []).forEach((x) => apps.push(x)) } catch {}
+        }
+        data.applications = apps
+        counts.applications = apps.length
+      } catch (e) { errors.programs = String(e?.message || e) }
+
+      const bundle = {
+        _backup: 'golf-grounds-management',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        club: courseInfo?.clubName || '',
+        data,
+      }
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const safe = (courseInfo?.clubName || 'club').replace(/[^\w-]+/g, '_')
+      a.href = url
+      a.download = `backup_${safe}_${localDateISO()}.json`
+      document.body.appendChild(a); a.click(); a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 4000)
+      setResult({ counts, error: Object.keys(errors).length ? errors : null })
+    } catch (e) {
+      setResult({ counts: null, error: { all: String(e?.message || e) } })
+    }
+    setBusy(false)
+  }
+
+  const totalRows = result?.counts ? Object.values(result.counts).reduce((a, b) => a + (Number(b) || 0), 0) : 0
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <div className="bg-white rounded-2xl border border-black/5 p-5 shadow-sm">
+        <div className="flex items-center gap-2 mb-1">
+          <CloudUpload size={18} style={{ color: FOREST }} />
+          <p className="font-display text-base font-semibold text-slate-900">Download a full backup</p>
+        </div>
+        <p className="font-body text-[13px] text-slate-500 mb-4">Saves <b>everything</b> the club has entered — products, spray &amp; fert sheets, clippings, greens speed, soil tests, scouting, practices, parts, playbook, tournaments and all your settings — to one file on this device. Keep it somewhere safe; it&apos;s your own copy of the data.</p>
+        <button onClick={exportAll} disabled={busy} className="font-body text-sm font-bold px-5 py-2.5 rounded-full text-white flex items-center gap-2 disabled:opacity-60" style={{ backgroundColor: FOREST }}>
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <CloudUpload size={15} />}
+          {busy ? 'Gathering your data…' : 'Export all data'}
+        </button>
+
+        {result && (
+          <div className="mt-4 rounded-xl p-3" style={{ backgroundColor: '#F0F6F2', border: '1px solid #CFE3D6' }}>
+            <p className="font-body text-[13px] font-bold" style={{ color: FERN }}>✓ Backup downloaded — {totalRows.toLocaleString()} record{totalRows !== 1 ? 's' : ''} saved.</p>
+            {result.counts && (
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-2">
+                {Object.entries(result.counts).filter(([, n]) => n > 0).map(([k, n]) => (
+                  <span key={k} className="font-body text-[11px] text-slate-500"><b className="text-slate-700">{n}</b> {k}</span>
+                ))}
+              </div>
+            )}
+            {result.error && (
+              <p className="font-body text-[11px] mt-2" style={{ color: '#B45309' }}>Some data couldn&apos;t be read: {Object.keys(result.error).join(', ')}. The rest saved fine.</p>
+            )}
+          </div>
+        )}
+      </div>
+      <p className="font-body text-[11px] text-slate-400 px-1">Tip: download a backup before a big change, and at the end of each season. The file is plain JSON — it opens in any text editor and can be handed to support to restore.</p>
     </div>
   )
 }
