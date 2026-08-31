@@ -330,6 +330,8 @@ export default function SprayApp({ user }) {
   const [sel, setSel] = useState(initial)
   const [seq, setSeq] = useState(0)
   const [drawer, setDrawer] = useState(false)
+  const [focus, setFocus] = useState(null)      // deep-link target for a searched item
+  const [searchOpen, setSearchOpen] = useState(false)
   // The property's courses (name + colour) and club name, for the course bar and
   // the sidebar brand. Fetched once here so the bar is one global control.
   const [courses, setCourses] = useState([])
@@ -346,9 +348,16 @@ export default function SprayApp({ user }) {
   // A stable nav token — only changes when the user actually picks a sidebar item,
   // so modules re-sync their internal route on a click (and on a re-click) but not
   // on every incidental re-render (which would clobber in-module navigation).
-  const nav = React.useMemo(() => ({ route: sel.r, seq }), [sel.r, seq])
+  const nav = React.useMemo(() => ({ route: sel.r, seq, focus }), [sel.r, seq, focus])
 
-  const pick = (item) => { setSel(item); setSeq((s) => s + 1); setDrawer(false) }
+  const pick = (item) => { setFocus(null); setSel(item); setSeq((s) => s + 1); setDrawer(false) }
+  // Jump to a specific screen (by module + route), optionally deep-opening an
+  // item there — used by global search results.
+  const gotoFocus = (m, r, f = null) => {
+    const it = allItems.find((x) => x.m === m && x.r === r)
+    if (!it) return
+    setFocus(f); setSel(it); setSeq((s) => s + 1); setDrawer(false); setSearchOpen(false)
+  }
   const showCourseBar = !!sel.follow && courses.length >= 2
   // Screens flagged noAll always show one course — never the mixed "All" view.
   // If we land on one while "All" is active, snap to the first course.
@@ -388,7 +397,13 @@ export default function SprayApp({ user }) {
               <Menu size={18} />
             </button>
             <span className="font-display text-[15px] font-semibold truncate" style={{ color: FOREST }}>{sel.label}</span>
+            {manage && (
+              <button onClick={() => setSearchOpen(true)} className="ml-auto flex items-center gap-2 rounded-full pl-3 pr-3 h-8 text-[12px] font-body" style={{ border: `1px solid ${HAIR}`, color: INK_3, backgroundColor: 'white' }} aria-label="Search everything">
+                <Search size={14} /> <span className="hidden sm:inline">Search…</span>
+              </button>
+            )}
           </div>
+          {manage && searchOpen && <GlobalSearch onGo={gotoFocus} onClose={() => setSearchOpen(false)} />}
 
           {/* Course bar — the one global All / Blue / Gold selector. Colours come
               from Property Setup. Shows only on course-aware screens; ignores the
@@ -535,6 +550,13 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   const [products, setProducts] = useState([])
   const [fertSheets, setFertSheets] = useState([])
   const [activeSheet, setActiveSheet] = useState(null)
+  // Global search can deep-open a specific sheet — open it once the sheets load.
+  useEffect(() => {
+    if (nav?.focus?.type === 'sheet' && sheets.length) {
+      const s = sheets.find((x) => x.id === nav.focus.id)
+      if (s) { setActiveSheet(s); setRoute('view') }
+    }
+  }, [nav, sheets]) // eslint-disable-line react-hooks/exhaustive-deps
   const [deliveries, setDeliveries] = useState([])
   const [programApps, setProgramApps] = useState([]) // applications of the current program
   const [areas, setAreas] = useState({})
@@ -1323,6 +1345,81 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
   )
 }
 
+// Global search — one box, reachable from anywhere, that spans every record:
+// products, spray sheets, greens speed, clippings, soil tests, scouting and
+// practices. A result jumps to the right screen (and deep-opens a sheet).
+function GlobalSearch({ onGo, onClose }) {
+  const [q, setQ] = useState('')
+  const [data, setData] = useState(null)
+  const inputRef = useRef(null)
+  useEffect(() => {
+    inputRef.current?.focus()
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    ;(async () => {
+      const [products, sheets, speeds, clippings, soilTests, scouting, practices] = await Promise.all([
+        db.fetchProducts().catch(() => []), db.fetchSheets().catch(() => []), db.fetchGreensSpeeds().catch(() => []),
+        db.fetchClippings().catch(() => []), db.fetchSoilTests().catch(() => []), db.fetchScouting().catch(() => []), db.fetchCulturalPractices().catch(() => []),
+      ])
+      setData({ products, sheets, speeds, clippings, soilTests, scouting, practices })
+    })()
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const term = q.trim().toLowerCase()
+  const results = React.useMemo(() => {
+    if (!data || term.length < 2) return []
+    const has = (s) => String(s || '').toLowerCase().includes(term)
+    const out = []
+    data.products.filter((p) => has(p.name) || has(p.activeIngredient) || has(p.moaGroup)).slice(0, 6)
+      .forEach((p) => out.push({ key: 'pr' + p.name, kind: 'Product', label: p.name, sub: [p.type, p.activeIngredient].filter(Boolean).join(' · '), Icon: Droplet, go: () => onGo('spray', 'chemicals') }))
+    data.sheets.filter((s) => has(s.area) || has(s.date) || has((s.targets || []).join(' ')) || has((s.products || []).map((p) => p.product).join(' ')))
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 6)
+      .forEach((s) => out.push({ key: 'sh' + s.id, kind: 'Spray sheet', label: s.area || 'Spray', sub: `${fmtDate(s.date)} · ${(s.products || []).filter((p) => p.product).map((p) => p.product).join(', ') || 'no products'}`, Icon: ClipboardList, go: () => onGo('spray', 'list', { type: 'sheet', id: s.id }) }))
+    data.speeds.filter((r) => has(r.area)).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 4)
+      .forEach((r) => out.push({ key: 'sp' + r.id, kind: 'Greens speed', label: r.area, sub: `${fmtDate(r.date)} · ${fmtStimp(r.speed)}`, Icon: Gauge, go: () => onGo('turf', 'data') }))
+    data.soilTests.filter((r) => has(r.area) || has(r.lab)).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 4)
+      .forEach((r) => out.push({ key: 'so' + r.id, kind: 'Soil test', label: r.area || 'Soil test', sub: `${fmtDate(r.date)}${r.lab ? ' · ' + r.lab : ''}`, Icon: Sprout, go: () => onGo('turf', 'soil') }))
+    data.scouting.filter((r) => has(r.area) || has(r.target) || has(r.kind)).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 4)
+      .forEach((r) => out.push({ key: 'sc' + r.id, kind: 'Scouting', label: `${r.area || ''} — ${r.target || r.kind || ''}`.trim(), sub: `${fmtDate(r.date)}${r.severity ? ' · ' + r.severity : ''}`, Icon: Bug, go: () => onGo('turf', 'data') }))
+    data.practices.filter((r) => has(r.area) || has(r.practice)).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 4)
+      .forEach((r) => out.push({ key: 'pc' + r.id, kind: 'Practice', label: `${r.practice || 'Practice'}${r.area ? ' — ' + r.area : ''}`, sub: fmtDate(r.date), Icon: Scissors, go: () => onGo('turf', 'practices') }))
+    return out
+  }, [data, term, onGo])
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-start justify-center px-3 pt-[12vh]" style={{ backgroundColor: 'rgba(10,20,14,0.4)' }} onClick={onClose}>
+      <div className="w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden" style={{ backgroundColor: 'white' }} onClick={(e) => e.stopPropagation()}>
+        <div className="relative">
+          <Search size={17} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: INK_3 }} />
+          <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search everything — products, sheets, greens speed, soil, scouting…" className="w-full pl-11 pr-4 py-3.5 text-[15px] font-body outline-none" style={{ borderBottom: `1px solid ${HAIR}` }} />
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto">
+          {!data ? (
+            <p className="font-body text-[13px] px-4 py-4" style={{ color: INK_3 }}>Loading…</p>
+          ) : term.length < 2 ? (
+            <p className="font-body text-[13px] px-4 py-4" style={{ color: INK_3 }}>Type at least two letters. Results jump straight to the record.</p>
+          ) : results.length === 0 ? (
+            <p className="font-body text-[13px] px-4 py-4" style={{ color: INK_3 }}>No matches for “{q}”.</p>
+          ) : results.map((r) => {
+            const Icon = r.Icon
+            return (
+              <button key={r.key} onClick={r.go} className="w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50" style={{ borderTop: `1px solid #F1EFE9` }}>
+                <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#F0F6F2' }}><Icon size={14} style={{ color: FERN }} /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-[13.5px] font-semibold truncate" style={{ color: FOREST }}>{r.label}</p>
+                  <p className="font-body text-[11px] truncate" style={{ color: INK_3 }}>{r.sub}</p>
+                </div>
+                <span className="font-body text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1F1EE', color: INK_3 }}>{r.kind}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // The season/soil weather comes from Open-Meteo's archive (Jan 1 → today), the
 // slowest call on the dashboard. Cache it for the day so a revisit shows the
 // Growth-Reg timing instantly instead of waiting for the network again.
@@ -1340,51 +1437,6 @@ function writeWxCache(lat, lng, day, patch) {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
-// Quick Find — one search box on Home to jump straight to any past spray sheet
-// or product, instead of hunting through lists.
-function QuickFind({ sheets = [], products = [], onOpen, onGo }) {
-  const [q, setQ] = useState('')
-  const term = q.trim().toLowerCase()
-  const results = (() => {
-    if (term.length < 2) return []
-    const out = []
-    const sheetMatches = (sheets || []).filter((s) => {
-      const hay = `${s.area || ''} ${s.date || ''} ${(s.targets || []).join(' ')} ${(s.products || []).map((p) => p.product).join(' ')}`.toLowerCase()
-      return hay.includes(term)
-    }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 6)
-    sheetMatches.forEach((s) => out.push({ kind: 'sheet', key: 's' + s.id, label: s.area || 'Spray', sub: `${fmtDate(s.date)} · ${(s.products || []).filter((p) => p.product).map((p) => p.product).join(', ') || 'no products'}`, action: () => onOpen && onOpen(s) }))
-    const prodMatches = (products || []).filter((p) => `${p.name || ''} ${p.activeIngredient || ''} ${p.moaGroup || ''}`.toLowerCase().includes(term))
-      .sort((a, b) => String(a.name).localeCompare(String(b.name))).slice(0, 5)
-    prodMatches.forEach((p) => out.push({ kind: 'product', key: 'p' + p.name, label: p.name, sub: [p.type, p.activeIngredient].filter(Boolean).join(' · '), action: () => onGo && onGo('chemicals') }))
-    return out
-  })()
-
-  return (
-    <div className="relative">
-      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: INK_3 }} />
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Quick find — a spray sheet, area, or product…" className="w-full rounded-full pl-9 pr-9 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${HAIR}` }} />
-      {q && <button onClick={() => setQ('')} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: INK_3 }}><X size={15} /></button>}
-      {term.length >= 2 && (
-        <div className="absolute z-30 mt-1.5 w-full rounded-2xl shadow-xl overflow-hidden" style={{ backgroundColor: 'white', border: `1px solid ${HAIR}` }}>
-          {results.length === 0 ? (
-            <p className="font-body text-[12.5px] px-4 py-3" style={{ color: INK_3 }}>No matches for “{q}”.</p>
-          ) : results.map((r) => (
-            <button key={r.key} onClick={() => { r.action(); setQ('') }} className="w-full text-left flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-50" style={{ borderTop: '1px solid #F1EFE9' }}>
-              <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: r.kind === 'sheet' ? '#EFF6FF' : '#F0F6F2' }}>
-                {r.kind === 'sheet' ? <ClipboardList size={13} style={{ color: '#2563EB' }} /> : <Droplet size={13} style={{ color: FERN }} />}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-body text-[13px] font-semibold truncate" style={{ color: FOREST }}>{r.label}</p>
-                <p className="font-body text-[11px] truncate" style={{ color: INK_3 }}>{r.sub}</p>
-              </div>
-              <span className="font-body text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1F1EE', color: INK_3 }}>{r.kind}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 // "Needs you today" — one prioritized action list at the top of Home so the
 // superintendent sees what actually needs doing without hunting through cards.
@@ -1571,9 +1623,6 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
           </a>
         </div>
       )}
-
-      {/* Quick find — jump to any sheet or product */}
-      {manage && <QuickFind sheets={sheets} products={products} onOpen={onOpen} onGo={onGo} />}
 
       {/* Morning briefing — spray window (the action list lives in TodayList below) */}
       {manage && (
