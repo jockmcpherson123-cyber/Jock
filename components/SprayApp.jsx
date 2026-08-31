@@ -1053,7 +1053,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} products={products} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
         {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} courseFilter={course} />}
-        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} onSaveSettings={saveSettings} />}
+        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} onSaveSettings={saveSettings} applicatorLicenses={applicatorLicenses} location={location} />}
         {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} courseFilter={course} />}
         {route === 'training' && manage && <TrainingTab sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
@@ -2571,6 +2571,72 @@ function seasonReportHTML(allSheets, products, areas, courseInfo = {}, year) {
     <table style="${tbl}"><thead><tr style="background:#16291F"><th style="${TH}">Date</th><th style="${TH}">Area</th><th style="${TH}">Products</th><th style="${TH}">Status</th></tr></thead><tbody>${log}</tbody></table>
 
     <p style="font-size:9px;color:#888;margin-top:16px;text-align:center">Generated ${esc(new Date().toLocaleString())} · ${esc(courseInfo.clubName || '')} ${esc(year)} Season Report</p>
+  </div>`
+}
+
+// Maryland record-book export — the inspector-ready application log. One row
+// per product applied, with every field the MDA expects: date, site + size,
+// product + EPA reg #, rate + total, target, and the certified applicator with
+// their licence number. Returns HTML for the shared print/PDF pipeline.
+function mdaRecordBookHTML(allSheets, products, areas, courseInfo = {}, location = {}, applicatorLicenses = {}, year) {
+  const sheets = (allSheets || [])
+    .filter((s) => sheetApplied(s) && String(s.date || '').slice(0, 4) === String(year))
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
+  const areaByName = {}
+  ;(areas || []).forEach((a) => { areaByName[a.area] = a })
+
+  const FOR = '#16291F', MUT = '#8A8984', GLD = '#C9A84C'
+  const TH = 'border:1px solid #16291F;padding:5px 6px;text-align:left;font-size:8.5px;text-transform:uppercase;letter-spacing:.02em;color:#fff;background:#16291F'
+  const TD = 'border:1px solid #CBD2CC;padding:4px 6px;font-size:9.5px;vertical-align:top'
+  const esc2 = (v) => (v == null || v === '' ? '—' : esc(v))
+
+  const rows = []
+  sheets.forEach((s) => {
+    const area = areaByName[s.area] || {}
+    const sqft = area.sqft
+    const sizeStr = sqft ? `${Number(sqft).toLocaleString()} ft² (${(sqft / 43560).toFixed(2)} ac)` : '—'
+    const applicator = s.completedBy || s.operator || ''
+    const lic = s.applicatorPesticideLicense || applicatorLicenses[applicator]?.pesticide || ''
+    const dateStr = s.date ? fmtDate(s.date) : '—'
+    const prods = (s.products || []).filter((p) => p.product)
+    prods.forEach((p, i) => {
+      const info = products.find((pr) => pr.name === p.product) || {}
+      const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, sqft, p.forceGal)
+      const total = amt != null ? Math.round(amt * (s.tanks || 1) * 10) / 10 : null
+      rows.push(`<tr>
+        <td style="${TD}">${i === 0 ? esc2(dateStr) : ''}</td>
+        <td style="${TD}">${i === 0 ? esc2(s.area) : ''}</td>
+        <td style="${TD};white-space:nowrap">${i === 0 ? esc2(sizeStr) : ''}</td>
+        <td style="${TD}"><b>${esc2(p.product)}</b></td>
+        <td style="${TD};white-space:nowrap">${esc2(info.epaReg)}</td>
+        <td style="${TD};white-space:nowrap">${esc2(p.rate)} ${esc(p.basis || '')}</td>
+        <td style="${TD};white-space:nowrap">${total != null ? `${total} ${esc(unit || '')}` : '—'}</td>
+        <td style="${TD}">${esc2(p.target || (s.targets || []).join(', '))}</td>
+        <td style="${TD}">${i === 0 ? `${esc2(applicator)}${lic ? `<br><span style="color:${MUT}">Lic ${esc(lic)}</span>` : ''}` : ''}</td>
+      </tr>`)
+    })
+  })
+  const body = rows.join('') || `<tr><td style="${TD}" colspan="9">No applications recorded for ${esc(String(year))}.</td></tr>`
+
+  return `<div style="font-family:Arial,Helvetica,sans-serif;color:#1A1A16;padding:16px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid ${GLD};padding-bottom:8px;margin-bottom:10px">
+      <div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:${GLD}">Maryland Pesticide Application Record</div>
+        <div style="font-size:20px;font-weight:800;color:${FOR};line-height:1.1">${esc(courseInfo.clubName || 'Golf Club')} — ${esc(String(year))}</div>
+        ${location.address ? `<div style="font-size:10px;color:${MUT};margin-top:2px">${esc(location.address)}</div>` : ''}
+      </div>
+      <div style="text-align:right;font-size:9px;color:${MUT}">Printed ${esc(new Date().toLocaleDateString())}<br>${rows.length} line item${rows.length !== 1 ? 's' : ''}</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr>
+        <th style="${TH}">Date</th><th style="${TH}">Site</th><th style="${TH}">Size</th>
+        <th style="${TH}">Product</th><th style="${TH}">EPA Reg. No.</th><th style="${TH}">Rate</th>
+        <th style="${TH}">Total</th><th style="${TH}">Target</th><th style="${TH}">Applicator (Lic #)</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    <p style="font-size:9px;color:${MUT};margin-top:12px">Record maintained under COMAR 15.05.01. Retain a minimum of 2 years and make available to the Maryland Department of Agriculture on request. Weather, PPE, and re-entry details for each application are on that day's individual spray record.</p>
+    <p style="font-size:8.5px;color:#999;margin-top:6px;text-align:center">${esc(courseInfo.clubName || '')} · ${esc(String(year))} pesticide application record book</p>
   </div>`
 }
 
@@ -4782,7 +4848,7 @@ function Inventory({ products, deliveries, onAddDelivery }) {
 }
 
 // ── REPORTS ───────────────────────────────────────────────────────────────
-function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], onSaveSettings }) {
+function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], onSaveSettings, applicatorLicenses = {}, location = {} }) {
   const [view, setView] = useState('byArea')
   const [report, setReport] = useState('npk') // 'npk' | 'rotation'
   const npkData = aggregateNPK(sheets, products, areas)
@@ -4800,6 +4866,15 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], on
       await pdfRecordHTML(seasonReportHTML(sheets, products, areas, courseInfo, reportYear), `Season-Report_${safeClub}_${reportYear}.pdf`)
     } catch (e) { console.error(e) }
     setPdfBusy(false)
+  }
+  const [mdaBusy, setMdaBusy] = useState(false)
+  const makeMdaRecord = async () => {
+    setMdaBusy(true)
+    try {
+      const safeClub = (courseInfo.clubName || 'Club').replace(/[^a-z0-9]+/gi, '-')
+      await pdfRecordHTML(mdaRecordBookHTML(sheets, products, areas, courseInfo, location, applicatorLicenses, reportYear), `MDA-Record_${safeClub}_${reportYear}.pdf`)
+    } catch (e) { console.error(e) }
+    setMdaBusy(false)
   }
 
   const totalN = Math.round(npkData.reduce((s, r) => s + r.n, 0) * 100) / 100
@@ -4878,6 +4953,9 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], on
           )}
           <button onClick={makeSeasonReport} disabled={pdfBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 disabled:opacity-50" style={{ backgroundColor: FOREST }}>
             <Package size={14} /> {pdfBusy ? 'Building…' : 'Season PDF'}
+          </button>
+          <button onClick={makeMdaRecord} disabled={mdaBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 disabled:opacity-50 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
+            <ShieldCheck size={14} /> {mdaBusy ? 'Building…' : 'MDA Record Book'}
           </button>
         </div>
       </div>
