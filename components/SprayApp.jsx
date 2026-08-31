@@ -2458,6 +2458,57 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
   </div>`
 }
 
+// Tank / secondary-container label — what to stick on a filled sprayer or mix
+// container. A filled tank is legally a secondary container and must identify
+// its contents + hazards. Compact card: the mix, active ingredients, signal
+// word, REI, site, who mixed it and when, plus a QR to the product label.
+function tankLabelHTML(sheet, area = {}, products = [], sheetTargets = [], courseInfo = {}, qrImg = '') {
+  const FOR = '#16291F', MUT = '#6B6F6C', LN = '#D8D6D0', GLD = '#C9A84C'
+  const esc2 = (v) => (v == null || v === '' ? '' : esc(v))
+  const rank = { Danger: 3, Warning: 2, Caution: 1 }
+  const rows = (sheet.products || []).filter((p) => p.product).map((p) => products.find((pr) => pr.name === p.product) || { name: p.product })
+  let signal = ''
+  rows.forEach((pr) => { if ((rank[pr.signalWord] || 0) > (rank[signal] || 0)) signal = pr.signalWord })
+  const maxRei = rows.reduce((mx, pr) => { const h = reiHours(pr.rei); return h != null && h > mx ? h : mx }, 0)
+  const reiStr = maxRei > 0 ? (rows.find((pr) => reiHours(pr.rei) === maxRei) || {}).rei || `${maxRei} hours` : ''
+  const niceDate = (() => { try { return new Date((sheet.date || '') + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) } catch { return sheet.date || '' } })()
+  const applied = sheet.completedAt ? new Date(sheet.completedAt).toLocaleString() : niceDate
+  const signalColor = signal === 'Danger' ? '#B3261E' : signal === 'Warning' ? '#9A6B12' : '#2E7D46'
+
+  const prodList = rows.map((pr) => `<div style="padding:5px 0;border-top:1px solid #ECEAE4">
+    <div style="font-size:14px;font-weight:800;color:${FOR}">${esc2(pr.name)}</div>
+    ${pr.activeIngredient ? `<div style="font-size:10px;color:${MUT}">AI: ${esc2(pr.activeIngredient)}${pr.epaReg ? ` · EPA ${esc2(pr.epaReg)}` : ''}</div>` : (pr.epaReg ? `<div style="font-size:10px;color:${MUT}">EPA ${esc2(pr.epaReg)}</div>` : '')}
+  </div>`).join('')
+
+  return `<div style="font-family:Arial,Helvetica,sans-serif;color:#1A1A16;background:#fff;border:2px solid ${FOR};border-radius:14px;padding:16px 18px;max-width:420px;margin:0 auto">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+      <div style="min-width:0">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:${GLD}">${esc2(courseInfo.clubName || 'Grounds')} · Tank Label</div>
+        <div style="font-size:22px;font-weight:800;color:${FOR};line-height:1.05">${esc2(sheet.area) || 'Spray Mix'}</div>
+        <div style="font-size:11px;color:${MUT};margin-top:1px">For: ${esc2((sheetTargets || []).join(' · ')) || '—'}</div>
+      </div>
+      ${qrImg ? `<img src="${qrImg}" style="width:78px;height:78px;flex-shrink:0" alt="label QR" />` : ''}
+    </div>
+
+    ${signal ? `<div style="display:inline-block;margin-top:10px;font-size:12px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#fff;background:${signalColor};border-radius:6px;padding:4px 10px">Signal word: ${esc2(signal)}</div>` : ''}
+
+    <div style="margin-top:8px">
+      <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT};margin-bottom:2px">Contents</div>
+      ${prodList || `<div style="font-size:12px;color:${MUT}">No products listed.</div>`}
+    </div>
+
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;border-top:1px solid ${LN}">
+      <tr>
+        <td style="padding:6px 0;font-size:11px;color:${MUT};width:50%"><b style="color:${FOR}">Mixed</b><br>${esc2(applied)}</td>
+        <td style="padding:6px 0;font-size:11px;color:${MUT}"><b style="color:${FOR}">By</b><br>${esc2(sheet.completedBy || sheet.operator) || '—'}</td>
+      </tr>
+      ${reiStr ? `<tr><td colspan="2" style="padding:4px 0;font-size:12px;color:#7A4E1E;border-top:1px solid #EFECE4"><b>Restricted entry — ${esc2(reiStr)}.</b> Do not enter until the interval has passed.</td></tr>` : ''}
+    </table>
+
+    <div style="margin-top:8px;font-size:9.5px;color:${MUT};border-top:1px solid ${LN};padding-top:6px">Keep out of reach of children. See the product label &amp; SDS before use — scan the code${qrImg ? '' : ' on the spray record'}. Do not eat, drink or smoke while handling.</div>
+  </div>`
+}
+
 // MDA record completeness — the fields a Maryland inspector expects on a
 // pesticide application record. Returns a list of what's missing so the
 // applicator can fix it BEFORE the record goes in the book. Advisory only —
@@ -3056,6 +3107,16 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
   const buildRecordHtml = () => sheetRecordHTML(sheet, area, products, sheetTargets, courseInfo, location)
   const gaps = recordGaps(sheet, area, products, sheetTargets)
   const printRecord = () => printRecordSinglePage(buildRecordHtml())
+  // Tank label — QR points at the first product's label URL if we have one.
+  const printTankLabel = async () => {
+    let qrImg = ''
+    try {
+      const labeled = (sheet.products || []).map((p) => products.find((pr) => pr.name === p.product)).find((pr) => pr && pr.labelUrl)
+      const qrTarget = labeled?.labelUrl || (typeof window !== 'undefined' ? window.location.href : '')
+      if (qrTarget) qrImg = await qrDataUrl(qrTarget, { width: 200 })
+    } catch { /* no QR is fine */ }
+    printRecordSinglePage(tankLabelHTML(sheet, area, products, sheetTargets, courseInfo, qrImg))
+  }
   const exportPdf = async () => {
     setPdfBusy(true)
     try {
@@ -3086,6 +3147,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
                   {[
                     ['Save', () => saveNow(), FERN],
                     ['Print', () => printRecord(), FOREST],
+                    ['Tank label', () => printTankLabel(), FOREST],
                     [pdfBusy ? 'Exporting…' : 'Export PDF', () => exportPdf(), FOREST],
                     ...(manage && onSprayAgain ? [['Spray again', () => onSprayAgain(), FOREST]] : []),
                     ...(manage && onDelete ? [['Delete', () => setConfirmDel(true), '#DC2626']] : []),
