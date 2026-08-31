@@ -3825,33 +3825,51 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
     }
   }
 
-  const apply = () => {
+  const [applying, setApplying] = useState(false)
+  const apply = async () => {
     if (!result) return
+    const r = result
+    setApplying(true)
     setDraft((d) => {
-      // Tag the safety-critical fields this scan fills as "verify vs. label".
+      // Every safety field the AI provides is applied — OVERRIDING what's there —
+      // and tagged "verify vs. label" so a human confirms it. Grasses-to-avoid
+      // are replaced with the AI's list.
       const av = { ...(d.aiVerify || {}) }
-      if (result.epaReg && !d.epaReg) av.epaReg = true
-      if (result.moaGroup && !d.moaGroup) av.moaGroup = true
-      if (result.rei && !d.rei) av.rei = true
+      if (r.epaReg) av.epaReg = true
+      if (r.moaGroup) av.moaGroup = true
+      if (r.rei) av.rei = true
       const next = {
         ...d,
-        avoidGrasses: Array.isArray(result.avoidGrasses) ? result.avoidGrasses : (d.avoidGrasses || []),
-        activeIngredient: result.activeIngredient || d.activeIngredient || '',
-        epaReg: result.epaReg || d.epaReg || '',
-        moaGroup: result.moaGroup || d.moaGroup || '',
-        signalWord: result.signalWord || d.signalWord || '',
-        rei: result.rei || d.rei || '',
-        phi: result.phi || d.phi || '',
-        safetyNote: result.safetyNote || d.safetyNote || '',
+        avoidGrasses: Array.isArray(r.avoidGrasses) ? r.avoidGrasses : (d.avoidGrasses || []),
+        activeIngredient: r.activeIngredient || d.activeIngredient || '',
+        epaReg: r.epaReg || d.epaReg || '',
+        moaGroup: r.moaGroup || d.moaGroup || '',
+        signalWord: r.signalWord || d.signalWord || '',
+        rei: r.rei || d.rei || '',
+        phi: r.phi || d.phi || '',
+        safetyNote: r.safetyNote || d.safetyNote || '',
       }
-      // Fill blank rate ranges from the label, tagged for verification.
+      // Rate ranges: override with the label's values, tagged for verification.
       ;['labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA'].forEach((f) => {
-        const v = parseFloat(result[f])
-        if (!isNaN(v) && (d[f] === '' || d[f] == null)) { next[f] = v; av[f] = true }
+        const v = parseFloat(r[f])
+        if (!isNaN(v)) { next[f] = v; av[f] = true }
       })
       next.aiVerify = av
       return next
     })
+    // Find the official label + SDS links by web search, and fill any that are blank.
+    try {
+      const res = await fetch('/api/find-docs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: r.productName || draft.name || '', manufacturer: draft.manufacturer || '' }),
+      })
+      const j = await res.json().catch(() => ({}))
+      const docs = j.result || {}
+      if (docs.labelUrl || docs.sdsUrl) {
+        setDraft((d) => ({ ...d, labelUrl: d.labelUrl || docs.labelUrl || '', sdsUrl: d.sdsUrl || docs.sdsUrl || '' }))
+      }
+    } catch { /* no docs found is fine */ }
+    setApplying(false)
     setResult(null)
     setImages([])
     setImgCount(0)
@@ -3899,7 +3917,7 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
         <p className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: '#7C3AED' }}>Read the label with AI</p>
       </div>
       <p className="font-body text-[10px] text-slate-500 mb-2">
-        Snap a photo of the product label (or just use the name above) and the AI fills in grass-safety, signal word, re-entry time, EPA registration number, resistance group and rate range — then <b>checks what you’ve already entered against the label</b> and flags anything that doesn’t match. <b>Always double-check against the physical label before you spray.</b>
+        Snap a photo of the product label (or just use the name above). The AI fills in grass-safety, signal word, re-entry, EPA reg #, resistance group and rate range, finds the official <b>label &amp; SDS links</b>, and <b>checks what you’ve already entered</b>, flagging anything that doesn’t match. <b>Always double-check against the physical label before you spray.</b>
       </p>
       <div className="flex flex-wrap gap-2">
         <label className="font-body text-xs font-semibold px-3 py-1.5 rounded-full border cursor-pointer flex items-center gap-1.5" style={{ backgroundColor: 'white', color: '#7C3AED', borderColor: '#DDD6FE' }}>
@@ -3963,8 +3981,10 @@ function AiLabelReader({ draft, setDraft, grassTypes = [] }) {
           )}
 
           <div className="flex gap-2 mt-3">
-            <button type="button" onClick={() => setResult(null)} className="flex-1 py-2 rounded-lg text-[11px] font-semibold font-body text-slate-500 border border-slate-200">Discard</button>
-            <button type="button" onClick={apply} className="flex-1 py-2 rounded-lg text-[11px] font-bold font-body text-white" style={{ backgroundColor: '#7C3AED' }}>Apply to form</button>
+            <button type="button" onClick={() => setResult(null)} disabled={applying} className="flex-1 py-2 rounded-lg text-[11px] font-semibold font-body text-slate-500 border border-slate-200 disabled:opacity-50">Discard</button>
+            <button type="button" onClick={apply} disabled={applying} className="flex-1 py-2 rounded-lg text-[11px] font-bold font-body text-white flex items-center justify-center gap-1.5 disabled:opacity-60" style={{ backgroundColor: '#7C3AED' }}>
+              {applying ? <><Loader2 size={12} className="animate-spin" /> Applying &amp; finding docs…</> : 'Apply to form'}
+            </button>
           </div>
         </div>
       )}
