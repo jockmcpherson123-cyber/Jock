@@ -3005,9 +3005,11 @@ async function printRecordSinglePage(bodyHtml) {
   const style = document.createElement('style')
   style.textContent = `#spa-print-image{display:none}
     @media print{
-      body.spa-print-image *{visibility:hidden !important}
-      body.spa-print-image #spa-print-image, body.spa-print-image #spa-print-image *{visibility:visible !important}
-      body.spa-print-image #spa-print-image{display:block !important;position:absolute;left:0;top:0;width:100%}
+      html,body{margin:0 !important;padding:0 !important;height:auto !important}
+      /* Hide (not just make invisible) everything but the print image, so the
+         app's own height can't spill onto extra blank pages. */
+      body.spa-print-image > *:not(#spa-print-image){display:none !important}
+      body.spa-print-image #spa-print-image{display:block !important;position:static;width:100%}
       body.spa-print-image #spa-print-image img{display:block;margin:0 auto;max-width:100%;max-height:9.6in}
       @page{margin:0.4in;size:portrait}
     }`

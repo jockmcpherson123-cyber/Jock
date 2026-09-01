@@ -412,8 +412,11 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
       @media print { html, body { background: #fff !important; } body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: 100% !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; } #weekly-report .avoid-break { break-inside: avoid; } .no-print, .empty-hide-print { display: none !important; } }
       /* One-page image print (iOS-safe: prints the MAIN document, not an iframe). */
       @media print {
-        body.wr-print-image #weekly-report { display: none !important; }
-        body.wr-print-image #wr-print-image { display: block !important; visibility: visible !important; position: absolute; left: 0; top: 0; width: 100%; }
+        html, body { margin: 0 !important; padding: 0 !important; height: auto !important; }
+        /* Hide everything but the printed image so the app's height can't spill
+           onto a second, blank page. */
+        body.wr-print-image > *:not(#wr-print-image) { display: none !important; }
+        body.wr-print-image #wr-print-image { display: block !important; visibility: visible !important; position: static; width: 100%; }
         body.wr-print-image #wr-print-image * { visibility: visible !important; }
         body.wr-print-image #wr-print-image img { display: block; margin: 0 auto; max-width: 100%; max-height: 277mm; }
       }
