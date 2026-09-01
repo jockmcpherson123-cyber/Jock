@@ -551,10 +551,13 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   const [fertSheets, setFertSheets] = useState([])
   const [activeSheet, setActiveSheet] = useState(null)
   // Global search can deep-open a specific sheet — open it once the sheets load.
+  // Guarded so a later data refresh doesn't yank the user back to that sheet.
+  const focusHandled = useRef(null)
   useEffect(() => {
-    if (nav?.focus?.type === 'sheet' && sheets.length) {
-      const s = sheets.find((x) => x.id === nav.focus.id)
-      if (s) { setActiveSheet(s); setRoute('view') }
+    const f = nav?.focus
+    if (f?.type === 'sheet' && sheets.length && focusHandled.current !== `${nav.seq}:${f.id}`) {
+      const s = sheets.find((x) => x.id === f.id)
+      if (s) { setActiveSheet(s); setRoute('view'); focusHandled.current = `${nav.seq}:${f.id}` }
     }
   }, [nav, sheets]) // eslint-disable-line react-hooks/exhaustive-deps
   const [deliveries, setDeliveries] = useState([])
