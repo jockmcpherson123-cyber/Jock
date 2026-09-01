@@ -25,7 +25,7 @@ const shortDay = (isoStr) => (isoStr ? new Date(isoStr + 'T00:00:00').toLocaleDa
 // ── Tiny inline-SVG charts (render cleanly in the PDF/print) ────────────────
 // points: [{ label, v }]. VB is a fixed 340×64 drawing space scaled to fit.
 const VBW = 340, VBH = 64, PADX = 6, PADT = 8, PADB = 16
-function TrendLine({ points, color = FERN }) {
+function TrendLine({ points, color = FERN, fmt = (v) => round(v, 1) }) {
   if (!points || points.length < 2) return null
   const vs = points.map((p) => p.v)
   const min = Math.min(...vs), max = Math.max(...vs)
@@ -41,16 +41,21 @@ function TrendLine({ points, color = FERN }) {
       <path d={area} fill={`${color}18`} />
       <path d={line} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
       {points.map((p, i) => <circle key={i} cx={xAt(i)} cy={yAt(p.v)} r="2.1" fill={color} />)}
+      {/* value at every point so readings can be referenced off the chart */}
+      {points.map((p, i) => {
+        const last = i === points.length - 1
+        const anchor = i === 0 ? 'start' : last ? 'end' : 'middle'
+        return <text key={'v' + i} x={xAt(i)} y={Math.max(7, yAt(p.v) - 4)} fontSize={last ? 9 : 7.5} fontWeight="700" fill={last ? color : '#6b7770'} textAnchor={anchor}>{fmt(p.v)}</text>
+      })}
       <text x={xAt(0)} y={VBH - 4} fontSize="8" fill="#9aa69d">{points[0].label}</text>
       <text x={xAt(points.length - 1)} y={VBH - 4} fontSize="8" fill="#9aa69d" textAnchor="end">{points[points.length - 1].label}</text>
-      <text x={xAt(points.length - 1)} y={yAt(points[points.length - 1].v) - 4} fontSize="9" fontWeight="700" fill={color} textAnchor="end">{round(points[points.length - 1].v, 1)}</text>
     </svg>
   )
 }
-function TrendBars({ points, color = '#2563EB' }) {
+function TrendBars({ points, color = '#2563EB', fmt = (v) => round(v, 1) }) {
   if (!points || points.length < 2) return null
   const vs = points.map((p) => p.v)
-  const hi = Math.max(...vs) * 1.15 || 1
+  const hi = Math.max(...vs) * 1.22 || 1
   const iw = VBW - PADX * 2, ih = VBH - PADT - PADB
   const bw = Math.min(26, (iw / points.length) * 0.7)
   const xAt = (i) => PADX + (i + 0.5) / points.length * iw
@@ -58,7 +63,13 @@ function TrendBars({ points, color = '#2563EB' }) {
     <svg viewBox={`0 0 ${VBW} ${VBH}`} width="100%" style={{ height: 'auto', display: 'block', maxWidth: 560 }} preserveAspectRatio="none">
       {points.map((p, i) => {
         const h = (p.v / hi) * ih
-        return <rect key={i} x={xAt(i) - bw / 2} y={PADT + ih - h} width={bw} height={Math.max(1, h)} rx="1.5" fill={color} opacity="0.85" />
+        const top = PADT + ih - h
+        return (
+          <g key={i}>
+            <rect x={xAt(i) - bw / 2} y={top} width={bw} height={Math.max(1, h)} rx="1.5" fill={color} opacity="0.85" />
+            <text x={xAt(i)} y={Math.max(7, top - 2.5)} fontSize="7.5" fontWeight="700" fill="#556" textAnchor="middle">{fmt(p.v)}</text>
+          </g>
+        )
       })}
       <text x={xAt(0)} y={VBH - 4} fontSize="8" fill="#9aa69d" textAnchor="middle">{points[0].label}</text>
       <text x={xAt(points.length - 1)} y={VBH - 4} fontSize="8" fill="#9aa69d" textAnchor="middle">{points[points.length - 1].label}</text>
@@ -633,7 +644,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         <div className={`grid grid-cols-2 gap-x-5 gap-y-1 mt-2 avoid-break ${(speedTrend.length >= 2 || clipTrend.length >= 2) ? '' : 'empty-hide-print'}`}>
           <div>
             <p className="font-body text-[9px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Greens speed trend</p>
-            {speedTrend.length >= 2 ? <TrendLine points={speedTrend} color={FERN} /> : <p className="font-body text-[10px] text-slate-300 no-print">Chart appears after 2+ stimp readings.</p>}
+            {speedTrend.length >= 2 ? <TrendLine points={speedTrend} color={FERN} fmt={fmtStimp} /> : <p className="font-body text-[10px] text-slate-300 no-print">Chart appears after 2+ stimp readings.</p>}
           </div>
           <div>
             <p className="font-body text-[9px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Clipping yield trend</p>
