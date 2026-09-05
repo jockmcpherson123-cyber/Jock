@@ -1648,13 +1648,16 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       <div className="lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start space-y-6 lg:space-y-0">
         {/* ── MAIN column ─────────────────────────────────────────────── */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Calendar — upcoming (planned) and past (actual) sprays at a glance */}
+          {/* Calendar — upcoming (planned) and past (actual) sprays at a glance.
+              Tapping a day's entry opens its sheet: a saved sheet opens as-is; a
+              planned program day opens as an editable draft (nothing persists until
+              saved, so Home stays a safe read-only overview). */}
           <SprayCalendar
             sheets={sheets}
             products={products}
             programApps={manage ? programApps : []}
             onOpenSheet={onOpen}
-            onCreateFromProgram={create ? onCreateFromProgram : undefined}
+            onCreateFromProgram={manage ? onCreateFromProgram : undefined}
           />
 
           {/* Insight cards — two-across on very wide screens so there's less scrolling */}
