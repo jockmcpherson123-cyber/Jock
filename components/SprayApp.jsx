@@ -10943,6 +10943,7 @@ function PracticesTab({ practices, areas, onAddMany, onDelete }) {
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState('all')
+  const [histOpen, setHistOpen] = useState(false) // full log list stays tucked away until asked for
   const [msg, setMsg] = useState(null) // { type: 'ok' | 'err', text }
 
   const toggleArea = (a) => setSelected((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]))
@@ -11048,26 +11049,35 @@ function PracticesTab({ practices, areas, onAddMany, onDelete }) {
         </div>
       )}
 
-      <div>
-        <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
-          <button onClick={() => setFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>All</button>
-          {usedPractices.map((p) => (
-            <button key={p} onClick={() => setFilter(p)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === p ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{p}</button>
-          ))}
-        </div>
-        {shown.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No practices logged yet.</div>
-        ) : (
-          <div className="space-y-2">
-            {shown.map((p) => (
-              <div key={p.id} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="font-body text-sm font-semibold text-slate-800 truncate">{p.practice} · {p.area}</p>
-                  <p className="font-body text-[11px] text-slate-400 truncate">{fmtDate(p.date)}{p.value != null ? ` · ${p.value}${p.unit ? ` ${p.unit}` : ''}` : ''}{p.notes ? ` · ${p.notes}` : ''}</p>
-                </div>
-                <button onClick={() => onDelete(p.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+      {/* Full log — tucked behind a toggle so it doesn't fill the screen */}
+      <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+        <button onClick={() => setHistOpen((o) => !o)} className="w-full flex items-center justify-between px-4 py-3 text-left">
+          <span className="font-body text-sm font-semibold" style={{ color: FOREST }}>All practice logs{practices?.length ? ` · ${practices.length}` : ''}</span>
+          <span className="flex items-center gap-1.5 font-body text-[11px] font-semibold" style={{ color: INK_3 }}>{histOpen ? 'Hide' : 'View'} <ChevronDown size={15} style={{ transform: histOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} /></span>
+        </button>
+        {histOpen && (
+          <div className="px-4 pb-4 pt-1 border-t border-black/5">
+            <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+              <button onClick={() => setFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>All</button>
+              {usedPractices.map((p) => (
+                <button key={p} onClick={() => setFilter(p)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === p ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{p}</button>
+              ))}
+            </div>
+            {shown.length === 0 ? (
+              <div className="text-center text-slate-400 font-body text-sm py-6">No practices logged yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {shown.map((p) => (
+                  <div key={p.id} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-body text-sm font-semibold text-slate-800 truncate">{p.practice} · {p.area}</p>
+                      <p className="font-body text-[11px] text-slate-400 truncate">{fmtDate(p.date)}{p.value != null ? ` · ${p.value}${p.unit ? ` ${p.unit}` : ''}` : ''}{p.notes ? ` · ${p.notes}` : ''}</p>
+                    </div>
+                    <button onClick={() => onDelete(p.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         )}
       </div>
