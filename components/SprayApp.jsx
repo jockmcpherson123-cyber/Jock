@@ -9352,17 +9352,17 @@ function trailingAvg(pts, win) {
   return clean.map((p, i) => { const s = Math.max(0, i - win + 1); const sl = clean.slice(s, i + 1); return { date: p.date, value: sl.reduce((a, b) => a + Number(b.value), 0) / sl.length } })
 }
 
-function TrendChart({ points = null, series = null, color = FERN, height = 170, unit = '', showAvg = true, refLine = null, band = null, guides = null, baseline = null, legend = true }) {
+function TrendChart({ points = null, series = null, color = FERN, height = 170, unit = '', showAvg = true, refLine = null, band = null, guides = null, baseline = null, legend = true, onPick = null }) {
   const [wrapRef, W] = useMeasuredWidth(560)
   // Normalise to a list of series. Single-series callers keep passing `points`
   // and get the classic filled trend with a called-out latest value.
   const rawSeries = (series && series.length)
     ? series
-    : [{ color, vals: points || [], width: 2, area: true, dots: true, callout: true, showAvg }]
+    : [{ color, vals: points || [], width: 2, area: true, dots: true, callout: true, showAvg, pickable: !!onPick }]
   const srs = rawSeries.map((s, i) => ({
     ...s,
     color: s.color || SERIES_COLORS[i % SERIES_COLORS.length],
-    data: (s.vals || []).filter((p) => p.value != null && p.value !== '' && !isNaN(Number(p.value))).map((p) => ({ t: chartMs(p.date), value: Number(p.value) })).filter((p) => !isNaN(p.t)),
+    data: (s.vals || []).filter((p) => p.value != null && p.value !== '' && !isNaN(Number(p.value))).map((p) => ({ t: chartMs(p.date), value: Number(p.value), raw: p })).filter((p) => !isNaN(p.t)),
   })).filter((s) => s.data.length)
   if (!srs.length) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">No data yet.</p>
 
@@ -9446,6 +9446,11 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
               {s.showAvg && n > 1 && <line x1={padL} x2={W - padR} y1={Y(mean)} y2={Y(mean)} stroke="#C7CFC9" strokeWidth="1" strokeDasharray="4 3" />}
               {!s.dotsOnly && <path d={path} fill="none" stroke={s.color} strokeWidth={s.width || 2} opacity={s.opacity || 1} strokeLinejoin="round" strokeLinecap="round" strokeDasharray={s.dash || 'none'} />}
               {(s.dots || s.dotsOnly) && s.data.map((d, i) => <circle key={i} cx={X(d.t)} cy={Y(d.value)} r={s.callout && i === n - 1 ? 3.5 : (s.r || 1.8)} fill={s.color} opacity={s.opacity || 1} />)}
+              {onPick && s.pickable && s.data.map((d, i) => (
+                <circle key={`hit${i}`} cx={X(d.t)} cy={Y(d.value)} r="12" fill="transparent" style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onPick(d.raw) }}>
+                  <title>Tap to edit {chartMmDd(d.t)}</title>
+                </circle>
+              ))}
               {s.callout && <text x={X(last.t)} y={Y(last.value) - 7} textAnchor="end" fontSize="11" fontWeight="700" fill={s.color} style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtY(last.value)}</text>}
             </g>
           )
@@ -9624,6 +9629,7 @@ function ClippingsTab({ clippings, areas, courseInfo, onSaveCourse, onAddMany, o
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState('all')
   const [histOpen, setHistOpen] = useState(false) // full logs list stays tucked away until asked for
+  const [picked, setPicked] = useState(null) // a log opened by tapping its point on the graph
   const [msg, setMsg] = useState(null) // { type: 'ok' | 'err', text }
 
   const toggleGreen = (g) => setSelected((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]))
@@ -9728,17 +9734,17 @@ function ClippingsTab({ clippings, areas, courseInfo, onSaveCourse, onAddMany, o
               <div key={area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-2">
                   <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
-                  <p className="font-body text-[10px] text-slate-400">{recent.length} log{recent.length !== 1 ? 's' : ''} · latest {latest?.volume} {latest?.unit}</p>
+                  <p className="font-body text-[10px] text-slate-400">{recent.length} log{recent.length !== 1 ? 's' : ''} · tap a point to remove</p>
                 </div>
                 {(() => {
-                  const pts = recent.map((c) => ({ date: c.date, value: c.volume }))
+                  const pts = recent.map((c) => ({ date: c.date, value: c.volume, rec: c }))
                   const dense = pts.length >= 6
                   const series = dense ? [
-                    { name: 'each log', color: '#98A0A6', vals: pts, width: 1, opacity: 0.45, dots: true, r: 1.6 },
+                    { name: 'each log', color: '#98A0A6', vals: pts, width: 1, opacity: 0.45, dots: true, r: 1.6, pickable: true },
                     { name: '7-log avg', color: '#1baf7a', vals: trailingAvg(pts, 7), width: 2 },
                     { name: '14-log avg', color: '#2a78d6', vals: trailingAvg(pts, 14), width: 2.2, callout: true },
                   ] : null
-                  return <TrendChart series={series} points={pts} unit={latest?.unit || ''} baseline={0} guides={guidesFor(courseInfo, 'clip')} />
+                  return <TrendChart series={series} points={pts} unit={latest?.unit || ''} baseline={0} guides={guidesFor(courseInfo, 'clip')} onPick={(p) => setPicked(p.rec)} />
                 })()}
               </div>
             )
@@ -9784,6 +9790,23 @@ function ClippingsTab({ clippings, areas, courseInfo, onSaveCourse, onAddMany, o
           </div>
         )
       })()}
+
+      {picked && (
+        <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-3" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setPicked(null)}>
+          <div className="w-full sm:max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-display text-base font-semibold" style={{ color: FOREST }}>{picked.area}</h3>
+              <button onClick={() => setPicked(null)} aria-label="Close"><X size={18} style={{ color: INK_3 }} /></button>
+            </div>
+            <p className="font-body text-[12px] mb-4" style={{ color: INK_3 }}>{fmtDate(picked.date)} · {picked.volume} {picked.unit}</p>
+            <p className="font-body text-[12px] mb-4" style={{ color: INK_2 }}>To change a clipping log, delete this one and re-log it from the form above.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setPicked(null)} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>Close</button>
+              <button onClick={async () => { if (confirm('Delete this log?')) { await onDelete(picked.id); setPicked(null) } }} className="py-2.5 px-4 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: '#C0392B' }}><Trash2 size={15} /></button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -9813,6 +9836,7 @@ function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate,
   const [filter, setFilter] = useState('all')
   const [msg, setMsg] = useState(null)
   const [histOpen, setHistOpen] = useState(false) // full readings list stays tucked away until asked for
+  const [picked, setPicked] = useState(null) // a reading opened by tapping its point on the graph
 
   const toggleGreen = (g) => setSelected((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]))
   const setVal = (g, part, v) => setVals((prev) => ({ ...prev, [g]: { ...(prev[g] || {}), [part]: v } }))
@@ -9942,16 +9966,16 @@ function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate,
               <div key={area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-2">
                   <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
-                  <p className="font-body text-[10px] text-slate-400">{recent.length} reading{recent.length !== 1 ? 's' : ''} · latest {fmtStimp(latest?.speed)}</p>
+                  <p className="font-body text-[10px] text-slate-400">{recent.length} reading{recent.length !== 1 ? 's' : ''} · tap a point to edit</p>
                 </div>
                 {(() => {
-                  const pts = recent.map((c) => ({ date: c.date, value: c.speed }))
+                  const pts = recent.map((c) => ({ date: c.date, value: c.speed, rec: c }))
                   const dense = pts.length >= 6
                   const series = dense ? [
-                    { name: 'each reading', color: '#98A0A6', vals: pts, width: 1, opacity: 0.5, dots: true, r: 1.8 },
+                    { name: 'each reading', color: '#98A0A6', vals: pts, width: 1, opacity: 0.5, dots: true, r: 1.8, pickable: true },
                     { name: '7-reading avg', color: FERN, vals: trailingAvg(pts, 7), width: 2.4, callout: true },
                   ] : null
-                  return <TrendChart series={series} points={pts} unit="ft" guides={guidesFor(courseInfo, 'speed')} />
+                  return <TrendChart series={series} points={pts} unit="ft" guides={guidesFor(courseInfo, 'speed')} onPick={(p) => setPicked(p.rec)} />
                 })()}
               </div>
             )
@@ -9990,6 +10014,46 @@ function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate,
           </div>
         )
       })()}
+
+      {picked && (
+        <SpeedPointEditor
+          reading={picked}
+          onClose={() => setPicked(null)}
+          onUpdate={async (patch) => { await onUpdate(picked.id, patch); setPicked(null) }}
+          onDelete={async () => { await onDelete(picked.id); setPicked(null) }}
+        />
+      )}
+    </div>
+  )
+}
+
+// Tap-a-point editor — opened from the graph to fix or delete one reading.
+function SpeedPointEditor({ reading, onClose, onUpdate, onDelete }) {
+  const parts = feetToParts(reading.speed)
+  const [ft, setFt] = useState(String(parts.ft))
+  const [inch, setInch] = useState(String(parts.inch))
+  const [busy, setBusy] = useState(false)
+  const save = async () => { if (busy) return; setBusy(true); try { await onUpdate({ speed: stimpToFeet(ft, inch) }) } catch (e) { console.error(e); setBusy(false) } }
+  const del = async () => { if (busy) return; if (!confirm('Delete this reading?')) return; setBusy(true); try { await onDelete() } catch (e) { console.error(e); setBusy(false) } }
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-3" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={onClose}>
+      <div className="w-full sm:max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="font-display text-base font-semibold" style={{ color: FOREST }}>{reading.area}</h3>
+          <button onClick={onClose} aria-label="Close"><X size={18} style={{ color: INK_3 }} /></button>
+        </div>
+        <p className="font-body text-[12px] mb-4" style={{ color: INK_3 }}>{fmtDate(reading.date)} · edit this reading</p>
+        <div className="flex items-center gap-2 mb-4">
+          <input type="number" inputMode="numeric" value={ft} onChange={(e) => setFt(e.target.value)} className="w-16 border border-slate-200 rounded-lg px-2 py-2.5 text-lg font-semibold tnum text-center" />
+          <span className="font-body text-slate-400">'</span>
+          <input type="number" inputMode="numeric" min="0" max="11" value={inch} onChange={(e) => setInch(e.target.value)} className="w-16 border border-slate-200 rounded-lg px-2 py-2.5 text-lg font-semibold tnum text-center" />
+          <span className="font-body text-slate-400">"</span>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={save} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save'}</button>
+          <button onClick={del} disabled={busy} className="py-2.5 px-4 rounded-xl text-sm font-bold font-body" style={{ color: '#C0392B', border: '1px solid #E9C9C2' }}><Trash2 size={15} /></button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -10123,6 +10187,7 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
   const [msg, setMsg] = useState(null)
   const [logOpen, setLogOpen] = useState(false) // logging form hidden until needed — data + graphs lead
   const [expanded, setExpanded] = useState(() => new Set()) // greens showing the full chart + tests
+  const [picked, setPicked] = useState(null) // an OM test opened by tapping its point on a graph
   const toggleExpand = (a) => setExpanded((prev) => { const n = new Set(prev); n.has(a) ? n.delete(a) : n.add(a); return n })
 
   const scoped = courseFilter ? om.filter((r) => omTok(r.area) === omTok(courseFilter)) : om
@@ -10237,9 +10302,10 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
             unit="%" baseline={0}
             refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null}
             guides={guidesFor(courseInfo, 'om')}
+            onPick={(p) => setPicked(p.rec)}
             series={areaList.map((area) => ({
-              name: area,
-              vals: [...byArea[area]].sort((a, b) => (a.date || '').localeCompare(b.date || '')).filter((r) => r.d02 != null).map((r) => ({ date: r.date, value: r.d02 })),
+              name: area, pickable: true,
+              vals: [...byArea[area]].sort((a, b) => (a.date || '').localeCompare(b.date || '')).filter((r) => r.d02 != null).map((r) => ({ date: r.date, value: r.d02, rec: r })),
               width: 2.2, dots: true,
             }))}
           />
@@ -10254,7 +10320,7 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
           {areaList.map((area) => {
             const rows = [...byArea[area]].sort((a, b) => (a.date || '').localeCompare(b.date || ''))
             const latest = rows[rows.length - 1]
-            const surfSeries = rows.filter((r) => r.d02 != null).map((r) => ({ date: r.date, value: r.d02 }))
+            const surfSeries = rows.filter((r) => r.d02 != null).map((r) => ({ date: r.date, value: r.d02, rec: r }))
             const isOpen = expanded.has(area)
             const dv = (v) => (v == null ? '—' : v)
             const over = target !== '' && latest.d02 != null && Number(latest.d02) > Number(target)
@@ -10282,7 +10348,7 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
                     {surfSeries.length >= 2 && (
                       <div>
                         <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Surface 0–2&quot; OM · trend</p>
-                        <TrendChart points={surfSeries} unit="%" baseline={0} refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null} guides={guidesFor(courseInfo, 'om')} />
+                        <TrendChart points={surfSeries} unit="%" baseline={0} refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null} guides={guidesFor(courseInfo, 'om')} onPick={(p) => setPicked(p.rec)} />
                       </div>
                     )}
                     <div>
@@ -10300,6 +10366,47 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
           })}
         </div>
       )}
+
+      {picked && (
+        <OmPointEditor
+          row={picked}
+          onClose={() => setPicked(null)}
+          onSave={async (patch) => { await updateRow(picked.id, patch); setPicked(null) }}
+          onDelete={async () => { await removeRow(picked.id); setPicked(null) }}
+        />
+      )}
+    </div>
+  )
+}
+
+// Tap-a-point editor for one OM test (the three depths), opened from a graph.
+function OmPointEditor({ row, onClose, onSave, onDelete }) {
+  const [d02, setD02] = useState(row.d02 ?? '')
+  const [d24, setD24] = useState(row.d24 ?? '')
+  const [d46, setD46] = useState(row.d46 ?? '')
+  const [busy, setBusy] = useState(false)
+  const save = async () => { if (busy) return; setBusy(true); try { await onSave({ d02: omNum(d02), d24: omNum(d24), d46: omNum(d46) }) } catch (e) { console.error(e); setBusy(false) } }
+  const del = async () => { if (busy) return; if (!confirm('Delete this test?')) return; setBusy(true); try { await onDelete() } catch (e) { console.error(e); setBusy(false) } }
+  const F = (label, v, set) => (
+    <div className="flex-1">
+      <FieldLabel>{label}</FieldLabel>
+      <input type="number" step="0.01" inputMode="decimal" value={v} onChange={(e) => set(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-base font-semibold tnum text-center" placeholder="—" />
+    </div>
+  )
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-3" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={onClose}>
+      <div className="w-full sm:max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="font-display text-base font-semibold" style={{ color: FOREST }}>{row.area}</h3>
+          <button onClick={onClose} aria-label="Close"><X size={18} style={{ color: INK_3 }} /></button>
+        </div>
+        <p className="font-body text-[12px] mb-4" style={{ color: INK_3 }}>{fmtDate(row.date)}{row.method ? ` · LOI ${row.method}°` : ''} · edit this test</p>
+        <div className="flex gap-2 mb-4">{F('0–2"', d02, setD02)}{F('2–4"', d24, setD24)}{F('4–6"', d46, setD46)}</div>
+        <div className="flex gap-2">
+          <button onClick={save} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save'}</button>
+          <button onClick={del} disabled={busy} className="py-2.5 px-4 rounded-xl text-sm font-bold font-body" style={{ color: '#C0392B', border: '1px solid #E9C9C2' }}><Trash2 size={15} /></button>
+        </div>
+      </div>
     </div>
   )
 }
