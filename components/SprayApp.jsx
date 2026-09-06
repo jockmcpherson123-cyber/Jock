@@ -9559,6 +9559,7 @@ function ClippingsTab({ clippings, areas, courseInfo, onSaveCourse, onAddMany, o
   const [vols, setVols] = useState({}) // green -> volume
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState('all')
+  const [histOpen, setHistOpen] = useState(false) // full logs list stays tucked away until asked for
   const [msg, setMsg] = useState(null) // { type: 'ok' | 'err', text }
 
   const toggleGreen = (g) => setSelected((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]))
@@ -9681,31 +9682,44 @@ function ClippingsTab({ clippings, areas, courseInfo, onSaveCourse, onAddMany, o
         </div>
       )}
 
-      {/* History */}
-      <div>
-        <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
-          <button onClick={() => setFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>All</button>
-          {Object.keys(byArea).sort(sortGreens).map((a) => (
-            <button key={a} onClick={() => setFilter(a)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === a ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{a}</button>
-          ))}
-        </div>
-        {shown.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No clipping logs yet.</div>
-        ) : (
-          <div className="space-y-2">
-            {shown.map((c) => (
-              <div key={c.id} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="font-body text-sm font-semibold text-slate-800 truncate">{c.area}</p>
-                  <p className="font-body text-[11px] text-slate-400">{fmtDate(c.date)}{c.notes ? ` · ${c.notes}` : ''}</p>
+      {/* History — tucked behind a toggle so it doesn't fill the screen */}
+      {(() => {
+        const total = Object.values(byArea).reduce((n, l) => n + l.length, 0)
+        return (
+          <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+            <button onClick={() => setHistOpen((o) => !o)} className="w-full flex items-center justify-between px-4 py-3 text-left">
+              <span className="font-body text-sm font-semibold" style={{ color: FOREST }}>All logs{total ? ` · ${total}` : ''}</span>
+              <span className="flex items-center gap-1.5 font-body text-[11px] font-semibold" style={{ color: INK_3 }}>{histOpen ? 'Hide' : 'View'} <ChevronDown size={15} style={{ transform: histOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} /></span>
+            </button>
+            {histOpen && (
+              <div className="px-4 pb-4 pt-1 border-t border-black/5">
+                <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+                  <button onClick={() => setFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>All</button>
+                  {Object.keys(byArea).sort(sortGreens).map((a) => (
+                    <button key={a} onClick={() => setFilter(a)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === a ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{a}</button>
+                  ))}
                 </div>
-                <p className="font-display text-base font-bold text-slate-900 shrink-0">{c.volume} <span className="font-body text-[11px] font-medium text-slate-400">{c.unit}</span></p>
-                <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+                {shown.length === 0 ? (
+                  <div className="text-center text-slate-400 font-body text-sm py-6">No clipping logs yet.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {shown.map((c) => (
+                      <div key={c.id} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-body text-sm font-semibold text-slate-800 truncate">{c.area}</p>
+                          <p className="font-body text-[11px] text-slate-400">{fmtDate(c.date)}{c.notes ? ` · ${c.notes}` : ''}</p>
+                        </div>
+                        <p className="font-display text-base font-bold text-slate-900 shrink-0">{c.volume} <span className="font-body text-[11px] font-medium text-slate-400">{c.unit}</span></p>
+                        <button onClick={() => onDelete(c.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete"><Trash2 size={15} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
+        )
+      })()}
     </div>
   )
 }
@@ -9734,6 +9748,7 @@ function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate,
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState('all')
   const [msg, setMsg] = useState(null)
+  const [histOpen, setHistOpen] = useState(false) // full readings list stays tucked away until asked for
 
   const toggleGreen = (g) => setSelected((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]))
   const setVal = (g, part, v) => setVals((prev) => ({ ...prev, [g]: { ...(prev[g] || {}), [part]: v } }))
@@ -9880,24 +9895,37 @@ function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate,
         </div>
       )}
 
-      {/* History */}
-      <div>
-        <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
-          <button onClick={() => setFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>All</button>
-          {Object.keys(byArea).sort(sortGreens).map((a) => (
-            <button key={a} onClick={() => setFilter(a)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === a ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{a.replace('Green ', '')}</button>
-          ))}
-        </div>
-        {shown.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No greens-speed readings yet.</div>
-        ) : (
-          <div className="space-y-2">
-            {shown.map((c) => (
-              <SpeedRow key={c.id} c={c} onUpdate={onUpdate} onDelete={onDelete} />
-            ))}
+      {/* History — tucked behind a toggle so it doesn't fill the screen */}
+      {(() => {
+        const total = Object.values(byArea).reduce((n, l) => n + l.length, 0)
+        return (
+          <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+            <button onClick={() => setHistOpen((o) => !o)} className="w-full flex items-center justify-between px-4 py-3 text-left">
+              <span className="font-body text-sm font-semibold" style={{ color: FOREST }}>All readings{total ? ` · ${total}` : ''}</span>
+              <span className="flex items-center gap-1.5 font-body text-[11px] font-semibold" style={{ color: INK_3 }}>{histOpen ? 'Hide' : 'View'} <ChevronDown size={15} style={{ transform: histOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} /></span>
+            </button>
+            {histOpen && (
+              <div className="px-4 pb-4 pt-1 border-t border-black/5">
+                <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+                  <button onClick={() => setFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>All</button>
+                  {Object.keys(byArea).sort(sortGreens).map((a) => (
+                    <button key={a} onClick={() => setFilter(a)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap" style={filter === a ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{a.replace('Green ', '')}</button>
+                  ))}
+                </div>
+                {shown.length === 0 ? (
+                  <div className="text-center text-slate-400 font-body text-sm py-6">No greens-speed readings yet.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {shown.map((c) => (
+                      <SpeedRow key={c.id} c={c} onUpdate={onUpdate} onDelete={onDelete} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        )
+      })()}
     </div>
   )
 }
