@@ -9318,88 +9318,128 @@ function SuppressionCurve({ model, gdd, surfaceKind }) {
 // Reusable mini line chart (pure SVG, no libraries). Feed it points in time order
 // and it draws a filled trend line with a dashed average and an emphasized latest
 // point — used for clipping yields and available for any other metric.
-// A readable line chart: labeled Y-axis + gridlines for reference numbers, dated
-// X-axis ticks across the range, an optional target line (refLine) or shaded
-// target band {min,max}, plus the average line and the latest value called out.
-function TrendChart({ points = [], color = FERN, height = 168, unit = '', showAvg = true, refLine = null, band = null, baseline = null }) {
+// ── Shared chart system ──────────────────────────────────────────────────
+// One consistent look across the whole app (approved with Jock). It draws a
+// time-based line chart with a labeled Y-axis + gridlines, dated X-axis ticks,
+// an optional target line (refLine) OR shaded Min/Max band, and supports one or
+// many series (raw + 7/14/30-day trailing averages) with a legend.
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+// Fixed multi-series colour order (CVD-safe categorical slots).
+const SERIES_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#4a3aa7', '#e34948', '#e87ba4', '#008300']
+const chartMs = (d) => { if (typeof d === 'number') return d; const p = String(d || '').split('-').map(Number); return p.length === 3 ? new Date(p[0], (p[1] || 1) - 1, p[2] || 1).getTime() : NaN }
+const chartMmDd = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()}` }
+// Trailing average over the last `win` points — for dense metrics (clippings, speed).
+function trailingAvg(pts, win) {
+  const clean = (pts || []).filter((p) => p.value != null && p.value !== '' && !isNaN(Number(p.value)))
+  return clean.map((p, i) => { const s = Math.max(0, i - win + 1); const sl = clean.slice(s, i + 1); return { date: p.date, value: sl.reduce((a, b) => a + Number(b.value), 0) / sl.length } })
+}
+
+function TrendChart({ points = null, series = null, color = FERN, height = 170, unit = '', showAvg = true, refLine = null, band = null, baseline = null, legend = true }) {
   const [wrapRef, W] = useMeasuredWidth(560)
-  const data = points
-    .filter((p) => p.value != null && p.value !== '' && !isNaN(Number(p.value)))
-    .map((p) => ({ date: p.date, value: Number(p.value) }))
-  if (data.length === 0) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">No data yet.</p>
-  const padL = 32, padR = 12, padT = 12, padB = 20
-  const vals = data.map((d) => d.value)
+  // Normalise to a list of series. Single-series callers keep passing `points`
+  // and get the classic filled trend with a called-out latest value.
+  const rawSeries = (series && series.length)
+    ? series
+    : [{ color, vals: points || [], width: 2, area: true, dots: true, callout: true, showAvg }]
+  const srs = rawSeries.map((s, i) => ({
+    ...s,
+    color: s.color || SERIES_COLORS[i % SERIES_COLORS.length],
+    data: (s.vals || []).filter((p) => p.value != null && p.value !== '' && !isNaN(Number(p.value))).map((p) => ({ t: chartMs(p.date), value: Number(p.value) })).filter((p) => !isNaN(p.t)),
+  })).filter((s) => s.data.length)
+  if (!srs.length) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">No data yet.</p>
+
+  const padL = 34, padR = 12, padT = 12, padB = 20, plotW = W - padL - padR
+  const allV = srs.flatMap((s) => s.data.map((p) => p.value))
   const ref = refLine && refLine.value != null && !isNaN(Number(refLine.value)) ? Number(refLine.value) : null
-  const bMin = band && band.min != null && !isNaN(Number(band.min)) ? Number(band.min) : null
-  const bMax = band && band.max != null && !isNaN(Number(band.max)) ? Number(band.max) : null
-  const scaleVals = [...vals]
-  if (ref != null) scaleVals.push(ref) // keep the reference line in view
+  const bMin = band && band.min != null && band.min !== '' && !isNaN(Number(band.min)) ? Number(band.min) : null
+  const bMax = band && band.max != null && band.max !== '' && !isNaN(Number(band.max)) ? Number(band.max) : null
+  const scaleVals = [...allV]
+  if (ref != null) scaleVals.push(ref)
   if (bMin != null) scaleVals.push(bMin)
   if (bMax != null) scaleVals.push(bMax)
-  if (baseline != null) scaleVals.push(baseline) // anchor the axis (e.g. 0 for volumes)
+  if (baseline != null) scaleVals.push(baseline)
   let min = Math.min(...scaleVals), max = Math.max(...scaleVals)
-  // Pad the range so points don't hug the top/bottom edges (which reads as
-  // "broken" when a small change fills the whole height). With a baseline the
-  // bottom stays anchored so the slope reflects the true size of the change.
   const spanPad = (max - min) * 0.12 || Math.abs(max) * 0.1 || 1
   max += spanPad
-  if (baseline != null) min = Math.min(min, baseline)
-  else min -= spanPad
+  if (baseline != null) min = Math.min(min, baseline); else min -= spanPad
   const range = max - min || Math.abs(max) || 1
-  const n = data.length
-  const plotW = W - padL - padR
-  const X = (i) => padL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW)
+  const allT = srs.flatMap((s) => s.data.map((p) => p.t))
+  const tMin = Math.min(...allT), tMax = Math.max(...allT)
+  const X = (t) => padL + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
   const Y = (v) => padT + (1 - (v - min) / range) * (height - padT - padB)
-  const line = data.map((d, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(d.value).toFixed(1)}`).join(' ')
-  const areaPath = `${line} L${X(n - 1).toFixed(1)},${(height - padB).toFixed(1)} L${X(0).toFixed(1)},${(height - padB).toFixed(1)} Z`
-  const mean = vals.reduce((s, v) => s + v, 0) / n
-  const last = data[n - 1]
-  // Decimal precision for the axis + callout, scaled to the value range.
   const decs = range >= 20 ? 0 : range >= 3 ? 1 : 2
   const fmtY = (v) => v.toFixed(decs)
-  const yTicks = [0, 1, 2, 3].map((t) => min + (t / 3) * range) // 4 gridlines
-  const shortDate = (iso) => { const p = String(iso || '').split('-'); return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : '' }
-  const tickN = Math.min(n, 5)
-  const xIdx = n === 1 ? [0] : [...new Set(Array.from({ length: tickN }, (_, i) => Math.round((i * (n - 1)) / (tickN - 1))))]
+  const yTicks = [0, 1, 2, 3].map((t) => min + (t / 3) * range)
+  // X ticks: each date when there are few, month starts when dense.
+  const times = [...new Set(allT)].sort((a, b) => a - b)
+  let xticks
+  if (times.length <= 6) { xticks = times.map((t) => ({ t, label: chartMmDd(t) })) }
+  else {
+    xticks = []; const d = new Date(times[0]); d.setDate(1); if (d.getTime() < times[0]) d.setMonth(d.getMonth() + 1)
+    while (d.getTime() <= times[times.length - 1]) { xticks.push({ t: d.getTime(), label: MONTHS_SHORT[d.getMonth()] }); d.setMonth(d.getMonth() + 1) }
+    if (!xticks.length) xticks = [{ t: times[0], label: chartMmDd(times[0]) }, { t: times[times.length - 1], label: chartMmDd(times[times.length - 1]) }]
+  }
+  const legendItems = []
+  srs.forEach((s) => { if (s.name) legendItems.push({ name: s.name, color: s.color, dash: s.dash }) })
+  if (bMin != null && bMax != null) legendItems.push({ name: band.label || `target ${fmtY(bMin)}–${fmtY(bMax)}`, color: band.color || FERN, band: true })
+  if (ref != null) legendItems.push({ name: refLine.label || `target ${fmtY(ref)}`, color: refLine.color || '#B7791F', dash: true })
+  const showLegend = legend && legendItems.length > 1
+
   return (
     <div ref={wrapRef}>
       <svg viewBox={`0 0 ${W} ${height}`} width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
-        {/* Y gridlines + reference numbers */}
         {yTicks.map((v, i) => (
           <g key={`y${i}`}>
             <line x1={padL} x2={W - padR} y1={Y(v)} y2={Y(v)} stroke="#EDF0ED" strokeWidth="1" />
             <text x={padL - 5} y={Y(v) + 3} textAnchor="end" fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtY(v)}</text>
           </g>
         ))}
-        {/* Target band (min–max window) */}
         {bMin != null && bMax != null && (
           <>
             <rect x={padL} y={Y(bMax)} width={plotW} height={Math.max(1, Y(bMin) - Y(bMax))} fill={band.color || '#3A6B4A'} opacity="0.1" />
             <line x1={padL} x2={W - padR} y1={Y(bMax)} y2={Y(bMax)} stroke={band.color || '#3A6B4A'} strokeWidth="1" strokeDasharray="3 2" opacity="0.6" />
             <line x1={padL} x2={W - padR} y1={Y(bMin)} y2={Y(bMin)} stroke={band.color || '#3A6B4A'} strokeWidth="1" strokeDasharray="3 2" opacity="0.6" />
-            {band.label && <text x={W - padR} y={Y(bMax) - 3} textAnchor="end" fontSize="8" fill={band.color || '#3A6B4A'} style={{ fontVariantNumeric: 'tabular-nums' }}>{band.label}</text>}
           </>
         )}
-        {/* Single target/reference line */}
         {ref != null && (
           <>
-            <line x1={padL} x2={W - padR} y1={Y(ref)} y2={Y(ref)} stroke={refLine.color || '#DC2626'} strokeWidth="1" strokeDasharray="3 2" />
-            <text x={W - padR} y={Y(ref) - 3} textAnchor="end" fontSize="8" fill={refLine.color || '#DC2626'} style={{ fontVariantNumeric: 'tabular-nums' }}>{refLine.label || ref}</text>
+            <line x1={padL} x2={W - padR} y1={Y(ref)} y2={Y(ref)} stroke={refLine.color || '#B7791F'} strokeWidth="1.2" strokeDasharray="4 2" />
+            <text x={W - padR} y={Y(ref) - 3} textAnchor="end" fontSize="8" fill={refLine.color || '#B7791F'} style={{ fontVariantNumeric: 'tabular-nums' }}>{refLine.label || fmtY(ref)}</text>
           </>
         )}
-        {showAvg && n > 1 && <line x1={padL} x2={W - padR} y1={Y(mean)} y2={Y(mean)} stroke="#C7CFC9" strokeWidth="1" strokeDasharray="4 3" />}
-        <path d={areaPath} fill={color} opacity="0.12" />
-        <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-        {data.map((d, i) => <circle key={i} cx={X(i)} cy={Y(d.value)} r={i === n - 1 ? 3.5 : 1.8} fill={color} />)}
-        <text x={X(n - 1)} y={Y(last.value) - 7} textAnchor="end" fontSize="11" fontWeight="700" fill={color} style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtY(last.value)}</text>
-        {/* X-axis date ticks across the range */}
-        {xIdx.map((i) => (
-          <text key={`x${i}`} x={X(i)} y={height - 5} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{shortDate(data[i].date)}</text>
+        {srs.map((s, si) => {
+          const n = s.data.length
+          const path = s.data.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${Y(d.value).toFixed(1)}`).join(' ')
+          const last = s.data[n - 1]
+          const mean = s.data.reduce((a, b) => a + b.value, 0) / n
+          return (
+            <g key={`s${si}`}>
+              {s.area && <path d={`${path} L${X(s.data[n - 1].t).toFixed(1)},${(height - padB).toFixed(1)} L${X(s.data[0].t).toFixed(1)},${(height - padB).toFixed(1)} Z`} fill={s.color} opacity="0.12" />}
+              {s.showAvg && n > 1 && <line x1={padL} x2={W - padR} y1={Y(mean)} y2={Y(mean)} stroke="#C7CFC9" strokeWidth="1" strokeDasharray="4 3" />}
+              {!s.dotsOnly && <path d={path} fill="none" stroke={s.color} strokeWidth={s.width || 2} opacity={s.opacity || 1} strokeLinejoin="round" strokeLinecap="round" strokeDasharray={s.dash || 'none'} />}
+              {(s.dots || s.dotsOnly) && s.data.map((d, i) => <circle key={i} cx={X(d.t)} cy={Y(d.value)} r={s.callout && i === n - 1 ? 3.5 : (s.r || 1.8)} fill={s.color} opacity={s.opacity || 1} />)}
+              {s.callout && <text x={X(last.t)} y={Y(last.value) - 7} textAnchor="end" fontSize="11" fontWeight="700" fill={s.color} style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtY(last.value)}</text>}
+            </g>
+          )
+        })}
+        {xticks.map((tk, i) => (
+          <text key={`x${i}`} x={X(tk.t)} y={height - 5} textAnchor={X(tk.t) <= padL + 2 ? 'start' : X(tk.t) >= W - padR - 2 ? 'end' : 'middle'} fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{tk.label}</text>
         ))}
       </svg>
-      {n > 1 && showAvg && (
-        <div className="text-right font-body text-[9px] text-slate-400 mt-1" style={{ fontVariantNumeric: 'tabular-nums' }}>avg {fmtY(mean)}{unit ? ` ${unit}` : ''}</div>
-      )}
+      {showLegend ? (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 font-body text-[10.5px]" style={{ color: INK_3 }}>
+          {legendItems.map((it, i) => (
+            <span key={i} className="inline-flex items-center gap-1.5">
+              <span style={it.band
+                ? { width: 13, height: 9, borderRadius: 2, background: it.color, opacity: 0.4, flexShrink: 0 }
+                : { width: 14, height: 0, borderTop: `${it.dash ? '2px dashed' : '3px solid'} ${it.color}`, flexShrink: 0 }} />
+              {it.name}
+            </span>
+          ))}
+        </div>
+      ) : (!series && showAvg && srs[0].data.length > 1 && (
+        <div className="text-right font-body text-[9px] text-slate-400 mt-1" style={{ fontVariantNumeric: 'tabular-nums' }}>avg {fmtY(srs[0].data.reduce((a, b) => a + b.value, 0) / srs[0].data.length)}{unit ? ` ${unit}` : ''}</div>
+      ))}
     </div>
   )
 }
