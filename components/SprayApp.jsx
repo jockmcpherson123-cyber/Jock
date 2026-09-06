@@ -9604,7 +9604,16 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete, cours
                   <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
                   <p className="font-body text-[10px] text-slate-400">{recent.length} log{recent.length !== 1 ? 's' : ''} · latest {latest?.volume} {latest?.unit}</p>
                 </div>
-                <TrendChart points={recent.map((c) => ({ date: c.date, value: c.volume }))} unit={latest?.unit || ''} baseline={0} />
+                {(() => {
+                  const pts = recent.map((c) => ({ date: c.date, value: c.volume }))
+                  const dense = pts.length >= 6
+                  const series = dense ? [
+                    { name: 'each log', color: '#98A0A6', vals: pts, width: 1, opacity: 0.45, dots: true, r: 1.6 },
+                    { name: '7-log avg', color: '#1baf7a', vals: trailingAvg(pts, 7), width: 2 },
+                    { name: '14-log avg', color: '#2a78d6', vals: trailingAvg(pts, 14), width: 2.2, callout: true },
+                  ] : null
+                  return <TrendChart series={series} points={pts} unit={latest?.unit || ''} baseline={0} />
+                })()}
               </div>
             )
           })}
@@ -9790,7 +9799,15 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onUpdate, onDelete, cou
                   <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
                   <p className="font-body text-[10px] text-slate-400">{recent.length} reading{recent.length !== 1 ? 's' : ''} · latest {fmtStimp(latest?.speed)}</p>
                 </div>
-                <TrendChart points={recent.map((c) => ({ date: c.date, value: c.speed }))} unit="ft" />
+                {(() => {
+                  const pts = recent.map((c) => ({ date: c.date, value: c.speed }))
+                  const dense = pts.length >= 6
+                  const series = dense ? [
+                    { name: 'each reading', color: '#98A0A6', vals: pts, width: 1, opacity: 0.5, dots: true, r: 1.8 },
+                    { name: '7-reading avg', color: FERN, vals: trailingAvg(pts, 7), width: 2.4, callout: true },
+                  ] : null
+                  return <TrendChart series={series} points={pts} unit="ft" />
+                })()}
               </div>
             )
           })}
@@ -10045,6 +10062,23 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
           <button onClick={save} disabled={!entries.length} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
             {entries.length ? `Log ${entries.length} green${entries.length !== 1 ? 's' : ''}` : 'Enter at least one depth to save'}
           </button>
+        </div>
+      )}
+
+      {/* Hero — every green's surface 0–2% on one timeline (appears once there
+          are tests on 2+ dates so there's an actual trend to draw). */}
+      {new Set(scoped.map((r) => r.date)).size >= 2 && (
+        <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+          <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Surface 0–2% · all greens</p>
+          <TrendChart
+            unit="%" baseline={0}
+            refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null}
+            series={areaList.map((area) => ({
+              name: area,
+              vals: [...byArea[area]].sort((a, b) => (a.date || '').localeCompare(b.date || '')).filter((r) => r.d02 != null).map((r) => ({ date: r.date, value: r.d02 })),
+              width: 2.2, dots: true,
+            }))}
+          />
         </div>
       )}
 
