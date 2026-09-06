@@ -8467,8 +8467,8 @@ function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse
       </div>
 
       {tab === 'moisture' && <WettingAgent key={course || 'all'} daily={daily} areas={areas} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} initialView="read" courseFilter={course} />}
-      {tab === 'clippings' && <ClippingsTab key={course || 'all'} clippings={clippings} areas={areas} courseInfo={turf.courseInfo} onAddMany={onClip} onDelete={onClipDel} courseFilter={course} />}
-      {tab === 'speed' && <GreensSpeedTab key={course || 'all'} speeds={speeds} courseInfo={turf.courseInfo} onAddMany={onSpeed} onUpdate={onSpeedUpd} onDelete={onSpeedDel} courseFilter={course} />}
+      {tab === 'clippings' && <ClippingsTab key={course || 'all'} clippings={clippings} areas={areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} onAddMany={onClip} onDelete={onClipDel} courseFilter={course} />}
+      {tab === 'speed' && <GreensSpeedTab key={course || 'all'} speeds={speeds} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} onAddMany={onSpeed} onUpdate={onSpeedUpd} onDelete={onSpeedDel} courseFilter={course} />}
       {tab === 'scouting' && <ScoutingTab key={course || 'all'} scouting={scouting} areas={areas} courseInfo={turf.courseInfo} onAdd={onScout} onUpdate={onScoutUpd} onDelete={onScoutDel} courseFilter={course} />}
 
       {qrOpen && <DataQRModal courseInfo={turf.courseInfo} saveCourse={saveTurfCourse} onClose={() => setQrOpen(false)} />}
@@ -8614,7 +8614,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         )}
         {route === 'clippings' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <ClippingsTab clippings={clippings} areas={turf.areas} courseInfo={turf.courseInfo}
+          : <ClippingsTab clippings={clippings} areas={turf.areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse}
               onAddMany={async (list) => { await db.addClippings(list); await reloadClippings() }}
               onDelete={async (id) => { await db.deleteClipping(id); await reloadClippings() }} />
         )}
@@ -8640,7 +8640,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         )}
         {route === 'speed' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <GreensSpeedTab speeds={speeds} courseInfo={turf.courseInfo}
+          : <GreensSpeedTab speeds={speeds} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse}
               onAddMany={async (list) => { await db.addGreensSpeeds(list); await reloadSpeeds() }}
               onUpdate={async (id, patch) => { await db.updateGreensSpeed(id, patch); await reloadSpeeds() }}
               onDelete={async (id) => { await db.deleteGreensSpeed(id); await reloadSpeeds() }} />
@@ -9334,7 +9334,7 @@ function trailingAvg(pts, win) {
   return clean.map((p, i) => { const s = Math.max(0, i - win + 1); const sl = clean.slice(s, i + 1); return { date: p.date, value: sl.reduce((a, b) => a + Number(b.value), 0) / sl.length } })
 }
 
-function TrendChart({ points = null, series = null, color = FERN, height = 170, unit = '', showAvg = true, refLine = null, band = null, baseline = null, legend = true }) {
+function TrendChart({ points = null, series = null, color = FERN, height = 170, unit = '', showAvg = true, refLine = null, band = null, guides = null, baseline = null, legend = true }) {
   const [wrapRef, W] = useMeasuredWidth(560)
   // Normalise to a list of series. Single-series callers keep passing `points`
   // and get the classic filled trend with a called-out latest value.
@@ -9353,10 +9353,13 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
   const ref = refLine && refLine.value != null && !isNaN(Number(refLine.value)) ? Number(refLine.value) : null
   const bMin = band && band.min != null && band.min !== '' && !isNaN(Number(band.min)) ? Number(band.min) : null
   const bMax = band && band.max != null && band.max !== '' && !isNaN(Number(band.max)) ? Number(band.max) : null
+  // Guide lines: any number of labelled reference lines (label + value + colour).
+  const gs = (guides || []).map((g) => ({ value: Number(g.value), label: g.label, color: g.color || '#B7791F' })).filter((g) => !isNaN(g.value))
   const scaleVals = [...allV]
   if (ref != null) scaleVals.push(ref)
   if (bMin != null) scaleVals.push(bMin)
   if (bMax != null) scaleVals.push(bMax)
+  gs.forEach((g) => scaleVals.push(g.value))
   if (baseline != null) scaleVals.push(baseline)
   let min = Math.min(...scaleVals), max = Math.max(...scaleVals)
   const spanPad = (max - min) * 0.12 || Math.abs(max) * 0.1 || 1
@@ -9383,6 +9386,7 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
   srs.forEach((s) => { if (s.name) legendItems.push({ name: s.name, color: s.color, dash: s.dash }) })
   if (bMin != null && bMax != null) legendItems.push({ name: band.label || `target ${fmtY(bMin)}–${fmtY(bMax)}`, color: band.color || FERN, band: true })
   if (ref != null) legendItems.push({ name: refLine.label || `target ${fmtY(ref)}`, color: refLine.color || '#B7791F', dash: true })
+  gs.forEach((g) => legendItems.push({ name: g.label || fmtY(g.value), color: g.color, dash: true }))
   const showLegend = legend && legendItems.length > 1
 
   return (
@@ -9407,6 +9411,12 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
             <text x={W - padR} y={Y(ref) - 3} textAnchor="end" fontSize="8" fill={refLine.color || '#B7791F'} style={{ fontVariantNumeric: 'tabular-nums' }}>{refLine.label || fmtY(ref)}</text>
           </>
         )}
+        {gs.map((g, i) => (
+          <g key={`g${i}`}>
+            <line x1={padL} x2={W - padR} y1={Y(g.value)} y2={Y(g.value)} stroke={g.color} strokeWidth="1.2" strokeDasharray="4 2" opacity="0.9" />
+            <text x={W - padR} y={Y(g.value) - 3} textAnchor="end" fontSize="8" fill={g.color} style={{ fontVariantNumeric: 'tabular-nums' }}>{g.label || fmtY(g.value)}</text>
+          </g>
+        ))}
         {srs.map((s, si) => {
           const n = s.data.length
           const path = s.data.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${Y(d.value).toFixed(1)}`).join(' ')
@@ -9440,6 +9450,52 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
       ) : (!series && showAvg && srs[0].data.length > 1 && (
         <div className="text-right font-body text-[9px] text-slate-400 mt-1" style={{ fontVariantNumeric: 'tabular-nums' }}>avg {fmtY(srs[0].data.reduce((a, b) => a + b.value, 0) / srs[0].data.length)}{unit ? ` ${unit}` : ''}</div>
       ))}
+    </div>
+  )
+}
+
+// Guide lines the user places on a metric's charts (as many as they like), each
+// a label + value + colour. Stored in courseInfo.guides[metric] and passed to
+// TrendChart's `guides` prop.
+const GUIDE_COLORS = ['#B7791F', '#C0392B', '#3A6B4A', '#2a78d6', '#8A94A0']
+function guidesFor(courseInfo, metric) {
+  const all = courseInfo && typeof courseInfo.guides === 'object' && courseInfo.guides ? courseInfo.guides : {}
+  return Array.isArray(all[metric]) ? all[metric] : []
+}
+function GuidesEditor({ metric, courseInfo, onSaveCourse, unit = '', title = 'Guide lines' }) {
+  const all = courseInfo && typeof courseInfo.guides === 'object' && courseInfo.guides ? courseInfo.guides : {}
+  const list = Array.isArray(all[metric]) ? all[metric] : []
+  const [open, setOpen] = useState(false)
+  const save = (next) => onSaveCourse({ guides: { ...all, [metric]: next } })
+  const add = () => save([...list, { id: uid(), label: '', value: '', color: GUIDE_COLORS[list.length % GUIDE_COLORS.length] }])
+  const upd = (id, patch) => save(list.map((g) => (g.id === id ? { ...g, ...patch } : g)))
+  const del = (id) => save(list.filter((g) => g.id !== id))
+  return (
+    <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between px-4 py-2.5 text-left">
+        <span className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>{title}{list.length ? ` · ${list.length}` : ''}</span>
+        <ChevronDown size={15} style={{ color: INK_3, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+      </button>
+      {open && (
+        <div className="px-4 pb-4 pt-1 border-t border-black/5 space-y-2">
+          {list.length === 0 && <p className="font-body text-[12px] text-slate-400">No guides yet — add reference lines like “Members 10.5” or “Action 6”.</p>}
+          {list.map((g) => (
+            <div key={g.id} className="rounded-xl p-2.5" style={{ backgroundColor: '#F8FAF9' }}>
+              <div className="flex gap-2 items-center">
+                <input value={g.label} onChange={(e) => upd(g.id, { label: e.target.value })} placeholder="Label (e.g. Members)" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body bg-white" />
+                <input value={g.value} onChange={(e) => upd(g.id, { value: e.target.value })} inputMode="decimal" placeholder={unit || 'value'} className="w-20 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-body tnum text-center bg-white" />
+                <button onClick={() => del(g.id)} className="shrink-0 p-1.5 rounded-lg" style={{ color: '#C0392B' }} aria-label="Remove guide"><Trash2 size={15} /></button>
+              </div>
+              <div className="flex gap-1.5 mt-2">
+                {GUIDE_COLORS.map((c) => (
+                  <button key={c} onClick={() => upd(g.id, { color: c })} className="w-6 h-6 rounded-full" style={{ backgroundColor: c, outline: g.color === c ? `2px solid ${INK_2}` : '1px solid rgba(0,0,0,0.08)', outlineOffset: 1 }} aria-label={`colour ${c}`} />
+                ))}
+              </div>
+            </div>
+          ))}
+          <button onClick={add} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: FOREST, border: `1px solid ${HAIR}` }}><Plus size={13} /> Add guide</button>
+        </div>
+      )}
     </div>
   )
 }
@@ -9480,7 +9536,7 @@ function saveErrorText(e, migration) {
 const clipErrorText = (e) => saveErrorText(e, 'supabase/phase10.sql')
 const practiceErrorText = (e) => saveErrorText(e, 'supabase/phase11.sql')
 
-function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete, courseFilter = '' }) {
+function ClippingsTab({ clippings, areas, courseInfo, onSaveCourse, onAddMany, onDelete, courseFilter = '' }) {
   const greenOptions = greenOptionsFor(courseInfo)
   const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
   const cfTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
@@ -9592,6 +9648,11 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete, cours
         )}
       </div>
 
+      {/* Guide lines (your reference thresholds for these charts) */}
+      {onSaveCourse && Object.keys(byArea).length > 0 && (
+        <GuidesEditor metric="clip" courseInfo={courseInfo} onSaveCourse={onSaveCourse} unit="vol" title="Clipping guide lines" />
+      )}
+
       {/* Trend graph per area */}
       {Object.keys(byArea).length > 0 && (
         <div className="space-y-3">
@@ -9612,7 +9673,7 @@ function ClippingsTab({ clippings, areas, courseInfo, onAddMany, onDelete, cours
                     { name: '7-log avg', color: '#1baf7a', vals: trailingAvg(pts, 7), width: 2 },
                     { name: '14-log avg', color: '#2a78d6', vals: trailingAvg(pts, 14), width: 2.2, callout: true },
                   ] : null
-                  return <TrendChart series={series} points={pts} unit={latest?.unit || ''} baseline={0} />
+                  return <TrendChart series={series} points={pts} unit={latest?.unit || ''} baseline={0} guides={guidesFor(courseInfo, 'clip')} />
                 })()}
               </div>
             )
@@ -9654,7 +9715,7 @@ const speedErrorText = (e) => saveErrorText(e, 'supabase/phase18.sql')
 // ── GREENS SPEED (STIMPMETER) ───────────────────────────────────────────────
 // Log each green's speed (feet) by date. The win is consistency: the day's
 // spread across greens (fastest vs slowest) matters as much as the average.
-function GreensSpeedTab({ speeds, courseInfo, onAddMany, onUpdate, onDelete, courseFilter = '' }) {
+function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate, onDelete, courseFilter = '' }) {
   const greenOptions = greenOptionsFor(courseInfo)
   const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
   const cfTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
@@ -9787,6 +9848,11 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onUpdate, onDelete, cou
         </div>
       )}
 
+      {/* Guide lines (e.g. Members 10.5, Tournament 12) */}
+      {onSaveCourse && Object.keys(byArea).length > 0 && (
+        <GuidesEditor metric="speed" courseInfo={courseInfo} onSaveCourse={onSaveCourse} unit="ft" title="Speed guide lines" />
+      )}
+
       {/* Trend graph per green */}
       {Object.keys(byArea).length > 0 && (
         <div className="space-y-3">
@@ -9806,7 +9872,7 @@ function GreensSpeedTab({ speeds, courseInfo, onAddMany, onUpdate, onDelete, cou
                     { name: 'each reading', color: '#98A0A6', vals: pts, width: 1, opacity: 0.5, dots: true, r: 1.8 },
                     { name: '7-reading avg', color: FERN, vals: trailingAvg(pts, 7), width: 2.4, callout: true },
                   ] : null
-                  return <TrendChart series={series} points={pts} unit="ft" />
+                  return <TrendChart series={series} points={pts} unit="ft" guides={guidesFor(courseInfo, 'speed')} />
                 })()}
               </div>
             )
@@ -10065,6 +10131,11 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
         </div>
       )}
 
+      {/* Guide lines for the OM charts (surface target + any extra thresholds) */}
+      {areaList.length > 0 && (
+        <GuidesEditor metric="om" courseInfo={courseInfo} onSaveCourse={onSaveCourse} unit="%" title="OM guide lines" />
+      )}
+
       {/* Hero — every green's surface 0–2% on one timeline (appears once there
           are tests on 2+ dates so there's an actual trend to draw). */}
       {new Set(scoped.map((r) => r.date)).size >= 2 && (
@@ -10073,6 +10144,7 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
           <TrendChart
             unit="%" baseline={0}
             refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null}
+            guides={guidesFor(courseInfo, 'om')}
             series={areaList.map((area) => ({
               name: area,
               vals: [...byArea[area]].sort((a, b) => (a.date || '').localeCompare(b.date || '')).filter((r) => r.d02 != null).map((r) => ({ date: r.date, value: r.d02 })),
@@ -10118,7 +10190,7 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
                     {surfSeries.length >= 2 && (
                       <div>
                         <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Surface 0–2&quot; OM · trend</p>
-                        <TrendChart points={surfSeries} unit="%" baseline={0} refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null} />
+                        <TrendChart points={surfSeries} unit="%" baseline={0} refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null} guides={guidesFor(courseInfo, 'om')} />
                       </div>
                     )}
                     <div>
