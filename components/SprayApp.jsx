@@ -8558,7 +8558,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
               <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
             </div>
             <div className="flex gap-1 font-body text-sm overflow-x-auto">
-              {[['dashboard', 'Dashboard'], ['report', 'Weekly Report'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['hoc', 'Height of Cut'], ['scouting', 'Scouting'], ['knowledge', 'Reference']].map(([key, label]) => (
+              {[['dashboard', 'Dashboard'], ['report', 'Weekly Report'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['hoc', 'Height of Cut'], ['scouting', 'Scouting'], ['timeline', 'Timeline'], ['knowledge', 'Reference']].map(([key, label]) => (
                 <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
                   {label}
                 </button>
@@ -8651,6 +8651,16 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
               onAdd={async (s) => { await db.addScouting(s); await reloadScouting() }}
               onUpdate={async (id, patch) => { await db.updateScouting(id, patch); await reloadScouting() }}
               onDelete={async (id) => { await db.deleteScouting(id); await reloadScouting() }} />
+        )}
+        {route === 'timeline' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <div className="max-w-4xl">
+              <h2 className="font-display text-lg font-semibold text-slate-900 mb-1">Season Timeline</h2>
+              <p className="font-body text-xs text-slate-400 mb-3">Everything you did this season on one dated line — sprays, topdressing, aeration and scouting. Overlay the story behind the trends.</p>
+              <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+                <SeasonTimeline sheets={turf.sheets} practices={practices} scouting={scouting} courseFilter={course} />
+              </div>
+            </div>
         )}
       </div>
     </div>
@@ -9176,6 +9186,14 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
         <p className="font-body text-[11px] opacity-70 mt-0.5">Accumulated since Jan 1 · {daily.length} days of weather</p>
       </div>
 
+      {/* Running total — season heat accumulating over the year */}
+      {gddSeries.length >= 2 && (
+        <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+          <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Season GDD · running total</p>
+          <TrendChart points={gddSeries.map((g) => ({ date: g.date, value: g.acc }))} unit="GDD" baseline={0} showAvg={false} />
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
         <div className="flex items-center justify-between mb-1">
           <p className="font-display text-base font-semibold text-slate-900">Growth-Reg Timing</p>
@@ -9496,6 +9514,52 @@ function GuidesEditor({ metric, courseInfo, onSaveCourse, unit = '', title = 'Gu
           <button onClick={add} className="font-body text-xs font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ color: FOREST, border: `1px solid ${HAIR}` }}><Plus size={13} /> Add guide</button>
         </div>
       )}
+    </div>
+  )
+}
+
+// Season timeline (shape ③): the things you DID — sprays, topdressing, aeration
+// and scouting — as colour-coded markers on one dated timeline.
+function SeasonTimeline({ sheets = [], practices = [], scouting = [], courseFilter = '' }) {
+  const [wrapRef, W] = useMeasuredWidth(560)
+  const cTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+  const inC = (a) => !courseFilter || cTok(a) === cTok(courseFilter)
+  const pm = (p, re) => re.test(String(p.practice || ''))
+  const lanes = [
+    { type: 'Sprays', color: '#eb6834', dates: (sheets || []).filter((s) => sheetApplied(s) && s.date && inC(s.area)).map((s) => s.date) },
+    { type: 'Topdress', color: '#1baf7a', dates: (practices || []).filter((p) => p.date && inC(p.area) && pm(p, /topdress|sand/i)).map((p) => p.date) },
+    { type: 'Aeration', color: '#2a78d6', dates: (practices || []).filter((p) => p.date && inC(p.area) && pm(p, /aer|vent|tine|core|verti/i)).map((p) => p.date) },
+    { type: 'Scouting', color: '#4a3aa7', dates: (scouting || []).filter((s) => s.date && inC(s.area)).map((s) => s.date) },
+  ].filter((l) => l.dates.length)
+  if (!lanes.length) return <div ref={wrapRef} className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No sprays, cultural practices or scouting logged yet — they’ll appear here on a season timeline.</div>
+  const allMs = lanes.flatMap((l) => l.dates.map((d) => chartMs(d))).filter((t) => !isNaN(t))
+  const tMin = Math.min(...allMs), tMax = Math.max(...allMs)
+  const H = 40 + lanes.length * 42, padL = 78, padR = 16, padT = 14, padB = 22, plotW = W - padL - padR
+  const X = (t) => padL + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
+  const laneH = (H - padT - padB) / lanes.length
+  const monthTicks = []
+  { const d = new Date(tMin); d.setDate(1); if (d.getTime() < tMin) d.setMonth(d.getMonth() + 1); while (d.getTime() <= tMax) { monthTicks.push(d.getTime()); d.setMonth(d.getMonth() + 1) } }
+  return (
+    <div ref={wrapRef}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block', overflow: 'visible' }}>
+        {monthTicks.map((t, i) => (
+          <g key={`m${i}`}>
+            <line x1={X(t)} x2={X(t)} y1={padT} y2={H - padB} stroke="#EDF0ED" strokeWidth="1" />
+            <text x={X(t)} y={H - 7} textAnchor="middle" fontSize="8.5" fill="#9AA6A0">{MONTHS_SHORT[new Date(t).getMonth()]}</text>
+          </g>
+        ))}
+        {lanes.map((l, li) => {
+          const cy = padT + li * laneH + laneH / 2
+          return (
+            <g key={l.type}>
+              <text x={padL - 10} y={cy + 4} textAnchor="end" fontSize="11" fontWeight="700" fill="#16291F">{l.type}</text>
+              <line x1={padL} x2={W - padR} y1={cy} y2={cy} stroke="#E4E1D4" strokeWidth="1" />
+              {l.dates.map((d, i) => <circle key={i} cx={X(chartMs(d))} cy={cy} r="4.5" fill={l.color} stroke="#fff" strokeWidth="1.5" />)}
+              <text x={W - padR} y={cy - 8} textAnchor="end" fontSize="9" fontWeight="700" fill={l.color}>{l.dates.length}×</text>
+            </g>
+          )
+        })}
+      </svg>
     </div>
   )
 }
