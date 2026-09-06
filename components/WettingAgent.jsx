@@ -767,6 +767,16 @@ function Setup({ greens, products, courses, onSave, wetting }) {
 
   return (
     <div className="space-y-6">
+      {/* Moisture target — draws a guide line on the VWC trend */}
+      <div className="paper-card p-4">
+        <h3 className="font-display text-base font-semibold mb-1" style={{ color: INK }}>Moisture target</h3>
+        <p className="font-body text-[12.5px] mb-3" style={{ color: INK_3 }}>A target %VWC to hold. It shows as a guide line on the average-moisture trend in <b>History</b>.</p>
+        <div className="flex items-center gap-2">
+          <input type="number" inputMode="decimal" defaultValue={wetting.targetVwc ?? ''} onBlur={(e) => onSave({ targetVwc: e.target.value.trim() === '' ? null : Number(e.target.value) })} placeholder="e.g. 21" className="w-28 rounded-lg px-3 py-2.5 text-sm font-body tnum" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }} />
+          <span className="font-body text-sm" style={{ color: INK_3 }}>% VWC</span>
+        </div>
+      </div>
+
       {/* Indicator greens */}
       <div className="paper-card p-4">
         <h3 className="font-display text-base font-semibold mb-1" style={{ color: INK }}>Indicator greens</h3>
@@ -841,6 +851,53 @@ function Setup({ greens, products, courses, onSave, wetting }) {
 // ── HISTORY ─────────────────────────────────────────────────────────────────
 // Every past collection, newest first, by green + date — tap one to see its
 // moisture map (if points were GPS-set) and the per-point values.
+// Average VWC per collection over time — same readable style as the rest of the
+// app (axis numbers, gridlines, dated ticks, an optional target guide line).
+function VwcTrend({ points = [], guide = null, height = 150 }) {
+  const data = points
+    .filter((p) => p.value != null && !isNaN(Number(p.value)))
+    .map((p) => { const s = String(p.date || '').split('-').map(Number); return { t: s.length === 3 ? new Date(s[0], s[1] - 1, s[2]).getTime() : NaN, value: Number(p.value) } })
+    .filter((p) => !isNaN(p.t)).sort((a, b) => a.t - b.t)
+  if (data.length < 2) return null
+  const W = 560, padL = 32, padR = 12, padT = 12, padB = 20, plotW = W - padL - padR
+  const g = guide != null && guide !== '' && !isNaN(Number(guide)) ? Number(guide) : null
+  const vs = data.map((d) => d.value).concat(g != null ? [g] : [])
+  let lo = Math.min(...vs), hi = Math.max(...vs); const pad = (hi - lo) * 0.12 || 1; hi += pad; lo -= pad * 0.5
+  const tMin = data[0].t, tMax = data[data.length - 1].t
+  const X = (t) => padL + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
+  const Y = (v) => padT + (1 - (v - lo) / ((hi - lo) || 1)) * (height - padT - padB)
+  const line = data.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${Y(d.value).toFixed(1)}`).join(' ')
+  const area = `${line} L${X(tMax).toFixed(1)},${height - padB} L${X(tMin).toFixed(1)},${height - padB} Z`
+  const yTicks = [0, 1, 2, 3].map((t) => lo + (t / 3) * (hi - lo))
+  const last = data[data.length - 1]
+  const md = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()}` }
+  const n = data.length
+  const xIdx = [...new Set([0, Math.round((n - 1) / 2), n - 1])]
+  return (
+    <svg viewBox={`0 0 ${W} ${height}`} width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
+      {yTicks.map((v, i) => (
+        <g key={i}>
+          <line x1={padL} x2={W - padR} y1={Y(v)} y2={Y(v)} stroke="#ECE9DD" strokeWidth="1" />
+          <text x={padL - 5} y={Y(v) + 3} textAnchor="end" fontSize="8.5" fill={INK_3} style={{ fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(0)}</text>
+        </g>
+      ))}
+      {g != null && (
+        <>
+          <line x1={padL} x2={W - padR} y1={Y(g)} y2={Y(g)} stroke={AMBER} strokeWidth="1.2" strokeDasharray="4 2" />
+          <text x={W - padR} y={Y(g) - 3} textAnchor="end" fontSize="8" fill={AMBER} style={{ fontVariantNumeric: 'tabular-nums' }}>target {g}%</text>
+        </>
+      )}
+      <path d={area} fill={FERN} opacity="0.12" />
+      <path d={line} fill="none" stroke={FERN} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+      {data.map((d, i) => <circle key={i} cx={X(d.t)} cy={Y(d.value)} r={i === n - 1 ? 3.5 : 1.8} fill={FERN} />)}
+      <text x={X(last.t)} y={Y(last.value) - 7} textAnchor="end" fontSize="11" fontWeight="700" fill={FERN} style={{ fontVariantNumeric: 'tabular-nums' }}>{last.value}</text>
+      {xIdx.map((i) => (
+        <text key={`x${i}`} x={X(data[i].t)} y={height - 5} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize="8.5" fill={INK_3} style={{ fontVariantNumeric: 'tabular-nums' }}>{md(data[i].t)}</text>
+      ))}
+    </svg>
+  )
+}
+
 function History({ greens, wetting, onSave }) {
   const nameOf = (id) => greens.find((g) => g.id === id)?.name || 'Green'
   const reads = [...(wetting.readings || [])].sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.id).localeCompare(String(a.id)))
@@ -862,6 +919,21 @@ function History({ greens, wetting, onSave }) {
           ))}
         </div>
       )}
+
+      {/* Average VWC trend for the selected green */}
+      {(() => {
+        const gid = filter !== 'all' ? filter : (greens.length === 1 ? greens[0].id : null)
+        if (!gid) return null
+        const pts = reads.filter((r) => r.greenId === gid && r.avg != null).map((r) => ({ date: r.date, value: r.avg }))
+        if (pts.length < 2) return null
+        return (
+          <div className="paper-card p-4 mb-3">
+            <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: INK_3 }}>Average %VWC · {nameOf(gid)}</p>
+            <VwcTrend points={pts} guide={wetting.targetVwc} />
+          </div>
+        )
+      })()}
+
       <div className="space-y-2">
         {shown.map((r) => {
           const open = openId === r.id
