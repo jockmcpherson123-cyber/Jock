@@ -9872,6 +9872,9 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
   const [vals, setVals] = useState({}) // green -> { d02, d24, d46 }
   const [notes, setNotes] = useState('')
   const [msg, setMsg] = useState(null)
+  const [logOpen, setLogOpen] = useState(false) // logging form hidden until needed — data + graphs lead
+  const [expanded, setExpanded] = useState(() => new Set()) // greens showing the full chart + tests
+  const toggleExpand = (a) => setExpanded((prev) => { const n = new Set(prev); n.has(a) ? n.delete(a) : n.add(a); return n })
 
   const scoped = courseFilter ? om.filter((r) => omTok(r.area) === omTok(courseFilter)) : om
   const target = courseInfo.omTarget != null ? courseInfo.omTarget : ''
@@ -9897,94 +9900,127 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
   const areaList = Object.keys(byArea).sort(sortGreens)
 
   return (
-    <div className="space-y-4 max-w-3xl">
-      <div>
-        <h2 className="font-display text-lg font-semibold text-slate-900">Organic Matter{courseFilter ? ` — ${courseFilter}` : ''}</h2>
-        <p className="font-body text-xs text-slate-400 mt-0.5">The greens “2-4-6” test — OM% by depth (0–2&quot;, 2–4&quot;, 4–6&quot;). The top 0–2&quot; drives surface firmness and thatch; watch it trend down as you topdress and aerate.</p>
-      </div>
-
-      {/* Surface target */}
-      <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm flex items-end gap-3 flex-wrap">
-        <div>
-          <FieldLabel>Surface (0–2&quot;) target OM%</FieldLabel>
-          <input inputMode="decimal" defaultValue={target} onBlur={(e) => onSaveCourse({ omTarget: e.target.value.trim() === '' ? null : Number(e.target.value) })} placeholder="e.g. 4" className="w-28 border border-slate-200 rounded-lg px-3 py-2 text-base font-body tnum" />
+    <div className="space-y-3 max-w-3xl">
+      {/* Compact header + log toggle — data and graphs lead, the form is one tap away */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-display text-lg font-semibold text-slate-900">Organic Matter{courseFilter ? ` — ${courseFilter}` : ''}</h2>
+          <p className="font-body text-[11px] text-slate-400 mt-0.5">The greens “2-4-6” OM% test by depth. Watch the surface 0–2&quot; trend down as you topdress and aerate.</p>
         </div>
-        <p className="font-body text-[11px] text-slate-400 flex-1 min-w-[180px]">A goal for the top 0–2&quot;. Many sand-based greens programs aim to hold ~3–5% and manage anything higher down slowly — set yours and the trend shows a target line.</p>
-      </div>
-
-      {/* Log form */}
-      <div className="bg-white rounded-2xl border-2 p-4 shadow-sm" style={{ borderColor: GOLD }}>
-        <p className="font-display text-base font-semibold text-slate-900 mb-1">Log OM test</p>
-        <p className="font-body text-[11px] text-slate-400 mb-3">Pick the greens on the report, then enter each depth's OM%. Logs the whole report at once.</p>
-
-        <FieldLabel>Greens</FieldLabel>
-        <div className="mt-1 mb-3">
-          <PeoplePicker options={greenOptions} selected={selected} onToggle={toggleGreen} placeholder="Search greens — e.g. 5, 12, 15…" max={40} />
-        </div>
-
-        {selected.length > 0 && (
-          <div className="rounded-xl p-3 mb-3 space-y-2" style={{ backgroundColor: '#F8FAF9' }}>
-            <div className="grid gap-2 items-center" style={{ gridTemplateColumns: '1fr repeat(3, 72px)' }}>
-              <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Green</span>
-              <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 text-center">0–2&quot;</span>
-              <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 text-center">2–4&quot;</span>
-              <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 text-center">4–6&quot;</span>
-            </div>
-            {[...selected].sort(sortGreens).map((g) => (
-              <div key={g} className="grid gap-2 items-center" style={{ gridTemplateColumns: '1fr repeat(3, 72px)' }}>
-                <span className="font-body text-[13px] font-semibold text-slate-700 truncate" title={g}>{shortGreen(g)}</span>
-                {['d02', 'd24', 'd46'].map((d) => (
-                  <input key={d} type="number" step="0.01" inputMode="decimal" value={vals[g]?.[d] ?? ''} onChange={(e) => setDepth(g, d, e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-base font-semibold tnum bg-white text-center" placeholder="—" />
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="flex gap-3 flex-wrap mb-3">
-          <div>
-            <FieldLabel>Date</FieldLabel>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body" />
-          </div>
-          <div>
-            <FieldLabel>Method</FieldLabel>
-            <div className="flex gap-1.5">
-              {['360', '440'].map((m) => (
-                <button key={m} type="button" onClick={() => setMethod(m)} className="font-body text-xs font-bold px-3 py-2.5 rounded-xl transition" style={method === m ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.1)' }}>LOI {m}°</button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="mb-3">
-          <FieldLabel>Notes (optional)</FieldLabel>
-          <input value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body" placeholder="e.g. Brookside file #28489" />
-        </div>
-        {msg && <div className="rounded-xl px-3 py-2 mb-2 font-body text-[12px] font-semibold" style={{ backgroundColor: '#E8F3EC', color: FERN }}>{msg.text}</div>}
-        <button onClick={save} disabled={!entries.length} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
-          {entries.length ? `Log ${entries.length} green${entries.length !== 1 ? 's' : ''}` : 'Enter at least one depth to save'}
+        <button onClick={() => setLogOpen((o) => !o)} className="shrink-0 font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}>
+          {logOpen ? <ChevronUp size={14} /> : <Plus size={14} />} {logOpen ? 'Close' : 'Log test'}
         </button>
       </div>
 
-      {/* Per-green summary + trend */}
+      {/* Collapsible: surface target + log form */}
+      {logOpen && (
+        <div className="bg-white rounded-2xl border-2 p-4 shadow-sm space-y-3" style={{ borderColor: GOLD }}>
+          <div className="flex items-end gap-3 flex-wrap pb-3 border-b border-black/5">
+            <div>
+              <FieldLabel>Surface (0–2&quot;) target OM%</FieldLabel>
+              <input inputMode="decimal" defaultValue={target} onBlur={(e) => onSaveCourse({ omTarget: e.target.value.trim() === '' ? null : Number(e.target.value) })} placeholder="e.g. 4" className="w-24 border border-slate-200 rounded-lg px-3 py-2 text-base font-body tnum" />
+            </div>
+            <p className="font-body text-[11px] text-slate-400 flex-1 min-w-[180px]">Sand greens often hold ~3–5%. Set yours and every trend shows a target line.</p>
+          </div>
+
+          <div>
+            <FieldLabel>Greens</FieldLabel>
+            <div className="mt-1">
+              <PeoplePicker options={greenOptions} selected={selected} onToggle={toggleGreen} placeholder="Search greens — e.g. 5, 12, 15…" max={40} />
+            </div>
+          </div>
+
+          {selected.length > 0 && (
+            <div className="rounded-xl p-3 space-y-2" style={{ backgroundColor: '#F8FAF9' }}>
+              <div className="grid gap-2 items-center" style={{ gridTemplateColumns: '1fr repeat(3, 64px)' }}>
+                <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Green</span>
+                <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 text-center">0–2&quot;</span>
+                <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 text-center">2–4&quot;</span>
+                <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 text-center">4–6&quot;</span>
+              </div>
+              {[...selected].sort(sortGreens).map((g) => (
+                <div key={g} className="grid gap-2 items-center" style={{ gridTemplateColumns: '1fr repeat(3, 64px)' }}>
+                  <span className="font-body text-[13px] font-semibold text-slate-700 truncate" title={g}>{shortGreen(g)}</span>
+                  {['d02', 'd24', 'd46'].map((d) => (
+                    <input key={d} type="number" step="0.01" inputMode="decimal" value={vals[g]?.[d] ?? ''} onChange={(e) => setDepth(g, d, e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-base font-semibold tnum bg-white text-center" placeholder="—" />
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-3 flex-wrap">
+            <div>
+              <FieldLabel>Date</FieldLabel>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body" />
+            </div>
+            <div>
+              <FieldLabel>Method</FieldLabel>
+              <div className="flex gap-1.5">
+                {['360', '440'].map((m) => (
+                  <button key={m} type="button" onClick={() => setMethod(m)} className="font-body text-xs font-bold px-3 py-2.5 rounded-xl transition" style={method === m ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.1)' }}>LOI {m}°</button>
+                ))}
+              </div>
+            </div>
+            <div className="flex-1 min-w-[160px]">
+              <FieldLabel>Notes (optional)</FieldLabel>
+              <input value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-base font-body" placeholder="e.g. Brookside file #28489" />
+            </div>
+          </div>
+          {msg && <div className="rounded-xl px-3 py-2 font-body text-[12px] font-semibold" style={{ backgroundColor: '#E8F3EC', color: FERN }}>{msg.text}</div>}
+          <button onClick={save} disabled={!entries.length} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
+            {entries.length ? `Log ${entries.length} green${entries.length !== 1 ? 's' : ''}` : 'Enter at least one depth to save'}
+          </button>
+        </div>
+      )}
+
+      {/* Per-green — compact rows with an inline sparkline; tap to open the full chart + tests */}
       {areaList.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No organic-matter tests logged yet.</div>
+        <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No organic-matter tests logged yet — tap “Log test”.</div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {areaList.map((area) => {
             const rows = [...byArea[area]].sort((a, b) => (a.date || '').localeCompare(b.date || ''))
             const latest = rows[rows.length - 1]
             const surfSeries = rows.filter((r) => r.d02 != null).map((r) => ({ date: r.date, value: r.d02 }))
+            const isOpen = expanded.has(area)
+            const dv = (v) => (v == null ? '—' : v)
+            const over = target !== '' && latest.d02 != null && Number(latest.d02) > Number(target)
             return (
-              <div key={area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
-                  <p className="font-body text-[11px] text-slate-400">{rows.length} test{rows.length !== 1 ? 's' : ''} · latest {fmtDate(latest.date)}{latest.method ? ` · LOI ${latest.method}°` : ''}</p>
-                </div>
-                <OmProfile row={latest} target={target !== '' ? Number(target) : null} />
-                {surfSeries.length >= 2 && (
-                  <div className="mt-3">
-                    <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Surface 0–2&quot; OM · trend</p>
-                    <TrendChart points={surfSeries} unit="%" baseline={0} refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null} />
+              <div key={area} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+                <button onClick={() => toggleExpand(area)} className="w-full text-left px-4 py-3 flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-body font-semibold text-sm text-slate-900 truncate">{area}</span>
+                      <span className="font-body text-[10px] text-slate-400 shrink-0">{rows.length} test{rows.length !== 1 ? 's' : ''} · {fmtDate(latest.date)}</span>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 font-body tnum">
+                      <span className="text-[15px] font-bold" style={{ color: over ? '#B7791F' : FERN }}>{latest.d02 != null ? `${latest.d02}%` : '—'}</span>
+                      <span className="text-[11px] text-slate-400">0–2&quot;</span>
+                      <span className="text-[12px] text-slate-500">{dv(latest.d24)} <span className="text-slate-300">2–4</span></span>
+                      <span className="text-[12px] text-slate-500">{dv(latest.d46)} <span className="text-slate-300">4–6</span></span>
+                    </div>
+                  </div>
+                  {surfSeries.length >= 2 && <MiniSpark points={surfSeries} color={over ? '#B7791F' : FERN} />}
+                  <ChevronDown size={16} className="shrink-0 text-slate-300" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+                </button>
+                {isOpen && (
+                  <div className="px-4 pb-4 pt-1 border-t border-black/5 space-y-3">
+                    <OmProfile row={latest} target={target !== '' ? Number(target) : null} />
+                    {surfSeries.length >= 2 && (
+                      <div>
+                        <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Surface 0–2&quot; OM · trend</p>
+                        <TrendChart points={surfSeries} unit="%" baseline={0} refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null} />
+                      </div>
+                    )}
+                    <div>
+                      <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">This green&apos;s tests</p>
+                      <div className="space-y-2">
+                        {[...byArea[area]].sort((a, b) => (b.date || '').localeCompare(a.date || '')).map((r) => (
+                          <OmRow key={r.id} r={r} onUpdate={updateRow} onDelete={removeRow} />
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -9992,19 +10028,26 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
           })}
         </div>
       )}
-
-      {/* History */}
-      {scoped.length > 0 && (
-        <div>
-          <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">All tests</p>
-          <div className="space-y-2">
-            {[...scoped].sort((a, b) => (b.date || '').localeCompare(a.date || '') || sortGreens(a.area, b.area)).map((r) => (
-              <OmRow key={r.id} r={r} onUpdate={updateRow} onDelete={removeRow} />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
+  )
+}
+
+// Tiny inline trend line for the compact green rows — a graph you can see without
+// opening the card. Full detail lives in TrendChart when the row is expanded.
+function MiniSpark({ points = [], color = FERN, width = 92, height = 30 }) {
+  const data = points.filter((p) => p.value != null && !isNaN(Number(p.value))).map((p) => Number(p.value))
+  if (data.length < 2) return null
+  const min = Math.min(...data), max = Math.max(...data)
+  const range = (max - min) || Math.abs(max) || 1
+  const n = data.length
+  const X = (i) => 2 + (i / (n - 1)) * (width - 4)
+  const Y = (v) => 3 + (1 - (v - min) / range) * (height - 6)
+  const line = data.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ')
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="shrink-0" style={{ display: 'block' }} aria-hidden="true">
+      <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={X(n - 1)} cy={Y(data[n - 1])} r="2.4" fill={color} />
+    </svg>
   )
 }
 
