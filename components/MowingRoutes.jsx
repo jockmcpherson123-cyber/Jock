@@ -12,13 +12,7 @@ import { useState, useEffect } from 'react'
 import { Scissors, Check, Lock, Plus, GripVertical, Printer } from 'lucide-react'
 import { greensForCourse, reconcileOrder, layoutForCount } from '@/lib/mowing'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const PAPER = '#F9F8F5'
-const HAIR = '#E2E0DB'
-const INK = '#1b2420'
-const INK_2 = '#5B6160'
-const INK_3 = '#8A8984'
+import { FOREST, FERN, PAPER, HAIR, INK, INK_2, INK_3 } from '@/lib/theme'
 const MOWER_COLORS = ['#3A6B4A', '#2B6C8F', '#9A6B12', '#6D4AC2', '#B23A2E', '#0E7C7B', '#8A5A2B', '#4B5563']
 const DEFAULT_MAX_SET = 8
 

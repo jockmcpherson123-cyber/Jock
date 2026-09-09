@@ -19,17 +19,7 @@ import { uid } from '@/lib/calc'
 import { localDateISO } from '@/lib/dates'
 import { gddSince, projectGddReachDate } from '@/lib/weather'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
-const RED = '#B23A2E'
-const AMBER = '#B7791F'
-const PAPER = '#F9F8F5'
-const HAIR = '#E2E0DB'
-const INK = '#1b2420'
-const INK_2 = '#5B6160'
-const INK_3 = '#8A8984'
-const BAND = '#EEF3EE'
+import { FOREST, FERN, GOLD, PAPER, HAIR, INK, INK_2, INK_3, RED, AMBER, BAND } from '@/lib/theme'
 
 const WA_BASE = 50 // GDD base temperature (°F) for surfactant breakdown
 

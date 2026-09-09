@@ -10,9 +10,7 @@ import * as db from '@/lib/db'
 import { SearchSelect } from '@/components/pickers'
 import { qrDataUrl } from '@/lib/tournament'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 
 const CATEGORIES = ['Head', 'Nozzle', 'Valve', 'Fitting', 'Pipe/PVC', 'Swing Joint', 'Wire/Splice', 'Controller', 'Sensor', 'Tool', 'Other']
 const BRANDS = ['Toro', 'Rain Bird', 'Hunter', 'Nelson', 'Other']

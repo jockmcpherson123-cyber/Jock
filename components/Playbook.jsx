@@ -14,16 +14,7 @@ import {
 } from 'lucide-react'
 import * as db from '@/lib/db'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
-const RED = '#B23A2E'
-const PAPER = '#F9F8F5'
-const PAPER_2 = '#E8E7E2'
-const HAIR = '#E2E0DB'
-const INK = '#1b2420'
-const INK_2 = '#5B6160'
-const INK_3 = '#8A8984'
+import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, RED } from '@/lib/theme'
 const CREAM = '#F1F0EC'
 
 const TABS = [

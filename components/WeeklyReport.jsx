@@ -9,9 +9,7 @@ import * as db from '@/lib/db'
 import { Printer, Download, Mail, Loader2, Calendar, Thermometer, Scissors, Gauge, Sprout } from 'lucide-react'
 import { fmtStimp } from '@/lib/greenspeed'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 const TYPE_COLOR = { Fungicide: '#3A6B4A', Herbicide: '#D97706', Insecticide: '#DC2626', 'Growth Reg': '#7C3AED', Fertilizer: '#2563EB', Biological: '#0D9488', 'Wetting Agent': '#64748B' }
 const typeColor = (t) => TYPE_COLOR[t] || '#64748B'
 

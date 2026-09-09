@@ -7,9 +7,7 @@ import { useState, useEffect, useCallback } from 'react'
 import * as db from '@/lib/db'
 import { personStatus, rosterStats, byCommittee, committeesOf, shiftLabel } from '@/lib/tournament'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 
 export default function TournamentBoard() {
   const [tournament, setTournament] = useState(null)

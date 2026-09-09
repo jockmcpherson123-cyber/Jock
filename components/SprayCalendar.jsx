@@ -7,16 +7,10 @@ import { useState } from 'react'
 import { ChevronLeft, ChevronRight, Plus, Calendar as CalIcon, RotateCw } from 'lucide-react'
 import { rotationWarnings } from '@/lib/calc'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD, PAPER, HAIR, INK_2, INK_3 } from '@/lib/theme'
 const DONE = '#2C7A7B' // teal — a spray that's actually been done (signed/logged)
 const PENDING = '#D97706'
 // Clubhouse × Instrument restyle tokens (mirror globals.css / SprayApp.jsx)
-const PAPER = '#F9F8F5'
-const HAIR = '#E2E0DB'
-const INK_2 = '#5B6160'
-const INK_3 = '#8A8984'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 

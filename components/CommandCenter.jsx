@@ -15,12 +15,8 @@ import { sheetApplied } from '@/lib/applied'
 import { localDateISO } from '@/lib/dates'
 import { fmtStimp } from '@/lib/greenspeed'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
-const BLUE = '#2563EB'
+import { FOREST, FERN, GOLD, INK_3, BLUE } from '@/lib/theme'
 const BG = '#EEF1EE'
-const INK3 = '#8A8984'
 
 const CC_WX_ICON = {
   sun: { Icon: Sun, color: '#E0A82E' }, partly: { Icon: CloudSun, color: '#D9A441' },
@@ -153,7 +149,7 @@ export default function CommandCentre() {
         <PropTile icon={Thermometer} label="GDD to date" value={seasonGdd != null ? seasonGdd.toLocaleString() : '—'} sub="base 50°F · since Jan 1" />
       </div>
       <p className="font-body text-[11px] text-slate-400 mb-4 flex items-center gap-1.5">
-        <span style={{ color: INK3 }}>↑ Shared across the whole property.</span>
+        <span style={{ color: INK_3 }}>↑ Shared across the whole property.</span>
         {courses.length > 1 && <span>↓ Each course below is edited on its own — same page, separate sections.</span>}
       </p>
 

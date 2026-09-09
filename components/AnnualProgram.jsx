@@ -99,9 +99,7 @@ const STATUS_STYLE = {
   done:    { bg: '#E8EAE6', fg: '#6B7280', label: 'Done' },
 }
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 
 // A live-status pill for an application/event in the Living Calendar.
 function StatusChip({ status, size = 'sm' }) {

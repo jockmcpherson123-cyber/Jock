@@ -22,9 +22,7 @@ import {
   committeesOf, shiftsOf, shiftLabel, qrDataUrl,
 } from '@/lib/tournament'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 
 // Sponsor tiers (biggest → smallest), like a championship program.
 const SPONSOR_TIERS = ['Platinum', 'Gold', 'Silver', 'Bronze', 'Industry Partner']

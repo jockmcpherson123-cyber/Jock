@@ -64,19 +64,11 @@ import ChemistryGuide from '@/components/ChemistryGuide'
 const productJug = (prod) => (prod && prod.jugSize > 0 ? { size: Number(prod.jugSize), unit: prod.jugUnit || 'gal' } : null)
 
 // ── PALETTE ───────────────────────────────────────────────────────────────
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3 } from '@/lib/theme'
 const CREAM = '#F7F5EF'
-const INK = '#1A1A16'
 // Clubhouse × Instrument restyle: "soft stone" surfaces + warm-neutral inks
 // (warmth dialled out). Mirrors the CSS tokens in globals.css so inline styles
 // stay in sync.
-const PAPER = '#F9F8F5'
-const PAPER_2 = '#E8E7E2'
-const HAIR = '#E2E0DB'
-const INK_2 = '#5B6160'
-const INK_3 = '#8A8984'
 const GOLD_SOFT = '#B9982F' // toned-down gold for decorative hairlines
 
 // ── ROLE HELPERS ────────────────────────────────────────────────────────────

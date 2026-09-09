@@ -15,8 +15,7 @@ import React, { useMemo, useState, useRef } from 'react'
 import { Search, X, AlertTriangle, Info, ShieldCheck, Plus, Sparkles, Loader2, CloudUpload, Pencil, Trash2, Check, Library } from 'lucide-react'
 import { CHEM_HUES, CHEM_JOBS, CHEM_SECTIONS, CHEM_ROTATION, CHEM_CATEGORIES, CHEM_EXTRA_SECTIONS } from '@/lib/chemistry'
 
-const FOREST = '#16291F'
-const GOLD = '#C9A84C'
+import { FOREST, GOLD } from '@/lib/theme'
 
 // section id -> hue key, drawn from the built-in sections + the extra categories.
 const SECTION_HUE = (() => {

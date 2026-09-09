@@ -14,9 +14,7 @@ import { directionForJob, stepLabel, surfaceKind } from '@/lib/mowdir'
 import MowPattern from '@/components/MowPattern'
 import HoleMap from '@/components/HoleMap'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 
 // Local calendar date so the board rolls over at local midnight, not UTC
 // midnight (which is early evening in US timezones).

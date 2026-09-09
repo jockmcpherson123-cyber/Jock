@@ -11,9 +11,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Compass, X, Check, RotateCcw } from 'lucide-react'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 
 function wedgePath(cx, cy, r, sweepDeg) {
   let s = Math.max(0, Math.min(359.9, sweepDeg))

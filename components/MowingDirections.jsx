@@ -13,13 +13,7 @@ import HoleMap from '@/components/HoleMap'
 import { mowDirConfig, stepIndexFor, stepLabel, stepShort, sameStep, axisStep, circleStep, CLOCK_AXES, surfaceKind } from '@/lib/mowdir'
 import { localDateISO } from '@/lib/dates'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const PAPER = '#F9F8F5'
-const HAIR = '#E2E0DB'
-const INK = '#1b2420'
-const INK_2 = '#5B6160'
-const INK_3 = '#8A8984'
+import { FOREST, FERN, PAPER, HAIR, INK, INK_2, INK_3 } from '@/lib/theme'
 
 export default function MowingDirections({ courses = [], courseInfo = {}, manage, onSave }) {
   const courseNames = courses.map((c) => c.name).filter(Boolean)

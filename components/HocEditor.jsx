@@ -5,8 +5,7 @@
 // and the Weekly Report so editing in either place keeps both in sync.
 import { useState, useEffect, useMemo } from 'react'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
+import { FOREST, FERN } from '@/lib/theme'
 const MOWED_SURFACE = /green|collar|tee|approach|fairway|surround|rough/i
 const mowRe = /mow|height|hoc|cut/i
 const surfRank = (n) => { const i = ['green', 'collar', 'tee', 'approach', 'fairway', 'surround', 'rough'].findIndex((x) => String(n).toLowerCase().includes(x)); return i < 0 ? 99 : i }

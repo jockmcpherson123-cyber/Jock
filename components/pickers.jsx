@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Check } from 'lucide-react'
 
-const FERN = '#3A6B4A'
+import { FERN } from '@/lib/theme'
 
 // Normalise an option to { value, label }. Plain strings map to themselves;
 // objects may carry a separate value and display label (e.g. 9 → "9 holes").

@@ -17,9 +17,7 @@ import ArcTool from '@/components/ArcTool'
 import { fitSimilarity, fitResiduals, imageCornerLatLngs, metresToFeet, pixelToLatLng } from '@/lib/geocalib'
 import { SYMBOL_GROUPS, PIPE_ITEMS, symbolById, symbolColor, symbolSvg, isPartCircle } from '@/lib/irrigationSymbols'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 
 // The overlay image's pixel size (from the rasterised PDF) and where to fetch it.
 const IMAGE_W = 5017

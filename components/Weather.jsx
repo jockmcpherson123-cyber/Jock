@@ -11,9 +11,7 @@ import { diseaseRisks, pestWatch, matchLibraryForPest } from '@/lib/pests'
 import { profileById, photoSearchUrl } from '@/lib/knowledge'
 import { localDateISO } from '@/lib/dates'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 
 const RISK_STYLES = {
   low: { bg: '#E8F3EC', fg: FERN, label: 'Low' },
