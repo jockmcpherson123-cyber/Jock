@@ -16,7 +16,7 @@ import * as db from '@/lib/db'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
-const GOLD = '#B9982F'
+const GOLD = '#C9A84C'
 const RED = '#B23A2E'
 const PAPER = '#F9F8F5'
 const PAPER_2 = '#E8E7E2'

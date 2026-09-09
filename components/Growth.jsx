@@ -24,7 +24,7 @@ import { sheetApplied } from '@/lib/applied'
 
 const FOREST = '#16291F'
 const FERN = '#3A6B4A'
-const GOLD = '#B9982F'
+const GOLD = '#C9A84C'
 const RED = '#B23A2E'
 const AMBER = '#B7791F'
 const BLUE = '#2563EB'
