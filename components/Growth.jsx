@@ -22,7 +22,7 @@ import { suppressionKind } from '@/lib/pgr'
 import { modelForProduct, suppressionAt, combinedSuppression, withTargets } from '@/lib/pgrmodel'
 import { sheetApplied } from '@/lib/applied'
 
-import { FOREST, FERN, GOLD, PAPER, HAIR, INK, INK_2, INK_3, RED, AMBER, BLUE, BAND } from '@/lib/theme'
+import { FOREST, FERN, GOLD, HAIR, INK, INK_2, INK_3, RED, AMBER, BLUE, BAND } from '@/lib/theme'
 
 const tok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
 const round1 = (n) => Math.round(n * 10) / 10

@@ -15,7 +15,7 @@ import { sheetApplied } from '@/lib/applied'
 import { localDateISO } from '@/lib/dates'
 import { fmtStimp } from '@/lib/greenspeed'
 
-import { FOREST, FERN, GOLD, INK_3, BLUE } from '@/lib/theme'
+import { FOREST, FERN, GOLD, INK_3 } from '@/lib/theme'
 const BG = '#EEF1EE'
 
 const CC_WX_ICON = {

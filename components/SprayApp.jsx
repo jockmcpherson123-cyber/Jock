@@ -61,7 +61,7 @@ import {
   uid, convertUnits, unitsAreCompatible, calcAmount, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
   productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, productRateForN, eiqLoad, measureOut,
 } from '@/lib/calc'
-import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder, mixRank } from '@/lib/defaults'
+import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate, buildRainYear, weatherCodeInfo } from '@/lib/weather'
 import { fungicideLogByArea } from '@/lib/disease'
@@ -70,7 +70,7 @@ import { applicationTimings, openWindows, soilTrend, currentSoilTemp, soilRate, 
 import { PROFILES, NUTRIENTS, photoSearchUrl } from '@/lib/knowledge'
 import { FERT_AREAS, fertArea } from '@/lib/fertAreas'
 import { computeFert, parseAnalysis, fmtNum } from '@/lib/fert'
-import { fungicidesFor, ratingsSourceFor, ownedMatch, diseaseIdForTarget, diseasesForProduct } from '@/lib/fungicides'
+import { fungicidesFor, ratingsSourceFor, ownedMatch, diseasesForProduct } from '@/lib/fungicides'
 import { suppressionMap, suppressionKind } from '@/lib/pgr'
 import { modelForProduct, regulationStatus, suppressionAt, combinedSuppression, surfaceCol, withTargets, PGR_MODELS, PHASE_STYLE } from '@/lib/pgrmodel'
 import { localDateISO } from '@/lib/dates'

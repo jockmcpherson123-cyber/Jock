@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { ChevronLeft, ChevronRight, Plus, Calendar as CalIcon, RotateCw } from 'lucide-react'
 import { rotationWarnings } from '@/lib/calc'
 
-import { FOREST, FERN, GOLD, PAPER, HAIR, INK_2, INK_3 } from '@/lib/theme'
+import { FOREST, FERN, GOLD, HAIR, INK_2, INK_3 } from '@/lib/theme'
 const DONE = '#2C7A7B' // teal — a spray that's actually been done (signed/logged)
 const PENDING = '#D97706'
 // Clubhouse × Instrument restyle tokens (mirror globals.css / SprayApp.jsx)
