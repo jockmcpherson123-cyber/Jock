@@ -9,14 +9,7 @@ import { useSearchParams } from 'next/navigation'
 import { localDateISO } from '@/lib/dates'
 import { stimpToFeet } from '@/lib/greenspeed'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
-const HAIR = '#E2E0DB'
-const INK = '#1b2420'
-const INK_2 = '#5B6160'
-const INK_3 = '#8A8984'
-const BAND = '#EEF3EE'
+import { FOREST, FERN, GOLD, HAIR, INK, INK_2, INK_3, BAND } from '@/lib/theme'
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 function stats(values) {

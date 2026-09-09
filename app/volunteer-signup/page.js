@@ -6,9 +6,7 @@
 // never needs a Suspense boundary at build time.
 import { useEffect, useState } from 'react'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 const inputCls = 'w-full border border-slate-300 rounded-xl px-3 py-2.5 text-base bg-white'
 
 export default function VolunteerSignup() {

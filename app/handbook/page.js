@@ -5,9 +5,7 @@
 // pulls the handbook via the public API (no login required).
 import { useEffect, useState } from 'react'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 
 export default function HandbookPage() {
   const [info, setInfo] = useState(null)

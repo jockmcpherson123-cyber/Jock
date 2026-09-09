@@ -8443,7 +8443,7 @@ function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse
     <div className="max-w-5xl">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
         <div>
-          <h2 className="font-display text-lg font-semibold" style={{ color: '#1b2420' }}>Field Data{course ? ` — ${course}` : ''}</h2>
+          <h2 className="font-display text-lg font-semibold" style={{ color: INK }}>Field Data{course ? ` — ${course}` : ''}</h2>
           <p className="font-body text-xs" style={{ color: INK_3 }}>Everything the crew records on morning rounds — in one place.</p>
         </div>
         <button onClick={() => setQrOpen(true)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 text-white" style={{ backgroundColor: FOREST }}>

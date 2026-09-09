@@ -6,8 +6,7 @@
 import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
+import { FOREST, FERN } from '@/lib/theme'
 
 function PartView() {
   const sp = useSearchParams()

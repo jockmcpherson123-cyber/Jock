@@ -9,8 +9,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Search, AlertTriangle, Minus, Plus, Loader2, Image as ImageIcon } from 'lucide-react'
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
+import { FOREST, FERN } from '@/lib/theme'
 const isLow = (p) => p.lowStock > 0 && p.stock <= p.lowStock
 
 function Inventory() {

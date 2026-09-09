@@ -19,9 +19,7 @@ function nearestCount(counts, target) {
   return below.length ? Math.max(...below) : Math.min(...counts)
 }
 
-const FOREST = '#16291F'
-const FERN = '#3A6B4A'
-const GOLD = '#C9A84C'
+import { FOREST, FERN, GOLD } from '@/lib/theme'
 // Per-route accent colours so each mower's card is easy to tell apart.
 const ACCENTS = ['#3A6B4A', '#2563EB', '#B45309', '#7C3AED', '#0E7490', '#B91C1C', '#0F766E', '#9333EA']
 

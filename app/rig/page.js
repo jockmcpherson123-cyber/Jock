@@ -6,10 +6,7 @@
 import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 
-const FOREST = '#16291F'
-const GOLD = '#C9A84C'
-const MUT = '#8A8984'
-const HAIR = '#E2E0DB'
+import { FOREST, GOLD, HAIR, INK_3 } from '@/lib/theme'
 
 function fmtDate(d) {
   if (!d) return ''
@@ -59,14 +56,14 @@ function Rig() {
       <div className="max-w-md mx-auto px-3 py-4">
         {!mix ? (
           <div className="bg-white rounded-2xl border shadow-sm p-5 text-center" style={{ borderColor: HAIR }}>
-            <p className="text-sm" style={{ color: MUT }}>No mix has been assigned to this sprayer yet.</p>
-            <p className="text-[12px] mt-1" style={{ color: MUT }}>From a spray record, a manager taps “Set as sprayer mix.”</p>
+            <p className="text-sm" style={{ color: INK_3 }}>No mix has been assigned to this sprayer yet.</p>
+            <p className="text-[12px] mt-1" style={{ color: INK_3 }}>From a spray record, a manager taps “Set as sprayer mix.”</p>
           </div>
         ) : (
           <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
-            <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: MUT }}>Currently loaded</p>
+            <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>Currently loaded</p>
             <p className="text-xl font-bold" style={{ color: FOREST }}>{mix.area || 'Spray mix'}</p>
-            <p className="text-[12px]" style={{ color: MUT }}>
+            <p className="text-[12px]" style={{ color: INK_3 }}>
               {(mix.targets || []).length ? `For ${(mix.targets || []).join(', ')} · ` : ''}
               {fmtDate(mix.date)}{mix.applicator ? ` · ${mix.applicator}` : ''}
             </p>
@@ -80,7 +77,7 @@ function Rig() {
                     <span className="text-[15px] font-bold" style={{ color: FOREST }}>{p.name}</span>
                     {p.labelUrl ? <a href={p.labelUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0" style={{ background: '#EFF6FF', color: '#2563EB' }}>Label ↗</a> : null}
                   </div>
-                  <p className="text-[11px]" style={{ color: MUT }}>
+                  <p className="text-[11px]" style={{ color: INK_3 }}>
                     {p.activeIngredient ? p.activeIngredient : ''}{p.activeIngredient && p.epaReg ? ' · ' : ''}{p.epaReg ? `EPA ${p.epaReg}` : ''}{p.rei ? ` · REI ${p.rei}` : ''}
                   </p>
                 </div>
@@ -92,7 +89,7 @@ function Rig() {
                 <b>Restricted entry.</b> Keep people off treated areas until the interval has passed.
               </div>
             )}
-            <p className="text-[10px] mt-3" style={{ color: MUT }}>Always confirm against the physical product label before handling. Set {fmtDate(mix.date)}.</p>
+            <p className="text-[10px] mt-3" style={{ color: INK_3 }}>Always confirm against the physical product label before handling. Set {fmtDate(mix.date)}.</p>
           </div>
         )}
       </div>
