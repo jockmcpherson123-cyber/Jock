@@ -8,7 +8,7 @@
 // Today's Focus note and a checkable To-Do list. Blue and Gold stay independent.
 // The live data refreshes on a timer; the editable fields persist to settings.
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Wind, Droplet, CloudRain, Gauge, Sprout, Thermometer, RefreshCw, Plus, X, ClipboardList, Sun, CloudSun, Cloud, CloudDrizzle, CloudSnow, CloudFog, CloudLightning } from 'lucide-react'
+import { CloudRain, Gauge, Sprout, Thermometer, RefreshCw, Plus, X, ClipboardList, Sun, CloudSun, Cloud, CloudDrizzle, CloudSnow, CloudFog, CloudLightning } from 'lucide-react'
 import * as db from '@/lib/db'
 import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, gddSince, weatherCodeInfo } from '@/lib/weather'
 import { sheetApplied } from '@/lib/applied'

@@ -12,8 +12,15 @@
 // with no schema step. A dedicated table is the production upgrade.
 import { useState, useEffect, useMemo, useRef } from 'react'
 import {
-  Plus, Trash2, Droplet, MapPin, Crosshair, Check, X, Pencil, ChevronRight,
-  Navigation, Loader2, AlertTriangle,
+  Plus,
+  Trash2,
+  Droplet,
+  MapPin,
+  Crosshair,
+  Check,
+  X,
+  ChevronRight,
+  Navigation,
 } from 'lucide-react'
 import { uid } from '@/lib/calc'
 import { localDateISO } from '@/lib/dates'
