@@ -9119,21 +9119,25 @@ function GddGrowthTab({ daily, clippings, sheets, products, areas, scopedAreas, 
         ))}
       </div>
       {tab === 'timing'
-        ? <GddPgrTab daily={daily} sheets={sheets} products={products} areas={scopedAreas} hasLocation={hasLocation} courseInfo={courseInfo} onSaveTargets={onSaveTargets} clippings={clippings} course={course} />
+        ? <GddPgrTab daily={daily} sheets={sheets} products={products} areas={scopedAreas} hasLocation={hasLocation} courseInfo={courseInfo} onSaveTargets={onSaveTargets} onSaveCourse={onSaveCourse} clippings={clippings} course={course} />
         : <Growth daily={daily} clippings={clippings} sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} onSaveCourse={onSaveCourse} courseFilter={course} />}
     </div>
   )
 }
 
-function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {}, onSaveTargets, clippings = [], course = '' }) {
+function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {}, onSaveTargets, onSaveCourse, clippings = [], course = '' }) {
   const pgrTargets = courseInfo.pgrTargets || {}
   const [editTargets, setEditTargets] = useState(false)
   // The classic Primo model: 200 GDD, base 0°C. Temps are °F, so we accumulate
-  // base 32°F and convert to °C (÷1.8) for display against this 200 target.
-  const [target, setTarget] = useState(200)
+  // base 32°F and convert to °C (÷1.8) for display against this target. Both the
+  // target and the reapply lead persist to courseInfo so they can be dialled in.
+  const [target, setTarget] = useState(Number(courseInfo.gddTarget) > 0 ? Number(courseInfo.gddTarget) : 200)
   // Reapply lead: spray this many GDD before target so you're ahead of the
   // rebound growth surge, never chasing it after the spike.
-  const [lead, setLead] = useState(20)
+  const [lead, setLead] = useState(courseInfo.gddLead != null ? Number(courseInfo.gddLead) : 20)
+  useEffect(() => { if (Number(courseInfo.gddTarget) > 0) setTarget(Number(courseInfo.gddTarget)); if (courseInfo.gddLead != null) setLead(Number(courseInfo.gddLead)) }, [courseInfo.gddTarget, courseInfo.gddLead])
+  const saveTarget2 = (v) => { setTarget(v); onSaveCourse?.({ gddTarget: v }) }
+  const saveLead = (v) => { setLead(v); onSaveCourse?.({ gddLead: v }) }
   const reapplyAt = Math.max(1, target - lead)
 
   if (!hasLocation) {
@@ -9284,12 +9288,12 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-2">
           <div className="flex items-center gap-1.5">
             <span className="font-body text-[11px] text-slate-400">Target</span>
-            <input type="number" value={target} onChange={(e) => setTarget(Number(e.target.value) || 0)} className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
+            <input type="number" value={target} onChange={(e) => saveTarget2(Number(e.target.value) || 0)} className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
             <span className="font-body text-[11px] text-slate-400">GDD °C</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="font-body text-[11px] text-slate-400">Reapply lead</span>
-            <input type="number" value={lead} onChange={(e) => setLead(Math.max(0, Number(e.target.value) || 0))} className="w-14 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
+            <input type="number" value={lead} onChange={(e) => saveLead(Math.max(0, Number(e.target.value) || 0))} className="w-14 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
             <span className="font-body text-[11px] text-slate-400">GDD early</span>
           </div>
         </div>
