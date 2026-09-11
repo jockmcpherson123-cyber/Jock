@@ -9584,6 +9584,67 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
   )
 }
 
+// Style-2 overlay: a faint daily series behind smooth 7/14/30-day trailing
+// trackers, inside a shaded target window (between the lowest and highest guide).
+// Soft palette, values labelled on the line ends. Tapping a daily point edits it.
+const OV_RAW = '#B7B2A8', OV_7 = FERN, OV_14 = '#C08A2E', OV_30 = '#5B8DB8'
+function TrailingOverlayChart({ points = [], unit = '', guides = [], onPick = null, height = 250 }) {
+  const [wrapRef, W] = useMeasuredWidth(560)
+  const raw = points.map((p) => ({ t: chartMs(p.date), value: Number(p.value), raw: p }))
+    .filter((p) => !isNaN(p.t) && p.value != null && p.value !== '' && !isNaN(p.value)).sort((a, b) => a.t - b.t)
+  if (raw.length < 2) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">Log a few readings and the trailing trackers fill in.</p>
+  const dayTrail = (days) => { const win = days * 86400000; return raw.map((p, i) => { let s = 0, c = 0; for (let j = i; j >= 0 && p.t - raw[j].t <= win; j--) { s += raw[j].value; c++ } return { t: p.t, value: s / c } }) }
+  const t7 = dayTrail(7), t14 = dayTrail(14), t30 = dayTrail(30)
+  const gv = (guides || []).map((g) => Number(g.value)).filter((v) => !isNaN(v))
+  const bandLo = gv.length >= 2 ? Math.min(...gv) : null, bandHi = gv.length >= 2 ? Math.max(...gv) : null
+  const padL = 34, padR = 52, padT = 12, padB = 22, plotW = W - padL - padR, plotH = height - padT - padB
+  const allV = [...raw, ...t7, ...t14, ...t30].map((p) => p.value)
+  if (bandLo != null) allV.push(bandLo, bandHi)
+  const mn = Math.min(0, ...allV), mx = Math.max(...allV) * 1.08 || 1
+  const tMin = raw[0].t, tMax = raw[raw.length - 1].t
+  const X = (t) => padL + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
+  const Y = (v) => padT + (1 - (v - mn) / ((mx - mn) || 1)) * plotH
+  const dec = mx >= 20 ? 0 : mx >= 3 ? 1 : 2
+  const path = (arr) => arr.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${Y(d.value).toFixed(1)}`).join(' ')
+  // month ticks
+  const times = raw.map((p) => p.t); let last = -1, xt = []
+  times.forEach((t) => { const mo = new Date(t).getMonth(); if (mo !== last) { xt.push({ t, label: MONTHS_SHORT[mo] }); last = mo } })
+  // end labels, staggered
+  const lab = [{ y: Y(t7[t7.length - 1].value), c: OV_7, v: t7[t7.length - 1].value }, { y: Y(t14[t14.length - 1].value), c: OV_14, v: t14[t14.length - 1].value }, { y: Y(t30[t30.length - 1].value), c: OV_30, v: t30[t30.length - 1].value }]
+  lab.sort((a, b) => a.y - b.y); for (let i = 1; i < lab.length; i++) if (lab[i].y - lab[i - 1].y < 13) lab[i].y = lab[i - 1].y + 13
+  const legend = [['Daily', OV_RAW], ['7-day', OV_7], ['14-day', OV_14], ['30-day', OV_30]]
+  return (
+    <div ref={wrapRef}>
+      <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mb-1 font-body text-[11px] font-semibold" style={{ color: INK_2 }}>
+        {legend.map(([n, c]) => <span key={n} className="inline-flex items-center gap-1.5"><span style={{ width: 16, height: 3, borderRadius: 2, background: c, flexShrink: 0 }} />{n}</span>)}
+      </div>
+      <svg viewBox={`0 0 ${W} ${height}`} width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
+        {[0, 1, 2, 3].map((g) => { const v = mn + (g / 3) * (mx - mn); return (
+          <g key={g}><line x1={padL} x2={W - padR} y1={Y(v)} y2={Y(v)} stroke="#EDF0ED" strokeWidth="1" />
+            <text x={padL - 5} y={Y(v) + 3} textAnchor="end" fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(dec)}</text></g>) })}
+        {bandLo != null && (
+          <>
+            <rect x={padL} y={Y(bandHi)} width={plotW} height={Math.max(1, Y(bandLo) - Y(bandHi))} fill={FERN} opacity="0.09" />
+            <line x1={padL} x2={W - padR} y1={Y(bandHi)} y2={Y(bandHi)} stroke={FERN} strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
+            <line x1={padL} x2={W - padR} y1={Y(bandLo)} y2={Y(bandLo)} stroke={FERN} strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
+            <text x={W - padR} y={Y(bandHi) - 3} textAnchor="end" fontSize="8" fill={FERN} style={{ fontVariantNumeric: 'tabular-nums' }}>target {bandLo.toFixed(dec)}–{bandHi.toFixed(dec)}</text>
+          </>
+        )}
+        <path d={path(raw)} fill="none" stroke={OV_RAW} strokeWidth="1" opacity="0.5" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={path(t30)} fill="none" stroke={OV_30} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={path(t14)} fill="none" stroke={OV_14} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={path(t7)} fill="none" stroke={OV_7} strokeWidth="2.6" strokeLinejoin="round" strokeLinecap="round" />
+        {[[t7, OV_7], [t14, OV_14], [t30, OV_30]].map(([a, c], i) => <circle key={i} cx={X(a[a.length - 1].t)} cy={Y(a[a.length - 1].value)} r="3" fill={c} />)}
+        {lab.map((o, i) => <text key={i} x={W - padR + 6} y={o.y + 3} fontSize="9.5" fontWeight="700" fill={o.c} style={{ fontVariantNumeric: 'tabular-nums' }}>{o.v.toFixed(dec)}</text>)}
+        {onPick && raw.map((d, i) => (
+          <circle key={`h${i}`} cx={X(d.t)} cy={Y(d.value)} r="10" fill="transparent" style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onPick(d.raw) }}><title>Tap to edit {chartMmDd(d.t)}</title></circle>
+        ))}
+        {xt.map((tk, i) => <text key={i} x={X(tk.t)} y={height - 5} textAnchor={X(tk.t) <= padL + 2 ? 'start' : X(tk.t) >= W - padR - 2 ? 'end' : 'middle'} fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{tk.label}</text>)}
+      </svg>
+    </div>
+  )
+}
+
 // Two solid lines over time on their own axes: daily average clip yield (left)
 // and GDD-since-last-greens-spray (right). Time-based like TrendChart, but with
 // a second Y scale so two very different units (litres vs GDD) can track in one
@@ -10011,33 +10072,23 @@ function ClippingsTab({ clippings, areas, courseInfo, onSaveCourse, onAddMany, o
         <GuidesEditor metric="clip" courseInfo={courseInfo} onSaveCourse={onSaveCourse} unit="vol" title="Clipping guide lines" />
       )}
 
-      {/* Trend graph per area */}
-      {Object.keys(byArea).length > 0 && (
-        <div className="space-y-3">
-          {Object.entries(byArea).sort((a, b) => sortGreens(a[0], b[0])).map(([area, list]) => {
-            const recent = [...list].sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-20)
-            const latest = recent[recent.length - 1]
-            return (
-              <div key={area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
-                  <p className="font-body text-[10px] text-slate-400">{recent.length} log{recent.length !== 1 ? 's' : ''} · tap a point to remove</p>
-                </div>
-                {(() => {
-                  const pts = recent.map((c) => ({ date: c.date, value: c.volume, rec: c }))
-                  const dense = pts.length >= 6
-                  const series = dense ? [
-                    { name: 'each log', color: '#98A0A6', vals: pts, width: 1, opacity: 0.45, dots: true, r: 1.6, pickable: true },
-                    { name: '7-log avg', color: '#1baf7a', vals: trailingAvg(pts, 7), width: 2 },
-                    { name: '14-log avg', color: '#2a78d6', vals: trailingAvg(pts, 14), width: 2.2, callout: true },
-                  ] : null
-                  return <TrendChart series={series} points={pts} unit={latest?.unit || ''} baseline={0} guides={guidesFor(courseInfo, 'clip')} onPick={(p) => setPicked(p.rec)} />
-                })()}
-              </div>
-            )
-          })}
-        </div>
-      )}
+      {/* Clipping volume & GvX — the single smoothed overlay (Style 2) */}
+      {(() => {
+        const allLogs = [...shown].filter((c) => c.volume != null && c.volume !== '' && !isNaN(Number(c.volume)))
+          .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+          .map((c) => ({ date: c.date, value: Number(c.volume), rec: c }))
+        if (allLogs.length < 2) return null
+        return (
+          <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-1">
+              <p className="font-display text-base font-semibold text-slate-900">Clipping volume &amp; GvX{filter !== 'all' ? ` — ${shortGreen(filter)}` : ''}</p>
+              <p className="font-body text-[10px] text-slate-400">tap a point to edit</p>
+            </div>
+            <p className="font-body text-[11px] text-slate-400 mb-2">Daily readings with 7 / 14 / 30-day trailing trackers, inside your target window.</p>
+            <TrailingOverlayChart points={allLogs} unit="vol" guides={guidesFor(courseInfo, 'clip')} onPick={(p) => setPicked(p.rec)} />
+          </div>
+        )
+      })()}
 
       {/* History — tucked behind a toggle so it doesn't fill the screen */}
       {(() => {
