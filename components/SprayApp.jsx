@@ -9569,7 +9569,7 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
 // markers, and the current cycle is projected forward on the forecast (dashed).
 const CLIP_COLOR = FERN, GDD_COLOR = AMBER
 const DAY_MS = 86400000
-const WINDOWS = [['all', 'Season', 0], ['12w', '12 wk', 84], ['8w', '8 wk', 56], ['4w', '4 wk', 28]]
+const WINDOWS = [['all', 'Season', 0], ['12w', '12 wk', 84], ['8w', '8 wk', 56], ['4w', '4 wk', 28], ['2w', '2 wk', 14], ['1w', '1 wk', 7]]
 function ClipGddTrend({ clip = [], gdd = [], gddFuture = [], sprays = [], target = 0, height = 200 }) {
   const [wrapRef, W] = useMeasuredWidth(560)
   const [winKey, setWinKey] = useState('all')
@@ -9617,7 +9617,7 @@ function ClipGddTrend({ clip = [], gdd = [], gddFuture = [], sprays = [], target
   const zoomed = winMs > 0 && winMs < fullMax - fullMin
   return (
     <div ref={wrapRef}>
-      <div className="flex items-center gap-1.5 mb-2">
+      <div className="flex flex-wrap items-center gap-1.5 mb-2">
         {WINDOWS.map(([k, lab]) => (
           <button key={k} type="button" onClick={() => setWinKey(k)} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full transition"
             style={winKey === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{lab}</button>
