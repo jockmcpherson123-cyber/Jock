@@ -9617,6 +9617,11 @@ function ClipGddTrend({ clip = [], gdd = [], sprays = [], target = 0, height = 2
   }
   const cPath = cData.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${YL(d.value).toFixed(1)}`).join(' ')
   const gPath = gData.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${YR(d.value).toFixed(1)}`).join(' ')
+  // Minor tick each week of the month (1st, 8th, 15th, 22nd, 29th) so you can
+  // read weeks within each month span.
+  const weekTicks = []
+  { const d = new Date(winT[0] || t0); d.setDate(1)
+    while (d.getTime() <= t1) { for (const day of [1, 8, 15, 22, 29]) { const wt = new Date(d.getFullYear(), d.getMonth(), day).getTime(); if (wt >= t0 && wt <= t1) weekTicks.push(wt) } d.setMonth(d.getMonth() + 1) } }
   const zoomed = winMs > 0 && winMs < fullMax - fullMin
   return (
     <div ref={wrapRef}>
@@ -9651,6 +9656,9 @@ function ClipGddTrend({ clip = [], gdd = [], sprays = [], target = 0, height = 2
         {gData.map((d, i) => <circle key={`gc${i}`} cx={X(d.t)} cy={YR(d.value)} r="2" fill={GDD_COLOR} />)}
         <path d={cPath} fill="none" stroke={CLIP_COLOR} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
         {cData.map((d, i) => <circle key={`cc${i}`} cx={X(d.t)} cy={YL(d.value)} r="2" fill={CLIP_COLOR} />)}
+        {weekTicks.map((t, i) => (
+          <line key={`wk${i}`} x1={X(t)} x2={X(t)} y1={height - padB} y2={height - padB + 3} stroke="#C7CFC9" strokeWidth="1" />
+        ))}
         {xticks.map((tick, i) => (
           <text key={`x${i}`} x={X(tick.t)} y={height - 5} textAnchor={X(tick.t) <= padL + 2 ? 'start' : X(tick.t) >= W - padR - 2 ? 'end' : 'middle'} fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{tick.label}</text>
         ))}
