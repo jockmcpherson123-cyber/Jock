@@ -104,7 +104,7 @@ import ChemistryGuide from '@/components/ChemistryGuide'
 const productJug = (prod) => (prod && prod.jugSize > 0 ? { size: Number(prod.jugSize), unit: prod.jugUnit || 'gal' } : null)
 
 // ── PALETTE ───────────────────────────────────────────────────────────────
-import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3 } from '@/lib/theme'
+import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, AMBER } from '@/lib/theme'
 const CREAM = '#F7F5EF'
 // Clubhouse × Instrument restyle: "soft stone" surfaces + warm-neutral inks
 // (warmth dialled out). Mirrors the CSS tokens in globals.css so inline styles
@@ -9119,13 +9119,13 @@ function GddGrowthTab({ daily, clippings, sheets, products, areas, scopedAreas, 
         ))}
       </div>
       {tab === 'timing'
-        ? <GddPgrTab daily={daily} sheets={sheets} products={products} areas={scopedAreas} hasLocation={hasLocation} courseInfo={courseInfo} onSaveTargets={onSaveTargets} />
+        ? <GddPgrTab daily={daily} sheets={sheets} products={products} areas={scopedAreas} hasLocation={hasLocation} courseInfo={courseInfo} onSaveTargets={onSaveTargets} clippings={clippings} course={course} />
         : <Growth daily={daily} clippings={clippings} sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} onSaveCourse={onSaveCourse} courseFilter={course} />}
     </div>
   )
 }
 
-function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {}, onSaveTargets }) {
+function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {}, onSaveTargets, clippings = [], course = '' }) {
   const pgrTargets = courseInfo.pgrTargets || {}
   const [editTargets, setEditTargets] = useState(false)
   // The classic Primo model: 200 GDD, base 0°C. Temps are °F, so we accumulate
@@ -9216,6 +9216,31 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
     onSaveTargets?.(next)
   }
 
+  // ── Clipping yield vs growth-reg GDD ──────────────────────────────────────
+  // Place each greens clipping reading by how much GDD had accumulated since the
+  // last greens growth-suppressing spray on its course. As GDD runs past the
+  // reapply target the plant comes out of regulation, so yield should climb —
+  // the scatter makes that rebound visible against your own data.
+  const courseTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+  const gddBetween = (start, end, base = 32) => {
+    let acc = 0
+    ;(daily || []).forEach((x) => { if (x.date > start && x.date <= end && x.tMax != null && x.tMin != null) acc += Math.max(0, (x.tMax + x.tMin) / 2 - base) })
+    return acc
+  }
+  const greensSprays = (sheets || []).filter((s) => appliedByDate(s) && areaSurface(s.area) === 'green' && (s.products || []).some((p) => supMap[p.product]))
+  const wantTok = course ? courseTok(course) : ''
+  const clipGddPts = (clippings || [])
+    .filter((c) => c.date && c.volume != null && c.volume !== '' && !isNaN(Number(c.volume)) && areaSurface(c.area) === 'green' && (!wantTok || courseTok(c.area) === wantTok))
+    .map((c) => {
+      const tok = courseTok(c.area)
+      const prior = greensSprays.filter((s) => courseTok(s.area) === tok && s.date <= c.date).map((s) => s.date).sort()
+      const last = prior[prior.length - 1]
+      if (!last) return null
+      return { x: Math.round(gddBetween(last, c.date, 32) / 1.8), y: Number(c.volume), date: c.date, area: c.area, sinceDate: last }
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.x - b.x)
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl p-4 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
@@ -9269,6 +9294,13 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
           {areaRows.length === 0 && <p className="font-body text-sm text-slate-400">No areas set up yet.</p>}
         </div>
       </div>
+
+      <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Clipping yield vs growth-reg GDD</p>
+        <p className="font-body text-[11px] text-slate-400 mb-3">Every greens clipping reading plotted by the GDD built up since its last growth-suppressing spray. Points climbing to the right of the reapply line are the <b>rebound</b> — the turf coming out of regulation. A flat cloud means your target is holding growth in check.</p>
+        <ClipGddScatter points={clipGddPts} target={target} />
+      </div>
+
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
         <div className="flex items-center justify-between mb-1">
           <p className="font-display text-base font-semibold text-slate-900">Regulation model — by product</p>
@@ -9511,6 +9543,73 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
       ) : (!series && showAvg && srs[0].data.length > 1 && (
         <div className="text-right font-body text-[9px] text-slate-400 mt-1" style={{ fontVariantNumeric: 'tabular-nums' }}>avg {fmtY(srs[0].data.reduce((a, b) => a + b.value, 0) / srs[0].data.length)}{unit ? ` ${unit}` : ''}</div>
       ))}
+    </div>
+  )
+}
+
+// Scatter: clipping yield (Y) against GDD-since-last-greens-PGR (X). A different
+// shape from TrendChart on purpose — this is a relationship, not a time trend —
+// but it borrows the same axes, colours and type so it reads as one system.
+function ClipGddScatter({ points = [], target = 0, height = 200 }) {
+  const [wrapRef, W] = useMeasuredWidth(560)
+  if (!points.length) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">Log greens clipping yields (Field Data → Clipping Yields) after a growth-reg spray and this fills in.</p>
+  const padL = 40, padR = 12, padT = 12, padB = 30, plotW = W - padL - padR, plotH = height - padT - padB
+  const xs = points.map((p) => p.x), ys = points.map((p) => p.y)
+  const xMax = (Math.max(target || 0, ...xs) || 1) * 1.08
+  const yMax = (Math.max(...ys) || 1) * 1.14
+  const X = (x) => padL + (x / xMax) * plotW
+  const Y = (y) => padT + (1 - y / yMax) * plotH
+  const yDec = yMax >= 20 ? 0 : yMax >= 3 ? 1 : 2
+  const yTicks = [0, 1, 2, 3].map((t) => (t / 3) * yMax)
+  const xTicks = [0, 1, 2, 3, 4].map((t) => Math.round((t / 4) * xMax))
+  // Least-squares trend line + Pearson r — only once there's enough to mean anything.
+  const n = points.length
+  let line = null, r = null
+  if (n >= 4) {
+    const mx = xs.reduce((a, b) => a + b, 0) / n, my = ys.reduce((a, b) => a + b, 0) / n
+    let sxy = 0, sxx = 0, syy = 0
+    for (let i = 0; i < n; i++) { const dx = xs[i] - mx, dy = ys[i] - my; sxy += dx * dy; sxx += dx * dx; syy += dy * dy }
+    if (sxx > 0 && syy > 0) {
+      const slope = sxy / sxx, b0 = my - slope * mx
+      r = sxy / Math.sqrt(sxx * syy)
+      line = { x1: 0, y1: b0, x2: xMax, y2: b0 + slope * xMax }
+    }
+  }
+  const tgt = target > 0 && target <= xMax ? target : null
+  const rTxt = r == null ? null : Math.abs(r) >= 0.6 ? 'strong' : Math.abs(r) >= 0.3 ? 'some' : 'little'
+  const clampY = (v) => Math.max(0, Math.min(yMax, v))
+  return (
+    <div ref={wrapRef}>
+      <svg viewBox={`0 0 ${W} ${height}`} width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
+        {yTicks.map((v, i) => (
+          <g key={`y${i}`}>
+            <line x1={padL} x2={W - padR} y1={Y(v)} y2={Y(v)} stroke="#EDF0ED" strokeWidth="1" />
+            <text x={padL - 5} y={Y(v) + 3} textAnchor="end" fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(yDec)}</text>
+          </g>
+        ))}
+        <text x={11} y={padT + plotH / 2} textAnchor="middle" fontSize="8.5" fill="#9AA6A0" transform={`rotate(-90 11 ${padT + plotH / 2})`}>Clip yield (L)</text>
+        {xTicks.map((v, i) => (
+          <text key={`x${i}`} x={X(v)} y={height - 16} textAnchor={i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'} fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{v}</text>
+        ))}
+        {tgt != null && (
+          <>
+            <line x1={X(tgt)} x2={X(tgt)} y1={padT} y2={height - padB} stroke={AMBER} strokeWidth="1.2" strokeDasharray="4 2" />
+            <text x={X(tgt) + 3} y={padT + 8} fontSize="8" fill={AMBER}>reapply {tgt}</text>
+          </>
+        )}
+        {line && <line x1={X(line.x1)} y1={Y(clampY(line.y1))} x2={X(line.x2)} y2={Y(clampY(line.y2))} stroke={INK_3} strokeWidth="1.5" strokeDasharray="5 3" opacity="0.7" />}
+        {points.map((p, i) => (
+          <circle key={i} cx={X(p.x)} cy={Y(p.y)} r="3.2" fill={tgt != null && p.x >= tgt ? AMBER : FERN} opacity="0.75">
+            <title>{`${p.area} · ${p.date} · ${p.y} L at ${p.x} GDD`}</title>
+          </circle>
+        ))}
+        <text x={padL + plotW / 2} y={height - 2} textAnchor="middle" fontSize="8.5" fill="#9AA6A0">GDD °C since last greens growth-reg spray</text>
+      </svg>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 font-body text-[10.5px]" style={{ color: INK_3 }}>
+        <span className="inline-flex items-center gap-1.5"><span style={{ width: 8, height: 8, borderRadius: 8, background: FERN, flexShrink: 0 }} />in regulation</span>
+        {tgt != null && <span className="inline-flex items-center gap-1.5"><span style={{ width: 8, height: 8, borderRadius: 8, background: AMBER, flexShrink: 0 }} />past reapply</span>}
+        <span className="ml-auto">{n} reading{n !== 1 ? 's' : ''}{rTxt ? ` · ${rTxt} link to GDD` : ''}</span>
+      </div>
     </div>
   )
 }
