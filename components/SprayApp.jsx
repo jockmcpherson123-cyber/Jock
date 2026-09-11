@@ -9131,6 +9131,10 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
   // The classic Primo model: 200 GDD, base 0°C. Temps are °F, so we accumulate
   // base 32°F and convert to °C (÷1.8) for display against this 200 target.
   const [target, setTarget] = useState(200)
+  // Reapply lead: spray this many GDD before target so you're ahead of the
+  // rebound growth surge, never chasing it after the spike.
+  const [lead, setLead] = useState(20)
+  const reapplyAt = Math.max(1, target - lead)
 
   if (!hasLocation) {
     return <ComingSoonCard title="Set your location first" desc="Growing Degree Days come from your course location. Add your address in Spray Ops → Settings → Location, then come back." />
@@ -9176,11 +9180,11 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
     const last = lastByArea[area]
     const gddF = last ? gddSince(daily, last.date, 32) : null
     const gdd = gddF == null ? null : Math.round(gddF / 1.8) // °F-GDD → °C-GDD
-    const pct = gdd != null && target > 0 ? Math.min(100, Math.round((gdd / target) * 100)) : 0
+    const pct = gdd != null && reapplyAt > 0 ? Math.min(100, Math.round((gdd / reapplyAt) * 100)) : 0
     let status = 'none'
-    if (gdd != null) status = gdd >= target ? 'due' : gdd >= target * 0.8 ? 'soon' : 'ok'
-    // Projected reapply date — remaining °C-GDD converted back to °F for the walker.
-    const est = gdd == null ? null : projectGddReachDate((target - gdd) * 1.8, daily, 32, todayIso)
+    if (gdd != null) status = gdd >= reapplyAt ? 'due' : gdd >= reapplyAt * 0.85 ? 'soon' : 'ok'
+    // Projected reapply date — remaining °C-GDD to the lead-adjusted point, back to °F.
+    const est = gdd == null ? null : projectGddReachDate((reapplyAt - gdd) * 1.8, daily, 32, todayIso)
     return { area, last, gdd, pct, status, est }
   }).sort((a, b) => (b.gdd ?? -1) - (a.gdd ?? -1))
 
@@ -9255,7 +9259,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
     for (const d of days) {
       const v = Math.round(gddBetween(lastGreensSpray, d.date, 32) / 1.8)
       cycleGdd.push({ date: d.date, value: v, future: d.date > todayIso, temp: Math.round((((d.tMax + d.tMin) / 2) - 32) * 5 / 9) })
-      if (target > 0 && v >= target && d.date > todayIso) break // a little past the reapply crossing
+      if (reapplyAt > 0 && v >= reapplyAt && d.date > todayIso) break // a little past the reapply (lead) crossing
     }
   }
 
@@ -9276,15 +9280,20 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
       )}
 
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
-        <div className="flex items-center justify-between mb-1">
-          <p className="font-display text-base font-semibold text-slate-900">Growth-Reg Timing</p>
+        <p className="font-display text-base font-semibold text-slate-900 mb-2">Growth-Reg Timing</p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-2">
           <div className="flex items-center gap-1.5">
-            <span className="font-body text-[11px] text-slate-400">Reapply target</span>
+            <span className="font-body text-[11px] text-slate-400">Target</span>
             <input type="number" value={target} onChange={(e) => setTarget(Number(e.target.value) || 0)} className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
             <span className="font-body text-[11px] text-slate-400">GDD °C</span>
           </div>
+          <div className="flex items-center gap-1.5">
+            <span className="font-body text-[11px] text-slate-400">Reapply lead</span>
+            <input type="number" value={lead} onChange={(e) => setLead(Math.max(0, Number(e.target.value) || 0))} className="w-14 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
+            <span className="font-body text-[11px] text-slate-400">GDD early</span>
+          </div>
         </div>
-        <p className="font-body text-[11px] text-slate-400 mb-3">GDD since each area's last growth-suppressing spray — a PGR <b>or</b> a DMI (FRAC 3) fungicide, which also regulates growth. <b>200 GDD, base 0°C</b> is the classic greens target (the Primo model); fairways run higher.</p>
+        <p className="font-body text-[11px] text-slate-400 mb-3">GDD since each area's last growth-suppressing spray — a PGR <b>or</b> a DMI (FRAC 3) fungicide, which also regulates growth. <b>200 GDD, base 0°C</b> is the classic greens target (the Primo model). The <b>reapply lead</b> flags you {lead} GDD early (at {reapplyAt}) so you stay ahead of the rebound instead of chasing it after the spike.</p>
         <div className="space-y-3">
           {areaRows.map((r) => (
             <div key={r.area}>
@@ -9292,7 +9301,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
                 <span className="font-body text-sm font-semibold text-slate-800">{r.area}</span>
                 {r.gdd != null ? (
                   <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: statusStyle[r.status].bg, color: statusStyle[r.status].fg }}>
-                    {r.gdd} / {target} · {statusStyle[r.status].label}
+                    {r.gdd} / {reapplyAt} · {statusStyle[r.status].label}
                   </span>
                 ) : (
                   <span className="font-body text-[10px] text-slate-400">No growth-reg app logged</span>
@@ -9321,8 +9330,8 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
 
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
         <p className="font-display text-base font-semibold text-slate-900 mb-1">Next reapply — forecast</p>
-        <p className="font-body text-[11px] text-slate-400 mb-3">The current cycle projected forward on the forecast: GDD since the spray in effect ({lastGreensSpray ? fmtDate(lastGreensSpray) : '—'}) climbing toward your {target} °C target. Solid is banked, dashed is forecast, and the ring marks the projected reapply.</p>
-        <GddForecastChart cycle={cycleGdd} target={target} />
+        <p className="font-body text-[11px] text-slate-400 mb-3">The current cycle projected forward on the forecast: GDD since the spray in effect ({lastGreensSpray ? fmtDate(lastGreensSpray) : '—'}) climbing toward the {reapplyAt} °C reapply point ({lead} GDD ahead of your {target} target, to beat the rebound). Solid is banked, dashed is forecast, and the ring marks the projected reapply.</p>
+        <GddForecastChart cycle={cycleGdd} target={reapplyAt} reference={target} />
       </div>
 
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
@@ -9679,14 +9688,14 @@ function ClipGddTrend({ clip = [], gdd = [], sprays = [], target = 0, height = 2
 // GDD line runs solid up to today then dashed through the forecast until it hits
 // the reapply target (ringed). A faint temp line shows the heat driving it.
 const TEMP_COLOR = '#2a78d6'
-function GddForecastChart({ cycle = [], target = 0, height = 190 }) {
+function GddForecastChart({ cycle = [], target = 0, reference = 0, height = 190 }) {
   const [wrapRef, W] = useMeasuredWidth(560)
   const data = cycle.map((p) => ({ t: chartMs(p.date), value: Number(p.value), future: !!p.future, temp: p.temp })).filter((p) => !isNaN(p.t) && !isNaN(p.value)).sort((a, b) => a.t - b.t)
   if (data.length < 2) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">Once a greens growth-reg spray is in effect, this projects the GDD forward on the forecast to the next reapply.</p>
   const padL = 34, padR = 34, padT = 12, padB = 22, plotW = W - padL - padR, plotH = height - padT - padB
   const tMin = data[0].t, tMax = data[data.length - 1].t
   const X = (t) => padL + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
-  const gMax = Math.max(...data.map((p) => p.value), target || 0, 1) * 1.1
+  const gMax = Math.max(...data.map((p) => p.value), target || 0, reference || 0, 1) * 1.1
   const YG = (v) => padT + (1 - v / gMax) * plotH
   const temps = data.map((p) => p.temp).filter((v) => v != null && !isNaN(v))
   const tHi = temps.length ? Math.max(...temps) : null, tLo = temps.length ? Math.min(...temps) : null
@@ -9715,6 +9724,12 @@ function GddForecastChart({ cycle = [], target = 0, height = 190 }) {
         {tHi != null && [tLo, tHi].map((v, i) => (
           <text key={`tr${i}`} x={W - padR + 5} y={YT(v) + 3} textAnchor="start" fontSize="8.5" fill={TEMP_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>{v}</text>
         ))}
+        {reference > 0 && reference !== target && reference <= gMax && (
+          <>
+            <line x1={padL} x2={W - padR} y1={YG(reference)} y2={YG(reference)} stroke={INK_3} strokeWidth="1" strokeDasharray="2 3" opacity="0.6" />
+            <text x={W - padR} y={YG(reference) - 3} textAnchor="end" fontSize="8" fill={INK_3} style={{ fontVariantNumeric: 'tabular-nums' }}>target {reference}</text>
+          </>
+        )}
         {target > 0 && target <= gMax && (
           <>
             <line x1={padL} x2={W - padR} y1={YG(target)} y2={YG(target)} stroke={GDD_COLOR} strokeWidth="1.2" strokeDasharray="4 2" opacity="0.7" />
