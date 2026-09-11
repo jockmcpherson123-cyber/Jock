@@ -9459,7 +9459,7 @@ function trailingAvg(pts, win) {
   return clean.map((p, i) => { const s = Math.max(0, i - win + 1); const sl = clean.slice(s, i + 1); return { date: p.date, value: sl.reduce((a, b) => a + Number(b.value), 0) / sl.length } })
 }
 
-function TrendChart({ points = null, series = null, color = FERN, height = 170, unit = '', showAvg = true, refLine = null, band = null, guides = null, baseline = null, legend = true, onPick = null }) {
+function TrendChart({ points = null, series = null, color = FERN, height = 170, unit = '', showAvg = true, refLine = null, band = null, guides = null, baseline = null, legend = true, onPick = null, shadeGuides = false }) {
   const [wrapRef, W] = useMeasuredWidth(560)
   // Normalise to a list of series. Single-series callers keep passing `points`
   // and get the classic filled trend with a called-out latest value.
@@ -9536,6 +9536,9 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
             <text x={W - padR} y={Y(ref) - 3} textAnchor="end" fontSize="8" fill={refLine.color || '#B7791F'} style={{ fontVariantNumeric: 'tabular-nums' }}>{refLine.label || fmtY(ref)}</text>
           </>
         )}
+        {shadeGuides && gs.length >= 2 && (() => { const lo = Math.min(...gs.map((g) => g.value)), hi = Math.max(...gs.map((g) => g.value)); return (
+          <rect x={padL} y={Y(hi)} width={plotW} height={Math.max(1, Y(lo) - Y(hi))} fill={FERN} opacity="0.09" />
+        ) })()}
         {gs.map((g, i) => (
           <g key={`g${i}`}>
             <line x1={padL} x2={W - padR} y1={Y(g.value)} y2={Y(g.value)} stroke={g.color} strokeWidth="1.2" strokeDasharray="4 2" opacity="0.9" />
@@ -10297,32 +10300,23 @@ function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate,
         <GuidesEditor metric="speed" courseInfo={courseInfo} onSaveCourse={onSaveCourse} unit="ft" title="Speed guide lines" />
       )}
 
-      {/* Trend graph per green */}
-      {Object.keys(byArea).length > 0 && (
-        <div className="space-y-3">
-          {Object.entries(byArea).sort((a, b) => sortGreens(a[0], b[0])).map(([area, list]) => {
-            const recent = [...list].sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(-12)
-            const latest = recent[recent.length - 1]
-            return (
-              <div key={area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="font-body font-semibold text-sm text-slate-900">{area}</p>
-                  <p className="font-body text-[10px] text-slate-400">{recent.length} reading{recent.length !== 1 ? 's' : ''} · tap a point to edit</p>
-                </div>
-                {(() => {
-                  const pts = recent.map((c) => ({ date: c.date, value: c.speed, rec: c }))
-                  const dense = pts.length >= 6
-                  const series = dense ? [
-                    { name: 'each reading', color: '#98A0A6', vals: pts, width: 1, opacity: 0.5, dots: true, r: 1.8, pickable: true },
-                    { name: '7-reading avg', color: FERN, vals: trailingAvg(pts, 7), width: 2.4, callout: true },
-                  ] : null
-                  return <TrendChart series={series} points={pts} unit="ft" guides={guidesFor(courseInfo, 'speed')} onPick={(p) => setPicked(p.rec)} />
-                })()}
-              </div>
-            )
-          })}
-        </div>
-      )}
+      {/* Green speed — single smoothed overlay (Style 2) */}
+      {(() => {
+        const allLogs = [...shown].filter((c) => c.speed != null && c.speed !== '' && !isNaN(Number(c.speed)))
+          .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+          .map((c) => ({ date: c.date, value: Number(c.speed), rec: c }))
+        if (allLogs.length < 2) return null
+        return (
+          <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-1">
+              <p className="font-display text-base font-semibold text-slate-900">Green speed{filter !== 'all' ? ` — ${shortGreen(filter)}` : ''}</p>
+              <p className="font-body text-[10px] text-slate-400">tap a point to edit</p>
+            </div>
+            <p className="font-body text-[11px] text-slate-400 mb-2">Daily readings with 7 / 14 / 30-day trailing trackers, inside your target window.</p>
+            <TrailingOverlayChart points={allLogs} unit="ft" guides={guidesFor(courseInfo, 'speed')} onPick={(p) => setPicked(p.rec)} />
+          </div>
+        )
+      })()}
 
       {/* History — tucked behind a toggle so it doesn't fill the screen */}
       {(() => {
@@ -10689,7 +10683,7 @@ function OrganicMatterTab({ courseInfo = {}, onSaveCourse, courseFilter = '' }) 
                     {surfSeries.length >= 2 && (
                       <div>
                         <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Surface 0–2&quot; OM · trend</p>
-                        <TrendChart points={surfSeries} unit="%" baseline={0} refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null} guides={guidesFor(courseInfo, 'om')} onPick={(p) => setPicked(p.rec)} />
+                        <TrendChart points={surfSeries} unit="%" baseline={0} refLine={target !== '' ? { value: Number(target), label: `target ${target}%`, color: '#B7791F' } : null} guides={guidesFor(courseInfo, 'om')} shadeGuides onPick={(p) => setPicked(p.rec)} />
                       </div>
                     )}
                     <div>

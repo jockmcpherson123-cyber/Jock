@@ -850,48 +850,56 @@ function Setup({ greens, products, courses, onSave, wetting }) {
 // moisture map (if points were GPS-set) and the per-point values.
 // Average VWC per collection over time — same readable style as the rest of the
 // app (axis numbers, gridlines, dated ticks, an optional target guide line).
-function VwcTrend({ points = [], guide = null, height = 150 }) {
-  const data = points
-    .filter((p) => p.value != null && !isNaN(Number(p.value)))
-    .map((p) => { const s = String(p.date || '').split('-').map(Number); return { t: s.length === 3 ? new Date(s[0], s[1] - 1, s[2]).getTime() : NaN, value: Number(p.value) } })
-    .filter((p) => !isNaN(p.t)).sort((a, b) => a.t - b.t)
+const V_RAW = '#B7B2A8', V_7 = FERN, V_14 = '#C08A2E', V_30 = '#5B8DB8'
+const V_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+function VwcTrend({ points = [], guide = null, height = 180 }) {
+  // one point per day (average), then smooth — Style-2 treatment
+  const byDay = {}
+  points.forEach((p) => { if (p.value == null || isNaN(Number(p.value)) || !p.date) return; const s = String(p.date).split('-').map(Number); if (s.length !== 3) return; const t = new Date(s[0], s[1] - 1, s[2]).getTime(); if (isNaN(t)) return; (byDay[t] = byDay[t] || { s: 0, n: 0 }); byDay[t].s += Number(p.value); byDay[t].n++ })
+  const data = Object.keys(byDay).map(Number).sort((a, b) => a - b).map((t) => ({ t, value: byDay[t].s / byDay[t].n }))
   if (data.length < 2) return null
-  const W = 560, padL = 32, padR = 12, padT = 12, padB = 20, plotW = W - padL - padR
+  const dayTrail = (days) => { const win = days * 86400000; return data.map((p, i) => { let s = 0, c = 0; for (let j = i; j >= 0 && p.t - data[j].t <= win; j--) { s += data[j].value; c++ } return { t: p.t, value: s / c } }) }
+  const t7 = dayTrail(7), t14 = dayTrail(14), t30 = dayTrail(30)
+  const W = 560, padL = 32, padR = 50, padT = 12, padB = 20, plotW = W - padL - padR
   const g = guide != null && guide !== '' && !isNaN(Number(guide)) ? Number(guide) : null
-  const vs = data.map((d) => d.value).concat(g != null ? [g] : [])
+  const vs = [...data, ...t7, ...t14, ...t30].map((d) => d.value).concat(g != null ? [g] : [])
   let lo = Math.min(...vs), hi = Math.max(...vs); const pad = (hi - lo) * 0.12 || 1; hi += pad; lo -= pad * 0.5
   const tMin = data[0].t, tMax = data[data.length - 1].t
   const X = (t) => padL + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
   const Y = (v) => padT + (1 - (v - lo) / ((hi - lo) || 1)) * (height - padT - padB)
-  const line = data.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${Y(d.value).toFixed(1)}`).join(' ')
-  const area = `${line} L${X(tMax).toFixed(1)},${height - padB} L${X(tMin).toFixed(1)},${height - padB} Z`
+  const P = (a) => a.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${Y(d.value).toFixed(1)}`).join(' ')
   const yTicks = [0, 1, 2, 3].map((t) => lo + (t / 3) * (hi - lo))
-  const last = data[data.length - 1]
-  const md = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()}` }
-  const n = data.length
-  const xIdx = [...new Set([0, Math.round((n - 1) / 2), n - 1])]
+  const lab = [{ y: Y(t7[t7.length - 1].value), c: V_7, v: t7[t7.length - 1].value }, { y: Y(t14[t14.length - 1].value), c: V_14, v: t14[t14.length - 1].value }, { y: Y(t30[t30.length - 1].value), c: V_30, v: t30[t30.length - 1].value }]
+  lab.sort((a, b) => a.y - b.y); for (let i = 1; i < lab.length; i++) if (lab[i].y - lab[i - 1].y < 13) lab[i].y = lab[i - 1].y + 13
+  let last = -1, xt = []; data.forEach((d) => { const mo = new Date(d.t).getMonth(); if (mo !== last) { xt.push({ t: d.t, label: V_MONTHS[mo] }); last = mo } })
+  const legend = [['Daily', V_RAW], ['7-day', V_7], ['14-day', V_14], ['30-day', V_30]]
   return (
-    <svg viewBox={`0 0 ${W} ${height}`} width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
-      {yTicks.map((v, i) => (
-        <g key={i}>
-          <line x1={padL} x2={W - padR} y1={Y(v)} y2={Y(v)} stroke="#ECE9DD" strokeWidth="1" />
-          <text x={padL - 5} y={Y(v) + 3} textAnchor="end" fontSize="8.5" fill={INK_3} style={{ fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(0)}</text>
-        </g>
-      ))}
-      {g != null && (
-        <>
-          <line x1={padL} x2={W - padR} y1={Y(g)} y2={Y(g)} stroke={AMBER} strokeWidth="1.2" strokeDasharray="4 2" />
-          <text x={W - padR} y={Y(g) - 3} textAnchor="end" fontSize="8" fill={AMBER} style={{ fontVariantNumeric: 'tabular-nums' }}>target {g}%</text>
-        </>
-      )}
-      <path d={area} fill={FERN} opacity="0.12" />
-      <path d={line} fill="none" stroke={FERN} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
-      {data.map((d, i) => <circle key={i} cx={X(d.t)} cy={Y(d.value)} r={i === n - 1 ? 3.5 : 1.8} fill={FERN} />)}
-      <text x={X(last.t)} y={Y(last.value) - 7} textAnchor="end" fontSize="11" fontWeight="700" fill={FERN} style={{ fontVariantNumeric: 'tabular-nums' }}>{last.value}</text>
-      {xIdx.map((i) => (
-        <text key={`x${i}`} x={X(data[i].t)} y={height - 5} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize="8.5" fill={INK_3} style={{ fontVariantNumeric: 'tabular-nums' }}>{md(data[i].t)}</text>
-      ))}
-    </svg>
+    <div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '4px 16px', marginBottom: 2, fontSize: 11, fontWeight: 600, color: INK_2 }}>
+        {legend.map(([n, c]) => <span key={n} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 16, height: 3, borderRadius: 2, background: c }} />{n}</span>)}
+      </div>
+      <svg viewBox={`0 0 ${W} ${height}`} width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
+        {yTicks.map((v, i) => (
+          <g key={i}>
+            <line x1={padL} x2={W - padR} y1={Y(v)} y2={Y(v)} stroke="#ECE9DD" strokeWidth="1" />
+            <text x={padL - 5} y={Y(v) + 3} textAnchor="end" fontSize="8.5" fill={INK_3} style={{ fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(0)}</text>
+          </g>
+        ))}
+        {g != null && (
+          <>
+            <line x1={padL} x2={W - padR} y1={Y(g)} y2={Y(g)} stroke={AMBER} strokeWidth="1.2" strokeDasharray="4 2" />
+            <text x={W - padR} y={Y(g) - 3} textAnchor="end" fontSize="8" fill={AMBER} style={{ fontVariantNumeric: 'tabular-nums' }}>target {g}%</text>
+          </>
+        )}
+        <path d={P(data)} fill="none" stroke={V_RAW} strokeWidth="1" opacity="0.5" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={P(t30)} fill="none" stroke={V_30} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={P(t14)} fill="none" stroke={V_14} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={P(t7)} fill="none" stroke={V_7} strokeWidth="2.6" strokeLinejoin="round" strokeLinecap="round" />
+        {[[t7, V_7], [t14, V_14], [t30, V_30]].map(([a, c], i) => <circle key={i} cx={X(a[a.length - 1].t)} cy={Y(a[a.length - 1].value)} r="3" fill={c} />)}
+        {lab.map((o, i) => <text key={i} x={W - padR + 6} y={o.y + 3} fontSize="9.5" fontWeight="700" fill={o.c} style={{ fontVariantNumeric: 'tabular-nums' }}>{o.v.toFixed(0)}</text>)}
+        {xt.map((tk, i) => <text key={`x${i}`} x={X(tk.t)} y={height - 5} textAnchor={X(tk.t) <= padL + 2 ? 'start' : X(tk.t) >= W - padR - 2 ? 'end' : 'middle'} fontSize="8.5" fill={INK_3} style={{ fontVariantNumeric: 'tabular-nums' }}>{tk.label}</text>)}
+      </svg>
+    </div>
   )
 }
 
