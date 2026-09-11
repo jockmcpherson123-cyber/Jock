@@ -9590,8 +9590,11 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
 const OV_RAW = '#B7B2A8', OV_7 = FERN, OV_14 = '#C08A2E', OV_30 = '#5B8DB8'
 function TrailingOverlayChart({ points = [], unit = '', guides = [], onPick = null, height = 250 }) {
   const [wrapRef, W] = useMeasuredWidth(560)
-  const raw = points.map((p) => ({ t: chartMs(p.date), value: Number(p.value), raw: p }))
-    .filter((p) => !isNaN(p.t) && p.value != null && p.value !== '' && !isNaN(p.value)).sort((a, b) => a.t - b.t)
+  // Aggregate to ONE point per day (average across greens) so the daily line is
+  // clean, then smooth from there.
+  const byDay = {}
+  points.forEach((p) => { if (!p.date || p.value == null || p.value === '' || isNaN(Number(p.value))) return; (byDay[p.date] = byDay[p.date] || { sum: 0, n: 0, recs: [] }); byDay[p.date].sum += Number(p.value); byDay[p.date].n++; byDay[p.date].recs.push(p) })
+  const raw = Object.keys(byDay).sort().map((d) => ({ t: chartMs(d), value: byDay[d].sum / byDay[d].n, recs: byDay[d].recs })).filter((p) => !isNaN(p.t)).sort((a, b) => a.t - b.t)
   if (raw.length < 2) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">Log a few readings and the trailing trackers fill in.</p>
   const dayTrail = (days) => { const win = days * 86400000; return raw.map((p, i) => { let s = 0, c = 0; for (let j = i; j >= 0 && p.t - raw[j].t <= win; j--) { s += raw[j].value; c++ } return { t: p.t, value: s / c } }) }
   const t7 = dayTrail(7), t14 = dayTrail(14), t30 = dayTrail(30)
@@ -9637,7 +9640,7 @@ function TrailingOverlayChart({ points = [], unit = '', guides = [], onPick = nu
         {[[t7, OV_7], [t14, OV_14], [t30, OV_30]].map(([a, c], i) => <circle key={i} cx={X(a[a.length - 1].t)} cy={Y(a[a.length - 1].value)} r="3" fill={c} />)}
         {lab.map((o, i) => <text key={i} x={W - padR + 6} y={o.y + 3} fontSize="9.5" fontWeight="700" fill={o.c} style={{ fontVariantNumeric: 'tabular-nums' }}>{o.v.toFixed(dec)}</text>)}
         {onPick && raw.map((d, i) => (
-          <circle key={`h${i}`} cx={X(d.t)} cy={Y(d.value)} r="10" fill="transparent" style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onPick(d.raw) }}><title>Tap to edit {chartMmDd(d.t)}</title></circle>
+          <circle key={`h${i}`} cx={X(d.t)} cy={Y(d.value)} r="10" fill="transparent" style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onPick(d.recs[d.recs.length - 1]) }}><title>Tap to edit {chartMmDd(d.t)}</title></circle>
         ))}
         {xt.map((tk, i) => <text key={i} x={X(tk.t)} y={height - 5} textAnchor={X(tk.t) <= padL + 2 ? 'start' : X(tk.t) >= W - padR - 2 ? 'end' : 'middle'} fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{tk.label}</text>)}
       </svg>
