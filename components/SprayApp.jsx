@@ -1591,10 +1591,13 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
     // also regulate growth — so both reset the "GDD since suppression" clock.
     const supMap = suppressionMap(products)
     if (Object.keys(supMap).length === 0) return []
+    // A future-dated sheet (marked sprayed but planned ahead) hasn't gone out
+    // yet, so it must not reset the growth-reg clock until its own date.
+    const todayIso = localDateISO()
     const lastByArea = {}
     const areaHasPGR = {} // only areas actually running a PGR program get tracked
     ;(sheets || [])
-      .filter((s) => sheetApplied(s) && s.date)
+      .filter((s) => sheetApplied(s) && s.date && s.date <= todayIso)
       .forEach((s) => {
         const sup = (s.products || []).filter((p) => supMap[p.product])
         if (sup.length === 0) return
@@ -9140,10 +9143,14 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
   // clock — but only for areas actually running a PGR program (a DMI on the rough
   // shouldn't create a growth-reg task there).
   const supMap = suppressionMap(products)
+  // A sheet marked sprayed but dated in the future (planned ahead) hasn't gone
+  // out yet, so it must not reset the growth-reg clock until its own date.
+  const todayIso = localDateISO()
+  const appliedByDate = (s) => sheetApplied(s) && s.date && s.date <= todayIso
   const lastByArea = {}
   const areaHasPGR = {}
   ;(sheets || [])
-    .filter((s) => sheetApplied(s) && s.date)
+    .filter(appliedByDate)
     .forEach((s) => {
       const sup = (s.products || []).filter((p) => supMap[p.product])
       if (sup.length === 0) return
@@ -9157,7 +9164,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
   // area — so a DMI and a PGR sprayed on different days each ride their own
   // curve, instead of the most recent spray hiding the earlier one.
   const regProdByArea = {} // { area: { productName: lastDate } }
-  ;(sheets || []).filter((s) => sheetApplied(s) && s.date).forEach((s) => {
+  ;(sheets || []).filter(appliedByDate).forEach((s) => {
     ;(s.products || []).forEach((p) => {
       if (!supMap[p.product]) return
       const a = regProdByArea[s.area] = regProdByArea[s.area] || {}
@@ -9165,7 +9172,6 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
     })
   })
 
-  const todayIso = localDateISO()
   const areaRows = Object.keys(areas).map((area) => {
     const last = lastByArea[area]
     const gddF = last ? gddSince(daily, last.date, 32) : null
@@ -11459,9 +11465,12 @@ function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, cli
 
   // Growth-reg timing — GDD since each area's last growth-suppressing spray.
   const supMap = suppressionMap(products)
+  // Ignore future-dated sprays (planned but not yet out) so tomorrow's spray
+  // doesn't reset the growth-reg clock before it actually happens.
+  const todayIsoPgr = localDateISO()
   const lastByArea = {}
   const areaHasPGR = {}
-  ;(sheets || []).filter((s) => sheetApplied(s) && s.date).forEach((s) => {
+  ;(sheets || []).filter((s) => sheetApplied(s) && s.date && s.date <= todayIsoPgr).forEach((s) => {
     const sup = (s.products || []).filter((p) => supMap[p.product])
     if (!sup.length) return
     if (sup.some((p) => supMap[p.product] === 'pgr')) areaHasPGR[s.area] = true
