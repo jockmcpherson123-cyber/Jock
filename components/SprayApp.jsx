@@ -9246,13 +9246,16 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
   // accruing GDD since the spray that's in effect right now until it reaches the
   // reapply target, so you can see the next reapply coming.
   const lastGreensSpray = greensSprays.filter((s) => (!wantTok || courseTok(s.area) === wantTok)).map((s) => s.date).sort().pop()
-  const gddFuture = []
+  // Full current cycle: from the spray in effect, day by day through today and on
+  // into the forecast, until GDD reaches the reapply target. Each day carries its
+  // mean temp (°C) so the futures graph can show the heat driving the projection.
+  const cycleGdd = []
   if (lastGreensSpray) {
-    const fdays = (daily || []).filter((d) => d.date >= todayIso && d.tMax != null && d.tMin != null).sort((a, b) => a.date.localeCompare(b.date))
-    for (const d of fdays) {
+    const days = (daily || []).filter((d) => d.date >= lastGreensSpray && d.tMax != null && d.tMin != null).sort((a, b) => a.date.localeCompare(b.date))
+    for (const d of days) {
       const v = Math.round(gddBetween(lastGreensSpray, d.date, 32) / 1.8)
-      gddFuture.push({ date: d.date, value: v })
-      if (target > 0 && v >= target) break // stop once it crosses the reapply target
+      cycleGdd.push({ date: d.date, value: v, future: d.date > todayIso, temp: Math.round((((d.tMax + d.tMin) / 2) - 32) * 5 / 9) })
+      if (target > 0 && v >= target && d.date > todayIso) break // a little past the reapply crossing
     }
   }
 
@@ -9313,7 +9316,13 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
         <p className="font-display text-base font-semibold text-slate-900 mb-1">Clipping yield vs growth-reg GDD</p>
         <p className="font-body text-[11px] text-slate-400 mb-3">Daily average greens clipping yield against the GDD built up since the last growth-suppressing spray. They rise together through a cycle and reset when you reapply — if clippings keep climbing while GDD runs past target, growth is getting away between sprays.</p>
-        <ClipGddTrend clip={clipDaily} gdd={gddDaily} gddFuture={gddFuture} sprays={greensSprayDates} target={target} />
+        <ClipGddTrend clip={clipDaily} gdd={gddDaily} sprays={greensSprayDates} target={target} />
+      </div>
+
+      <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Next reapply — forecast</p>
+        <p className="font-body text-[11px] text-slate-400 mb-3">The current cycle projected forward on the forecast: GDD since the spray in effect ({lastGreensSpray ? fmtDate(lastGreensSpray) : '—'}) climbing toward your {target} °C target. Solid is banked, dashed is forecast, and the ring marks the projected reapply.</p>
+        <GddForecastChart cycle={cycleGdd} target={target} />
       </div>
 
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
@@ -9565,45 +9574,40 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
 // Two solid lines over time on their own axes: daily average clip yield (left)
 // and GDD-since-last-greens-spray (right). Time-based like TrendChart, but with
 // a second Y scale so two very different units (litres vs GDD) can track in one
-// frame. A window control pans/zooms across the year, spray applications show as
-// markers, and the current cycle is projected forward on the forecast (dashed).
+// frame. A window control pans/zooms across the year and spray applications show
+// as markers. (The forecast projection lives in its own GddForecastChart card.)
 const CLIP_COLOR = FERN, GDD_COLOR = AMBER
 const DAY_MS = 86400000
 const WINDOWS = [['all', 'Season', 0], ['12w', '12 wk', 84], ['8w', '8 wk', 56], ['4w', '4 wk', 28], ['2w', '2 wk', 14], ['1w', '1 wk', 7]]
-function ClipGddTrend({ clip = [], gdd = [], gddFuture = [], sprays = [], target = 0, height = 200 }) {
+function ClipGddTrend({ clip = [], gdd = [], sprays = [], target = 0, height = 200 }) {
   const [wrapRef, W] = useMeasuredWidth(560)
   const [winKey, setWinKey] = useState('all')
   const [pan, setPan] = useState(100) // 0 = start of year, 100 = most recent
   const cAll = clip.map((p) => ({ t: chartMs(p.date), value: Number(p.value) })).filter((p) => !isNaN(p.t) && !isNaN(p.value)).sort((a, b) => a.t - b.t)
   const gAll = gdd.map((p) => ({ t: chartMs(p.date), value: Number(p.value) })).filter((p) => !isNaN(p.t) && !isNaN(p.value)).sort((a, b) => a.t - b.t)
-  const fAll = gddFuture.map((p) => ({ t: chartMs(p.date), value: Number(p.value) })).filter((p) => !isNaN(p.t) && !isNaN(p.value)).sort((a, b) => a.t - b.t)
   const sAll = [...new Set(sprays.map((d) => chartMs(d)).filter((t) => !isNaN(t)))].sort((a, b) => a - b)
   if (!cAll.length) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">Log greens clipping yields (Field Data → Clipping Yields) after a growth-reg spray and this fills in.</p>
 
   // Full data span, then the visible window the user has scrubbed to.
-  const fullMin = Math.min(...[...cAll, ...gAll, ...fAll].map((p) => p.t), ...(sAll.length ? sAll : [Infinity]))
-  const fullMax = Math.max(...[...cAll, ...gAll, ...fAll].map((p) => p.t))
+  const fullMin = Math.min(...[...cAll, ...gAll].map((p) => p.t), ...(sAll.length ? sAll : [Infinity]))
+  const fullMax = Math.max(...[...cAll, ...gAll].map((p) => p.t))
   const winDays = (WINDOWS.find((w) => w[0] === winKey) || WINDOWS[0])[2]
   const winMs = winDays * DAY_MS
   let t0 = fullMin, t1 = fullMax
   if (winMs > 0 && winMs < fullMax - fullMin) { t0 = fullMin + (pan / 100) * (fullMax - fullMin - winMs); t1 = t0 + winMs }
   const inWin = (p) => p.t >= t0 && p.t <= t1
-  const cData = cAll.filter(inWin), gData = gAll.filter(inWin), fData = fAll.filter(inWin)
+  const cData = cAll.filter(inWin), gData = gAll.filter(inWin)
   const sIn = sAll.filter((t) => t >= t0 && t <= t1)
 
   const padL = 34, padR = 34, padT = 12, padB = 22, plotW = W - padL - padR, plotH = height - padT - padB
   const X = (t) => padL + (t1 === t0 ? plotW / 2 : ((t - t0) / (t1 - t0)) * plotW)
   const cMax = Math.max(...cData.map((p) => p.value), 1) * 1.14
-  const gMax = Math.max(...gData.map((p) => p.value), ...fData.map((p) => p.value), target || 0, 1) * 1.14
+  const gMax = Math.max(...gData.map((p) => p.value), target || 0, 1) * 1.14
   const YL = (v) => padT + (1 - v / cMax) * plotH
   const YR = (v) => padT + (1 - v / gMax) * plotH
   const cDec = cMax >= 20 ? 0 : 1
   const tk = [0, 1, 2, 3]
-  // dashed forecast continues from the last real GDD point so the line joins up
-  const fPathData = fData.length ? (gData.length ? [gData[gData.length - 1], ...fData] : fData) : []
-  const todayT = fData.length ? fData[0].t : null
-  const reapply = fData.length && target > 0 && fData[fData.length - 1].value >= target ? fData[fData.length - 1] : null
-  const winT = [...new Set([...cData, ...gData, ...fData].map((p) => p.t))].sort((a, b) => a - b)
+  const winT = [...new Set([...cData, ...gData].map((p) => p.t))].sort((a, b) => a - b)
   let xticks
   if (winT.length <= 6) { xticks = winT.map((t) => ({ t, label: chartMmDd(t) })) }
   else {
@@ -9613,7 +9617,6 @@ function ClipGddTrend({ clip = [], gdd = [], gddFuture = [], sprays = [], target
   }
   const cPath = cData.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${YL(d.value).toFixed(1)}`).join(' ')
   const gPath = gData.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${YR(d.value).toFixed(1)}`).join(' ')
-  const fPath = fPathData.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${YR(d.value).toFixed(1)}`).join(' ')
   const zoomed = winMs > 0 && winMs < fullMax - fullMin
   return (
     <div ref={wrapRef}>
@@ -9644,16 +9647,8 @@ function ClipGddTrend({ clip = [], gdd = [], gddFuture = [], sprays = [], target
             <path d={`M${X(t)},${height - padB} l-3,5 h6 z`} fill="#6D4AC2" opacity="0.8" />
           </g>
         ))}
-        {/* today divider, where history hands off to forecast */}
-        {todayT != null && (
-          <line x1={X(todayT)} x2={X(todayT)} y1={padT} y2={height - padB} stroke={INK_3} strokeWidth="1" opacity="0.4" />
-        )}
-        {/* GDD: solid history + dashed forecast */}
-        {fPath && <path d={fPath} fill="none" stroke={GDD_COLOR} strokeWidth="2" strokeDasharray="5 3" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />}
         <path d={gPath} fill="none" stroke={GDD_COLOR} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
         {gData.map((d, i) => <circle key={`gc${i}`} cx={X(d.t)} cy={YR(d.value)} r="2" fill={GDD_COLOR} />)}
-        {reapply && <circle cx={X(reapply.t)} cy={YR(reapply.value)} r="3.5" fill="none" stroke={GDD_COLOR} strokeWidth="1.5" />}
-        {/* clip yield */}
         <path d={cPath} fill="none" stroke={CLIP_COLOR} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
         {cData.map((d, i) => <circle key={`cc${i}`} cx={X(d.t)} cy={YL(d.value)} r="2" fill={CLIP_COLOR} />)}
         {xticks.map((tick, i) => (
@@ -9666,8 +9661,77 @@ function ClipGddTrend({ clip = [], gdd = [], gddFuture = [], sprays = [], target
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 font-body text-[10.5px]" style={{ color: INK_3 }}>
         <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 0, borderTop: `3px solid ${CLIP_COLOR}`, flexShrink: 0 }} />Clip yield (L)</span>
         <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 0, borderTop: `3px solid ${GDD_COLOR}`, flexShrink: 0 }} />Growth-reg GDD (°C)</span>
-        {fData.length > 0 && <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 0, borderTop: `2px dashed ${GDD_COLOR}`, flexShrink: 0 }} />forecast</span>}
         {sIn.length > 0 && <span className="inline-flex items-center gap-1.5"><span style={{ width: 9, height: 9, background: '#6D4AC2', flexShrink: 0, clipPath: 'polygon(50% 100%, 0 0, 100% 0)' }} />spray applied</span>}
+      </div>
+    </div>
+  )
+}
+
+// Futures: the current growth-reg cycle projected forward on the forecast. The
+// GDD line runs solid up to today then dashed through the forecast until it hits
+// the reapply target (ringed). A faint temp line shows the heat driving it.
+const TEMP_COLOR = '#2a78d6'
+function GddForecastChart({ cycle = [], target = 0, height = 190 }) {
+  const [wrapRef, W] = useMeasuredWidth(560)
+  const data = cycle.map((p) => ({ t: chartMs(p.date), value: Number(p.value), future: !!p.future, temp: p.temp })).filter((p) => !isNaN(p.t) && !isNaN(p.value)).sort((a, b) => a.t - b.t)
+  if (data.length < 2) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">Once a greens growth-reg spray is in effect, this projects the GDD forward on the forecast to the next reapply.</p>
+  const padL = 34, padR = 34, padT = 12, padB = 22, plotW = W - padL - padR, plotH = height - padT - padB
+  const tMin = data[0].t, tMax = data[data.length - 1].t
+  const X = (t) => padL + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
+  const gMax = Math.max(...data.map((p) => p.value), target || 0, 1) * 1.1
+  const YG = (v) => padT + (1 - v / gMax) * plotH
+  const temps = data.map((p) => p.temp).filter((v) => v != null && !isNaN(v))
+  const tHi = temps.length ? Math.max(...temps) : null, tLo = temps.length ? Math.min(...temps) : null
+  const YT = (v) => (tHi == null || tHi === tLo) ? padT + plotH * 0.5 : padT + (1 - (v - tLo) / (tHi - tLo)) * plotH
+  const past = data.filter((p) => !p.future), fut = data.filter((p) => p.future)
+  const futJoin = past.length && fut.length ? [past[past.length - 1], ...fut] : fut
+  const boundaryT = fut.length ? fut[0].t : null
+  const reapply = target > 0 ? data.find((p) => p.value >= target) : null
+  const gPast = past.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${YG(d.value).toFixed(1)}`).join(' ')
+  const gFut = futJoin.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${YG(d.value).toFixed(1)}`).join(' ')
+  const tempPath = temps.length ? data.filter((p) => p.temp != null).map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${YT(d.temp).toFixed(1)}`).join(' ') : ''
+  const tk = [0, 1, 2, 3]
+  const xticks = [0, 1, 2, 3, 4].map((i) => { const t = tMin + (i / 4) * (tMax - tMin); return { t, label: chartMmDd(t) } })
+  return (
+    <div ref={wrapRef}>
+      <svg viewBox={`0 0 ${W} ${height}`} width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
+        {tk.map((i) => {
+          const gv = (i / 3) * gMax
+          return (
+            <g key={`y${i}`}>
+              <line x1={padL} x2={W - padR} y1={YG(gv)} y2={YG(gv)} stroke="#EDF0ED" strokeWidth="1" />
+              <text x={padL - 5} y={YG(gv) + 3} textAnchor="end" fontSize="8.5" fill={GDD_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>{Math.round(gv)}</text>
+            </g>
+          )
+        })}
+        {tHi != null && [tLo, tHi].map((v, i) => (
+          <text key={`tr${i}`} x={W - padR + 5} y={YT(v) + 3} textAnchor="start" fontSize="8.5" fill={TEMP_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>{v}</text>
+        ))}
+        {target > 0 && target <= gMax && (
+          <>
+            <line x1={padL} x2={W - padR} y1={YG(target)} y2={YG(target)} stroke={GDD_COLOR} strokeWidth="1.2" strokeDasharray="4 2" opacity="0.7" />
+            <text x={W - padR} y={YG(target) - 3} textAnchor="end" fontSize="8" fill={GDD_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>reapply {target}</text>
+          </>
+        )}
+        {boundaryT != null && <line x1={X(boundaryT)} x2={X(boundaryT)} y1={padT} y2={height - padB} stroke={INK_3} strokeWidth="1" opacity="0.4" />}
+        {boundaryT != null && <text x={X(boundaryT)} y={padT - 2} textAnchor="middle" fontSize="8" fill={INK_3}>today</text>}
+        {tempPath && <path d={tempPath} fill="none" stroke={TEMP_COLOR} strokeWidth="1.5" opacity="0.35" strokeLinejoin="round" strokeLinecap="round" />}
+        {gPast && <path d={gPast} fill="none" stroke={GDD_COLOR} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />}
+        {gFut && <path d={gFut} fill="none" stroke={GDD_COLOR} strokeWidth="2" strokeDasharray="5 3" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />}
+        {reapply && (
+          <>
+            <circle cx={X(reapply.t)} cy={YG(reapply.value)} r="4" fill="none" stroke={GDD_COLOR} strokeWidth="1.6" />
+            <text x={X(reapply.t)} y={YG(reapply.value) - 7} textAnchor="middle" fontSize="8.5" fontWeight="700" fill={GDD_COLOR}>{chartMmDd(reapply.t)}</text>
+          </>
+        )}
+        {xticks.map((tick, i) => (
+          <text key={`x${i}`} x={X(tick.t)} y={height - 5} textAnchor={i === 0 ? 'start' : i === xticks.length - 1 ? 'end' : 'middle'} fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{tick.label}</text>
+        ))}
+      </svg>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 font-body text-[10.5px]" style={{ color: INK_3 }}>
+        <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 0, borderTop: `3px solid ${GDD_COLOR}`, flexShrink: 0 }} />GDD banked</span>
+        <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 0, borderTop: `2px dashed ${GDD_COLOR}`, flexShrink: 0 }} />forecast</span>
+        {temps.length > 0 && <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 0, borderTop: `2px solid ${TEMP_COLOR}`, opacity: 0.5, flexShrink: 0 }} />mean temp (°C)</span>}
       </div>
     </div>
   )
