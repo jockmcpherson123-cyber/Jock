@@ -9229,6 +9229,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
   }
   const greensSprays = (sheets || []).filter((s) => appliedByDate(s) && areaSurface(s.area) === 'green' && (s.products || []).some((p) => supMap[p.product]))
   const wantTok = course ? courseTok(course) : ''
+  const greensSprayDates = [...new Set(greensSprays.filter((s) => (!wantTok || courseTok(s.area) === wantTok)).map((s) => s.date))].sort()
   // average every greens clipping reading logged on a given day → one point/day
   const clipByDay = {}
   ;(clippings || [])
@@ -9241,6 +9242,19 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
     const last = prior[prior.length - 1]
     return last ? { date, value: Math.round(gddBetween(last, date, 32) / 1.8) } : null
   }).filter(Boolean)
+  // Futures — project the current cycle forward on the forecast temps: keep
+  // accruing GDD since the spray that's in effect right now until it reaches the
+  // reapply target, so you can see the next reapply coming.
+  const lastGreensSpray = greensSprays.filter((s) => (!wantTok || courseTok(s.area) === wantTok)).map((s) => s.date).sort().pop()
+  const gddFuture = []
+  if (lastGreensSpray) {
+    const fdays = (daily || []).filter((d) => d.date >= todayIso && d.tMax != null && d.tMin != null).sort((a, b) => a.date.localeCompare(b.date))
+    for (const d of fdays) {
+      const v = Math.round(gddBetween(lastGreensSpray, d.date, 32) / 1.8)
+      gddFuture.push({ date: d.date, value: v })
+      if (target > 0 && v >= target) break // stop once it crosses the reapply target
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -9299,7 +9313,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
         <p className="font-display text-base font-semibold text-slate-900 mb-1">Clipping yield vs growth-reg GDD</p>
         <p className="font-body text-[11px] text-slate-400 mb-3">Daily average greens clipping yield against the GDD built up since the last growth-suppressing spray. They rise together through a cycle and reset when you reapply — if clippings keep climbing while GDD runs past target, growth is getting away between sprays.</p>
-        <ClipGddTrend clip={clipDaily} gdd={gddDaily} target={target} />
+        <ClipGddTrend clip={clipDaily} gdd={gddDaily} gddFuture={gddFuture} sprays={greensSprayDates} target={target} />
       </div>
 
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
@@ -9551,35 +9565,64 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
 // Two solid lines over time on their own axes: daily average clip yield (left)
 // and GDD-since-last-greens-spray (right). Time-based like TrendChart, but with
 // a second Y scale so two very different units (litres vs GDD) can track in one
-// frame. Reuses the same palette, type and x-axis logic to stay in the system.
+// frame. A window control pans/zooms across the year, spray applications show as
+// markers, and the current cycle is projected forward on the forecast (dashed).
 const CLIP_COLOR = FERN, GDD_COLOR = AMBER
-function ClipGddTrend({ clip = [], gdd = [], target = 0, height = 200 }) {
+const DAY_MS = 86400000
+const WINDOWS = [['all', 'Season', 0], ['12w', '12 wk', 84], ['8w', '8 wk', 56], ['4w', '4 wk', 28]]
+function ClipGddTrend({ clip = [], gdd = [], gddFuture = [], sprays = [], target = 0, height = 200 }) {
   const [wrapRef, W] = useMeasuredWidth(560)
-  const cData = clip.map((p) => ({ t: chartMs(p.date), value: Number(p.value) })).filter((p) => !isNaN(p.t) && !isNaN(p.value)).sort((a, b) => a.t - b.t)
-  const gData = gdd.map((p) => ({ t: chartMs(p.date), value: Number(p.value) })).filter((p) => !isNaN(p.t) && !isNaN(p.value)).sort((a, b) => a.t - b.t)
-  if (!cData.length) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">Log greens clipping yields (Field Data → Clipping Yields) after a growth-reg spray and this fills in.</p>
+  const [winKey, setWinKey] = useState('all')
+  const [pan, setPan] = useState(100) // 0 = start of year, 100 = most recent
+  const cAll = clip.map((p) => ({ t: chartMs(p.date), value: Number(p.value) })).filter((p) => !isNaN(p.t) && !isNaN(p.value)).sort((a, b) => a.t - b.t)
+  const gAll = gdd.map((p) => ({ t: chartMs(p.date), value: Number(p.value) })).filter((p) => !isNaN(p.t) && !isNaN(p.value)).sort((a, b) => a.t - b.t)
+  const fAll = gddFuture.map((p) => ({ t: chartMs(p.date), value: Number(p.value) })).filter((p) => !isNaN(p.t) && !isNaN(p.value)).sort((a, b) => a.t - b.t)
+  const sAll = [...new Set(sprays.map((d) => chartMs(d)).filter((t) => !isNaN(t)))].sort((a, b) => a - b)
+  if (!cAll.length) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">Log greens clipping yields (Field Data → Clipping Yields) after a growth-reg spray and this fills in.</p>
+
+  // Full data span, then the visible window the user has scrubbed to.
+  const fullMin = Math.min(...[...cAll, ...gAll, ...fAll].map((p) => p.t), ...(sAll.length ? sAll : [Infinity]))
+  const fullMax = Math.max(...[...cAll, ...gAll, ...fAll].map((p) => p.t))
+  const winDays = (WINDOWS.find((w) => w[0] === winKey) || WINDOWS[0])[2]
+  const winMs = winDays * DAY_MS
+  let t0 = fullMin, t1 = fullMax
+  if (winMs > 0 && winMs < fullMax - fullMin) { t0 = fullMin + (pan / 100) * (fullMax - fullMin - winMs); t1 = t0 + winMs }
+  const inWin = (p) => p.t >= t0 && p.t <= t1
+  const cData = cAll.filter(inWin), gData = gAll.filter(inWin), fData = fAll.filter(inWin)
+  const sIn = sAll.filter((t) => t >= t0 && t <= t1)
+
   const padL = 34, padR = 34, padT = 12, padB = 22, plotW = W - padL - padR, plotH = height - padT - padB
-  const allT = [...cData, ...gData].map((p) => p.t)
-  const tMin = Math.min(...allT), tMax = Math.max(...allT)
-  const X = (t) => padL + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
+  const X = (t) => padL + (t1 === t0 ? plotW / 2 : ((t - t0) / (t1 - t0)) * plotW)
   const cMax = Math.max(...cData.map((p) => p.value), 1) * 1.14
-  const gMax = Math.max(...gData.map((p) => p.value), target || 0, 1) * 1.14
+  const gMax = Math.max(...gData.map((p) => p.value), ...fData.map((p) => p.value), target || 0, 1) * 1.14
   const YL = (v) => padT + (1 - v / cMax) * plotH
   const YR = (v) => padT + (1 - v / gMax) * plotH
   const cDec = cMax >= 20 ? 0 : 1
   const tk = [0, 1, 2, 3]
-  const times = [...new Set(allT)].sort((a, b) => a - b)
+  // dashed forecast continues from the last real GDD point so the line joins up
+  const fPathData = fData.length ? (gData.length ? [gData[gData.length - 1], ...fData] : fData) : []
+  const todayT = fData.length ? fData[0].t : null
+  const reapply = fData.length && target > 0 && fData[fData.length - 1].value >= target ? fData[fData.length - 1] : null
+  const winT = [...new Set([...cData, ...gData, ...fData].map((p) => p.t))].sort((a, b) => a - b)
   let xticks
-  if (times.length <= 6) { xticks = times.map((t) => ({ t, label: chartMmDd(t) })) }
+  if (winT.length <= 6) { xticks = winT.map((t) => ({ t, label: chartMmDd(t) })) }
   else {
-    xticks = []; const d = new Date(times[0]); d.setDate(1); if (d.getTime() < times[0]) d.setMonth(d.getMonth() + 1)
-    while (d.getTime() <= times[times.length - 1]) { xticks.push({ t: d.getTime(), label: MONTHS_SHORT[d.getMonth()] }); d.setMonth(d.getMonth() + 1) }
-    if (!xticks.length) xticks = [{ t: times[0], label: chartMmDd(times[0]) }, { t: times[times.length - 1], label: chartMmDd(times[times.length - 1]) }]
+    xticks = []; const d = new Date(winT[0]); d.setDate(1); if (d.getTime() < winT[0]) d.setMonth(d.getMonth() + 1)
+    while (d.getTime() <= winT[winT.length - 1]) { xticks.push({ t: d.getTime(), label: MONTHS_SHORT[d.getMonth()] }); d.setMonth(d.getMonth() + 1) }
+    if (!xticks.length) xticks = [{ t: winT[0], label: chartMmDd(winT[0]) }, { t: winT[winT.length - 1], label: chartMmDd(winT[winT.length - 1]) }]
   }
   const cPath = cData.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${YL(d.value).toFixed(1)}`).join(' ')
   const gPath = gData.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${YR(d.value).toFixed(1)}`).join(' ')
+  const fPath = fPathData.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${YR(d.value).toFixed(1)}`).join(' ')
+  const zoomed = winMs > 0 && winMs < fullMax - fullMin
   return (
     <div ref={wrapRef}>
+      <div className="flex items-center gap-1.5 mb-2">
+        {WINDOWS.map(([k, lab]) => (
+          <button key={k} type="button" onClick={() => setWinKey(k)} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full transition"
+            style={winKey === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{lab}</button>
+        ))}
+      </div>
       <svg viewBox={`0 0 ${W} ${height}`} width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
         {tk.map((i) => {
           const cv = (i / 3) * cMax, gv = (i / 3) * gMax
@@ -9594,17 +9637,37 @@ function ClipGddTrend({ clip = [], gdd = [], target = 0, height = 200 }) {
         {target > 0 && target <= gMax && (
           <line x1={padL} x2={W - padR} y1={YR(target)} y2={YR(target)} stroke={GDD_COLOR} strokeWidth="1" strokeDasharray="4 2" opacity="0.5" />
         )}
+        {/* spray applications */}
+        {sIn.map((t, i) => (
+          <g key={`sp${i}`}>
+            <line x1={X(t)} x2={X(t)} y1={padT} y2={height - padB} stroke="#6D4AC2" strokeWidth="1" strokeDasharray="2 2" opacity="0.55" />
+            <path d={`M${X(t)},${height - padB} l-3,5 h6 z`} fill="#6D4AC2" opacity="0.8" />
+          </g>
+        ))}
+        {/* today divider, where history hands off to forecast */}
+        {todayT != null && (
+          <line x1={X(todayT)} x2={X(todayT)} y1={padT} y2={height - padB} stroke={INK_3} strokeWidth="1" opacity="0.4" />
+        )}
+        {/* GDD: solid history + dashed forecast */}
+        {fPath && <path d={fPath} fill="none" stroke={GDD_COLOR} strokeWidth="2" strokeDasharray="5 3" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />}
         <path d={gPath} fill="none" stroke={GDD_COLOR} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
         {gData.map((d, i) => <circle key={`gc${i}`} cx={X(d.t)} cy={YR(d.value)} r="2" fill={GDD_COLOR} />)}
+        {reapply && <circle cx={X(reapply.t)} cy={YR(reapply.value)} r="3.5" fill="none" stroke={GDD_COLOR} strokeWidth="1.5" />}
+        {/* clip yield */}
         <path d={cPath} fill="none" stroke={CLIP_COLOR} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
         {cData.map((d, i) => <circle key={`cc${i}`} cx={X(d.t)} cy={YL(d.value)} r="2" fill={CLIP_COLOR} />)}
         {xticks.map((tick, i) => (
           <text key={`x${i}`} x={X(tick.t)} y={height - 5} textAnchor={X(tick.t) <= padL + 2 ? 'start' : X(tick.t) >= W - padR - 2 ? 'end' : 'middle'} fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{tick.label}</text>
         ))}
       </svg>
+      {zoomed && (
+        <input type="range" min="0" max="100" value={pan} onChange={(e) => setPan(Number(e.target.value))} className="w-full mt-1" style={{ accentColor: FERN }} aria-label="Scrub across the year" />
+      )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 font-body text-[10.5px]" style={{ color: INK_3 }}>
         <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 0, borderTop: `3px solid ${CLIP_COLOR}`, flexShrink: 0 }} />Clip yield (L)</span>
         <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 0, borderTop: `3px solid ${GDD_COLOR}`, flexShrink: 0 }} />Growth-reg GDD (°C)</span>
+        {fData.length > 0 && <span className="inline-flex items-center gap-1.5"><span style={{ width: 14, height: 0, borderTop: `2px dashed ${GDD_COLOR}`, flexShrink: 0 }} />forecast</span>}
+        {sIn.length > 0 && <span className="inline-flex items-center gap-1.5"><span style={{ width: 9, height: 9, background: '#6D4AC2', flexShrink: 0, clipPath: 'polygon(50% 100%, 0 0, 100% 0)' }} />spray applied</span>}
       </div>
     </div>
   )
