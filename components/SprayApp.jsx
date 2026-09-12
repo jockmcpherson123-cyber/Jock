@@ -9459,7 +9459,7 @@ function trailingAvg(pts, win) {
   return clean.map((p, i) => { const s = Math.max(0, i - win + 1); const sl = clean.slice(s, i + 1); return { date: p.date, value: sl.reduce((a, b) => a + Number(b.value), 0) / sl.length } })
 }
 
-function TrendChart({ points = null, series = null, color = FERN, height = 170, unit = '', showAvg = true, refLine = null, band = null, guides = null, baseline = null, legend = true, onPick = null, shadeGuides = false }) {
+function TrendChart({ points = null, series = null, color = FERN, height = 170, unit = '', showAvg = true, refLine = null, band = null, guides = null, baseline = null, legend = true, onPick = null, shadeGuides = true }) {
   const [wrapRef, W] = useMeasuredWidth(560)
   // Normalise to a list of series. Single-series callers keep passing `points`
   // and get the classic filled trend with a called-out latest value.
