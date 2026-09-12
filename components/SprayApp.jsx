@@ -9279,7 +9279,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
       {gddSeries.length >= 2 && (
         <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
           <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Season GDD · running total</p>
-          <TrendChart points={gddSeries.map((g) => ({ date: g.date, value: g.acc }))} unit="GDD" baseline={0} showAvg={false} />
+          <TrendChart points={gddSeries.map((g) => ({ date: g.date, value: g.acc }))} unit="GDD" baseline={0} showAvg={false} trailing />
         </div>
       )}
 
@@ -9459,12 +9459,30 @@ function trailingAvg(pts, win) {
   return clean.map((p, i) => { const s = Math.max(0, i - win + 1); const sl = clean.slice(s, i + 1); return { date: p.date, value: sl.reduce((a, b) => a + Number(b.value), 0) / sl.length } })
 }
 
-function TrendChart({ points = null, series = null, color = FERN, height = 170, unit = '', showAvg = true, refLine = null, band = null, guides = null, baseline = null, legend = true, onPick = null, shadeGuides = true }) {
+function TrendChart({ points = null, series = null, color = FERN, height = 170, unit = '', showAvg = true, refLine = null, band = null, guides = null, baseline = null, legend = true, onPick = null, shadeGuides = true, trailing = false }) {
   const [wrapRef, W] = useMeasuredWidth(560)
+  // `trailing` turns a single-series chart into the Style-2 overlay: average to
+  // one point/day, then a faint daily line behind smooth 7/14/30-day trackers.
+  let baseSeries = series
+  if (trailing && (!series || !series.length) && points && points.length) {
+    const byDay = {}
+    points.forEach((p) => { const v = Number(p && p.value); if (!p || !p.date || p.value == null || p.value === '' || isNaN(v)) return; (byDay[p.date] = byDay[p.date] || { s: 0, n: 0 }); byDay[p.date].s += v; byDay[p.date].n++ })
+    const daily = Object.keys(byDay).sort().map((d) => ({ date: d, value: byDay[d].s / byDay[d].n }))
+    if (daily.length >= 4) {
+      const dt = daily.map((p) => ({ t: chartMs(p.date), value: p.value, date: p.date })).filter((p) => !isNaN(p.t)).sort((a, b) => a.t - b.t)
+      const roll = (days) => { const win = days * 86400000; return dt.map((p, i) => { let s = 0, c = 0; for (let j = i; j >= 0 && p.t - dt[j].t <= win; j--) { s += dt[j].value; c++ } return { date: p.date, value: s / c } }) }
+      baseSeries = [
+        { name: 'Daily', color: '#B7B2A8', vals: daily, width: 1, opacity: 0.5 },
+        { name: '30-day', color: '#5B8DB8', vals: roll(30), width: 2.4 },
+        { name: '14-day', color: '#C08A2E', vals: roll(14), width: 2.4 },
+        { name: '7-day', color: FERN, vals: roll(7), width: 2.6, callout: true },
+      ]
+    }
+  }
   // Normalise to a list of series. Single-series callers keep passing `points`
   // and get the classic filled trend with a called-out latest value.
-  const rawSeries = (series && series.length)
-    ? series
+  const rawSeries = (baseSeries && baseSeries.length)
+    ? baseSeries
     : [{ color, vals: points || [], width: 2, area: true, dots: true, callout: true, showAvg, pickable: !!onPick }]
   const srs = rawSeries.map((s, i) => ({
     ...s,
@@ -11298,7 +11316,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
               <p className="font-body text-[12px] text-slate-400 py-4 text-center">No {trendDef.label} entered on these tests yet.</p>
             ) : (
               <>
-                <TrendChart points={trendSeries} unit={trendDef.unit || 'ppm'} refLine={trendDef.floor ? { value: trendDef.floor, label: `MLSN ${trendDef.floor}` } : null} />
+                <TrendChart points={trendSeries} unit={trendDef.unit || 'ppm'} refLine={trendDef.floor ? { value: trendDef.floor, label: `MLSN ${trendDef.floor}` } : null} trailing />
                 {trendSeries.length < 2 && <p className="font-body text-[10px] text-slate-400 mt-1.5 text-center">Add another test date to draw the trend line.</p>}
               </>
             )}
@@ -11632,7 +11650,7 @@ function TimingTab({ soilSeries, hasLocation, products = [] }) {
       {recent.length >= 2 && (
         <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
           <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Soil temp · last {recent.length} days</p>
-          <TrendChart points={recent} unit="°F" />
+          <TrendChart points={recent} unit="°F" trailing />
         </div>
       )}
 

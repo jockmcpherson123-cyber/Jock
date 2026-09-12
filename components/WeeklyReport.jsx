@@ -649,7 +649,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
           </div>
           <div>
             <p className="font-body text-[9px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Clipping yield trend</p>
-            {clipTrend.length >= 2 ? <TrendBars points={clipTrend} color="#2563EB" /> : <p className="font-body text-[10px] text-slate-300 no-print">Chart appears after 2+ clipping logs.</p>}
+            {clipTrend.length >= 2 ? <TrendLine points={clipTrend} color={FERN} /> : <p className="font-body text-[10px] text-slate-300 no-print">Chart appears after 2+ clipping logs.</p>}
           </div>
         </div>
 
