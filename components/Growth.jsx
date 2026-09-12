@@ -213,6 +213,15 @@ export default function Growth({ daily = [], clippings = [], sheets = [], produc
         )}
       </div>
 
+      {/* Clip volume — Style-2 overlay (daily + trailing + target window) */}
+      {surf.measured && hasClip && clipRows.length >= 2 && (
+        <div className="paper-card p-4 mb-4">
+          <p className="font-body text-sm font-bold mb-1" style={{ color: INK }}>Clip volume · trend</p>
+          <p className="font-body text-[11px] mb-1" style={{ color: INK_3 }}>Daily readings with 7 / 14 / 30-day trailing trackers, inside your target range.</p>
+          <ClipTrendOverlay rows={clipRows} low={clipLow} high={clipHigh} unit={unit} />
+        </div>
+      )}
+
       {/* Trend chart */}
       {gpSeries.length > 3 && (
         <div className="paper-card p-4 mb-4">
@@ -417,4 +426,62 @@ function guidance(surf, { clipStatus, gpPct, combinedPct, modeled, hasProgram, h
   if (clipStatus === 'in') return `Growth is in your target range — the program is doing its job.${hasProgram ? ` It's holding back about ${combinedPct}% right now.` : ''}`
   if (!hasClip) return `Log a few days of ${surf.label.toLowerCase()} clipping volume and set a target range, and this will tell you whether growth is where you want it — and how much the PGR program is holding back. The modeled read above works right now with no data.`
   return `Set a target range below and this will read whether growth is where you want it.`
+}
+
+// Style-2 clip-volume overlay: one point per day (averaged), a faint daily line
+// behind smooth 7/14/30-day trailing trackers, inside the shaded target range.
+const CT_RAW = '#B7B2A8', CT_7 = FERN, CT_14 = '#C08A2E', CT_30 = '#5B8DB8'
+const CT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+function ClipTrendOverlay({ rows = [], low = '', high = '', unit = '', height = 190 }) {
+  const byDay = {}
+  rows.forEach((r) => { if (!r.date || r.volume == null || r.volume === '' || isNaN(Number(r.volume))) return; const s = String(r.date).split('-').map(Number); if (s.length !== 3) return; const t = new Date(s[0], s[1] - 1, s[2]).getTime(); if (isNaN(t)) return; (byDay[t] = byDay[t] || { s: 0, n: 0 }); byDay[t].s += Number(r.volume); byDay[t].n++ })
+  const data = Object.keys(byDay).map(Number).sort((a, b) => a - b).map((t) => ({ t, value: byDay[t].s / byDay[t].n }))
+  if (data.length < 2) return null
+  const dayTrail = (days) => { const win = days * 86400000; return data.map((p, i) => { let s = 0, c = 0; for (let j = i; j >= 0 && p.t - data[j].t <= win; j--) { s += data[j].value; c++ } return { t: p.t, value: s / c } }) }
+  const t7 = dayTrail(7), t14 = dayTrail(14), t30 = dayTrail(30)
+  const lo = low !== '' && !isNaN(Number(low)) ? Number(low) : null
+  const hi = high !== '' && !isNaN(Number(high)) ? Number(high) : null
+  const W = 560, padL = 34, padR = 50, padT = 12, padB = 20, plotW = W - padL - padR, plotH = height - padT - padB
+  const all = [...data, ...t7, ...t14, ...t30].map((d) => d.value); if (lo != null) all.push(lo); if (hi != null) all.push(hi)
+  const mn = Math.min(0, ...all), mx = Math.max(...all) * 1.08 || 1
+  const tMin = data[0].t, tMax = data[data.length - 1].t
+  const X = (t) => padL + (tMax === tMin ? plotW / 2 : ((t - tMin) / (tMax - tMin)) * plotW)
+  const Y = (v) => padT + (1 - (v - mn) / ((mx - mn) || 1)) * plotH
+  const dec = mx >= 20 ? 0 : 1
+  const P = (a) => a.map((d, i) => `${i ? 'L' : 'M'}${X(d.t).toFixed(1)},${Y(d.value).toFixed(1)}`).join(' ')
+  const yTicks = [0, 1, 2, 3].map((t) => mn + (t / 3) * (mx - mn))
+  const lab = [{ y: Y(t7[t7.length - 1].value), c: CT_7, v: t7[t7.length - 1].value }, { y: Y(t14[t14.length - 1].value), c: CT_14, v: t14[t14.length - 1].value }, { y: Y(t30[t30.length - 1].value), c: CT_30, v: t30[t30.length - 1].value }]
+  lab.sort((a, b) => a.y - b.y); for (let i = 1; i < lab.length; i++) if (lab[i].y - lab[i - 1].y < 13) lab[i].y = lab[i - 1].y + 13
+  let last = -1, xt = []; data.forEach((d) => { const mo = new Date(d.t).getMonth(); if (mo !== last) { xt.push({ t: d.t, label: CT_MONTHS[mo] }); last = mo } })
+  const legend = [['Daily', CT_RAW], ['7-day', CT_7], ['14-day', CT_14], ['30-day', CT_30]]
+  return (
+    <div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '4px 16px', margin: '2px 0 2px', fontSize: 11, fontWeight: 600, color: INK_2 }}>
+        {legend.map(([n, c]) => <span key={n} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 16, height: 3, borderRadius: 2, background: c }} />{n}</span>)}
+      </div>
+      <svg viewBox={`0 0 ${W} ${height}`} width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
+        {yTicks.map((v, i) => (
+          <g key={i}>
+            <line x1={padL} x2={W - padR} y1={Y(v)} y2={Y(v)} stroke="#ECE9DD" strokeWidth="1" />
+            <text x={padL - 5} y={Y(v) + 3} textAnchor="end" fontSize="8.5" fill={INK_3} style={{ fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(dec)}</text>
+          </g>
+        ))}
+        {lo != null && hi != null && (
+          <>
+            <rect x={padL} y={Y(hi)} width={plotW} height={Math.max(1, Y(lo) - Y(hi))} fill={FERN} opacity="0.09" />
+            <line x1={padL} x2={W - padR} y1={Y(hi)} y2={Y(hi)} stroke={FERN} strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
+            <line x1={padL} x2={W - padR} y1={Y(lo)} y2={Y(lo)} stroke={FERN} strokeWidth="1" strokeDasharray="4 3" opacity="0.5" />
+            <text x={W - padR} y={Y(hi) - 3} textAnchor="end" fontSize="8" fill={FERN} style={{ fontVariantNumeric: 'tabular-nums' }}>target {lo}–{hi}{unit ? ` ${unit}` : ''}</text>
+          </>
+        )}
+        <path d={P(data)} fill="none" stroke={CT_RAW} strokeWidth="1" opacity="0.5" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={P(t30)} fill="none" stroke={CT_30} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={P(t14)} fill="none" stroke={CT_14} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={P(t7)} fill="none" stroke={CT_7} strokeWidth="2.6" strokeLinejoin="round" strokeLinecap="round" />
+        {[[t7, CT_7], [t14, CT_14], [t30, CT_30]].map(([a, c], i) => <circle key={i} cx={X(a[a.length - 1].t)} cy={Y(a[a.length - 1].value)} r="3" fill={c} />)}
+        {lab.map((o, i) => <text key={i} x={W - padR + 6} y={o.y + 3} fontSize="9.5" fontWeight="700" fill={o.c} style={{ fontVariantNumeric: 'tabular-nums' }}>{o.v.toFixed(dec)}</text>)}
+        {xt.map((tk, i) => <text key={`x${i}`} x={X(tk.t)} y={height - 5} textAnchor={X(tk.t) <= padL + 2 ? 'start' : X(tk.t) >= W - padR - 2 ? 'end' : 'middle'} fontSize="8.5" fill={INK_3} style={{ fontVariantNumeric: 'tabular-nums' }}>{tk.label}</text>)}
+      </svg>
+    </div>
+  )
 }
