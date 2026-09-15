@@ -321,6 +321,7 @@ const NAV_MANAGER = [
     { id: 'tournament', label: 'Tournament', m: 'tournament', r: null },
   ] },
   { title: 'Reports', items: [
+    { id: 'aibrief', label: 'Weekly AI Reports', m: 'turf', r: 'brief', follow: true },
     { id: 'weekly', label: 'Weekly Report', m: 'turf', r: 'report', follow: true },
     { id: 'season', label: 'Season Reports', m: 'spray', r: 'reports' },
     { id: 'weather', label: 'Weather', m: 'spray', r: 'weather' },
@@ -8594,7 +8595,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
               <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
             </div>
             <div className="flex gap-1 font-body text-sm overflow-x-auto">
-              {[['dashboard', 'Dashboard'], ['brief', 'AI Brief'], ['report', 'Weekly Report'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['hoc', 'Height of Cut'], ['scouting', 'Scouting'], ['timeline', 'Timeline'], ['knowledge', 'Reference']].map(([key, label]) => (
+              {[['dashboard', 'Dashboard'], ['report', 'Weekly Report'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['hoc', 'Height of Cut'], ['scouting', 'Scouting'], ['timeline', 'Timeline'], ['knowledge', 'Reference']].map(([key, label]) => (
                 <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
                   {label}
                 </button>
