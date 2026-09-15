@@ -9497,7 +9497,7 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
   })).filter((s) => s.data.length)
   if (!srs.length) return <p ref={wrapRef} className="font-body text-[11px] text-slate-400">No data yet.</p>
 
-  const padL = 34, padR = 12, padT = 12, padB = 20, plotW = W - padL - padR
+  const padL = 34, padR = 30, padT = 12, padB = 20, plotW = W - padL - padR
   const allV = srs.flatMap((s) => s.data.map((p) => p.value))
   const ref = refLine && refLine.value != null && !isNaN(Number(refLine.value)) ? Number(refLine.value) : null
   const bMin = band && band.min != null && band.min !== '' && !isNaN(Number(band.min)) ? Number(band.min) : null
@@ -9537,6 +9537,15 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
   if (ref != null) legendItems.push({ name: refLine.label || `target ${fmtY(ref)}`, color: refLine.color || '#B7791F', dash: true })
   gs.forEach((g) => legendItems.push({ name: g.label || fmtY(g.value), color: g.color, dash: true }))
   const showLegend = legend && legendItems.length > 1
+  // Freight-study look: a value tag at the end of every prominent line, in the
+  // right margin, nudged apart vertically so stacked lines each stay readable.
+  const endLabels = srs.map((s, si) => {
+    const last = s.data[s.data.length - 1]
+    const show = last && (s.opacity == null || s.opacity >= 0.8) && (s.callout || s.name || srs.length === 1)
+    return show ? { si, x: X(last.t), y: Y(last.value), color: s.color, text: fmtY(last.value) } : null
+  }).filter(Boolean).sort((a, b) => a.y - b.y)
+  for (let i = 1; i < endLabels.length; i++) { if (endLabels[i].y - endLabels[i - 1].y < 11) endLabels[i].y = endLabels[i - 1].y + 11 }
+  const labeledSi = new Set(endLabels.map((e) => e.si))
 
   return (
     <div ref={wrapRef}>
@@ -9585,10 +9594,13 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
                   <title>Tap to edit {chartMmDd(d.t)}</title>
                 </circle>
               ))}
-              {s.callout && <text x={X(last.t)} y={Y(last.value) - 7} textAnchor="end" fontSize="11" fontWeight="700" fill={s.color} style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtY(last.value)}</text>}
+              {labeledSi.has(si) && <circle cx={X(last.t)} cy={Y(last.value)} r="3.4" fill={s.color} stroke="#fff" strokeWidth="1.2" />}
             </g>
           )
         })}
+        {endLabels.map((e, i) => (
+          <text key={`el${i}`} x={Math.min(e.x + 6, W - 1)} y={e.y + 3} textAnchor="start" fontSize="10.5" fontWeight="700" fill={e.color} style={{ fontVariantNumeric: 'tabular-nums' }}>{e.text}</text>
+        ))}
         {xticks.map((tk, i) => (
           <text key={`x${i}`} x={X(tk.t)} y={height - 5} textAnchor={X(tk.t) <= padL + 2 ? 'start' : X(tk.t) >= W - padR - 2 ? 'end' : 'middle'} fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{tk.label}</text>
         ))}
@@ -9760,6 +9772,9 @@ function ClipGddTrend({ clip = [], gdd = [], sprays = [], target = 0, height = 2
         {gData.map((d, i) => <circle key={`gc${i}`} cx={X(d.t)} cy={YR(d.value)} r="2" fill={GDD_COLOR} />)}
         <path d={cPath} fill="none" stroke={CLIP_COLOR} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
         {cData.map((d, i) => <circle key={`cc${i}`} cx={X(d.t)} cy={YL(d.value)} r="2" fill={CLIP_COLOR} />)}
+        {/* Freight-study endpoint value tags on both lines */}
+        {gData.length > 0 && (() => { const d = gData[gData.length - 1]; return (<g><circle cx={X(d.t)} cy={YR(d.value)} r="3.4" fill={GDD_COLOR} stroke="#fff" strokeWidth="1.2" /><text x={X(d.t)} y={YR(d.value) - 7} textAnchor="end" fontSize="10.5" fontWeight="700" fill={GDD_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>{Math.round(d.value)}</text></g>) })()}
+        {cData.length > 0 && (() => { const d = cData[cData.length - 1]; return (<g><circle cx={X(d.t)} cy={YL(d.value)} r="3.4" fill={CLIP_COLOR} stroke="#fff" strokeWidth="1.2" /><text x={X(d.t)} y={YL(d.value) - 7} textAnchor="end" fontSize="10.5" fontWeight="700" fill={CLIP_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>{d.value.toFixed(cDec)}</text></g>) })()}
         {weekTicks.map((t, i) => (
           <line key={`wk${i}`} x1={X(t)} x2={X(t)} y1={height - padB} y2={height - padB + 3} stroke="#C7CFC9" strokeWidth="1" />
         ))}
@@ -9836,6 +9851,7 @@ function GddForecastChart({ cycle = [], target = 0, reference = 0, height = 190 
         {tempPath && <path d={tempPath} fill="none" stroke={TEMP_COLOR} strokeWidth="1.5" opacity="0.35" strokeLinejoin="round" strokeLinecap="round" />}
         {gPast && <path d={gPast} fill="none" stroke={GDD_COLOR} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />}
         {gFut && <path d={gFut} fill="none" stroke={GDD_COLOR} strokeWidth="2" strokeDasharray="5 3" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />}
+        {past.length > 0 && (() => { const d = past[past.length - 1]; return (<g><circle cx={X(d.t)} cy={YG(d.value)} r="3.4" fill={GDD_COLOR} stroke="#fff" strokeWidth="1.2" /><text x={X(d.t)} y={YG(d.value) - 7} textAnchor="end" fontSize="10.5" fontWeight="700" fill={GDD_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>{Math.round(d.value)}</text></g>) })()}
         {reapply && (
           <>
             <circle cx={X(reapply.t)} cy={YG(reapply.value)} r="4" fill="none" stroke={GDD_COLOR} strokeWidth="1.6" />

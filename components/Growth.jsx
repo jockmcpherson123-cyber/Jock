@@ -395,6 +395,9 @@ function GrowthChart({ gpSeries, modeledSeries, clipRows }) {
           const cy = padT + (1 - (Number(c.volume) || 0) / clipMax) * ih
           return <circle key={i} cx={x(c.date)} cy={cy} r="2.6" fill={BLUE} fillOpacity="0.8" />
         })}
+        {/* Freight-study endpoint value tags */}
+        {gpSeries.length > 0 && (() => { const d = gpSeries[gpSeries.length - 1]; const px = x(d.date), py = yv(d.gp); return (<g><circle cx={px} cy={py} r="3.4" fill={FERN} stroke="#fff" strokeWidth="1.2" /><text x={px} y={py - 7} textAnchor="end" fontSize="10.5" fontWeight="700" fill={FERN} style={{ fontVariantNumeric: 'tabular-nums' }}>{Math.round(d.gp * 100)}%</text></g>) })()}
+        {mLine && modeledSeries.length > 0 && (() => { const d = modeledSeries[modeledSeries.length - 1]; const px = x(d.date), py = yv(d.v); return (<g><circle cx={px} cy={py} r="3.4" fill={GOLD} stroke="#fff" strokeWidth="1.2" /><text x={px} y={py - 7} textAnchor="end" fontSize="10.5" fontWeight="700" fill={GOLD} style={{ fontVariantNumeric: 'tabular-nums' }}>{Math.round(d.v * 100)}%</text></g>) })()}
         {monthTicks.map((t, i) => <text key={i} x={t.x} y={H - 5} fontSize="9" fill={INK_3} textAnchor="middle" fontFamily="Inter,sans-serif">{t.label}</text>)}
       </svg>
     </div>
