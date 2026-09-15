@@ -1,124 +1,147 @@
 'use client'
 
-// ── AI Turf Brief ───────────────────────────────────────────────────────────
-// On-demand weekly brief. Assembles a compact summary of the club's own data
-// (trends, products + FRAC groups, recent & planned sprays, forecast, soil,
-// program) and asks /api/turf-brief to research recent turf findings and write
-// a decision brief grounded in THIS course. Phase 1: generate & review in-app.
-import { useState } from 'react'
-import { Sparkles, Loader2, RefreshCw, Copy, Check } from 'lucide-react'
+// ── Weekly AI Reports · "The Grounds Dispatch" ───────────────────────────────
+// A bespoke weekly agronomy brief: researches recent turf science far and wide,
+// targeted to this course's weather-station region and grass types, avoids
+// repeating past editions, and reads it aloud. On-demand — generate any time.
+import { useState, useEffect, useRef } from 'react'
+import { Play, Pause, Loader2, RotateCcw, Sparkles } from 'lucide-react'
 import { sheetApplied } from '@/lib/applied'
-import { FOREST, FERN, GOLD, INK, INK_2, INK_3, HAIR, PAPER } from '@/lib/theme'
+import { FERN } from '@/lib/theme'
 
+// editorial palette (paper-luxury, restrained)
+const PAPER = '#F4F0E7', CARD = '#FBF9F3', INK = '#1B1B17', INK2 = '#57544a', INK3 = '#8f8b7d'
+const HAIR = '#D9D3C4', HAIR2 = '#E7E2D5', FOREST = '#14251C', EMBER = '#A83C2C', GOLDD = '#9A7A16'
+const DISP = "'Fraunces', Georgia, serif", MONO = "'IBM Plex Mono', ui-monospace, monospace"
 const iso = (d) => String(d || '').slice(0, 10)
 
-// average a metric to one point per day, keep the most recent `days` days
 function dailyAvg(rows, field, days = 30) {
-  const byDay = {}
-  ;(rows || []).forEach((r) => { const v = Number(r?.[field]); if (!r?.date || isNaN(v)) return; (byDay[iso(r.date)] = byDay[iso(r.date)] || { s: 0, n: 0 }); byDay[iso(r.date)].s += v; byDay[iso(r.date)].n++ })
-  return Object.keys(byDay).sort().slice(-days).map((d) => ({ date: d, avg: Math.round((byDay[d].s / byDay[d].n) * 100) / 100 }))
-}
-function soilNums(s) {
-  const out = {}
-  Object.entries(s || {}).forEach(([k, v]) => { if (['id', 'date', 'area', 'course', 'createdAt'].includes(k)) return; if (v != null && v !== '' && !isNaN(Number(v))) out[k] = Number(v) })
-  return out
+  const by = {}
+  ;(rows || []).forEach((r) => { const v = Number(r?.[field]); if (!r?.date || isNaN(v)) return; (by[iso(r.date)] = by[iso(r.date)] || { s: 0, n: 0 }); by[iso(r.date)].s += v; by[iso(r.date)].n++ })
+  return Object.keys(by).sort().slice(-days).map((d) => ({ date: d, avg: Math.round((by[d].s / by[d].n) * 100) / 100 }))
 }
 
-// tiny markdown → React (headings, bold, bullet/numbered lists, paragraphs)
-function md(text) {
-  const lines = String(text || '').split('\n')
-  const out = []; let list = null; let key = 0
-  const flush = () => { if (list) { out.push(<ul key={key++} style={{ margin: '6px 0 10px', paddingLeft: 18 }}>{list}</ul>); list = null } }
-  const inline = (s) => s.split(/(\*\*[^*]+\*\*)/g).map((p, i) => p.startsWith('**') && p.endsWith('**') ? <strong key={i}>{p.slice(2, -2)}</strong> : p)
-  for (const raw of lines) {
-    const l = raw.trimEnd()
-    if (/^#{1,6}\s/.test(l)) { flush(); const t = l.replace(/^#+\s/, ''); out.push(<p key={key++} className="font-display" style={{ color: FOREST, fontWeight: 600, fontSize: 15, margin: '14px 0 4px' }}>{inline(t)}</p>); continue }
-    if (/^\s*[-*]\s+/.test(l)) { list = list || []; list.push(<li key={key++} style={{ margin: '2px 0', color: INK_2, fontSize: 13.5 }}>{inline(l.replace(/^\s*[-*]\s+/, ''))}</li>); continue }
-    if (/^\s*\d+\.\s+/.test(l)) { list = list || []; list.push(<li key={key++} style={{ margin: '2px 0', color: INK_2, fontSize: 13.5 }}>{inline(l.replace(/^\s*\d+\.\s+/, ''))}</li>); continue }
-    if (!l.trim()) { flush(); continue }
-    flush(); out.push(<p key={key++} style={{ color: INK_2, fontSize: 13.5, lineHeight: 1.55, margin: '4px 0' }}>{inline(l)}</p>)
-  }
-  flush(); return out
-}
-
-export default function TurfBrief({ daily = [], clippings = [], speeds = [], soilTests = [], sheets = [], practices = [], products = [], areas = {}, courseInfo = {}, course = '', onSaveCourse }) {
-  const saved = courseInfo?.aiBrief && typeof courseInfo.aiBrief === 'object' ? courseInfo.aiBrief : null
-  const [brief, setBrief] = useState(saved?.text || '')
+export default function TurfBrief({ daily = [], clippings = [], speeds = [], soilTests = [], sheets = [], practices = [], products = [], areas = {}, courseInfo = {}, course = '', location = null, onSaveCourse }) {
+  const saved = courseInfo?.aiBrief && typeof courseInfo.aiBrief === 'object' && courseInfo.aiBrief.brief ? courseInfo.aiBrief : null
+  const [brief, setBrief] = useState(saved?.brief || null)
   const [at, setAt] = useState(saved?.generatedAt || '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const [copied, setCopied] = useState(false)
+  const [speaking, setSpeaking] = useState(false)
+  const uRef = useRef(null)
+
+  useEffect(() => () => { try { window.speechSynthesis?.cancel() } catch {} }, [])
 
   function buildContext() {
-    const today = new Date().toISOString().slice(0, 10)
-    const courses = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).map((c) => ({ name: c?.name, holes: c?.holes, grasses: c?.grasses }))
+    const todayIso = new Date().toISOString().slice(0, 10)
     const areaGrasses = {}; Object.entries(areas || {}).forEach(([n, a]) => { if (a?.grasses?.length) areaGrasses[n] = a.grasses })
+    const grasses = [...new Set([...(courseInfo?.siteGrasses || []), ...Object.values(areaGrasses).flat()])]
     const applied = (sheets || []).filter((s) => sheetApplied(s) && s.date)
     return {
       course: course || null,
-      courses,
-      siteGrasses: courseInfo?.siteGrasses || [],
+      region: location ? { lat: location.lat, lng: location.lng, name: location.name || location.address || null } : (courseInfo?.location || null),
+      grasses,
       areaGrasses,
-      dataTrends: {
+      data: {
         clipVolume: dailyAvg(clippings, 'volume', 30),
         greenSpeed: dailyAvg(speeds, 'speed', 30),
-        soilTests: (soilTests || []).slice(-6).map((s) => ({ date: iso(s.date), area: s.area, ...soilNums(s) })),
+        soilTests: (soilTests || []).slice(-4).map((s) => ({ date: iso(s.date), area: s.area })),
       },
-      products: (products || []).slice(0, 60).map((p) => ({ name: p?.name, type: p?.type, frac: p?.frac || p?.fracGroup || p?.frac_group || null, ai: p?.ai || p?.activeIngredient || null, rei: p?.rei ?? null, phi: p?.phi ?? null })),
-      recentSprays: applied.sort((a, b) => String(b.date).localeCompare(a.date)).slice(0, 12).map((s) => ({ date: iso(s.date), area: s.area, products: (s.products || []).map((p) => p.product).filter(Boolean) })),
-      plannedApplications: (sheets || []).filter((s) => !sheetApplied(s)).slice(0, 15).map((s) => ({ date: iso(s.plannedDate || s.date), area: s.area, products: (s.products || []).map((p) => p.product).filter(Boolean) })),
-      recentPractices: (practices || []).slice(-8).map((p) => ({ date: iso(p.date), area: p.area, type: p.type || p.kind, notes: p.notes })),
-      forecast: (daily || []).filter((d) => iso(d.date) >= today && d.tMax != null).slice(0, 10).map((d) => ({ date: iso(d.date), hi: d.tMax, lo: d.tMin, precip: d.precip ?? d.rain ?? null })),
-      recentWeather: (daily || []).filter((d) => iso(d.date) < today && d.tMax != null).slice(-7).map((d) => ({ date: iso(d.date), hi: d.tMax, lo: d.tMin })),
+      products: (products || []).slice(0, 50).map((p) => ({ name: p?.name, type: p?.type, frac: p?.frac || p?.fracGroup || null })),
+      recentSprays: applied.sort((a, b) => String(b.date).localeCompare(a.date)).slice(0, 10).map((s) => ({ date: iso(s.date), area: s.area, products: (s.products || []).map((p) => p.product).filter(Boolean) })),
+      plannedApplications: (sheets || []).filter((s) => !sheetApplied(s)).slice(0, 12).map((s) => ({ date: iso(s.plannedDate || s.date), area: s.area, products: (s.products || []).map((p) => p.product).filter(Boolean) })),
+      forecast: (daily || []).filter((d) => iso(d.date) >= todayIso && d.tMax != null).slice(0, 10).map((d) => ({ date: iso(d.date), hi: d.tMax, lo: d.tMin, precip: d.precip ?? d.rain ?? null })),
     }
   }
 
   async function generate() {
+    try { window.speechSynthesis?.cancel() } catch {}; setSpeaking(false)
     setBusy(true); setErr('')
     try {
-      const res = await fetch('/api/turf-brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: buildContext() }) })
+      const covered = Array.isArray(courseInfo?.aiBriefKeys) ? courseInfo.aiBriefKeys : []
+      const res = await fetch('/api/turf-brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: buildContext(), covered }) })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || 'Could not generate the brief.')
       setBrief(data.brief); setAt(data.generatedAt)
-      onSaveCourse?.({ aiBrief: { text: data.brief, generatedAt: data.generatedAt } })
+      const newKeys = Array.isArray(data.brief?.keys) ? data.brief.keys : []
+      onSaveCourse?.({ aiBrief: { brief: data.brief, generatedAt: data.generatedAt }, aiBriefKeys: [...covered, ...newKeys].slice(-80) })
     } catch (e) { setErr(e.message || 'Something went wrong.') }
     setBusy(false)
   }
 
-  const copy = async () => { try { await navigator.clipboard.writeText(brief); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch {} }
-  const whenTxt = at ? new Date(at).toLocaleString() : ''
+  function toggleAudio() {
+    const synth = typeof window !== 'undefined' ? window.speechSynthesis : null
+    if (!synth || !brief?.audioScript) return
+    if (speaking) { synth.cancel(); setSpeaking(false); return }
+    synth.cancel()
+    const u = new SpeechSynthesisUtterance(brief.audioScript)
+    u.rate = 1; u.pitch = 1
+    u.onend = () => setSpeaking(false); u.onerror = () => setSpeaking(false)
+    uRef.current = u; synth.speak(u); setSpeaking(true)
+  }
+
+  const monthDay = at ? new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
+  const S = { paper: PAPER }
 
   return (
-    <div className="max-w-3xl">
-      <div className="flex items-center gap-2 mb-1">
-        <Sparkles size={18} style={{ color: GOLD }} />
-        <h2 className="font-display text-lg font-semibold" style={{ color: INK }}>AI Turf Brief</h2>
+    <div style={{ maxWidth: 620, margin: '0 auto', background: PAPER, borderRadius: 18, padding: '26px 22px 28px', border: `1px solid ${HAIR}` }}>
+      {/* masthead */}
+      <div style={{ textAlign: 'center', fontFamily: MONO, fontSize: 9.5, letterSpacing: '.3em', textTransform: 'uppercase', color: GOLDD }}>Weekly AI Report</div>
+      <div style={{ fontFamily: DISP, fontWeight: 600, fontSize: 34, lineHeight: 1, textAlign: 'center', letterSpacing: '-.02em', margin: '8px 0 10px', color: INK }}>The Grounds Dispatch</div>
+      <div style={{ height: 1, background: INK, opacity: .85 }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: MONO, fontSize: 9, letterSpacing: '.12em', textTransform: 'uppercase', color: INK3, padding: '7px 1px' }}>
+        <span>{brief?.dateline || (course ? `${course}` : 'Your course')}</span>
+        <span>{at ? new Date(at).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span>
       </div>
-      <p className="font-body text-xs mb-3" style={{ color: INK_3 }}>A weekly read on your own data, spray program, incoming weather and recent turf research — grounded in this course{course ? ` (${course})` : ''}. Research items are AI-gathered: verify against the label and local conditions before acting.</p>
+      <div style={{ height: 1, background: HAIR }} />
 
-      <div className="rounded-2xl border p-4 shadow-sm" style={{ borderColor: HAIR, background: PAPER }}>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <button onClick={generate} disabled={busy} className="inline-flex items-center gap-2 font-body text-sm font-bold px-4 py-2.5 rounded-xl text-white disabled:opacity-60" style={{ backgroundColor: FOREST }}>
-            {busy ? <><Loader2 size={16} className="animate-spin" /> Researching &amp; writing…</> : brief ? <><RefreshCw size={15} /> Regenerate this week's brief</> : <><Sparkles size={15} /> Generate this week's brief</>}
+      {/* controls / audio */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', margin: '14px 0 4px', border: `1px solid ${HAIR}`, borderRadius: 12, background: CARD }}>
+        {brief && (
+          <button onClick={toggleAudio} style={{ width: 36, height: 36, borderRadius: '50%', background: FOREST, color: '#fff', border: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', cursor: 'pointer' }}>
+            {speaking ? <Pause size={15} /> : <Play size={15} style={{ marginLeft: 1 }} />}
           </button>
-          {brief && !busy && (
-            <button onClick={copy} className="inline-flex items-center gap-1.5 font-body text-xs font-bold px-3 py-2 rounded-lg" style={{ color: FERN, border: `1px solid ${HAIR}` }}>
-              {copied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
-            </button>
-          )}
+        )}
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: INK }}>{brief ? (speaking ? 'Reading aloud…' : 'Listen to this brief') : 'Weekly AI research brief'}</div>
+          <div style={{ fontFamily: MONO, fontSize: 9.5, color: INK3, marginTop: 1, letterSpacing: '.04em' }}>{brief ? 'READ ALOUD FOR THE CART' : 'FAR-AND-WIDE · TARGETED TO YOUR REGION & GRASS'}</div>
         </div>
-        {busy && <p className="font-body text-[11px] mt-2" style={{ color: INK_3 }}>This takes up to a minute or two — it's searching current research and reading your data.</p>}
-        {err && <p className="font-body text-[12px] mt-3" style={{ color: '#B23A2E' }}>{err}</p>}
+        <button onClick={generate} disabled={busy} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 700, color: '#fff', background: FOREST, border: 0, borderRadius: 10, padding: '9px 13px', cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1 }}>
+          {busy ? <><Loader2 size={14} className="animate-spin" /> Compiling…</> : brief ? <><RotateCcw size={13} /> New brief</> : <><Sparkles size={13} /> Generate</>}
+        </button>
       </div>
+      {busy && <p style={{ fontFamily: MONO, fontSize: 10, color: INK3, margin: '6px 2px' }}>Researching across extension, USGA and the journals for your region &amp; grasses…</p>}
+      {err && <p style={{ fontSize: 12.5, color: EMBER, margin: '8px 2px' }}>{err}</p>}
 
-      {brief && (
-        <div className="rounded-2xl border p-5 shadow-sm mt-4" style={{ borderColor: HAIR, background: '#fff' }}>
-          {whenTxt && <p className="font-body text-[10px] uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Generated {whenTxt}</p>}
-          {md(brief)}
-        </div>
-      )}
-      {!brief && !busy && (
-        <p className="font-body text-[12px] mt-4" style={{ color: INK_3 }}>No brief yet. Tap generate — it works best once you've logged some field data and set up your program.</p>
+      {brief ? (
+        <>
+          <div style={{ padding: '18px 0 6px' }}>
+            <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '.24em', textTransform: 'uppercase', color: EMBER, marginBottom: 9 }}>{brief.hero?.eyebrow || "This week's call"}</div>
+            <div style={{ fontFamily: DISP, fontWeight: 600, fontSize: 26, lineHeight: 1.1, letterSpacing: '-.015em', color: INK, textWrap: 'balance' }}>{brief.hero?.headline}</div>
+            {brief.hero?.standfirst && <p style={{ fontSize: 14.5, lineHeight: 1.6, color: '#33322b', marginTop: 12 }}>{brief.hero.standfirst}</p>}
+          </div>
+
+          <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '.24em', textTransform: 'uppercase', color: INK3, textAlign: 'center', margin: '22px 0 2px' }}>The Field · this week's findings</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '4px 0 2px' }}><span style={{ flex: 1, height: 1, background: HAIR }} /><span style={{ color: GOLDD, fontSize: 9 }}>✦</span><span style={{ flex: 1, height: 1, background: HAIR }} /></div>
+
+          {(brief.findings || []).map((f, i) => (
+            <div key={i} style={{ padding: '18px 0', borderTop: i ? `1px solid ${HAIR2}` : 0 }}>
+              <span style={{ fontFamily: DISP, fontStyle: 'italic', fontSize: 15, color: GOLDD, fontWeight: 500 }}>{f.n || `${i + 1}.`}</span>
+              <div style={{ fontFamily: DISP, fontWeight: 600, fontSize: 18.5, lineHeight: 1.2, letterSpacing: '-.01em', margin: '3px 0 7px', color: INK }}>{f.subhead}</div>
+              <p style={{ fontSize: 13.5, lineHeight: 1.58, color: '#3a382f', margin: 0 }}>{f.body}</p>
+              {f.take && <p style={{ fontFamily: DISP, fontStyle: 'italic', fontSize: 14, lineHeight: 1.5, color: FOREST, margin: '9px 0 0', paddingLeft: 12, borderLeft: `2px solid ${FERN}` }}>{f.take}</p>}
+              {Array.isArray(f.sources) && f.sources.length > 0 && (
+                <p style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.06em', color: INK3, marginTop: 9 }}>SOURCE · {f.sources.map((s) => s.name).filter(Boolean).join(' · ')}</p>
+              )}
+            </div>
+          ))}
+
+          <p style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: '.05em', color: INK3, textAlign: 'center', marginTop: 18, lineHeight: 1.6 }}>
+            Compiled from your {course || 'course'} data + this week's research, targeted to your region &amp; grass.<br />Verify rates against the label and local conditions before acting.
+          </p>
+        </>
+      ) : !busy && (
+        <p style={{ fontSize: 13, color: INK3, textAlign: 'center', padding: '26px 10px' }}>Tap <b style={{ color: INK }}>Generate</b> for this week's brief — researched far and wide, targeted to your weather-station region and grass types, and it won't repeat what it's told you before.</p>
       )}
     </div>
   )

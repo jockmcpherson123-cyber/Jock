@@ -8612,7 +8612,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} products={turf.products} />}
         {route === 'brief' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <TurfBrief daily={daily} clippings={clippings} speeds={speeds} soilTests={soilTests} sheets={turf.sheets} practices={practices} products={turf.products} areas={turf.areas} courseInfo={turf.courseInfo} course={course} onSaveCourse={saveTurfCourse} />
+          : <TurfBrief daily={daily} clippings={clippings} speeds={speeds} soilTests={soilTests} sheets={turf.sheets} practices={practices} products={turf.products} areas={turf.areas} courseInfo={turf.courseInfo} course={course} location={turf.location} onSaveCourse={saveTurfCourse} />
         )}
         {route === 'report' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>

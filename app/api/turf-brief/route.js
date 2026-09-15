@@ -1,18 +1,14 @@
 // ════════════════════════════════════════════════════════════════════════
-//  AI Turf Brief — server route.
+//  Weekly AI Reports — "The Grounds Dispatch" — server route.
 //
-//  Takes a compact summary of the club's data (recent trends, weather forecast,
-//  annual program, course grasses/regions) and asks Claude to research recent,
-//  credible turf findings on the web and write a weekly decision brief grounded
-//  in THAT club's situation.
+//  Researches recent turf science far and wide, targets it to THIS course's
+//  weather-station region and grass types, avoids anything it has already
+//  covered, and returns a structured editorial brief (+ a spoken audio script)
+//  the app renders as a bespoke weekly dispatch.
 //
-//  WHY SERVER-SIDE: the Anthropic API key is a secret and must never reach the
-//  browser. This runs on Vercel, reads the key from an env var, and returns
-//  only the finished brief.
-//
-//  SETUP (once): ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables
-//  (no NEXT_PUBLIC_ prefix). Web search + Opus can take up to a couple of
-//  minutes, so this route needs a plan that allows a longer function timeout.
+//  SETUP (once): ANTHROPIC_API_KEY in the hosting env (no NEXT_PUBLIC_ prefix).
+//  Web search + Opus can take a couple of minutes — needs a longer function
+//  timeout (e.g. Vercel Pro).
 // ════════════════════════════════════════════════════════════════════════
 
 import Anthropic from '@anthropic-ai/sdk'
@@ -20,76 +16,72 @@ import Anthropic from '@anthropic-ai/sdk'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-const SYSTEM = `You are a turf agronomy research assistant for a golf course maintenance team. You write a weekly decision brief for the superintendent and their director — plain, confident, practical language a superintendent respects. Specific, no fluff, no hype.
+const SYSTEM = `You are the research desk behind "The Grounds Dispatch" — a bespoke weekly agronomy intelligence brief written for one golf course superintendent. You write like a sharp turf editor: confident, specific, plain-spoken, no fluff or hype.
 
-Ground EVERYTHING in the COURSE CONTEXT provided (grasses, region, recent data trends, weather forecast, annual program). When you state an external research finding, you MUST have actually found it via web search in this session — cite the source (institution + what it is). NEVER invent studies, numbers, product claims, or citations. If you found nothing solid this week, say so plainly rather than padding. Flag anything the team must verify against the product label and local conditions before acting.
+HOW YOU RESEARCH
+- Cast a WIDE net every week: university extension (Penn State, Rutgers, Cornell, Wisconsin, Tennessee, UMass, NC State, etc.), USGA, GCSAA, peer-reviewed journals (Crop Science, Plant Disease, Agronomy Journal, Crop, Forage & Turfgrass Mgmt), and international turf research. Use web search.
+- Bias hard toward RECENT work (this season / this year). Avoid evergreen textbook facts the super already knows.
+- TARGET the course's region and grasses: the weather-station coordinates define the climate zone — prioritise the nearest land-grant turf programs and regionally-relevant conditions. Filter findings to THIS course's grass species; if a study used a different cultivar, say so rather than over-applying it.
+- NEVER repeat anything in the COVERED list you are given — those topics have already been sent in past editions. Find genuinely new material each week.
+- Only state a finding you actually found via search. Cite the source. Never invent studies, numbers, or citations.
 
-Write the brief in markdown with these sections, giving each real weight:
+GROUND IT
+- Weave the course's own data into the hero and the "take" lines where it's genuinely relevant (growth-reg GDD vs target, clip/GvX, moisture, spray program / FRAC rotation, forecast). Be concrete with their numbers.
 
-## Your data — what to notice
-Read the trends in the provided data (clipping volume / GvX, growth-reg GDD, moisture, green speed, soil). Call out what is moving, whether it is inside target, outlier greens, and why it matters this week.
+OUTPUT
+Respond with ONLY a single JSON object (no prose, no markdown fences) of this exact shape:
+{
+  "title": "Friday Turf Research Brief — <Month Day>",
+  "dateline": "<short, e.g. 'Blue & Gold · Mid-Atlantic'>",
+  "hero": { "eyebrow": "This week's call", "headline": "<one bold decision, ~10-14 words>", "standfirst": "<2-3 sentences; include their data + why now>" },
+  "findings": [
+    { "n": "I", "subhead": "<punchy editorial subhead>", "body": "<2-3 sentences, the finding>", "take": "<'For you' — how it applies to THIS course/grasses/region>", "sources": [ { "name": "<institution / journal>" } ] }
+  ],
+  "audioScript": "<a natural ~150-word spoken version of the brief, first sentence names the single most important call, plain sentences for text-to-speech>",
+  "keys": [ "<short kebab-case topic key per finding, for de-duplication next week, e.g. 'dmi-injury-poa'>" ]
+}
+Give 3-5 findings. Keep each tight. The headline is the single most important thing this week.`
 
-## Spray program check
-From the products (with FRAC group / mode of action) and the recent + planned sprays: flag resistance-management concerns (repeating the same FRAC group, not rotating modes of action), reapply intervals slipping, and any REI/PHI that could collide with upcoming play or events. Think of the fungicide plan as a resistance-management plan first. If the data isn't there to judge something, say so rather than guessing.
-
-## Incoming weather & spray windows
-From the forecast: disease pressure, heat/cold/wind stress, and the best days to spray or water-in over the coming week.
-
-## This week's research worth knowing
-2–4 recent, credible turf findings relevant to THIS course's grasses and conditions. Each: the finding in a sentence, a one-line "what it means for you", and the source. Prefer university extension, peer-reviewed journals, USGA. Verify-before-acting applies here.
-
-## Annual program — on the radar
-Upcoming applications and tasks from their program, and what to prepare for.
-
-## Recommended actions this week
-A short, prioritized checklist grounded in everything above.
-
-Keep it tight — a superintendent reads this over coffee. End with one line reminding the team to verify research items and rates against the product label and local conditions before acting.`
+function extractJson(text) {
+  if (!text) return null
+  let s = text.trim()
+  if (s.startsWith('```')) s = s.replace(/^```(json)?/i, '').replace(/```$/, '').trim()
+  const a = s.indexOf('{'), b = s.lastIndexOf('}')
+  if (a < 0 || b < 0) return null
+  try { return JSON.parse(s.slice(a, b + 1)) } catch { return null }
+}
 
 export async function POST(request) {
   const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    return Response.json({ error: 'AI is not set up yet. Add ANTHROPIC_API_KEY in your Vercel settings, then redeploy.' }, { status: 503 })
-  }
+  if (!apiKey) return Response.json({ error: 'AI is not set up yet. Add ANTHROPIC_API_KEY in your hosting settings, then redeploy.' }, { status: 503 })
 
   let body
   try { body = await request.json() } catch { return Response.json({ error: 'Bad request.' }, { status: 400 }) }
   const context = body?.context
-  if (!context || typeof context !== 'object') {
-    return Response.json({ error: 'Missing course context.' }, { status: 400 })
-  }
+  if (!context || typeof context !== 'object') return Response.json({ error: 'Missing course context.' }, { status: 400 })
+  const covered = Array.isArray(body?.covered) ? body.covered.slice(0, 200) : []
 
   const client = new Anthropic({ apiKey })
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-  const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 6 }]
+  const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 7 }]
   const messages = [{
     role: 'user',
-    content: `Today is ${today}. Below is the course context as JSON. Search the web for recent, relevant turf research, then write this week's brief for this specific course.\n\nCOURSE CONTEXT:\n\`\`\`json\n${JSON.stringify(context).slice(0, 60000)}\n\`\`\``,
+    content: `Today is ${today}. Research this week's turf science for this course and return the JSON brief.\n\nALREADY COVERED (do NOT repeat these topics):\n${covered.length ? covered.join(', ') : '(nothing yet)'}\n\nCOURSE CONTEXT:\n\`\`\`json\n${JSON.stringify(context).slice(0, 60000)}\n\`\`\``,
   }]
 
   const make = () => client.messages.create({
-    model: 'claude-opus-5',
-    max_tokens: 6000,
-    thinking: { type: 'adaptive' },
-    tools,
-    system: SYSTEM,
-    messages,
+    model: 'claude-opus-5', max_tokens: 6000, thinking: { type: 'adaptive' }, tools, system: SYSTEM, messages,
   })
 
   try {
     let resp = await make()
-    // Web search is a server tool; the model may pause to run it. Continue the loop.
     let guard = 0
-    while (resp.stop_reason === 'pause_turn' && guard++ < 6) {
-      messages.push({ role: 'assistant', content: resp.content })
-      resp = await make()
-    }
-    if (resp.stop_reason === 'refusal') {
-      return Response.json({ error: 'The request was declined.' }, { status: 422 })
-    }
-    const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim()
-    if (!text) return Response.json({ error: 'No brief was produced. Try again.' }, { status: 502 })
-    return Response.json({ brief: text, generatedAt: new Date().toISOString() })
+    while (resp.stop_reason === 'pause_turn' && guard++ < 6) { messages.push({ role: 'assistant', content: resp.content }); resp = await make() }
+    if (resp.stop_reason === 'refusal') return Response.json({ error: 'The request was declined.' }, { status: 422 })
+    const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n')
+    const brief = extractJson(text)
+    if (!brief || !brief.findings) return Response.json({ error: 'Could not compile the brief. Try again.' }, { status: 502 })
+    return Response.json({ brief, generatedAt: new Date().toISOString() })
   } catch (e) {
     if (e instanceof Anthropic.RateLimitError) return Response.json({ error: 'AI is busy right now — try again in a minute.' }, { status: 429 })
     if (e instanceof Anthropic.APIError) return Response.json({ error: e.message || 'AI request failed.' }, { status: e.status || 502 })
