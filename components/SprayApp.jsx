@@ -89,6 +89,7 @@ import { loadTranslations, txGet } from '@/lib/translate'
 import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import WeeklyReport from '@/components/WeeklyReport'
+import TurfBrief from '@/components/TurfBrief'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
 import Growth from '@/components/Growth'
@@ -8593,7 +8594,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
               <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
             </div>
             <div className="flex gap-1 font-body text-sm overflow-x-auto">
-              {[['dashboard', 'Dashboard'], ['report', 'Weekly Report'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['hoc', 'Height of Cut'], ['scouting', 'Scouting'], ['timeline', 'Timeline'], ['knowledge', 'Reference']].map(([key, label]) => (
+              {[['dashboard', 'Dashboard'], ['brief', 'AI Brief'], ['report', 'Weekly Report'], ['gdd', 'Growing Degree Days'], ['timing', 'Timing'], ['soil', 'Soil Tests'], ['clippings', 'Clipping Yields'], ['practices', 'Practices'], ['speed', 'Greens Speed'], ['hoc', 'Height of Cut'], ['scouting', 'Scouting'], ['timeline', 'Timeline'], ['knowledge', 'Reference']].map(([key, label]) => (
                 <button key={key} onClick={() => setRoute(key)} className="px-3.5 py-1.5 rounded-full font-medium transition whitespace-nowrap" style={route === key ? { backgroundColor: 'rgba(255,255,255,0.12)', color: 'white' } : { color: 'rgba(255,255,255,0.5)' }}>
                   {label}
                 </button>
@@ -8609,6 +8610,10 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
           : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} clippings={clippings} soilTests={soilTests} practices={practices} speeds={speeds} soilSeries={soilSeries} hasLocation={turf.location?.lat != null} onGo={setRoute} />
         )}
         {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} products={turf.products} />}
+        {route === 'brief' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <TurfBrief daily={daily} clippings={clippings} speeds={speeds} soilTests={soilTests} sheets={turf.sheets} practices={practices} products={turf.products} areas={turf.areas} courseInfo={turf.courseInfo} course={course} onSaveCourse={saveTurfCourse} />
+        )}
         {route === 'report' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <WeeklyReport daily={daily} clippings={clippings} practices={practices} speeds={speeds} areas={turf.areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} userEmail={user?.email} userName={user?.fullName} courseFilter={course} />
