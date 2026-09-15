@@ -42,13 +42,43 @@ Respond with ONLY a single JSON object (no prose, no markdown fences) of this ex
 }
 Give 3-5 findings. Keep each tight. The headline is the single most important thing this week.`
 
+// Close off a JSON object that got cut short (e.g. the model hit max_tokens
+// mid-brief): finish an open string, drop a dangling comma, and balance the
+// braces/brackets that were still open. Lets a truncated brief still render.
+function repairJson(s) {
+  let out = '', inStr = false, esc = false
+  const stack = []
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    out += ch
+    if (inStr) {
+      if (esc) esc = false
+      else if (ch === '\\') esc = true
+      else if (ch === '"') inStr = false
+      continue
+    }
+    if (ch === '"') inStr = true
+    else if (ch === '{') stack.push('}')
+    else if (ch === '[') stack.push(']')
+    else if (ch === '}' || ch === ']') stack.pop()
+  }
+  if (inStr) out += '"'
+  out = out.replace(/,\s*$/, '')
+  while (stack.length) out += stack.pop()
+  out = out.replace(/,(\s*[}\]])/g, '$1')
+  try { return JSON.parse(out) } catch { return null }
+}
+
 function extractJson(text) {
   if (!text) return null
   let s = text.trim()
   if (s.startsWith('```')) s = s.replace(/^```(json)?/i, '').replace(/```$/, '').trim()
-  const a = s.indexOf('{'), b = s.lastIndexOf('}')
-  if (a < 0 || b < 0) return null
-  try { return JSON.parse(s.slice(a, b + 1)) } catch { return null }
+  const a = s.indexOf('{')
+  if (a < 0) return null
+  s = s.slice(a)
+  const b = s.lastIndexOf('}')
+  if (b > 0) { try { return JSON.parse(s.slice(0, b + 1)) } catch { /* fall through to repair */ } }
+  return repairJson(s)
 }
 
 export async function POST(request) {
@@ -69,18 +99,21 @@ export async function POST(request) {
     content: `Today is ${today}. Research this week's turf science for this course and return the JSON brief.\n\nALREADY COVERED (do NOT repeat these topics):\n${covered.length ? covered.join(', ') : '(nothing yet)'}\n\nCOURSE CONTEXT:\n\`\`\`json\n${JSON.stringify(context).slice(0, 60000)}\n\`\`\``,
   }]
 
-  const make = () => client.messages.create({
-    model: 'claude-opus-5', max_tokens: 6000, thinking: { type: 'adaptive' }, tools, system: SYSTEM, messages,
-  })
+  // Stream so the long web-search + reasoning run doesn't trip a socket timeout,
+  // and give the JSON room: adaptive thinking + search results share max_tokens,
+  // so a tight budget was truncating the brief mid-object.
+  const make = () => client.messages.stream({
+    model: 'claude-opus-5', max_tokens: 16000, thinking: { type: 'adaptive' }, tools, system: SYSTEM, messages,
+  }).finalMessage()
 
   try {
     let resp = await make()
     let guard = 0
-    while (resp.stop_reason === 'pause_turn' && guard++ < 6) { messages.push({ role: 'assistant', content: resp.content }); resp = await make() }
+    while (resp.stop_reason === 'pause_turn' && guard++ < 10) { messages.push({ role: 'assistant', content: resp.content }); resp = await make() }
     if (resp.stop_reason === 'refusal') return Response.json({ error: 'The request was declined.' }, { status: 422 })
     const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n')
     const brief = extractJson(text)
-    if (!brief || !brief.findings) return Response.json({ error: 'Could not compile the brief. Try again.' }, { status: 502 })
+    if (!brief || !Array.isArray(brief.findings) || !brief.findings.length) return Response.json({ error: 'Could not compile the brief. Try again.' }, { status: 502 })
     return Response.json({ brief, generatedAt: new Date().toISOString() })
   } catch (e) {
     if (e instanceof Anthropic.RateLimitError) return Response.json({ error: 'AI is busy right now — try again in a minute.' }, { status: 429 })

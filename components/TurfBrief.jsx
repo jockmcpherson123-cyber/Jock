@@ -110,7 +110,7 @@ export default function TurfBrief({ daily = [], clippings = [], speeds = [], soi
           {busy ? <><Loader2 size={14} className="animate-spin" /> Compiling…</> : brief ? <><RotateCcw size={13} /> New brief</> : <><Sparkles size={13} /> Generate</>}
         </button>
       </div>
-      {busy && <p style={{ fontFamily: MONO, fontSize: 10, color: INK3, margin: '6px 2px' }}>Researching across extension, USGA and the journals for your region &amp; grasses…</p>}
+      {busy && <p style={{ fontFamily: MONO, fontSize: 10, color: INK3, margin: '6px 2px' }}>Researching across extension, USGA and the journals for your region &amp; grasses — this usually takes a minute or two. Leave it running.</p>}
       {err && <p style={{ fontSize: 12.5, color: EMBER, margin: '8px 2px' }}>{err}</p>}
 
       {brief ? (
