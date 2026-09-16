@@ -63,7 +63,7 @@ import {
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, projectGddReachDate, buildRainYear, weatherCodeInfo } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, fetchNbmForecast, overlayForecastTemps, projectGddReachDate, buildRainYear, weatherCodeInfo } from '@/lib/weather'
 import { fungicideLogByArea } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, soilRate, projectWindow, TIMING_WINDOWS } from '@/lib/soiltiming'
@@ -1552,10 +1552,14 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
       try {
         const data = await fetchWeather(location.lat, location.lng)
         const daily = dailyFromHourly(data)
-        const todayRow = daily.find((d) => d.date === today) || daily[0] || null
+        // US courses: NWS blend (NBM) so forecast highs match the phone. No-op elsewhere.
+        const nbm = await fetchNbmForecast(location.lat, location.lng)
+        let todayRow = daily.find((d) => d.date === today) || daily[0] || null
+        const nbmToday = nbm.find((d) => d.date === today)
+        if (todayRow && nbmToday) todayRow = { ...todayRow, tMax: nbmToday.tMax, tMin: nbmToday.tMin }
         // The daily block carries the next ~14 days too — kept for projecting the
         // Growth-Reg reapply date from upcoming weather.
-        const forecast = dailyFromForecastBlock(data)
+        const forecast = overlayForecastTemps(dailyFromForecastBlock(data), nbm)
         if (!cancelled) setWx((w) => ({ ...w, todayWindow: todayRow ? { ...todayRow, spray: sprayWindow(todayRow) } : null, forecast }))
       } catch { /* ignore */ }
     })()
@@ -8554,7 +8558,11 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
             const wxData = await fetchWeather(lat, lng)
             let season = []
             try { season = await fetchSeasonDaily(lat, lng) } catch { /* ignore */ }
-            setDaily(mergeDaily(season, dailyFromForecastBlock(wxData)))
+            let merged = mergeDaily(season, dailyFromForecastBlock(wxData))
+            // US courses: overlay the NWS blend (NBM) so forecast highs match
+            // what the crew sees on their phones. No-ops outside CONUS.
+            try { const nbm = await fetchNbmForecast(lat, lng); merged = overlayForecastTemps(merged, nbm) } catch { /* keep default */ }
+            setDaily(merged)
           } catch { try { setDaily(await fetchSeasonDaily(lat, lng)) } catch (e) { console.error(e) } }
           try { setSoilSeries(await fetchBreakdownTemps(lat, lng)) } catch (e) { console.error(e) }
         }

@@ -5,7 +5,7 @@
 // All from Open-Meteo using the club's saved location — no API key required.
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind, Info } from 'lucide-react'
-import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDaily, dailyFromForecastBlock, mergeDaily, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps, buildRainYear, smithKernsModel } from '@/lib/weather'
+import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDaily, dailyFromForecastBlock, mergeDaily, fetchNbmForecast, overlayForecastTemps, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps, buildRainYear, smithKernsModel } from '@/lib/weather'
 import { applicationTimings, soilTrend, currentSoilTemp } from '@/lib/soiltiming'
 import { diseaseRisks, pestWatch, matchLibraryForPest } from '@/lib/pests'
 import { profileById, photoSearchUrl } from '@/lib/knowledge'
@@ -252,7 +252,10 @@ export default function Weather({ location, courseInfo, products = [], manage = 
         // Forecast (drives conditions, forecast, disease models) + season
         // archive (drives accurate Jan-1 GDD). Archive is best-effort.
         const data = await fetchWeather(location.lat, location.lng)
-        const daily = dailyFromHourly(data)
+        // US courses: overlay the NWS blend (NBM) so forecast highs/lows match the
+        // phone weather apps the crew checks. No-op outside CONUS or on error.
+        const nbm = await fetchNbmForecast(location.lat, location.lng)
+        const daily = overlayForecastTemps(dailyFromHourly(data), nbm)
         const summary = summarize(daily)
 
         // Live current conditions (best-effort — doesn't block the page).
@@ -262,7 +265,7 @@ export default function Weather({ location, courseInfo, products = [], manage = 
 
         let season = []
         try { season = await fetchSeasonDaily(location.lat, location.lng) } catch { season = [] }
-        const merged = mergeDaily(season, dailyFromForecastBlock(data))
+        const merged = overlayForecastTemps(mergeDaily(season, dailyFromForecastBlock(data)), nbm)
         const gdd = gddFromDaily(merged.length ? merged : dailyFromForecastBlock(data))
         const gddNow = gdd.length ? gdd[gdd.length - 1].acc : summary.gddNow
         const fullSeason = merged.length > 0
