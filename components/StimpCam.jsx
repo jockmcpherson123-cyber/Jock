@@ -93,21 +93,55 @@ export default function StimpCam({ onClose, onResult }) {
     return ctx.getImageData(0, 0, c.width, c.height)
   }
 
-  // Whiteness blob within a search box → centroid + pixel count (n → diameter).
-  function findBall(img, box) {
+  // Find the BALL blob in a search box: label connected white shapes, keep only
+  // compact round ones of a plausible size, and pick the one closest to where the
+  // ball is predicted — so glare, sky, ball-marks and the meter don't grab it.
+  function findBall(img, box, expectedD, predicted) {
     const { data, width, height } = img
     const x0 = Math.max(0, Math.floor(box.x0)), y0 = Math.max(0, Math.floor(box.y0))
     const x1 = Math.min(width, Math.ceil(box.x1)), y1 = Math.min(height, Math.ceil(box.y1))
-    let sumX = 0, sumY = 0, n = 0
-    for (let y = y0; y < y1; y++) {
-      let row = (y * width + x0) * 4
-      for (let x = x0; x < x1; x++, row += 4) {
+    const bw = x1 - x0, bh = y1 - y0
+    if (bw < 2 || bh < 2) return null
+    const mask = new Uint8Array(bw * bh)
+    for (let y = 0; y < bh; y++) {
+      let row = ((y + y0) * width + x0) * 4
+      for (let x = 0; x < bw; x++, row += 4) {
         const r = data[row], g = data[row + 1], b = data[row + 2]
-        if (r > 186 && g > 186 && b > 176 && Math.abs(r - g) < 48 && g - b < 62) { sumX += x; sumY += y; n++ }
+        if (r > 186 && g > 186 && b > 176 && Math.abs(r - g) < 48 && g - b < 62) mask[y * bw + x] = 1
       }
     }
-    if (n < 3) return null
-    return { x: sumX / n, y: sumY / n, n, d: 2 * Math.sqrt(n / Math.PI) }
+    const seen = new Uint8Array(bw * bh)
+    const stack = []
+    const maxN = expectedD ? Math.PI * (expectedD * 1.9 / 2) ** 2 : bw * bh * 0.4
+    const minN = 3
+    let best = null
+    for (let i = 0; i < mask.length; i++) {
+      if (!mask[i] || seen[i]) continue
+      stack.length = 0; stack.push(i); seen[i] = 1
+      let sx = 0, sy = 0, n = 0, minx = bw, maxx = 0, miny = bh, maxy = 0
+      while (stack.length) {
+        const p = stack.pop(), px = p % bw, py = (p / bw) | 0
+        sx += px; sy += py; n++
+        if (px < minx) minx = px; if (px > maxx) maxx = px; if (py < miny) miny = py; if (py > maxy) maxy = py
+        if (px > 0 && mask[p - 1] && !seen[p - 1]) { seen[p - 1] = 1; stack.push(p - 1) }
+        if (px < bw - 1 && mask[p + 1] && !seen[p + 1]) { seen[p + 1] = 1; stack.push(p + 1) }
+        if (py > 0 && mask[p - bw] && !seen[p - bw]) { seen[p - bw] = 1; stack.push(p - bw) }
+        if (py < bh - 1 && mask[p + bw] && !seen[p + bw]) { seen[p + bw] = 1; stack.push(p + bw) }
+      }
+      if (n < minN || n > maxN) continue
+      const cw = maxx - minx + 1, ch = maxy - miny + 1
+      const fill = n / (cw * ch)                     // compactness (a disc ≈ .78)
+      const aspect = Math.max(cw, ch) / Math.max(1, Math.min(cw, ch))
+      if (fill < 0.45 || aspect > 2.3) continue      // reject streaks/glare/sky edges
+      const cx = x0 + sx / n, cy = y0 + sy / n
+      const d = 2 * Math.sqrt(n / Math.PI)
+      if (expectedD && (d > expectedD * 1.8 || d < expectedD * 0.35)) continue // can't jump size
+      let score = 0
+      if (predicted) score += Math.hypot(cx - predicted.x, cy - predicted.y)
+      if (expectedD) score += Math.abs(d - expectedD) * 1.5
+      if (!best || score < best.score) best = { x: cx, y: cy, n, d, score }
+    }
+    return best
   }
   const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)] }
 
@@ -152,11 +186,17 @@ export default function StimpCam({ onClose, onResult }) {
     const img = grabFrame()
     if (img) {
       const b = tr.box
-      const found = findBall(img, { x0: tr.last.x - b, y0: tr.last.y - b, x1: tr.last.x + b, y1: tr.last.y + b })
+      const pred = tr.pred || tr.last
+      const found = findBall(img, { x0: pred.x - b, y0: pred.y - b, x1: pred.x + b, y1: pred.y + b }, tr.lastGoodD, pred)
       const now = performance.now() / 1000
       if (tr.t0 == null) tr.t0 = now
       const C = calRef.current || DEFAULT_C
       if (found) {
+        // velocity-smoothed prediction so the search box rides ahead of the ball
+        const vx = tr.lastPos ? found.x - tr.lastPos.x : 0, vy = tr.lastPos ? found.y - tr.lastPos.y : 0
+        tr.vel = { x: 0.6 * (tr.vel?.x || 0) + 0.4 * vx, y: 0.6 * (tr.vel?.y || 0) + 0.4 * vy }
+        tr.lastPos = { x: found.x, y: found.y }
+        tr.pred = { x: found.x + tr.vel.x, y: found.y + tr.vel.y }
         tr.lost = 0; tr.last = { x: found.x, y: found.y }; tr.lastGoodD = found.d
         tr.box = Math.max(20, Math.min(90, found.d * 3.4)) // ROI shrinks as ball recedes
         if (!tr.moved) tr.dStart.push(found.d)              // pre-roll sizes = at-rest ball
@@ -175,6 +215,7 @@ export default function StimpCam({ onClose, onResult }) {
         }
       } else {
         tr.lost++; tr.box = Math.min(150, tr.box + 12)
+        tr.pred = tr.last; tr.vel = { x: 0, y: 0 }           // stop chasing a ghost
         if (tr.moved && tr.lost > 22) { finish(); return }   // rolled out of view / lost
       }
       if (now - tr.t0 > 16) { finish(); return }
