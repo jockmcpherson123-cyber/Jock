@@ -158,27 +158,26 @@ export default function StimpCam({ onClose, onResult }) {
       const C = calRef.current || DEFAULT_C
       if (found) {
         tr.lost = 0; tr.last = { x: found.x, y: found.y }; tr.lastGoodD = found.d
-        tr.box = Math.max(22, Math.min(90, found.d * 3.2)) // ROI shrinks as ball recedes
-        if (now - tr.t0 < 0.4) tr.dStart.push(found.d)      // first ~0.4s = at-rest size
+        tr.box = Math.max(20, Math.min(90, found.d * 3.4)) // ROI shrinks as ball recedes
+        if (!tr.moved) tr.dStart.push(found.d)              // pre-roll sizes = at-rest ball
         const dStart0 = median(tr.dStart) || found.d
         const rawNow = (1 / found.d) - (1 / dStart0)
         const ftNow = Math.max(0, C * rawNow)
         setLiveFt(Math.round(ftNow * 100) / 100)
         setDot(dispFromProc(found.x, found.y))
-        if (ftNow > 0.8) tr.moved = true                    // real roll started
+        if (ftNow > 0.6) tr.moved = true                    // real roll started
         if (tr.moved) {
-          const mv = Math.hypot(found.x - (tr.prev?.x ?? found.x), found.y - (tr.prev?.y ?? found.y))
-          if (mv < 1.6) { if (tr.stableSince == null) tr.stableSince = now; else if (now - tr.stableSince > 0.5) { tr.dStop.push(found.d); finish(); return } }
-          else { tr.stableSince = null }
-          // keep a short trailing window of sizes for a stable stop estimate
-          tr.dStop.push(found.d); if (tr.dStop.length > 6) tr.dStop.shift()
+          // Stop = the DISTANCE estimate stops climbing (scale-independent, so a
+          // slow far-away ball isn't mistaken for stopped). Reset the timer each
+          // time it advances; if it fails to gain ground for ~0.7 s, it's done.
+          if (tr.ftRef == null || ftNow > tr.ftRef + 0.15) { tr.ftRef = ftNow; tr.plateauSince = now; tr.dStop = [found.d] }
+          else { tr.dStop.push(found.d); if (tr.dStop.length > 10) tr.dStop.shift(); if (now - tr.plateauSince > 0.7) { finish(); return } }
         }
-        tr.prev = { x: found.x, y: found.y }
       } else {
-        tr.lost++; tr.box = Math.min(140, tr.box + 10)
-        if (tr.moved && tr.lost > 16) { finish(); return }   // rolled out / stopped & lost
+        tr.lost++; tr.box = Math.min(150, tr.box + 12)
+        if (tr.moved && tr.lost > 22) { finish(); return }   // rolled out of view / lost
       }
-      if (now - tr.t0 > 14) { finish(); return }
+      if (now - tr.t0 > 16) { finish(); return }
     }
     rafRef.current = v.requestVideoFrameCallback ? v.requestVideoFrameCallback(() => loop()) : requestAnimationFrame(() => loop())
   }, [dispFromProc])
