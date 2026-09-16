@@ -118,10 +118,13 @@ export default function StimpCam({ onClose, onResult }) {
   }
 
   function startMeasure(isCal) {
-    if (!seed) { setErrMsg('Tap the ball at the meter first so it knows where the roll starts.'); return }
     setErrMsg(''); setResultFt(null); setLiveFt(0); setCalibrating(!!isCal)
-    const start = procFromDisp(seed.xDisp, seed.yDisp)
-    trackRef.current = { start, last: start, dStart: [], dStop: [], moved: false, stableSince: null, t0: null, box: 46, lost: 0, stopped: false }
+    // Mounted on the meter, the ball always leaves from the same near spot, so we
+    // auto-catch it: seed from a tap if given, else the lower-centre start zone
+    // with a wide search box that narrows once it locks on.
+    const proc = procRef.current
+    const start = seed ? procFromDisp(seed.xDisp, seed.yDisp) : { x: (proc?.width || PROC_W) * 0.5, y: (proc?.height || Math.round(PROC_W * 0.56)) * 0.72 }
+    trackRef.current = { start, last: start, dStart: [], dStop: [], moved: false, stableSince: null, t0: null, box: seed ? 60 : 150, lost: 0, stopped: false }
     setStep('measuring')
     loop()
   }
@@ -201,7 +204,7 @@ export default function StimpCam({ onClose, onResult }) {
         <Camera size={18} style={{ color: GOLD }} />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>Measure green speed <span style={{ fontSize: 10, fontWeight: 700, color: GOLD, border: `1px solid ${GOLD}`, borderRadius: 6, padding: '1px 5px', marginLeft: 4 }}>BETA</span></div>
-          <div style={{ fontSize: 10.5, opacity: .7 }}>Phone flat behind the meter · aim down the line{cal ? ' · calibrated' : ' · not calibrated'}</div>
+          <div style={{ fontSize: 10.5, opacity: .7 }}>Phone on the meter end · aim down the line{cal ? ' · calibrated' : ' · not calibrated'}</div>
         </div>
         <button onClick={onClose} style={{ background: 'rgba(255,255,255,.12)', border: 0, borderRadius: 10, padding: 8, color: '#fff', cursor: 'pointer' }}><X size={18} /></button>
       </div>
@@ -233,11 +236,11 @@ export default function StimpCam({ onClose, onResult }) {
 
         {step === 'aim' && (
           <>
-            <p style={{ fontSize: 12.5, opacity: .85, margin: '0 0 10px', lineHeight: 1.5 }}><Crosshair size={13} style={{ verticalAlign: -2, color: GOLD }} /> Lay the phone flat on the green <b>behind the Stimpmeter</b>, lens looking straight down the roll line. Tap the ball at the meter, then release it and hit <b>Start</b>. Keep the whole roll in view.</p>
+            <p style={{ fontSize: 12.5, opacity: .85, margin: '0 0 10px', lineHeight: 1.5 }}><Crosshair size={13} style={{ verticalAlign: -2, color: GOLD }} /> Clamp the phone to the <b>end of the Stimpmeter</b>, lens straight down the line. Hit <b>Start</b>, then lift to release — it catches the ball off the ramp and follows it across the green. (Optional: tap the ball first to help it lock on.)</p>
             {!cal && <p style={{ fontSize: 11.5, color: GOLD, margin: '0 0 10px' }}>Not calibrated yet — do one <b>Calibrate roll</b> against a hand measurement first for a real number.</p>}
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={() => startMeasure(true)} style={btn('#2A2A26', { flex: 'none' })}><SlidersHorizontal size={15} /> Calibrate roll</button>
-              <button onClick={() => startMeasure(false)} style={btn(FERN, { flex: 1, opacity: seed ? 1 : .5 })}><Camera size={16} /> Start</button>
+              <button onClick={() => startMeasure(false)} style={btn(FERN, { flex: 1 })}><Camera size={16} /> Start</button>
             </div>
           </>
         )}
