@@ -46,6 +46,7 @@ import {
   Target,
   Scissors,
   Gauge,
+  Camera,
   Sun,
   CloudSun,
   CloudDrizzle,
@@ -90,6 +91,7 @@ import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import WeeklyReport from '@/components/WeeklyReport'
 import TurfBrief from '@/components/TurfBrief'
+import StimpCam from '@/components/StimpCam'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
 import Growth from '@/components/Growth'
@@ -10229,10 +10231,21 @@ function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate,
   const [msg, setMsg] = useState(null)
   const [histOpen, setHistOpen] = useState(false) // full readings list stays tucked away until asked for
   const [picked, setPicked] = useState(null) // a reading opened by tapping its point on the graph
+  const [camOpen, setCamOpen] = useState(false) // camera roll-out measure (beta)
 
   const toggleGreen = (g) => setSelected((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]))
   const setVal = (g, part, v) => setVals((prev) => ({ ...prev, [g]: { ...(prev[g] || {}), [part]: v } }))
   const hasReading = (g) => { const v = vals[g] || {}; return (v.ft !== '' && v.ft != null) || (v.in !== '' && v.in != null) }
+  // Camera measured a roll-out (decimal feet) → drop it into the first selected
+  // green that's still blank, so the crew can eyeball it before saving.
+  const applyMeasure = (feet) => {
+    const ordered = [...selected].sort(sortGreens)
+    const target = ordered.find((g) => !hasReading(g)) || ordered[0]
+    if (!target) { setMsg({ type: 'err', text: 'Pick a green first, then measure.' }); return }
+    const parts = feetToParts(feet)
+    setVal(target, 'ft', parts.ft); setVal(target, 'in', parts.inch)
+    setMsg({ type: 'ok', text: `Measured ${fmtStimp(feet)} → ${shortGreen(target)}. Check it, then Save.` })
+  }
 
   const entries = selected.filter(hasReading)
   const save = async () => {
@@ -10300,6 +10313,12 @@ function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate,
               ))}
             </div>
           </div>
+        )}
+
+        {selected.length > 0 && (
+          <button type="button" onClick={() => setCamOpen(true)} className="w-full mb-3 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold font-body" style={{ backgroundColor: 'white', color: FOREST, border: `1.5px solid ${GOLD}` }}>
+            <Camera size={16} style={{ color: GOLD }} /> Measure roll-out with camera <span style={{ fontSize: 9, fontWeight: 800, color: GOLD, border: `1px solid ${GOLD}`, borderRadius: 5, padding: '1px 4px' }}>BETA</span>
+          </button>
         )}
 
         <div className="mb-3">
@@ -10406,6 +10425,8 @@ function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate,
           onDelete={async () => { await onDelete(picked.id); setPicked(null) }}
         />
       )}
+
+      {camOpen && <StimpCam onClose={() => setCamOpen(false)} onResult={applyMeasure} />}
     </div>
   )
 }
