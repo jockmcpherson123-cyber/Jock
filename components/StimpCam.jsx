@@ -1,83 +1,88 @@
 'use client'
 
-// ── Green-speed by camera (BETA) ─────────────────────────────────────────────
-// Keeps the Stimpmeter for the standard release; the phone films the roll and
-// auto-measures the roll-OUT distance, which is the Stimp reading in feet.
+// ── Green-speed by camera · down-the-line (BETA) ─────────────────────────────
+// Matches the Ball Roll Pro setup: phone flat on the green, BEHIND the
+// Stimpmeter, aimed straight down the intended roll line. Lift the meter, the
+// ball rolls AWAY from the camera, and we measure the roll-out.
 //
-// How it works, honestly: this is not magic. You calibrate the scale by sizing a
-// ring over the ball at rest (a golf ball is 1.68"/42.67 mm, so its pixel size
-// gives us millimetres-per-pixel). Then it tracks the white ball across the green
-// frame by frame and measures how far it travelled before stopping. It needs a
-// SIDE-ON view (phone low, a couple of feet to the side, square to the roll line)
-// so the ball stays the same distance from the lens and the scale holds. Bright,
-// even light and a clean green help. Always sanity-check the number against a
-// hand-measured roll until you trust it on your greens — hence "beta".
+// Because the ball rolls away (it doesn't cross the frame), we can't use sideways
+// pixel travel. Instead we range it by SIZE: a golf ball is always 42.67 mm, so
+// the smaller it looks, the further away it is (distance ∝ 1 / apparent size).
+// The roll-out is how much further away it ended up than where it started.
+//
+// The lens field-of-view and the phone's tilt turn that size-change into feet by
+// a single multiplier that differs per phone/setup — so you CALIBRATE ONCE: do a
+// roll, measure it by hand, tell the app, and it remembers the multiplier. After
+// that it converts automatically. Re-calibrate any time the setup changes.
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { X, Camera, RotateCcw, Check, Ruler } from 'lucide-react'
-import { FOREST, FERN, GOLD, INK, INK_3, HAIR, RED } from '@/lib/theme'
+import { X, Camera, RotateCcw, Check, Crosshair, SlidersHorizontal } from 'lucide-react'
+import { FOREST, FERN, GOLD, INK, INK_3 } from '@/lib/theme'
 import { fmtStimp, stimpToFeet } from '@/lib/greenspeed'
 
-const BALL_MM = 42.67          // golf ball diameter
-const PROC_W = 480             // processing canvas width (downscaled for speed)
-const MM_PER_FT = 304.8
+const PROC_W = 640            // processing width (higher = the far, tiny ball survives)
+const BALL_MM = 42.67
+const CAL_KEY = 'stimp_cam_cal_v1'
+// Fallback multiplier from an assumed ~66° horizontal field of view, so an
+// un-calibrated reading is at least a ballpark. C = f_px · BALL_MM / 304.8 (ft).
+const F_PX = (PROC_W / 2) / Math.tan((66 * Math.PI / 180) / 2)
+const DEFAULT_C = (F_PX * BALL_MM) / 304.8
+
+function loadCal() { try { const v = Number(localStorage.getItem(CAL_KEY)); return v > 0 ? v : null } catch { return null } }
+function saveCal(c) { try { localStorage.setItem(CAL_KEY, String(c)) } catch {} }
 
 export default function StimpCam({ onClose, onResult }) {
   const videoRef = useRef(null)
-  const procRef = useRef(null)      // offscreen processing canvas
+  const procRef = useRef(null)
   const rafRef = useRef(null)
-  const trackRef = useRef(null)     // mutable tracking state (avoids re-render churn)
+  const trackRef = useRef(null)
 
-  const [step, setStep] = useState('init')   // init | calibrate | ready | measuring | result | error | manual
+  const [step, setStep] = useState('init')  // init|aim|measuring|result|calibrateAsk|error|manual
   const [errMsg, setErrMsg] = useState('')
-  const [ringR, setRingR] = useState(26)      // calibration ring radius, CSS px
-  const [seed, setSeed] = useState(null)      // {xDisp,yDisp} tapped ball start, CSS px
-  const [liveFt, setLiveFt] = useState(null)  // running distance while measuring
-  const [dot, setDot] = useState(null)        // tracked ball position, CSS px
+  const [seed, setSeed] = useState(null)     // tapped ball start (CSS px)
+  const [dot, setDot] = useState(null)       // live tracked pos (CSS px)
+  const [liveFt, setLiveFt] = useState(null)
   const [result, setResultFt] = useState(null)
+  const [rawResult, setRawResult] = useState(null) // 1/dStop - 1/dStart (for calibration)
+  const [calibrating, setCalibrating] = useState(false)
+  const [calFt, setCalFt] = useState(''); const [calIn, setCalIn] = useState('')
   const [manFt, setManFt] = useState(''); const [manIn, setManIn] = useState('')
-  const mmPerPxRef = useRef(null)             // scale (in PROCESSING px)
+  const [cal, setCal] = useState(null)       // stored multiplier
+  const calRef = useRef(null)
 
-  // ── camera lifecycle ──
+  useEffect(() => { const c = loadCal(); setCal(c); calRef.current = c }, [])
+
+  // ── camera ──
   useEffect(() => {
     let stream
     ;(async () => {
-      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) { setStep('error'); setErrMsg('This device or browser won\'t give the app camera access. Use manual entry.'); return }
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) { setStep('error'); setErrMsg("This device won't give the app camera access. Use manual entry."); return }
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
-        const v = videoRef.current
-        if (!v) return
-        v.srcObject = stream
-        v.setAttribute('playsinline', 'true'); v.muted = true
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+        const v = videoRef.current; if (!v) return
+        v.srcObject = stream; v.setAttribute('playsinline', 'true'); v.muted = true
         await v.play().catch(() => {})
-        setStep('calibrate')
+        setStep('aim')
       } catch (e) {
         setStep('error')
-        setErrMsg(e?.name === 'NotAllowedError' ? 'Camera permission was blocked. Allow it in your browser settings, or use manual entry.' : 'Couldn\'t start the camera. Use manual entry.')
+        setErrMsg(e?.name === 'NotAllowedError' ? 'Camera permission was blocked. Allow it in your browser settings, or use manual entry.' : "Couldn't start the camera. Use manual entry.")
       }
     })()
-    return () => { try { (stream || videoRef.current?.srcObject)?.getTracks?.().forEach((t) => t.stop()) } catch {} ; if (rafRef.current) cancelAnimationFrame(rafRef.current) }
+    return () => { try { (stream || videoRef.current?.srcObject)?.getTracks?.().forEach((t) => t.stop()) } catch {}; stopLoop() }
   }, [])
 
-  // Map processing-canvas coords → on-screen CSS coords over the <video>.
+  function stopLoop() { try { const v = videoRef.current; if (rafRef.current != null) { if (v?.cancelVideoFrameCallback) v.cancelVideoFrameCallback(rafRef.current); cancelAnimationFrame(rafRef.current) } } catch {} rafRef.current = null }
+
   const dispFromProc = useCallback((px, py) => {
     const v = videoRef.current; if (!v) return { x: 0, y: 0 }
-    const r = v.getBoundingClientRect()
-    const proc = procRef.current
-    const sx = r.width / (proc?.width || PROC_W)
-    const sy = r.height / (proc?.height || 1)
-    return { x: px * sx, y: py * sy }
+    const r = v.getBoundingClientRect(); const proc = procRef.current
+    return { x: px * (r.width / (proc?.width || PROC_W)), y: py * (r.height / (proc?.height || 1)) }
   }, [])
-  // Map on-screen CSS coords (relative to video box) → processing coords.
   const procFromDisp = useCallback((cx, cy) => {
     const v = videoRef.current; if (!v) return { x: 0, y: 0 }
-    const r = v.getBoundingClientRect()
-    const proc = procRef.current
-    const sx = (proc?.width || PROC_W) / r.width
-    const sy = (proc?.height || 1) / r.height
-    return { x: cx * sx, y: cy * sy }
+    const r = v.getBoundingClientRect(); const proc = procRef.current
+    return { x: cx * ((proc?.width || PROC_W) / r.width), y: cy * ((proc?.height || 1) / r.height) }
   }, [])
 
-  // Grab a downscaled frame into the processing canvas; returns its ImageData.
   function grabFrame() {
     const v = videoRef.current, c = procRef.current
     if (!v || !c || !v.videoWidth) return null
@@ -88,7 +93,7 @@ export default function StimpCam({ onClose, onResult }) {
     return ctx.getImageData(0, 0, c.width, c.height)
   }
 
-  // Find the white ball's centroid within a search box. Returns {x,y,n} or null.
+  // Whiteness blob within a search box → centroid + pixel count (n → diameter).
   function findBall(img, box) {
     const { data, width, height } = img
     const x0 = Math.max(0, Math.floor(box.x0)), y0 = Math.max(0, Math.floor(box.y0))
@@ -98,43 +103,25 @@ export default function StimpCam({ onClose, onResult }) {
       let row = (y * width + x0) * 4
       for (let x = x0; x < x1; x++, row += 4) {
         const r = data[row], g = data[row + 1], b = data[row + 2]
-        // White = all channels bright and not strongly green-dominant.
-        if (r > 188 && g > 188 && b > 178 && Math.abs(r - g) < 46 && g - b < 60) { sumX += x; sumY += y; n++ }
+        if (r > 186 && g > 186 && b > 176 && Math.abs(r - g) < 48 && g - b < 62) { sumX += x; sumY += y; n++ }
       }
     }
-    if (n < 4) return null
-    return { x: sumX / n, y: sumY / n, n }
+    if (n < 3) return null
+    return { x: sumX / n, y: sumY / n, n, d: 2 * Math.sqrt(n / Math.PI) }
   }
+  const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)] }
 
-  // ── calibration: user sizes the ring over the ball, then confirms ──
-  function confirmCalibrate() {
-    const v = videoRef.current; if (!v) return
-    const rect = v.getBoundingClientRect()
-    const proc = grabFrame(); if (!proc) { setStep('error'); setErrMsg('No video frame yet — give it a second and retry.'); return }
-    // ring diameter (CSS px) → processing px → mm/px
-    const procDiaPx = (ringR * 2) * (proc.width / rect.width)
-    if (procDiaPx < 4) { setErrMsg('Make the ring a bit bigger over the ball.'); return }
-    mmPerPxRef.current = BALL_MM / procDiaPx
-    setErrMsg('')
-    setStep('ready')
-  }
-
-  // Tap the ball at rest to seed where the roll begins.
   function onVideoTap(e) {
-    if (step !== 'ready') return
-    const v = videoRef.current; const rect = v.getBoundingClientRect()
-    const cx = e.clientX - rect.left, cy = e.clientY - rect.top
-    setSeed({ xDisp: cx, yDisp: cy })
+    if (step !== 'aim') return
+    const v = videoRef.current, rect = v.getBoundingClientRect()
+    setSeed({ xDisp: e.clientX - rect.left, yDisp: e.clientY - rect.top })
   }
 
-  // ── measuring loop ──
-  function startMeasure() {
-    if (!seed) { setErrMsg('Tap the ball first so it knows where the roll starts.'); return }
-    setErrMsg(''); setResultFt(null); setLiveFt(0)
-    const proc = grabFrame(); if (!proc) return
+  function startMeasure(isCal) {
+    if (!seed) { setErrMsg('Tap the ball at the meter first so it knows where the roll starts.'); return }
+    setErrMsg(''); setResultFt(null); setLiveFt(0); setCalibrating(!!isCal)
     const start = procFromDisp(seed.xDisp, seed.yDisp)
-    const box = 40 // half-size of the search window (proc px), grows if lost
-    trackRef.current = { start, last: start, path: [], lostFrames: 0, box, moved: false, stableSince: null, t0: null }
+    trackRef.current = { start, last: start, dStart: [], dStop: [], moved: false, stableSince: null, t0: null, box: 46, lost: 0, stopped: false }
     setStep('measuring')
     loop()
   }
@@ -142,13 +129,18 @@ export default function StimpCam({ onClose, onResult }) {
   function finish() {
     const tr = trackRef.current
     if (tr) tr.stopped = true
-    try { const v = videoRef.current; if (rafRef.current != null) { if (v?.cancelVideoFrameCallback) v.cancelVideoFrameCallback(rafRef.current); cancelAnimationFrame(rafRef.current) } } catch {}
-    const mmPerPx = mmPerPxRef.current
-    if (!tr || !mmPerPx || !tr.moved) { setStep('ready'); setErrMsg('Didn\'t catch a clean roll — line the ball up and try again, or enter it by hand.'); return }
-    const dx = tr.last.x - tr.start.x, dy = tr.last.y - tr.start.y
-    const mm = Math.hypot(dx, dy) * mmPerPx
-    const feet = Math.round((mm / MM_PER_FT) * 100) / 100
-    setResultFt(feet); setStep('result')
+    stopLoop()
+    const dStart = median(tr?.dStart || []), dStop = median(tr?.dStop?.length ? tr.dStop : (tr?.lastGoodD ? [tr.lastGoodD] : []))
+    if (!tr || !tr.moved || !dStart || !dStop || dStop >= dStart) {
+      setStep('aim'); setErrMsg("Didn't catch a clean roll away from the camera — re-aim straight down the line, tap the ball, and try again (or enter by hand).")
+      return
+    }
+    const raw = (1 / dStop) - (1 / dStart)  // grows as the ball recedes
+    setRawResult(raw)
+    if (calibrating) { setStep('calibrateAsk'); return }
+    const C = calRef.current || DEFAULT_C
+    setResultFt(Math.round(C * raw * 100) / 100)
+    setStep('result')
   }
 
   const loop = useCallback(function loop() {
@@ -156,117 +148,113 @@ export default function StimpCam({ onClose, onResult }) {
     if (!v || !tr || tr.stopped) return
     const img = grabFrame()
     if (img) {
-      const cx = tr.last.x, cy = tr.last.y
       const b = tr.box
-      const found = findBall(img, { x0: cx - b, y0: cy - b, x1: cx + b, y1: cy + b })
+      const found = findBall(img, { x0: tr.last.x - b, y0: tr.last.y - b, x1: tr.last.x + b, y1: tr.last.y + b })
       const now = performance.now() / 1000
       if (tr.t0 == null) tr.t0 = now
+      const C = calRef.current || DEFAULT_C
       if (found) {
-        tr.lostFrames = 0; tr.box = 40
-        const moveDist = Math.hypot(found.x - tr.last.x, found.y - tr.last.y)
-        const totalFromStart = Math.hypot(found.x - tr.start.x, found.y - tr.start.y)
-        if (totalFromStart * (mmPerPxRef.current || 0) > 60) tr.moved = true // >6cm = a real roll
-        tr.last = { x: found.x, y: found.y }
-        tr.path.push({ x: found.x, y: found.y, t: now })
-        const d = dispFromProc(found.x, found.y); setDot(d)
-        const mm = totalFromStart * (mmPerPxRef.current || 0)
-        setLiveFt(Math.round((mm / MM_PER_FT) * 100) / 100)
-        // stop = has moved, then near-still for ~0.5 s
+        tr.lost = 0; tr.last = { x: found.x, y: found.y }; tr.lastGoodD = found.d
+        tr.box = Math.max(22, Math.min(90, found.d * 3.2)) // ROI shrinks as ball recedes
+        if (now - tr.t0 < 0.4) tr.dStart.push(found.d)      // first ~0.4s = at-rest size
+        const dStart0 = median(tr.dStart) || found.d
+        const rawNow = (1 / found.d) - (1 / dStart0)
+        const ftNow = Math.max(0, C * rawNow)
+        setLiveFt(Math.round(ftNow * 100) / 100)
+        setDot(dispFromProc(found.x, found.y))
+        if (ftNow > 0.8) tr.moved = true                    // real roll started
         if (tr.moved) {
-          if (moveDist < 2.2) { if (tr.stableSince == null) tr.stableSince = now; else if (now - tr.stableSince > 0.5) { finish(); return } }
-          else tr.stableSince = null
+          const mv = Math.hypot(found.x - (tr.prev?.x ?? found.x), found.y - (tr.prev?.y ?? found.y))
+          if (mv < 1.6) { if (tr.stableSince == null) tr.stableSince = now; else if (now - tr.stableSince > 0.5) { tr.dStop.push(found.d); finish(); return } }
+          else { tr.stableSince = null }
+          // keep a short trailing window of sizes for a stable stop estimate
+          tr.dStop.push(found.d); if (tr.dStop.length > 6) tr.dStop.shift()
         }
+        tr.prev = { x: found.x, y: found.y }
       } else {
-        tr.lostFrames++; tr.box = Math.min(160, tr.box + 8) // widen the hunt
-        if (tr.moved && tr.lostFrames > 18) { finish(); return } // rolled out of view / stopped
+        tr.lost++; tr.box = Math.min(140, tr.box + 10)
+        if (tr.moved && tr.lost > 16) { finish(); return }   // rolled out / stopped & lost
       }
-      // hard timeout ~12 s
-      if (now - tr.t0 > 12) { finish(); return }
+      if (now - tr.t0 > 14) { finish(); return }
     }
-    // schedule next frame
-    if (v.requestVideoFrameCallback) rafRef.current = v.requestVideoFrameCallback(() => loop())
-    else rafRef.current = requestAnimationFrame(() => loop())
+    rafRef.current = v.requestVideoFrameCallback ? v.requestVideoFrameCallback(() => loop()) : requestAnimationFrame(() => loop())
   }, [dispFromProc])
+
+  function saveCalibration() {
+    const feet = stimpToFeet(calFt, calIn)
+    if (!(feet > 0) || !(rawResult > 0)) { setErrMsg('Enter the hand-measured distance.'); return }
+    const C = feet / rawResult
+    saveCal(C); setCal(C); calRef.current = C
+    setCalibrating(false); setErrMsg(''); setCalFt(''); setCalIn('')
+    setResultFt(Math.round(C * rawResult * 100) / 100); setStep('result')
+  }
 
   function acceptResult() { if (result != null && onResult) onResult(result); onClose?.() }
   function saveManual() { const f = stimpToFeet(manFt, manIn); if (f > 0 && onResult) onResult(f); onClose?.() }
 
-  // ── UI ──
   const overlay = { position: 'absolute', inset: 0, pointerEvents: 'none' }
   const btn = (bg, extra = {}) => ({ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, fontSize: 14, fontWeight: 700, color: '#fff', background: bg, border: 0, borderRadius: 12, padding: '12px 16px', cursor: 'pointer', ...extra })
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 90, background: '#0B0B0A', display: 'flex', flexDirection: 'column' }}>
-      {/* header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', color: '#fff', background: FOREST }}>
         <Camera size={18} style={{ color: GOLD }} />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>Measure green speed <span style={{ fontSize: 10, fontWeight: 700, color: GOLD, border: `1px solid ${GOLD}`, borderRadius: 6, padding: '1px 5px', marginLeft: 4 }}>BETA</span></div>
-          <div style={{ fontSize: 10.5, opacity: .7 }}>Side-on · phone low · square to the roll</div>
+          <div style={{ fontSize: 10.5, opacity: .7 }}>Phone flat behind the meter · aim down the line{cal ? ' · calibrated' : ' · not calibrated'}</div>
         </div>
         <button onClick={onClose} style={{ background: 'rgba(255,255,255,.12)', border: 0, borderRadius: 10, padding: 8, color: '#fff', cursor: 'pointer' }}><X size={18} /></button>
       </div>
 
-      {/* video stage */}
       <div style={{ position: 'relative', flex: 1, background: '#000', overflow: 'hidden' }} onClick={onVideoTap}>
-        <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'contain', display: step === 'error' || step === 'manual' ? 'none' : 'block' }} />
+        <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'contain', display: step === 'error' || step === 'manual' || step === 'calibrateAsk' ? 'none' : 'block' }} />
         <canvas ref={procRef} style={{ display: 'none' }} />
 
-        {/* calibration ring */}
-        {step === 'calibrate' && (
+        {/* down-the-line guide */}
+        {step === 'aim' && (
           <div style={overlay}>
-            <div style={{ position: 'absolute', left: '50%', top: '50%', width: ringR * 2, height: ringR * 2, marginLeft: -ringR, marginTop: -ringR, border: `2px solid ${GOLD}`, borderRadius: '50%', boxShadow: '0 0 0 9999px rgba(0,0,0,0.28)' }} />
-            <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, top: 0 }} />
+            <div style={{ position: 'absolute', left: '50%', top: '35%', bottom: 0, width: 2, marginLeft: -1, background: 'linear-gradient(to bottom, rgba(201,168,76,0), rgba(201,168,76,.7))' }} />
+            {seed && <div style={{ position: 'absolute', left: seed.xDisp - 10, top: seed.yDisp - 10, width: 20, height: 20, border: `2px solid ${FERN}`, borderRadius: '50%', background: 'rgba(58,107,74,.25)' }} />}
           </div>
         )}
-        {/* seed marker */}
-        {step === 'ready' && seed && (
-          <div style={{ ...overlay }}>
-            <div style={{ position: 'absolute', left: seed.xDisp - 9, top: seed.yDisp - 9, width: 18, height: 18, border: `2px solid ${FERN}`, borderRadius: '50%', background: 'rgba(58,107,74,.25)' }} />
-          </div>
-        )}
-        {/* live tracked dot */}
-        {step === 'measuring' && dot && (
-          <div style={overlay}><div style={{ position: 'absolute', left: dot.x - 7, top: dot.y - 7, width: 14, height: 14, border: '2px solid #fff', borderRadius: '50%', boxShadow: '0 0 8px rgba(255,255,255,.8)' }} /></div>
-        )}
-        {/* live distance readout */}
+        {step === 'measuring' && dot && <div style={overlay}><div style={{ position: 'absolute', left: dot.x - 7, top: dot.y - 7, width: 14, height: 14, border: '2px solid #fff', borderRadius: '50%', boxShadow: '0 0 8px rgba(255,255,255,.85)' }} /></div>}
         {step === 'measuring' && (
           <div style={{ position: 'absolute', left: 0, right: 0, top: 12, textAlign: 'center', color: '#fff', pointerEvents: 'none' }}>
             <div style={{ display: 'inline-block', background: 'rgba(0,0,0,.5)', borderRadius: 12, padding: '6px 14px', fontSize: 26, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtStimp(liveFt)}</div>
-            <div style={{ fontSize: 11, opacity: .8, marginTop: 4 }}>tracking the roll…</div>
+            <div style={{ fontSize: 11, opacity: .8, marginTop: 4 }}>tracking the ball away…</div>
           </div>
         )}
       </div>
 
-      {/* controls / copy */}
       <div style={{ background: '#141412', color: '#fff', padding: '14px 16px 22px' }}>
         {errMsg && <p style={{ color: '#FCA5A5', fontSize: 12.5, margin: '0 0 10px' }}>{errMsg}</p>}
 
         {step === 'init' && <p style={{ fontSize: 13, opacity: .8, margin: 0 }}>Starting camera…</p>}
 
-        {step === 'calibrate' && (
+        {step === 'aim' && (
           <>
-            <p style={{ fontSize: 12.5, opacity: .85, margin: '0 0 10px', lineHeight: 1.5 }}><Ruler size={13} style={{ verticalAlign: -2, color: GOLD }} /> Line the phone up <b>side-on</b> to the roll, low to the ground. Put a ball where the release lands and size the ring to match it exactly.</p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-              <span style={{ fontSize: 11, opacity: .7, width: 64 }}>Ring size</span>
-              <input type="range" min="10" max="70" value={ringR} onChange={(e) => setRingR(Number(e.target.value))} style={{ flex: 1, accentColor: GOLD }} />
-            </div>
-            <button onClick={confirmCalibrate} style={btn(GOLD, { width: '100%', color: INK })}><Check size={16} /> Ball fits the ring</button>
-          </>
-        )}
-
-        {step === 'ready' && (
-          <>
-            <p style={{ fontSize: 12.5, opacity: .85, margin: '0 0 10px', lineHeight: 1.5 }}>Tap the ball at rest to mark the start, then release it off the Stimpmeter and hit <b>Start</b>. Keep the whole roll in frame.</p>
+            <p style={{ fontSize: 12.5, opacity: .85, margin: '0 0 10px', lineHeight: 1.5 }}><Crosshair size={13} style={{ verticalAlign: -2, color: GOLD }} /> Lay the phone flat on the green <b>behind the Stimpmeter</b>, lens looking straight down the roll line. Tap the ball at the meter, then release it and hit <b>Start</b>. Keep the whole roll in view.</p>
+            {!cal && <p style={{ fontSize: 11.5, color: GOLD, margin: '0 0 10px' }}>Not calibrated yet — do one <b>Calibrate roll</b> against a hand measurement first for a real number.</p>}
             <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => setStep('calibrate')} style={btn('#2A2A26', { flex: 'none' })}><RotateCcw size={15} /> Re-scale</button>
-              <button onClick={startMeasure} style={btn(FERN, { flex: 1, opacity: seed ? 1 : .5 })}><Camera size={16} /> Start</button>
+              <button onClick={() => startMeasure(true)} style={btn('#2A2A26', { flex: 'none' })}><SlidersHorizontal size={15} /> Calibrate roll</button>
+              <button onClick={() => startMeasure(false)} style={btn(FERN, { flex: 1, opacity: seed ? 1 : .5 })}><Camera size={16} /> Start</button>
             </div>
           </>
         )}
 
-        {step === 'measuring' && (
-          <button onClick={finish} style={btn('#2A2A26', { width: '100%' })}>Stop &amp; read</button>
+        {step === 'measuring' && <button onClick={finish} style={btn('#2A2A26', { width: '100%' })}>Stop &amp; read</button>}
+
+        {step === 'calibrateAsk' && (
+          <>
+            <p style={{ fontSize: 13, margin: '0 0 12px', opacity: .9 }}>Good roll. Now measure that same roll-out <b>by hand</b> and enter it — the app will learn the multiplier for this phone &amp; setup.</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <input type="number" inputMode="numeric" value={calFt} onChange={(e) => setCalFt(e.target.value)} placeholder="9" style={{ width: 70, textAlign: 'center', fontSize: 20, fontWeight: 700, padding: 10, borderRadius: 10, border: 0 }} />
+              <span style={{ opacity: .6 }}>′</span>
+              <input type="number" inputMode="numeric" min="0" max="11" value={calIn} onChange={(e) => setCalIn(e.target.value)} placeholder="10" style={{ width: 70, textAlign: 'center', fontSize: 20, fontWeight: 700, padding: 10, borderRadius: 10, border: 0 }} />
+              <span style={{ opacity: .6 }}>″</span>
+            </div>
+            <button onClick={saveCalibration} style={btn(GOLD, { width: '100%', color: INK })}><Check size={16} /> Save calibration</button>
+          </>
         )}
 
         {step === 'result' && (
@@ -274,10 +262,10 @@ export default function StimpCam({ onClose, onResult }) {
             <div style={{ textAlign: 'center', margin: '2px 0 14px' }}>
               <div style={{ fontSize: 11, letterSpacing: '.16em', textTransform: 'uppercase', opacity: .6 }}>Measured roll-out</div>
               <div style={{ fontSize: 46, fontWeight: 800, color: GOLD, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{fmtStimp(result)}</div>
-              <div style={{ fontSize: 11, opacity: .6 }}>Sanity-check against a hand roll before you trust it.</div>
+              <div style={{ fontSize: 11, opacity: .6 }}>{cal ? 'Sanity-check against a hand roll now and then.' : 'Rough estimate — calibrate for an accurate number.'}</div>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => { setStep('ready'); setResultFt(null); setDot(null) }} style={btn('#2A2A26', { flex: 'none' })}><RotateCcw size={15} /> Redo</button>
+              <button onClick={() => { setStep('aim'); setResultFt(null); setDot(null) }} style={btn('#2A2A26', { flex: 'none' })}><RotateCcw size={15} /> Redo</button>
               <button onClick={acceptResult} style={btn(FERN, { flex: 1 })}><Check size={16} /> Use {fmtStimp(result)}</button>
             </div>
           </>
@@ -287,17 +275,16 @@ export default function StimpCam({ onClose, onResult }) {
           <>
             <p style={{ fontSize: 13, margin: '0 0 12px', opacity: .85 }}>{step === 'error' ? errMsg : 'Enter the reading you measured by hand.'}</p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <input type="number" inputMode="numeric" value={manFt} onChange={(e) => setManFt(e.target.value)} placeholder="9" style={{ width: 70, textAlign: 'center', fontSize: 20, fontWeight: 700, padding: '10px', borderRadius: 10, border: 0 }} />
+              <input type="number" inputMode="numeric" value={manFt} onChange={(e) => setManFt(e.target.value)} placeholder="9" style={{ width: 70, textAlign: 'center', fontSize: 20, fontWeight: 700, padding: 10, borderRadius: 10, border: 0 }} />
               <span style={{ opacity: .6 }}>′</span>
-              <input type="number" inputMode="numeric" min="0" max="11" value={manIn} onChange={(e) => setManIn(e.target.value)} placeholder="10" style={{ width: 70, textAlign: 'center', fontSize: 20, fontWeight: 700, padding: '10px', borderRadius: 10, border: 0 }} />
+              <input type="number" inputMode="numeric" min="0" max="11" value={manIn} onChange={(e) => setManIn(e.target.value)} placeholder="10" style={{ width: 70, textAlign: 'center', fontSize: 20, fontWeight: 700, padding: 10, borderRadius: 10, border: 0 }} />
               <span style={{ opacity: .6 }}>″</span>
             </div>
             <button onClick={saveManual} style={btn(FERN, { width: '100%' })}><Check size={16} /> Use this reading</button>
           </>
         )}
 
-        {/* manual entry escape hatch always available (except while measuring) */}
-        {step !== 'measuring' && step !== 'manual' && step !== 'error' && (
+        {step !== 'measuring' && step !== 'manual' && step !== 'error' && step !== 'calibrateAsk' && (
           <button onClick={() => setStep('manual')} style={{ width: '100%', marginTop: 10, background: 'none', border: 0, color: INK_3, fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>Enter by hand instead</button>
         )}
       </div>
