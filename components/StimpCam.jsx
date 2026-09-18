@@ -32,6 +32,11 @@ function saveCal(c) { try { localStorage.setItem(CAL_KEY, String(c)) } catch {} 
 const LINE_KEY = 'stimp_cam_line_v1'  // release line = grass-contact point, as a fraction of frame height
 function loadLine() { try { const v = Number(localStorage.getItem(LINE_KEY)); return v > 0 && v < 1 ? v : 0.6 } catch { return 0.6 } }
 function saveLine(v) { try { localStorage.setItem(LINE_KEY, String(v)) } catch {} }
+const SAMP_KEY = 'stimp_cam_samples_v1'  // [{raw, feet}] calibration rolls
+function loadSamples() { try { const a = JSON.parse(localStorage.getItem(SAMP_KEY) || '[]'); return Array.isArray(a) ? a.filter((p) => p && p.raw > 0 && p.feet > 0) : [] } catch { return [] } }
+function saveSamples(a) { try { localStorage.setItem(SAMP_KEY, JSON.stringify(a)) } catch {} }
+// Best-fit multiplier through the origin (feet ≈ C·raw) from all calibration rolls.
+function fitC(samples) { if (!samples || !samples.length) return null; const num = samples.reduce((s, p) => s + p.feet * p.raw, 0), den = samples.reduce((s, p) => s + p.raw * p.raw, 0); return den > 0 ? num / den : null }
 
 export default function StimpCam({ onClose, onResult }) {
   const videoRef = useRef(null)
@@ -39,7 +44,7 @@ export default function StimpCam({ onClose, onResult }) {
   const rafRef = useRef(null)
   const trackRef = useRef(null)
 
-  const [step, setStep] = useState('init')  // init|aim|measuring|result|calibrateAsk|error|manual
+  const [step, setStep] = useState('init')  // init|aim|measuring|result|calibrateAsk|calibrateDone|error|manual
   const [errMsg, setErrMsg] = useState('')
   const [seed, setSeed] = useState(null)     // tapped ball start (CSS px)
   const [dot, setDot] = useState(null)       // live tracked pos (CSS px)
@@ -51,12 +56,18 @@ export default function StimpCam({ onClose, onResult }) {
   const [manFt, setManFt] = useState(''); const [manIn, setManIn] = useState('')
   const [cal, setCal] = useState(null)       // stored multiplier
   const calRef = useRef(null)
+  const [calSamples, setCalSamples] = useState([]) // calibration rolls [{raw,feet}]
+  const [lastCal, setLastCal] = useState(null)     // {measured, hand} for the done screen
   const [lineY, setLineY] = useState(0.6)    // release line (grass contact), fraction of height
   const lineRef = useRef(0.6)
   const draggingRef = useRef(false)
   const dragEndRef = useRef(0)
 
-  useEffect(() => { const c = loadCal(); setCal(c); calRef.current = c; const l = loadLine(); setLineY(l); lineRef.current = l }, [])
+  useEffect(() => {
+    const s = loadSamples(); setCalSamples(s)
+    const c = fitC(s) ?? loadCal(); setCal(c); calRef.current = c
+    const l = loadLine(); setLineY(l); lineRef.current = l
+  }, [])
 
   // ── camera ──
   useEffect(() => {
@@ -251,13 +262,22 @@ export default function StimpCam({ onClose, onResult }) {
     rafRef.current = v.requestVideoFrameCallback ? v.requestVideoFrameCallback(() => loop()) : requestAnimationFrame(() => loop())
   }, [dispFromProc])
 
+  // A calibration roll is for TEACHING only — it never goes into the data. Add
+  // this (known distance → measured raw) to the sample set and re-fit.
   function saveCalibration() {
     const feet = stimpToFeet(calFt, calIn)
     if (!(feet > 0) || !(rawResult > 0)) { setErrMsg('Enter the hand-measured distance.'); return }
-    const C = feet / rawResult
-    saveCal(C); setCal(C); calRef.current = C
-    setCalibrating(false); setErrMsg(''); setCalFt(''); setCalIn('')
-    setResultFt(Math.round(C * rawResult * 100) / 100); setStep('result')
+    const next = [...calSamples, { raw: rawResult, feet }].slice(-12)
+    const C = fitC(next) || (feet / rawResult)
+    saveCal(C); saveSamples(next); calRef.current = C
+    setCal(C); setCalSamples(next)
+    setLastCal({ measured: Math.round(C * rawResult * 100) / 100, hand: feet })
+    setErrMsg(''); setCalFt(''); setCalIn(''); setCalibrating(false)
+    setStep('calibrateDone')  // stay in calibration mode — add more or finish
+  }
+  function resetCalibration() {
+    saveSamples([]); try { localStorage.removeItem(CAL_KEY) } catch {}
+    calRef.current = null; setCal(null); setCalSamples([]); setLastCal(null)
   }
 
   function acceptResult() { if (result != null && onResult) onResult(result); onClose?.() }
@@ -313,7 +333,9 @@ export default function StimpCam({ onClose, onResult }) {
         {step === 'aim' && (
           <>
             <p style={{ fontSize: 12.5, opacity: .85, margin: '0 0 10px', lineHeight: 1.5 }}><Crosshair size={13} style={{ verticalAlign: -2, color: GOLD }} /> Clamp the phone to the <b>end of the Stimpmeter</b>, lens down the line. Drag the <b style={{ color: GOLD }}>gold release line</b> to where the ball meets the grass at the meter's base — the roll-out is counted from there. Hit <b>Start</b>, then lift to release.</p>
-            {!cal && <p style={{ fontSize: 11.5, color: GOLD, margin: '0 0 10px' }}>Not calibrated yet — do one <b>Calibrate roll</b> against a hand measurement first for a real number.</p>}
+            {!cal
+              ? <p style={{ fontSize: 11.5, color: GOLD, margin: '0 0 10px' }}>Not calibrated — do a few <b>Calibrate rolls</b> at different lengths (measured by hand) first. Calibration rolls are NOT saved to your data.</p>
+              : <p style={{ fontSize: 11.5, opacity: .7, margin: '0 0 10px' }}>Calibrated from {calSamples.length} roll{calSamples.length !== 1 ? 's' : ''}. <span onClick={resetCalibration} style={{ color: GOLD, textDecoration: 'underline', cursor: 'pointer' }}>Reset</span></p>}
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={() => startMeasure(true)} style={btn('#2A2A26', { flex: 'none' })}><SlidersHorizontal size={15} /> Calibrate roll</button>
               <button onClick={() => startMeasure(false)} style={btn(FERN, { flex: 1 })}><Camera size={16} /> Start</button>
@@ -325,14 +347,28 @@ export default function StimpCam({ onClose, onResult }) {
 
         {step === 'calibrateAsk' && (
           <>
-            <p style={{ fontSize: 13, margin: '0 0 12px', opacity: .9 }}>Good roll. Now measure that same roll-out <b>by hand</b> and enter it — the app will learn the multiplier for this phone &amp; setup.</p>
+            <p style={{ fontSize: 13, margin: '0 0 12px', opacity: .9 }}>Good roll. Measure that same roll-out <b>by hand</b> and enter it — this teaches the app, it is <b>not</b> saved to your data.</p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
               <input type="number" inputMode="numeric" value={calFt} onChange={(e) => setCalFt(e.target.value)} placeholder="9" style={{ width: 70, textAlign: 'center', fontSize: 20, fontWeight: 700, padding: 10, borderRadius: 10, border: 0 }} />
               <span style={{ opacity: .6 }}>′</span>
               <input type="number" inputMode="numeric" min="0" max="11" value={calIn} onChange={(e) => setCalIn(e.target.value)} placeholder="10" style={{ width: 70, textAlign: 'center', fontSize: 20, fontWeight: 700, padding: 10, borderRadius: 10, border: 0 }} />
               <span style={{ opacity: .6 }}>″</span>
             </div>
-            <button onClick={saveCalibration} style={btn(GOLD, { width: '100%', color: INK })}><Check size={16} /> Save calibration</button>
+            <button onClick={saveCalibration} style={btn(GOLD, { width: '100%', color: INK })}><Check size={16} /> Add to calibration</button>
+          </>
+        )}
+
+        {step === 'calibrateDone' && (
+          <>
+            <div style={{ margin: '0 0 12px' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Calibration updated · {calSamples.length} roll{calSamples.length !== 1 ? 's' : ''}</div>
+              {lastCal && <p style={{ fontSize: 12.5, opacity: .85, margin: 0 }}>That roll now reads <b style={{ color: GOLD }}>{fmtStimp(lastCal.measured)}</b> vs your <b>{fmtStimp(lastCal.hand)}</b>. {calSamples.length < 3 ? 'Add a couple more at different lengths (short + long) for accuracy across the range.' : 'Looking good — add more any time to sharpen it.'}</p>}
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => startMeasure(true)} style={btn('#2A2A26', { flex: 1 })}><SlidersHorizontal size={15} /> Another roll</button>
+              <button onClick={() => setStep('aim')} style={btn(FERN, { flex: 1 })}><Check size={16} /> Done</button>
+            </div>
+            <button onClick={resetCalibration} style={{ width: '100%', marginTop: 10, background: 'none', border: 0, color: INK_3, fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>Reset calibration &amp; start over</button>
           </>
         )}
 
@@ -363,7 +399,7 @@ export default function StimpCam({ onClose, onResult }) {
           </>
         )}
 
-        {step !== 'measuring' && step !== 'manual' && step !== 'error' && step !== 'calibrateAsk' && (
+        {(step === 'aim' || step === 'result') && (
           <button onClick={() => setStep('manual')} style={{ width: '100%', marginTop: 10, background: 'none', border: 0, color: INK_3, fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>Enter by hand instead</button>
         )}
       </div>
