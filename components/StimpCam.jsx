@@ -125,13 +125,17 @@ export default function StimpCam({ onClose, onResult }) {
       let row = ((y + y0) * width + x0) * 4
       for (let x = 0; x < bw; x++, row += 4) {
         const r = data[row], g = data[row + 1], b = data[row + 2]
-        if (r > 186 && g > 186 && b > 176 && Math.abs(r - g) < 48 && g - b < 62) mask[y * bw + x] = 1
+        // White ball = bright AND low colour-saturation. Grass (green-dominant)
+        // has a big channel spread, so it's rejected even when sunlit.
+        const mx = r > g ? (r > b ? r : b) : (g > b ? g : b)
+        const mn = r < g ? (r < b ? r : b) : (g < b ? g : b)
+        if (mn > 160 && mx - mn < 46) mask[y * bw + x] = 1
       }
     }
     const seen = new Uint8Array(bw * bh)
     const stack = []
-    const maxN = expectedD ? Math.PI * (expectedD * 1.9 / 2) ** 2 : bw * bh * 0.4
-    const minN = 3
+    const maxN = expectedD ? Math.PI * (expectedD * 1.9 / 2) ** 2 : 3500
+    const minN = 4
     let best = null
     for (let i = 0; i < mask.length; i++) {
       if (!mask[i] || seen[i]) continue
@@ -216,11 +220,19 @@ export default function StimpCam({ onClose, onResult }) {
     if (img) {
       const b = tr.box
       const pred = tr.pred || tr.last
-      const found = findBall(img, { x0: pred.x - b, y0: pred.y - b, x1: pred.x + b, y1: pred.y + b }, tr.lastGoodD, pred)
+      let found = findBall(img, { x0: pred.x - b, y0: pred.y - b, x1: pred.x + b, y1: pred.y + b }, tr.lastGoodD, pred)
       const now = performance.now() / 1000
       if (tr.t0 == null) tr.t0 = now
       const C = calRef.current || DEFAULT_C
+      // Jump gate: once locked, reject a detection that leapt further than the
+      // ball plausibly could this frame (a distractor grabbed the tracker).
+      if (found && (tr.lockCount || 0) >= 3) {
+        const jump = Math.hypot(found.x - pred.x, found.y - pred.y)
+        const speed = Math.hypot(tr.vel?.x || 0, tr.vel?.y || 0)
+        if (jump > Math.max(16, speed * 2.6 + (tr.lastGoodD || 10))) found = null
+      }
       if (found) {
+        tr.lockCount = (tr.lockCount || 0) + 1
         // velocity-smoothed prediction so the search box rides ahead of the ball
         const vx = tr.lastPos ? found.x - tr.lastPos.x : 0, vy = tr.lastPos ? found.y - tr.lastPos.y : 0
         tr.vel = { x: 0.6 * (tr.vel?.x || 0) + 0.4 * vx, y: 0.6 * (tr.vel?.y || 0) + 0.4 * vy }
@@ -228,28 +240,27 @@ export default function StimpCam({ onClose, onResult }) {
         tr.pred = { x: found.x + tr.vel.x, y: found.y + tr.vel.y }
         tr.lost = 0; tr.last = { x: found.x, y: found.y }; tr.lastGoodD = found.d
         tr.box = Math.max(20, Math.min(90, found.d * 3.4)) // ROI shrinks as ball recedes
-        setDot(dispFromProc(found.x, found.y))
+        // smooth position (display + crossing) and size (the number) to kill jitter
+        tr.sm = tr.sm ? { x: 0.5 * tr.sm.x + 0.5 * found.x, y: 0.5 * tr.sm.y + 0.5 * found.y } : { x: found.x, y: found.y }
+        tr.dEma = tr.dEma ? 0.6 * tr.dEma + 0.4 * found.d : found.d
+        const d = tr.dEma
+        setDot(dispFromProc(tr.sm.x, tr.sm.y))
         const lineYpx = lineRef.current * img.height
-        const side = Math.sign(found.y - lineYpx) || 1
+        const side = Math.sign(tr.sm.y - lineYpx) || 1
         if (tr.initSide == null) tr.initSide = side
         if (!tr.crossed) {
-          // On the ramp / near side — hold the size at the line; no roll counted yet.
-          tr.preD = found.d; setLiveFt(0)
-          if (side !== tr.initSide) {                        // ball crossed onto the grass → zero here
-            tr.crossed = true
-            tr.dRef = (tr.preD + found.d) / 2
-            tr.dStop = [found.d]; tr.ftRef = 0; tr.plateauSince = now
+          tr.preD = d; setLiveFt(0)
+          if (side !== tr.initSide) {                        // crossed onto the grass → zero here
+            tr.crossed = true; tr.dRef = (tr.preD + d) / 2; tr.dStop = [d]; tr.ftRef = 0; tr.plateauSince = now
           }
         } else {
-          const rawNow = (1 / found.d) - (1 / tr.dRef)
+          const rawNow = (1 / d) - (1 / tr.dRef)
           const ftNow = Math.max(0, C * rawNow)
           setLiveFt(Math.round(ftNow * 100) / 100)
-          if (ftNow > 0.6) tr.moved = true                  // real roll started (past the line)
+          if (ftNow > 0.6) tr.moved = true
           if (tr.moved) {
-            // Stop = the DISTANCE estimate stops climbing (scale-independent, so a
-            // slow far-away ball isn't mistaken for stopped).
-            if (ftNow > tr.ftRef + 0.15) { tr.ftRef = ftNow; tr.plateauSince = now; tr.dStop = [found.d] }
-            else { tr.dStop.push(found.d); if (tr.dStop.length > 10) tr.dStop.shift(); if (now - tr.plateauSince > 0.7) { finish(); return } }
+            if (ftNow > tr.ftRef + 0.15) { tr.ftRef = ftNow; tr.plateauSince = now; tr.dStop = [d] }
+            else { tr.dStop.push(d); if (tr.dStop.length > 10) tr.dStop.shift(); if (now - tr.plateauSince > 0.7) { finish(); return } }
           }
         }
       } else {
