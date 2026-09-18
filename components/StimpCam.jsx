@@ -62,6 +62,7 @@ export default function StimpCam({ onClose, onResult }) {
   const lineRef = useRef(0.6)
   const draggingRef = useRef(false)
   const dragEndRef = useRef(0)
+  const grayRef = useRef(null)   // previous frame's grayscale, for motion detection
 
   useEffect(() => {
     const s = loadSamples(); setCalSamples(s)
@@ -111,25 +112,38 @@ export default function StimpCam({ onClose, onResult }) {
     return ctx.getImageData(0, 0, c.width, c.height)
   }
 
-  // Find the BALL blob in a search box: label connected white shapes, keep only
-  // compact round ones of a plausible size, and pick the one closest to where the
-  // ball is predicted — so glare, sky, ball-marks and the meter don't grab it.
-  function findBall(img, box, expectedD, predicted) {
+  // Find the BALL blob in a search box. A pixel qualifies if it's white AND
+  // (it MOVED since last frame, or it's right by the ball's last spot). Because
+  // the mounted camera is still, the ball is what moves — so static white stuff
+  // (sky, shoes, ball-marks, the meter) is ignored, and the ball pops even small.
+  // Then keep only compact round blobs of a plausible size, nearest the
+  // predicted position.
+  function findBall(img, box, expectedD, predicted, prev, cur) {
     const { data, width, height } = img
     const x0 = Math.max(0, Math.floor(box.x0)), y0 = Math.max(0, Math.floor(box.y0))
     const x1 = Math.min(width, Math.ceil(box.x1)), y1 = Math.min(height, Math.ceil(box.y1))
     const bw = x1 - x0, bh = y1 - y0
     if (bw < 2 || bh < 2) return null
+    const R2 = ((expectedD || 14) * 1.7) ** 2
     const mask = new Uint8Array(bw * bh)
     for (let y = 0; y < bh; y++) {
-      let row = ((y + y0) * width + x0) * 4
-      for (let x = 0; x < bw; x++, row += 4) {
-        const r = data[row], g = data[row + 1], b = data[row + 2]
-        // White ball = bright AND low colour-saturation. Grass (green-dominant)
-        // has a big channel spread, so it's rejected even when sunlit.
-        const mx = r > g ? (r > b ? r : b) : (g > b ? g : b)
-        const mn = r < g ? (r < b ? r : b) : (g < b ? g : b)
-        if (mn > 160 && mx - mn < 46) mask[y * bw + x] = 1
+      const yy = y + y0
+      let row = (yy * width + x0) * 4, grow = yy * width + x0
+      for (let x = 0; x < bw; x++, row += 4, grow++) {
+        const r = data[row], g1 = data[row + 1], b = data[row + 2]
+        // White = bright AND low colour-saturation (grass is green-dominant → rejected)
+        const mx = r > g1 ? (r > b ? r : b) : (g1 > b ? g1 : b)
+        const mn = r < g1 ? (r < b ? r : b) : (g1 < b ? g1 : b)
+        if (mn > 160 && mx - mn < 46) {
+          let ok = true
+          if (prev) {
+            const moving = Math.abs(cur[grow] - prev[grow]) > 16
+            const px = x0 + x
+            const near = predicted ? ((px - predicted.x) ** 2 + (yy - predicted.y) ** 2) < R2 : false
+            ok = moving || near   // moving anywhere, or white right by the last spot (a stopping ball)
+          }
+          if (ok) mask[y * bw + x] = 1
+        }
       }
     }
     const seen = new Uint8Array(bw * bh)
@@ -187,6 +201,7 @@ export default function StimpCam({ onClose, onResult }) {
     const start = seed ? procFromDisp(seed.xDisp, seed.yDisp) : { x: (proc?.width || PROC_W) * 0.5, y: (proc?.height || Math.round(PROC_W * 0.56)) * 0.72 }
     // crossed=false until the ball passes the release line (grass contact); only
     // then does the roll-out start counting, with dRef = the ball's size there.
+    grayRef.current = null   // fresh motion baseline for this roll
     trackRef.current = { start, last: start, crossed: false, initSide: null, preD: null, dRef: null, dStop: [], moved: false, ftRef: 0, plateauSince: null, t0: null, box: seed ? 60 : 150, lost: 0, stopped: false }
     setStep('measuring')
     loop()
@@ -218,9 +233,14 @@ export default function StimpCam({ onClose, onResult }) {
     if (!v || !tr || tr.stopped) return
     const img = grabFrame()
     if (img) {
+      // grayscale of this frame, for motion detection vs the previous one
+      const dta = img.data, cur = new Uint8Array(img.width * img.height)
+      for (let i = 0, j = 0; j < cur.length; i += 4, j++) cur[j] = (dta[i] * 77 + dta[i + 1] * 150 + dta[i + 2] * 29) >> 8
+      const prev = grayRef.current
+      grayRef.current = cur
       const b = tr.box
       const pred = tr.pred || tr.last
-      let found = findBall(img, { x0: pred.x - b, y0: pred.y - b, x1: pred.x + b, y1: pred.y + b }, tr.lastGoodD, pred)
+      let found = findBall(img, { x0: pred.x - b, y0: pred.y - b, x1: pred.x + b, y1: pred.y + b }, tr.lastGoodD, pred, prev, cur)
       const now = performance.now() / 1000
       if (tr.t0 == null) tr.t0 = now
       const C = calRef.current || DEFAULT_C
