@@ -29,6 +29,9 @@ const DEFAULT_C = (F_PX * BALL_MM) / 304.8
 
 function loadCal() { try { const v = Number(localStorage.getItem(CAL_KEY)); return v > 0 ? v : null } catch { return null } }
 function saveCal(c) { try { localStorage.setItem(CAL_KEY, String(c)) } catch {} }
+const LINE_KEY = 'stimp_cam_line_v1'  // release line = grass-contact point, as a fraction of frame height
+function loadLine() { try { const v = Number(localStorage.getItem(LINE_KEY)); return v > 0 && v < 1 ? v : 0.6 } catch { return 0.6 } }
+function saveLine(v) { try { localStorage.setItem(LINE_KEY, String(v)) } catch {} }
 
 export default function StimpCam({ onClose, onResult }) {
   const videoRef = useRef(null)
@@ -48,8 +51,12 @@ export default function StimpCam({ onClose, onResult }) {
   const [manFt, setManFt] = useState(''); const [manIn, setManIn] = useState('')
   const [cal, setCal] = useState(null)       // stored multiplier
   const calRef = useRef(null)
+  const [lineY, setLineY] = useState(0.6)    // release line (grass contact), fraction of height
+  const lineRef = useRef(0.6)
+  const draggingRef = useRef(false)
+  const dragEndRef = useRef(0)
 
-  useEffect(() => { const c = loadCal(); setCal(c); calRef.current = c }, [])
+  useEffect(() => { const c = loadCal(); setCal(c); calRef.current = c; const l = loadLine(); setLineY(l); lineRef.current = l }, [])
 
   // ── camera ──
   useEffect(() => {
@@ -147,9 +154,14 @@ export default function StimpCam({ onClose, onResult }) {
 
   function onVideoTap(e) {
     if (step !== 'aim') return
+    if (draggingRef.current || performance.now() - dragEndRef.current < 300) return // that was a line drag
     const v = videoRef.current, rect = v.getBoundingClientRect()
     setSeed({ xDisp: e.clientX - rect.left, yDisp: e.clientY - rect.top })
   }
+  // Drag the release line to the meter's base (grass-contact point).
+  function onLineDown(e) { e.stopPropagation(); draggingRef.current = true }
+  function onStageMove(e) { if (!draggingRef.current) return; const v = videoRef.current, rect = v.getBoundingClientRect(); let f = (e.clientY - rect.top) / rect.height; f = Math.max(0.2, Math.min(0.88, f)); setLineY(f); lineRef.current = f }
+  function onStageUp() { if (draggingRef.current) { draggingRef.current = false; dragEndRef.current = performance.now(); saveLine(lineRef.current) } }
 
   function startMeasure(isCal) {
     setErrMsg(''); setResultFt(null); setLiveFt(0); setCalibrating(!!isCal)
@@ -158,7 +170,9 @@ export default function StimpCam({ onClose, onResult }) {
     // with a wide search box that narrows once it locks on.
     const proc = procRef.current
     const start = seed ? procFromDisp(seed.xDisp, seed.yDisp) : { x: (proc?.width || PROC_W) * 0.5, y: (proc?.height || Math.round(PROC_W * 0.56)) * 0.72 }
-    trackRef.current = { start, last: start, dStart: [], dStop: [], moved: false, stableSince: null, t0: null, box: seed ? 60 : 150, lost: 0, stopped: false }
+    // crossed=false until the ball passes the release line (grass contact); only
+    // then does the roll-out start counting, with dRef = the ball's size there.
+    trackRef.current = { start, last: start, crossed: false, initSide: null, preD: null, dRef: null, dStop: [], moved: false, ftRef: 0, plateauSince: null, t0: null, box: seed ? 60 : 150, lost: 0, stopped: false }
     setStep('measuring')
     loop()
   }
@@ -167,12 +181,16 @@ export default function StimpCam({ onClose, onResult }) {
     const tr = trackRef.current
     if (tr) tr.stopped = true
     stopLoop()
-    const dStart = median(tr?.dStart || []), dStop = median(tr?.dStop?.length ? tr.dStop : (tr?.lastGoodD ? [tr.lastGoodD] : []))
-    if (!tr || !tr.moved || !dStart || !dStop || dStop >= dStart) {
-      setStep('aim'); setErrMsg("Didn't catch a clean roll away from the camera — re-aim straight down the line, tap the ball, and try again (or enter by hand).")
+    const dStart = tr?.dRef, dStop = median(tr?.dStop?.length ? tr.dStop : (tr?.lastGoodD ? [tr.lastGoodD] : []))
+    if (!tr || !tr.crossed) {
+      setStep('aim'); setErrMsg("The ball didn't cross the release line — set the line to the bottom of the meter (grass contact) and try again.")
       return
     }
-    const raw = (1 / dStop) - (1 / dStart)  // grows as the ball recedes
+    if (!tr.moved || !dStart || !dStop || dStop >= dStart) {
+      setStep('aim'); setErrMsg("Didn't catch a clean roll away from the camera — re-aim straight down the line and try again (or enter by hand).")
+      return
+    }
+    const raw = (1 / dStop) - (1 / dStart)  // grows as the ball recedes past the line
     setRawResult(raw)
     if (calibrating) { setStep('calibrateAsk'); return }
     const C = calRef.current || DEFAULT_C
@@ -199,19 +217,29 @@ export default function StimpCam({ onClose, onResult }) {
         tr.pred = { x: found.x + tr.vel.x, y: found.y + tr.vel.y }
         tr.lost = 0; tr.last = { x: found.x, y: found.y }; tr.lastGoodD = found.d
         tr.box = Math.max(20, Math.min(90, found.d * 3.4)) // ROI shrinks as ball recedes
-        if (!tr.moved) tr.dStart.push(found.d)              // pre-roll sizes = at-rest ball
-        const dStart0 = median(tr.dStart) || found.d
-        const rawNow = (1 / found.d) - (1 / dStart0)
-        const ftNow = Math.max(0, C * rawNow)
-        setLiveFt(Math.round(ftNow * 100) / 100)
         setDot(dispFromProc(found.x, found.y))
-        if (ftNow > 0.6) tr.moved = true                    // real roll started
-        if (tr.moved) {
-          // Stop = the DISTANCE estimate stops climbing (scale-independent, so a
-          // slow far-away ball isn't mistaken for stopped). Reset the timer each
-          // time it advances; if it fails to gain ground for ~0.7 s, it's done.
-          if (tr.ftRef == null || ftNow > tr.ftRef + 0.15) { tr.ftRef = ftNow; tr.plateauSince = now; tr.dStop = [found.d] }
-          else { tr.dStop.push(found.d); if (tr.dStop.length > 10) tr.dStop.shift(); if (now - tr.plateauSince > 0.7) { finish(); return } }
+        const lineYpx = lineRef.current * img.height
+        const side = Math.sign(found.y - lineYpx) || 1
+        if (tr.initSide == null) tr.initSide = side
+        if (!tr.crossed) {
+          // On the ramp / near side — hold the size at the line; no roll counted yet.
+          tr.preD = found.d; setLiveFt(0)
+          if (side !== tr.initSide) {                        // ball crossed onto the grass → zero here
+            tr.crossed = true
+            tr.dRef = (tr.preD + found.d) / 2
+            tr.dStop = [found.d]; tr.ftRef = 0; tr.plateauSince = now
+          }
+        } else {
+          const rawNow = (1 / found.d) - (1 / tr.dRef)
+          const ftNow = Math.max(0, C * rawNow)
+          setLiveFt(Math.round(ftNow * 100) / 100)
+          if (ftNow > 0.6) tr.moved = true                  // real roll started (past the line)
+          if (tr.moved) {
+            // Stop = the DISTANCE estimate stops climbing (scale-independent, so a
+            // slow far-away ball isn't mistaken for stopped).
+            if (ftNow > tr.ftRef + 0.15) { tr.ftRef = ftNow; tr.plateauSince = now; tr.dStop = [found.d] }
+            else { tr.dStop.push(found.d); if (tr.dStop.length > 10) tr.dStop.shift(); if (now - tr.plateauSince > 0.7) { finish(); return } }
+          }
         }
       } else {
         tr.lost++; tr.box = Math.min(150, tr.box + 12)
@@ -249,17 +277,25 @@ export default function StimpCam({ onClose, onResult }) {
         <button onClick={onClose} style={{ background: 'rgba(255,255,255,.12)', border: 0, borderRadius: 10, padding: 8, color: '#fff', cursor: 'pointer' }}><X size={18} /></button>
       </div>
 
-      <div style={{ position: 'relative', flex: 1, background: '#000', overflow: 'hidden' }} onClick={onVideoTap}>
+      <div style={{ position: 'relative', flex: 1, background: '#000', overflow: 'hidden' }} onClick={onVideoTap} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerLeave={onStageUp}>
         <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'contain', display: step === 'error' || step === 'manual' || step === 'calibrateAsk' ? 'none' : 'block' }} />
         <canvas ref={procRef} style={{ display: 'none' }} />
 
-        {/* down-the-line guide */}
+        {/* down-the-line guide + draggable release line */}
         {step === 'aim' && (
           <div style={overlay}>
             <div style={{ position: 'absolute', left: '50%', top: '35%', bottom: 0, width: 2, marginLeft: -1, background: 'linear-gradient(to bottom, rgba(201,168,76,0), rgba(201,168,76,.7))' }} />
             {seed && <div style={{ position: 'absolute', left: seed.xDisp - 10, top: seed.yDisp - 10, width: 20, height: 20, border: `2px solid ${FERN}`, borderRadius: '50%', background: 'rgba(58,107,74,.25)' }} />}
+            {/* release line — drag to the bottom of the meter */}
+            <div onPointerDown={onLineDown} style={{ position: 'absolute', left: 0, right: 0, top: `${lineY * 100}%`, transform: 'translateY(-50%)', height: 30, display: 'flex', alignItems: 'center', pointerEvents: 'auto', cursor: 'ns-resize', touchAction: 'none' }}>
+              <div style={{ position: 'absolute', left: 0, right: 0, height: 2, background: GOLD, boxShadow: '0 0 6px rgba(0,0,0,.6)' }} />
+              <span style={{ position: 'absolute', left: 8, top: -16, fontSize: 10, fontWeight: 700, color: GOLD, textShadow: '0 1px 3px rgba(0,0,0,.8)', letterSpacing: '.06em' }}>RELEASE LINE — drag to meter base</span>
+              <div style={{ position: 'absolute', right: 10, width: 18, height: 18, borderRadius: '50%', background: GOLD, border: '2px solid #fff' }} />
+            </div>
           </div>
         )}
+        {/* static release line while measuring */}
+        {step === 'measuring' && <div style={overlay}><div style={{ position: 'absolute', left: 0, right: 0, top: `${lineY * 100}%`, height: 1.5, background: 'rgba(201,168,76,.6)' }} /></div>}
         {step === 'measuring' && dot && <div style={overlay}><div style={{ position: 'absolute', left: dot.x - 7, top: dot.y - 7, width: 14, height: 14, border: '2px solid #fff', borderRadius: '50%', boxShadow: '0 0 8px rgba(255,255,255,.85)' }} /></div>}
         {step === 'measuring' && (
           <div style={{ position: 'absolute', left: 0, right: 0, top: 12, textAlign: 'center', color: '#fff', pointerEvents: 'none' }}>
@@ -276,7 +312,7 @@ export default function StimpCam({ onClose, onResult }) {
 
         {step === 'aim' && (
           <>
-            <p style={{ fontSize: 12.5, opacity: .85, margin: '0 0 10px', lineHeight: 1.5 }}><Crosshair size={13} style={{ verticalAlign: -2, color: GOLD }} /> Clamp the phone to the <b>end of the Stimpmeter</b>, lens straight down the line. Hit <b>Start</b>, then lift to release — it catches the ball off the ramp and follows it across the green. (Optional: tap the ball first to help it lock on.)</p>
+            <p style={{ fontSize: 12.5, opacity: .85, margin: '0 0 10px', lineHeight: 1.5 }}><Crosshair size={13} style={{ verticalAlign: -2, color: GOLD }} /> Clamp the phone to the <b>end of the Stimpmeter</b>, lens down the line. Drag the <b style={{ color: GOLD }}>gold release line</b> to where the ball meets the grass at the meter's base — the roll-out is counted from there. Hit <b>Start</b>, then lift to release.</p>
             {!cal && <p style={{ fontSize: 11.5, color: GOLD, margin: '0 0 10px' }}>Not calibrated yet — do one <b>Calibrate roll</b> against a hand measurement first for a real number.</p>}
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={() => startMeasure(true)} style={btn('#2A2A26', { flex: 'none' })}><SlidersHorizontal size={15} /> Calibrate roll</button>
