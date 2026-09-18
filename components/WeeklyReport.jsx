@@ -247,9 +247,9 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const clipStat = (() => {
     if (!clipsThis.length) return null
     const unit = clipsThis[0].unit || 'L'
-    const byArea = {}
-    clipsThis.forEach((c) => { byArea[c.area] = (byArea[c.area] || 0) + Number(c.volume || 0) })
-    return { unit, byArea, total: round(clipsThis.reduce((a, c) => a + Number(c.volume || 0), 0), 1) }
+    const vols = clipsThis.map((c) => Number(c.volume || 0))
+    // Average clipping yield this week (not the summed total across surfaces).
+    return { unit, avg: round(vols.reduce((a, b) => a + b, 0) / vols.length, 1) }
   })()
 
   // Trend data (recent readings) for the little charts — aggregated per date.
@@ -260,15 +260,15 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   }, [speeds, course])
   const clipTrend = useMemo(() => {
     const byDate = {}
-    clippings.filter((c) => inCourse(c.area) && c.volume != null).forEach((c) => { byDate[c.date] = (byDate[c.date] || 0) + Number(c.volume) })
-    return Object.keys(byDate).sort().slice(-8).map((d) => ({ label: shortDay(d), v: round(byDate[d], 1) }))
+    clippings.filter((c) => inCourse(c.area) && c.volume != null).forEach((c) => { (byDate[c.date] = byDate[c.date] || []).push(Number(c.volume)) })
+    return Object.keys(byDate).sort().slice(-8).map((d) => ({ label: shortDay(d), v: round(avg(byDate[d]), 1) }))
   }, [clippings, course])
 
   // Displayed this-week numbers: logged data wins; otherwise the quick-fill value.
   const mv = (k) => (manual[k] != null && String(manual[k]).trim() !== '' ? String(manual[k]).trim() : null)
   const dStimpAvg = speedStat ? fmtStimp(speedStat.avg) : (mv('stimpAvg') ? `${mv('stimpAvg')}'` : '—')
   const dStimpRange = speedStat ? `${fmtStimp(speedStat.min)}–${fmtStimp(speedStat.max)}` : (mv('stimpRange') || '—')
-  const dClip = clipStat ? `${clipStat.total}` : (mv('clippings') || '—')
+  const dClip = clipStat ? `${clipStat.avg}` : (mv('clippings') || '—')
   const dClipUnit = clipStat ? clipStat.unit : (mv('clippings') ? (mv('clipUnit') || 'L') : '')
   const dHigh = twx.n ? `${round(twx.avgHigh)}°` : (mv('wxHigh') ? `${mv('wxHigh')}°` : '—')
   const dLow = twx.n ? `${round(twx.avgLow)}°` : (mv('wxLow') ? `${mv('wxLow')}°` : '—')
