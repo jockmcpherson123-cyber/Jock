@@ -22,6 +22,11 @@ WHAT YOU'RE DECIDING
 - Should the program TIGHTEN, HOLD, or EASE, and on which surfaces (greens vs fairways)?
 - Timing with the forecast: spray sooner, wait a few days, or stay on schedule.
 
+WEIGH RAIN (the GDD clock is temperature-only, so you cover what it misses):
+- Rain within a few hours of a PGR going down cuts uptake — suppression breaks EARLY, so a big rainSinceSprayIn soon after the last spray means reapply sooner than the GDD suggests.
+- Rain + warmth flushes growth beyond the GDD clock; if clips are climbing and rain fell, growth may be getting away even if GDD isn't at target yet.
+- Heavy forecast rain is a spray blackout — get overdue apps down in the dry window before it.
+
 BE BRIEF. This is a glanceable read for a busy superintendent, not an essay.
 - headline: one line, the single call.
 - read: ONE or TWO short sentences — the key why, with one or two real numbers. No more.

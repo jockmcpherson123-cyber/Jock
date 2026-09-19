@@ -9285,16 +9285,19 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
   }
 
   // Context for the AI "program read": last 3 weeks of greens clip yield, the
-  // growth-reg GDD status per surface, recent regulating sprays, and the forecast.
+  // growth-reg GDD status per surface, recent regulating sprays, rainfall, and
+  // the forecast (rain can flush growth and wash a fresh PGR off, so it matters).
   const adviceContext = () => {
     const cut = new Date(Date.now() - 21 * 86400000).toISOString().slice(0, 10)
     const clip3wk = clipDaily.filter((d) => d.date >= cut)
     const forecast = (daily || []).filter((d) => d.date >= todayIso && d.tMax != null).slice(0, 10).map((d) => ({ date: d.date, hi: d.tMax, lo: d.tMin, precip: d.precip ?? 0 }))
-    const growthReg = areaRows.filter((r) => r.gdd != null).map((r) => ({ area: r.area, gddC: r.gdd, reapplyAt, target, status: r.status, projReapply: r.est?.date || null, daysToReapply: r.est?.days ?? null, lastSpray: r.last?.date || null, lastProducts: r.last?.products || [] }))
+    const recentRain = (daily || []).filter((d) => d.date >= cut && d.date <= todayIso && d.precip != null && Number(d.precip) > 0).map((d) => ({ date: d.date, precip: Math.round(Number(d.precip) * 100) / 100 }))
+    const rainSince = (start) => start ? Math.round((daily || []).filter((d) => d.date > start && d.date <= todayIso).reduce((s, d) => s + (Number(d.precip) || 0), 0) * 100) / 100 : null
+    const growthReg = areaRows.filter((r) => r.gdd != null).map((r) => ({ area: r.area, gddC: r.gdd, reapplyAt, target, status: r.status, projReapply: r.est?.date || null, daysToReapply: r.est?.days ?? null, lastSpray: r.last?.date || null, lastProducts: r.last?.products || [], rainSinceSprayIn: rainSince(r.last?.date) }))
     const fracOf = (name) => { const p = (products || []).find((x) => x?.name === name); return p?.frac || p?.fracGroup || null }
     const recentSprays = (sheets || []).filter((s) => appliedByDate(s) && s.date >= cut).sort((a, b) => String(b.date).localeCompare(a.date)).slice(0, 12).map((s) => ({ date: s.date, area: s.area, products: (s.products || []).map((p) => ({ name: p.product, frac: fracOf(p.product), kind: supMap[p.product] || null })).filter((p) => p.name) }))
     const grasses = [...new Set([...(courseInfo?.siteGrasses || []), ...Object.values(areas || {}).flatMap((a) => a?.grasses || [])])]
-    return { course: course || null, grasses, target, lead, reapplyAt, note: 'clip values are volume as logged; rising = more growth', clipDailyLast3wk: clip3wk, forecast, growthReg, recentSprays }
+    return { course: course || null, grasses, target, lead, reapplyAt, note: 'clip values are volume as logged (rising = more growth); precip in inches', clipDailyLast3wk: clip3wk, forecast, recentRain, growthReg, recentSprays }
   }
 
   return (
