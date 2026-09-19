@@ -407,7 +407,10 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
       {/* Print rules: only the report prints, sized to one A4 page. */}
       <style>{`@page { size: A4 portrait; margin: 8mm; }
       #wr-print-image { display: none; }
-      @media print { html, body { background: #fff !important; } body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: 100% !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; } #weekly-report .avoid-break { break-inside: avoid; } .no-print, .empty-hide-print { display: none !important; } }
+      /* Keep background fills, tints, chart shading and the gold rule when printing
+         — browsers drop them by default, which washed the report out on paper. */
+      #weekly-report, #weekly-report * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+      @media print { html, body { background: #fff !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: 100% !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; } #weekly-report .avoid-break { break-inside: avoid; } .no-print, .empty-hide-print { display: none !important; } }
       /* One-page image print (iOS-safe: prints the MAIN document, not an iframe). */
       @media print {
         html, body { margin: 0 !important; padding: 0 !important; height: auto !important; }
