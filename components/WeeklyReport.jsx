@@ -410,6 +410,13 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
       /* Keep background fills, tints, chart shading and the gold rule when printing
          — browsers drop them by default, which washed the report out on paper. */
       #weekly-report, #weekly-report * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+      /* Print polish: the pale GREEN-tinted fills read as a muddy sage/tan wash on
+         paper, and the gold is too light to hold — so on print, neutralise those
+         fills to a clean light grey and deepen the gold rule + club name. */
+      @media print {
+        #weekly-report [style*="f0f6f2" i], #weekly-report [style*="f8faf8" i], #weekly-report [style*="fcfcfa" i], #weekly-report [style*="fffdf2" i] { background:#f5f5f3 !important; border-color:#e2e1db !important; }
+        #weekly-report [style*="c9a84c" i] { border-color:#9a7a16 !important; color:#9a7a16 !important; }
+      }
       @media print { html, body { background: #fff !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } body * { visibility: hidden !important; } #weekly-report, #weekly-report * { visibility: visible !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } #weekly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: 100% !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; } #weekly-report .avoid-break { break-inside: avoid; } .no-print, .empty-hide-print { display: none !important; } }
       /* One-page image print (iOS-safe: prints the MAIN document, not an iframe). */
       @media print {
@@ -422,7 +429,11 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         body.wr-print-image #wr-print-image img { display: block; margin: 0 auto; max-width: 100%; max-height: 277mm; }
       }
       /* Applied only while capturing the PDF/email image — hides edit chrome + blank rows. */
-      .wr-capturing .no-print, .wr-capturing .empty-hide-print, .wr-capturing .cap-hide { display: none !important; }`}</style>
+      .wr-capturing .no-print, .wr-capturing .empty-hide-print, .wr-capturing .cap-hide { display: none !important; }
+      /* Same print polish for the captured image (Print button, PDF, email): the
+         pale green tints muddy on paper, so neutralise them and deepen the gold. */
+      .wr-capturing [style*="f0f6f2" i], .wr-capturing [style*="f8faf8" i], .wr-capturing [style*="fcfcfa" i], .wr-capturing [style*="fffdf2" i] { background:#f5f5f3 !important; border-color:#e2e1db !important; }
+      .wr-capturing [style*="c9a84c" i] { border-color:#9a7a16 !important; color:#9a7a16 !important; }`}</style>
 
       {toast && <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: '#1A1A16' }}>{toast}</div>}
 
