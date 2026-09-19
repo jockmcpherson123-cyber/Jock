@@ -9841,19 +9841,16 @@ function GddForecastChart({ cycle = [], target = 0, reference = 0, height = 190 
             </g>
           )
         })}
-        {tHi != null && [tLo, tHi].map((v, i) => (
-          <text key={`tr${i}`} x={W - padR + 5} y={YT(v) + 3} textAnchor="start" fontSize="8.5" fill={TEMP_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>{v}</text>
-        ))}
         {reference > 0 && reference !== target && reference <= gMax && (
           <>
             <line x1={padL} x2={W - padR} y1={YG(reference)} y2={YG(reference)} stroke={INK_3} strokeWidth="1" strokeDasharray="2 3" opacity="0.6" />
-            <text x={W - padR} y={YG(reference) - 3} textAnchor="end" fontSize="8" fill={INK_3} style={{ fontVariantNumeric: 'tabular-nums' }}>target {reference}</text>
+            <text x={padL + 3} y={YG(reference) - 4} textAnchor="start" fontSize="8" fill={INK_3} style={{ fontVariantNumeric: 'tabular-nums' }}>target {reference}</text>
           </>
         )}
         {target > 0 && target <= gMax && (
           <>
             <line x1={padL} x2={W - padR} y1={YG(target)} y2={YG(target)} stroke={GDD_COLOR} strokeWidth="1.2" strokeDasharray="4 2" opacity="0.7" />
-            <text x={W - padR} y={YG(target) - 3} textAnchor="end" fontSize="8" fill={GDD_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>reapply {target}</text>
+            <text x={padL + 3} y={YG(target) + 11} textAnchor="start" fontSize="8" fill={GDD_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>reapply {target}</text>
           </>
         )}
         {boundaryT != null && <line x1={X(boundaryT)} x2={X(boundaryT)} y1={padT} y2={height - padB} stroke={INK_3} strokeWidth="1" opacity="0.4" />}
@@ -9861,13 +9858,16 @@ function GddForecastChart({ cycle = [], target = 0, reference = 0, height = 190 
         {tempPath && <path d={tempPath} fill="none" stroke={TEMP_COLOR} strokeWidth="1.5" opacity="0.35" strokeLinejoin="round" strokeLinecap="round" />}
         {gPast && <path d={gPast} fill="none" stroke={GDD_COLOR} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />}
         {gFut && <path d={gFut} fill="none" stroke={GDD_COLOR} strokeWidth="2" strokeDasharray="5 3" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />}
-        {past.length > 0 && (() => { const d = past[past.length - 1]; return (<g><circle cx={X(d.t)} cy={YG(d.value)} r="3.4" fill={GDD_COLOR} stroke="#fff" strokeWidth="1.2" /><text x={X(d.t)} y={YG(d.value) - 7} textAnchor="end" fontSize="10.5" fontWeight="700" fill={GDD_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>{Math.round(d.value)}</text></g>) })()}
-        {reapply && (
-          <>
-            <circle cx={X(reapply.t)} cy={YG(reapply.value)} r="4" fill="none" stroke={GDD_COLOR} strokeWidth="1.6" />
-            <text x={X(reapply.t)} y={YG(reapply.value) - 7} textAnchor="middle" fontSize="8.5" fontWeight="700" fill={GDD_COLOR}>{chartMmDd(reapply.t)}</text>
-          </>
-        )}
+        {past.length > 0 && (() => { const d = past[past.length - 1]; return (<g><circle cx={X(d.t)} cy={YG(d.value)} r="3.4" fill={GDD_COLOR} stroke="#fff" strokeWidth="1.2" /><text x={X(d.t)} y={YG(d.value) - 7} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={GDD_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>{Math.round(d.value)}</text></g>) })()}
+        {reapply && (() => {
+          const rx = X(reapply.t), anc = rx > W - padR - 30 ? 'end' : 'middle', lx = anc === 'end' ? rx - 6 : rx
+          return (
+            <g>
+              <circle cx={rx} cy={YG(reapply.value)} r="4.5" fill="#fff" stroke={GDD_COLOR} strokeWidth="1.8" />
+              <text x={lx} y={YG(reapply.value) - 9} textAnchor={anc} fontSize="9.5" fontWeight="700" fill={GDD_COLOR} style={{ fontVariantNumeric: 'tabular-nums' }}>reapply {chartMmDd(reapply.t)}</text>
+            </g>
+          )
+        })()}
         {xticks.map((tick, i) => (
           <text key={`x${i}`} x={X(tick.t)} y={height - 5} textAnchor={i === 0 ? 'start' : i === xticks.length - 1 ? 'end' : 'middle'} fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{tick.label}</text>
         ))}
