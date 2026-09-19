@@ -91,6 +91,7 @@ import { logout } from '@/app/actions/auth'
 import AnnualProgram from '@/components/AnnualProgram'
 import WeeklyReport from '@/components/WeeklyReport'
 import TurfBrief from '@/components/TurfBrief'
+import ProgramAdvice from '@/components/ProgramAdvice'
 import StimpCam from '@/components/StimpCam'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
@@ -9283,6 +9284,19 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
     }
   }
 
+  // Context for the AI "program read": last 3 weeks of greens clip yield, the
+  // growth-reg GDD status per surface, recent regulating sprays, and the forecast.
+  const adviceContext = () => {
+    const cut = new Date(Date.now() - 21 * 86400000).toISOString().slice(0, 10)
+    const clip3wk = clipDaily.filter((d) => d.date >= cut)
+    const forecast = (daily || []).filter((d) => d.date >= todayIso && d.tMax != null).slice(0, 10).map((d) => ({ date: d.date, hi: d.tMax, lo: d.tMin, precip: d.precip ?? 0 }))
+    const growthReg = areaRows.filter((r) => r.gdd != null).map((r) => ({ area: r.area, gddC: r.gdd, reapplyAt, target, status: r.status, projReapply: r.est?.date || null, daysToReapply: r.est?.days ?? null, lastSpray: r.last?.date || null, lastProducts: r.last?.products || [] }))
+    const fracOf = (name) => { const p = (products || []).find((x) => x?.name === name); return p?.frac || p?.fracGroup || null }
+    const recentSprays = (sheets || []).filter((s) => appliedByDate(s) && s.date >= cut).sort((a, b) => String(b.date).localeCompare(a.date)).slice(0, 12).map((s) => ({ date: s.date, area: s.area, products: (s.products || []).map((p) => ({ name: p.product, frac: fracOf(p.product), kind: supMap[p.product] || null })).filter((p) => p.name) }))
+    const grasses = [...new Set([...(courseInfo?.siteGrasses || []), ...Object.values(areas || {}).flatMap((a) => a?.grasses || [])])]
+    return { course: course || null, grasses, target, lead, reapplyAt, note: 'clip values are volume as logged; rising = more growth', clipDailyLast3wk: clip3wk, forecast, growthReg, recentSprays }
+  }
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl p-4 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
@@ -9290,6 +9304,8 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
         <p className="font-display text-3xl font-bold mt-0.5">{Math.round(seasonGdd).toLocaleString()}</p>
         <p className="font-body text-[11px] opacity-70 mt-0.5">Accumulated since Jan 1 · {daily.length} days of weather</p>
       </div>
+
+      <ProgramAdvice getContext={adviceContext} courseInfo={courseInfo} onSaveCourse={onSaveCourse} />
 
       {/* Running total — season heat accumulating over the year */}
       {gddSeries.length >= 2 && (

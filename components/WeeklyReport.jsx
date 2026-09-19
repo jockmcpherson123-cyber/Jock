@@ -502,6 +502,23 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
           )}
         </div>
 
+        {/* AI program read — echoed here when enabled in GDD & Growth */}
+        {courseInfo?.adviceInReport && courseInfo?.programAdvice?.advice && (() => {
+          const a = courseInfo.programAdvice.advice
+          return (
+            <div className="mt-2.5 rounded-lg px-3 py-2.5 avoid-break" style={{ backgroundColor: '#F8FAF8', border: '1px solid #D8E4DA' }}>
+              <p className="font-body text-[9px] font-bold uppercase tracking-wide mb-0.5" style={{ color: FERN }}>Program read · AI</p>
+              <p className="font-display text-[14px] font-semibold" style={{ color: FOREST }}>{a.headline}</p>
+              {a.read && <p className="font-body text-[12px] text-slate-700 leading-snug mt-1">{a.read}</p>}
+              {Array.isArray(a.actions) && a.actions.length > 0 && (
+                <ul className="mt-1.5 space-y-0.5">
+                  {a.actions.map((x, i) => <li key={i} className="font-body text-[11.5px] text-slate-700"><b>{x.when}:</b> {x.do}</li>)}
+                </ul>
+              )}
+            </div>
+          )
+        })()}
+
         {/* Sprays next week (pulled from program + hand-typed) */}
         <div className="flex items-center justify-between">
           <H icon={Calendar}>Planned sprays — next week</H>
