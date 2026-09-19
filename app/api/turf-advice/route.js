@@ -38,13 +38,36 @@ Respond with ONLY a single JSON object (no prose, no markdown fences):
 }
 Give 2-4 actions. Keep every field tight.`
 
+// Close off a JSON object cut short by the token limit (finish an open string,
+// drop a dangling comma, balance the braces) so a truncated read still renders.
+function repairJson(s) {
+  let out = '', inStr = false, esc = false
+  const stack = []
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]; out += ch
+    if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue }
+    if (ch === '"') inStr = true
+    else if (ch === '{') stack.push('}')
+    else if (ch === '[') stack.push(']')
+    else if (ch === '}' || ch === ']') stack.pop()
+  }
+  if (inStr) out += '"'
+  out = out.replace(/,\s*$/, '')
+  while (stack.length) out += stack.pop()
+  out = out.replace(/,(\s*[}\]])/g, '$1')
+  try { return JSON.parse(out) } catch { return null }
+}
+
 function extractJson(text) {
   if (!text) return null
   let s = text.trim()
   if (s.startsWith('```')) s = s.replace(/^```(json)?/i, '').replace(/```$/, '').trim()
-  const a = s.indexOf('{'), b = s.lastIndexOf('}')
-  if (a < 0 || b < 0) return null
-  try { return JSON.parse(s.slice(a, b + 1)) } catch { return null }
+  const a = s.indexOf('{')
+  if (a < 0) return null
+  s = s.slice(a)
+  const b = s.lastIndexOf('}')
+  if (b > 0) { try { return JSON.parse(s.slice(0, b + 1)) } catch { /* fall through */ } }
+  return repairJson(s)
 }
 
 export async function POST(request) {
@@ -64,9 +87,11 @@ export async function POST(request) {
   }]
 
   try {
-    const resp = await client.messages.create({
-      model: 'claude-opus-5', max_tokens: 1500, thinking: { type: 'adaptive' }, system: SYSTEM, messages,
-    })
+    // Stream + a roomy budget: adaptive thinking shares max_tokens, so a tight
+    // cap was truncating the JSON before it finished.
+    const resp = await client.messages.stream({
+      model: 'claude-opus-5', max_tokens: 5000, thinking: { type: 'adaptive' }, system: SYSTEM, messages,
+    }).finalMessage()
     if (resp.stop_reason === 'refusal') return Response.json({ error: 'The request was declined.' }, { status: 422 })
     const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n')
     const advice = extractJson(text)
