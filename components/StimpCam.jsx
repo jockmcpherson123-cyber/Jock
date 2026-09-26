@@ -52,6 +52,7 @@ export default function StimpCam({ onClose, onResult }) {
   const [result, setResultFt] = useState(null)
   const [rawResult, setRawResult] = useState(null) // 1/dStop - 1/dStart (for calibration)
   const [calibrating, setCalibrating] = useState(false)
+  const calibratingRef = useRef(false)   // read by the frame loop's finish() (avoids a stale-closure)
   const [calFt, setCalFt] = useState(''); const [calIn, setCalIn] = useState('')
   const [manFt, setManFt] = useState(''); const [manIn, setManIn] = useState('')
   const [cal, setCal] = useState(null)       // stored multiplier
@@ -193,7 +194,7 @@ export default function StimpCam({ onClose, onResult }) {
   function onStageUp() { if (draggingRef.current) { draggingRef.current = false; dragEndRef.current = performance.now(); saveLine(lineRef.current) } }
 
   function startMeasure(isCal) {
-    setErrMsg(''); setResultFt(null); setLiveFt(0); setCalibrating(!!isCal)
+    setErrMsg(''); setResultFt(null); setLiveFt(0); setCalibrating(!!isCal); calibratingRef.current = !!isCal
     // Mounted on the meter, the ball always leaves from the same near spot, so we
     // auto-catch it: seed from a tap if given, else the lower-centre start zone
     // with a wide search box that narrows once it locks on.
@@ -222,7 +223,7 @@ export default function StimpCam({ onClose, onResult }) {
     }
     const raw = (1 / dStop) - (1 / dStart)  // grows as the ball recedes past the line
     setRawResult(raw)
-    if (calibrating) { setStep('calibrateAsk'); return }
+    if (calibratingRef.current) { setStep('calibrateAsk'); return }
     const C = calRef.current || DEFAULT_C
     setResultFt(Math.round(C * raw * 100) / 100)
     setStep('result')
@@ -303,7 +304,7 @@ export default function StimpCam({ onClose, onResult }) {
     saveCal(C); saveSamples(next); calRef.current = C
     setCal(C); setCalSamples(next)
     setLastCal({ measured: Math.round(C * rawResult * 100) / 100, hand: feet })
-    setErrMsg(''); setCalFt(''); setCalIn(''); setCalibrating(false)
+    setErrMsg(''); setCalFt(''); setCalIn(''); setCalibrating(false); calibratingRef.current = false
     setStep('calibrateDone')  // stay in calibration mode — add more or finish
   }
   function resetCalibration() {
