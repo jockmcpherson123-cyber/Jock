@@ -39,6 +39,15 @@ export default function SprayBatchCalc({ products = [], area = {}, value = {}, o
     return { name: p.product, basis: p.basis, rate: r, total, per }
   })
 
+  // Liquid products (oz = fluid oz, or gal) take up room in the tank; dry ones
+  // (lbs/g) dissolve, so we don't subtract them. Water to meter = spray volume
+  // minus the liquid product volume.
+  const liquidGal = (res) => res.value == null ? 0 : res.unit === 'gal' ? res.value : res.unit === 'oz' ? res.value / 128 : 0
+  const totalLiquidGal = rows.reduce((s, r) => s + liquidGal(r.total), 0)
+  const perTankLiquidGal = rows.reduce((s, r) => s + liquidGal(r.per), 0)
+  const waterTotal = totalWater > 0 ? Math.max(0, totalWater - totalLiquidGal) : 0
+  const waterPerFullTank = tanks && tanks > 1 && tankGal > 0 ? Math.max(0, tankGal - perTankLiquidGal) : null
+
   const box = { border: `1px solid ${HAIR}`, borderRadius: 10, padding: '8px 10px', background: '#fff' }
   const lbl = { fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: INK_3, marginBottom: 3 }
   const inputCls = 'w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body'
@@ -87,9 +96,16 @@ export default function SprayBatchCalc({ products = [], area = {}, value = {}, o
       {/* headline results */}
       <div className="grid gap-2 mt-3" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))' }}>
         <div style={box}><div style={lbl}>Area</div><div style={{ fontSize: 15, fontWeight: 700, color: INK }}>{fmt(acres, 2)} ac</div><div style={{ fontSize: 11, color: INK_3 }}>{fmt(areaSqft)} ft² · {fmt(M, 1)} M</div></div>
-        <div style={box}><div style={lbl}>Total spray water</div><div style={{ fontSize: 15, fontWeight: 700, color: FOREST }}>{fmt(totalWater, 1)} gal</div><div style={{ fontSize: 11, color: INK_3 }}>at {waterRateStr || '—'} {waterUnit === 'gal/A' ? 'gal/ac' : 'gal/1000'}</div></div>
+        <div style={box}><div style={lbl}>Total spray mix</div><div style={{ fontSize: 15, fontWeight: 700, color: INK }}>{fmt(totalWater, 1)} gal</div><div style={{ fontSize: 11, color: INK_3 }}>at {waterRateStr || '—'} {waterUnit === 'gal/A' ? 'gal/ac' : 'gal/1000'}</div></div>
+        <div style={{ ...box, borderColor: FERN, background: '#F4F8F5' }}><div style={{ ...lbl, color: FERN }}>Water to meter in</div><div style={{ fontSize: 15, fontWeight: 800, color: FOREST }}>{fmt(waterTotal, 1)} gal</div><div style={{ fontSize: 11, color: INK_3 }}>mix − {fmt(totalLiquidGal, 1)} gal product</div></div>
         <div style={box}><div style={lbl}>Tanks</div><div style={{ fontSize: 15, fontWeight: 700, color: INK }}>{tanks != null ? `${tanks}` : '—'}</div><div style={{ fontSize: 11, color: INK_3 }}>{tankGal > 0 ? `× ${fmt(tankGal)} gal` : 'set tank size'}</div></div>
       </div>
+
+      {waterPerFullTank != null && (
+        <div className="mt-2 rounded-lg px-3 py-2" style={{ background: '#F4F8F5', border: `1px solid ${HAIR}` }}>
+          <span className="font-body" style={{ fontSize: 12.5, color: INK_2 }}>Per full tank: meter in <b style={{ color: FOREST }}>{fmt(waterPerFullTank, 1)} gal water</b> + {fmt(perTankLiquidGal, 1)} gal product = {fmt(tankGal)} gal.</span>
+        </div>
+      )}
 
       {/* per-product */}
       {rows.length > 0 && (
@@ -121,7 +137,7 @@ export default function SprayBatchCalc({ products = [], area = {}, value = {}, o
           </table>
         </div>
       )}
-      <p className="font-body mt-2" style={{ fontSize: 10.5, color: INK_3 }}>Total covers the whole area entered; per-tank is the load for one full tank (a job under one tank shows the whole amount). Always verify against the label.</p>
+      <p className="font-body mt-2" style={{ fontSize: 10.5, color: INK_3 }}>Water to meter in = spray volume minus the liquid product volume (dry products dissolve, so they're not subtracted). Per-tank is one full tank; a job under one tank shows the whole amount. Always verify against the label.</p>
     </div>
   )
 }
