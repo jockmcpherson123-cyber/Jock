@@ -92,6 +92,7 @@ import AnnualProgram from '@/components/AnnualProgram'
 import WeeklyReport from '@/components/WeeklyReport'
 import TurfBrief from '@/components/TurfBrief'
 import ProgramAdvice from '@/components/ProgramAdvice'
+import SprayBatchCalc from '@/components/SprayBatchCalc'
 import StimpCam from '@/components/StimpCam'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
@@ -2359,6 +2360,8 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             <input type="number" min={1} value={s.tanks} onChange={(e) => update({ tanks: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
           </div>
         </Card>
+
+        <SprayBatchCalc products={s.products} area={area} value={s.calc} onChange={(calc) => update({ calc })} />
 
         {rotationAlerts.length > 0 && (
           <div className="rounded-2xl border p-3" style={{ backgroundColor: '#FEF2F2', borderColor: '#FECACA' }}>
