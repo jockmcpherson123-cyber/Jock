@@ -92,7 +92,6 @@ import AnnualProgram from '@/components/AnnualProgram'
 import WeeklyReport from '@/components/WeeklyReport'
 import TurfBrief from '@/components/TurfBrief'
 import ProgramAdvice from '@/components/ProgramAdvice'
-import SprayBatchCalc from '@/components/SprayBatchCalc'
 import StimpCam from '@/components/StimpCam'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
@@ -2293,7 +2292,17 @@ function InfoChip({ label, value }) {
 function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes, location, sheets = [], courseInfo = {} }) {
   const [s, setS] = useState({ ...sheet, targets: sheet.targets || (sheet.target ? [sheet.target] : []) })
   const [nTargets, setNTargets] = useState({}) // per-line "feed by N" target (lb N/M)
-  const area = resolveArea(areas, s.area) || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
+  const baseArea = resolveArea(areas, s.area) || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
+  const numOr = (v, d) => (v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : d)
+  const impliedRate = baseArea.sqft && baseArea.galTank ? Math.round((baseArea.galTank / (baseArea.sqft / 1000)) * 100) / 100 : ''
+  // The sheet prefills from the chosen area but each field is editable; `disp`
+  // is what shows in the inputs, `area` (merged) is what the sheet's math uses.
+  const disp = {
+    sqft: s.sqft ?? (baseArea.sqft || ''), galTank: s.galTank ?? (baseArea.galTank || ''),
+    waterRate: s.waterRate ?? impliedRate, nozzle: s.nozzle ?? (baseArea.nozzle || ''),
+    psi: s.psi ?? (baseArea.psi || ''), tanks: s.tanks ?? baseArea.tanks ?? 1,
+  }
+  const area = { ...baseArea, sqft: numOr(s.sqft, baseArea.sqft), galTank: numOr(s.galTank, baseArea.galTank), nozzle: s.nozzle ?? baseArea.nozzle, psi: s.psi ?? baseArea.psi, waterRate: numOr(s.waterRate, impliedRate) }
   const rotationAlerts = rotationWarnings(s, sheets, products)
 
   const update = (patch) => setS((prev) => ({ ...prev, ...patch }))
@@ -2302,7 +2311,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
 
   // Area is now the sheet's identity — keep sheetType mirroring it so older
   // records and any place that still reads sheetType show the area name.
-  const handleAreaChange = (areaName) => update({ area: areaName, sheetType: areaName, tanks: areas[areaName].tanks })
+  const handleAreaChange = (areaName) => update({ area: areaName, sheetType: areaName, tanks: areas[areaName]?.tanks ?? 1, sqft: undefined, galTank: undefined, waterRate: undefined, nozzle: undefined, psi: undefined })
   const handleProductSelect = (id, name) => {
     const prod = products.find((p) => p.name === name)
     updateProduct(id, { product: name, basis: prod?.basis || '', defaultRate: prod?.rate ?? null })
@@ -2349,19 +2358,34 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 mt-3 bg-slate-50 rounded-xl p-3">
-            <InfoChip label="Nozzle" value={area.nozzle} />
-            <InfoChip label="PSI" value={area.psi} />
-            <InfoChip label="Gal/Tank" value={area.galTank} />
-          </div>
-
-          <div className="mt-3">
-            <FieldLabel>{`Tanks (default ${area.tanks})`}</FieldLabel>
-            <input type="number" min={1} value={s.tanks} onChange={(e) => update({ tanks: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+          {/* The essentials — prefilled from the area, edit any of them here */}
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <div>
+              <FieldLabel>Area (sq ft)</FieldLabel>
+              <input type="number" inputMode="numeric" value={disp.sqft} onChange={(e) => update({ sqft: e.target.value })} placeholder="30,000" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tabular-nums" />
+            </div>
+            <div>
+              <FieldLabel>Water rate (gal / 1000)</FieldLabel>
+              <input type="number" inputMode="decimal" step="0.01" value={disp.waterRate} onChange={(e) => update({ waterRate: e.target.value })} placeholder="1.44" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tabular-nums" />
+            </div>
+            <div>
+              <FieldLabel>Gal / tank</FieldLabel>
+              <input type="number" inputMode="numeric" value={disp.galTank} onChange={(e) => update({ galTank: e.target.value })} placeholder="300" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tabular-nums" />
+            </div>
+            <div>
+              <FieldLabel>Number of tanks</FieldLabel>
+              <input type="number" inputMode="numeric" min={1} value={disp.tanks} onChange={(e) => update({ tanks: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tabular-nums" />
+            </div>
+            <div>
+              <FieldLabel>Nozzle</FieldLabel>
+              <input value={disp.nozzle} onChange={(e) => update({ nozzle: e.target.value })} placeholder="e.g. Blue" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+            </div>
+            <div>
+              <FieldLabel>PSI</FieldLabel>
+              <input value={disp.psi} onChange={(e) => update({ psi: e.target.value })} placeholder="e.g. 40" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+            </div>
           </div>
         </Card>
-
-        <SprayBatchCalc products={s.products} area={area} value={s.calc} onChange={(calc) => update({ calc })} />
 
         {rotationAlerts.length > 0 && (
           <div className="rounded-2xl border p-3" style={{ backgroundColor: '#FEF2F2', borderColor: '#FECACA' }}>
