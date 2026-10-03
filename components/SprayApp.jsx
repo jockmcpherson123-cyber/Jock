@@ -59,7 +59,7 @@ import {
   Pencil,
 } from 'lucide-react'
 import {
-  uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankPlan, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
+  uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
   productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, productRateForN, eiqLoad, measureOut,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
@@ -162,7 +162,7 @@ function sheetDeductions(sheet, area) {
   const tanks = sheet.tanks || 1
   const map = {}
   ;(sheet.products || []).filter((p) => p.product).forEach((p) => {
-    const { total: amt, unit } = amtPerTankTotal(parseFloat(p.rate), p.basis, area?.sqft, tanks, p.forceGal)
+    const { total: amt, unit } = amtPerTankTotal(parseFloat(p.rate), p.basis, area?.sqft, area?.sqft, p.forceGal)
     if (amt == null) return
     map[p.product] = { name: p.product, unit, total: (map[p.product]?.total || 0) + amt }
   })
@@ -2308,14 +2308,16 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   // The sheet prefills from the chosen area but each field is editable; `disp`
   // is what shows in the inputs, `area` (merged) is what the sheet's math uses.
   const area = { ...baseArea, sqft: numOr(s.sqft, baseArea.sqft), galTank: numOr(s.galTank, baseArea.galTank), nozzle: s.nozzle ?? baseArea.nozzle, psi: s.psi ?? baseArea.psi, waterRate: numOr(s.waterRate, impliedRate) }
-  // Tanks: auto-suggested from the whole area ÷ what one tank covers, unless the
-  // user has typed their own number.
-  const suggestedTanks = tankPlan(area.sqft, area.waterRate, area.galTank).tanksNeeded
-  const effTanks = s.tanksManual ? Math.max(1, numOr(s.tanks, 1)) : suggestedTanks
+  // Whole job broken into whole tanks + the leftover partial (never rounded).
+  const bd = tankBreakdown(area.sqft, area.waterRate, area.galTank)
+  const perTankSqft = bd.sqftPerTank > 0 ? Math.min(area.sqft || bd.sqftPerTank, bd.sqftPerTank) : (area.sqft || 0)
+  const tanksLabel = (bd.fullTanks > 0 || bd.remainderGal > 0)
+    ? `${bd.fullTanks} tank${bd.fullTanks === 1 ? '' : 's'}${bd.remainderGal > 0 ? ` + ${bd.remainderGal} gal` : ''}`
+    : '—'
   const disp = {
     sqft: s.sqft ?? (baseArea.sqft || ''), galTank: s.galTank ?? (baseArea.galTank || ''),
     waterRate: s.waterRate ?? impliedRate, nozzle: s.nozzle ?? (baseArea.nozzle || ''),
-    psi: s.psi ?? (baseArea.psi || ''), tanks: effTanks,
+    psi: s.psi ?? (baseArea.psi || ''),
   }
   const rotationAlerts = rotationWarnings(s, sheets, products)
 
@@ -2351,7 +2353,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
       <div className="flex items-center justify-between mb-5">
         <button onClick={onCancel} className="font-body text-sm font-medium text-slate-400">Cancel</button>
         <h2 className="font-display text-lg font-semibold text-slate-900">{sheet.status === 'pending' && sheet.directorSig === '' ? 'Spray Sheet' : 'Edit Sheet'}</h2>
-        <button onClick={() => onSave({ ...s, tanks: effTanks, targets: productTargets.length ? productTargets : (s.targets || []) })} disabled={saving} className="font-body text-xs font-bold px-4 py-2 rounded-full text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
+        <button onClick={() => onSave({ ...s, tanks: bd.tanksToMix, targets: productTargets.length ? productTargets : (s.targets || []) })} disabled={saving} className="font-body text-xs font-bold px-4 py-2 rounded-full text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
           {saving ? 'Saving…' : 'Save'}
         </button>
       </div>
@@ -2387,8 +2389,8 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               <input type="number" inputMode="numeric" value={disp.galTank} onChange={(e) => update({ galTank: e.target.value })} placeholder="300" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tabular-nums" />
             </div>
             <div>
-              <FieldLabel>{`Number of tanks${!s.tanksManual && suggestedTanks ? ` · auto ${suggestedTanks}` : ''}`}</FieldLabel>
-              <input type="number" inputMode="numeric" min={1} value={disp.tanks} onChange={(e) => update({ tanks: Number(e.target.value), tanksManual: true })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tabular-nums" />
+              <FieldLabel>Tanks needed</FieldLabel>
+              <div className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body font-semibold tabular-nums" style={{ backgroundColor: '#F8FAF8', color: FOREST }}>{tanksLabel}</div>
             </div>
             <div>
               <FieldLabel>Nozzle</FieldLabel>
@@ -2441,7 +2443,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
           <MultiSelect selected={s.products.map((p) => p.product).filter(Boolean)} options={products.map((pr) => pr.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mt-3 items-start">
             {sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p, mixIdx) => {
-              const { amt, unit: amtUnit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, effTanks, p.forceGal)
+              const { amt, unit: amtUnit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, perTankSqft, p.forceGal)
               const prodInfo = products.find((pr) => pr.name === p.product)
               const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
               const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
@@ -2602,19 +2604,14 @@ function reiHours(str) {
 }
 function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], courseInfo = {}, location = {}) {
 
-  // Partial fill is folded straight into each product's TOTAL so the sheet stays
-  // one connected list (no separate extra-spray table).
-  const partialGal = sheet.partialGallons
-  const hasPartial = partialGal && area.galTank
+  // Whole-area model: the total already covers the entire area (full tanks + the
+  // derived partial), so it needs no extra add-on. Amt/tank shows one full tank.
+  const bdR = tankBreakdown(area.sqft, area.waterRate, area.galTank)
+  const hasPartial = bdR.remainderGal > 0.05 && area.galTank
+  const perTankSqftR = bdR.sqftPerTank > 0 ? Math.min(area.sqft || bdR.sqftPerTank, bdR.sqftPerTank) : (area.sqft || 0)
   const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p) => {
     const prodInfo = products.find((pr) => pr.name === p.product) || {}
-    const { amt, unit, total: whole } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, sheet.tanks || 1, p.forceGal)
-    let partialAmt = 0
-    if (hasPartial && amt !== null) {
-      const { value: pAmt } = calcAmount(parseFloat(p.rate), p.basis, effectiveSqft(partialGal, area), p.forceGal)
-      partialAmt = pAmt || 0
-    }
-    const total = whole !== null ? Math.round((whole + partialAmt) * 10) / 10 : null
+    const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, perTankSqftR, p.forceGal)
     return { ...p, amt, total, unit, epaReg: prodInfo.epaReg, ai: prodInfo.activeIngredient, rei: prodInfo.rei, signalWord: prodInfo.signalWord }
   })
   // Restricted-entry summary: the longest REI on the sheet, and — if signed off
@@ -2632,7 +2629,7 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
 
   const specCell = (l, v) => `<td style="padding:6px 12px;vertical-align:middle;white-space:nowrap"><span style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT}">${esc(l)}</span> <span style="font-size:13px;font-weight:700;color:${FOR};margin-left:6px">${g(v)}</span></td>`
   const weatherStr = [w.temp ? `${esc(w.temp)}°F` : null, w.wind ? `${esc(w.wind)} mph ${esc(w.windDir || '')}`.trim() : null, w.humidity ? `${esc(w.humidity)}% RH` : null].filter(Boolean).join(' · ') || '—'
-  const tanksStr = `${esc(sheet.tanks)}${area.galTank ? ` × ${esc(area.galTank)} gal` : ''}${hasPartial ? ` + ${esc(partialGal)} gal` : ''}`
+  const tanksStr = `${esc(bdR.fullTanks || sheet.tanks || 0)}${area.galTank ? ` × ${esc(area.galTank)} gal` : ''}${hasPartial ? ` + ${esc(bdR.remainderGal)} gal` : ''}`
 
   const productRows = rows.map((p, i) => {
     const meta = [p.target && String(p.target).trim() && `For: ${esc(p.target)}`, p.ai && `AI ${esc(p.ai)}`, p.epaReg && `EPA ${esc(p.epaReg)}`, p.rei && `REI ${esc(p.rei)}`, p.signalWord && esc(p.signalWord)].filter(Boolean).join(' · ')
@@ -2664,7 +2661,7 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
   const appliedDate = sheet.completedAt ? new Date(sheet.completedAt).toLocaleString() : '—'
   const approvedDate = sheet.directorDate ? new Date(sheet.directorDate).toLocaleString() : '—'
   const submitted = sheet.createdAt ? `Submitted by ${esc(sheet.operator || '—')} · ${esc(new Date(sheet.createdAt).toLocaleDateString())}` : ''
-  const partialNote = hasPartial ? `<div style="font-size:10px;color:${MUT};margin:6px 0 0">Totals include the ${esc(partialGal)} gal partial fill (${sheet.tanks || 1} full tank${(sheet.tanks || 1) !== 1 ? 's' : ''} + ${esc(partialGal)} gal).</div>` : ''
+  const partialNote = hasPartial ? `<div style="font-size:10px;color:${MUT};margin:6px 0 0">Mix as ${esc(bdR.fullTanks)} full tank${bdR.fullTanks !== 1 ? 's' : ''} + a ${esc(bdR.remainderGal)} gal partial. Totals cover the whole area.</div>` : ''
   const instr = (sheet.instructions && String(sheet.instructions).trim()) ? `<div style="font-size:11px;color:#5B6160;margin-bottom:10px"><b style="color:${FOR}">Instructions:</b> ${esc(sheet.instructions)}</div>` : ''
 
   return `<div style="font-family:Arial,Helvetica,sans-serif;color:#1A1A16;background:#F7F5EF;padding:18px">
@@ -2917,7 +2914,7 @@ function mdaRecordBookHTML(allSheets, products, areas, courseInfo = {}, location
     const prods = (s.products || []).filter((p) => p.product)
     prods.forEach((p, i) => {
       const info = products.find((pr) => pr.name === p.product) || {}
-      const { unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, sqft, s.tanks || 1, p.forceGal)
+      const { unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, sqft, sqft, p.forceGal)
       rows.push(`<tr>
         <td style="${TD}">${i === 0 ? esc2(dateStr) : ''}</td>
         <td style="${TD}">${i === 0 ? esc2(s.area) : ''}</td>
@@ -2964,10 +2961,12 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
   const FOR = '#16291F', MUT = '#8A8984', LINE = '#E2E0DB', GLD = '#C9A84C'
   const g = (v) => (v == null || v === '' ? '—' : esc(v))
   const acres = area.sqft ? (area.sqft / 43560).toFixed(2) : null
+  const bdT = tankBreakdown(area.sqft, area.waterRate, area.galTank)
+  const perTankSqftT = bdT.sqftPerTank > 0 ? Math.min(area.sqft || bdT.sqftPerTank, bdT.sqftPerTank) : (area.sqft || 0)
 
   const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p) => {
     const prodInfo = products.find((pr) => pr.name === p.product) || {}
-    const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, sheet.tanks || 1, p.forceGal)
+    const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, perTankSqftT, p.forceGal)
     return { ...p, amt, total, unit, prodInfo }
   })
 
@@ -3276,8 +3275,6 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
   // The applicator's drawn sign-off signature (data URL).
   const [applicatorSig, setApplicatorSig] = useState(sheet.applicatorSignature || '')
   const licenseFor = applicatorLicenses[sprayedBy] || {}
-  const [partialGal, setPartialGal] = useState(sheet.partialGallons ?? '')
-  const [showPartial, setShowPartial] = useState(sheet.partialGallons != null)
   const [wxLoading, setWxLoading] = useState(false)
   const baseArea = resolveArea(areas, sheet.area) || {}
   const numOr2 = (v, d) => (v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : d)
@@ -3286,18 +3283,28 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
   // saved defaults, so the operator sheet matches what was built.
   const area = { ...baseArea, sqft: numOr2(sheet.sqft, baseArea.sqft), galTank: numOr2(sheet.galTank, baseArea.galTank), nozzle: sheet.nozzle ?? baseArea.nozzle, psi: sheet.psi ?? baseArea.psi, waterRate: numOr2(sheet.waterRate, impliedRate2) }
   const productIds = sheet.products.filter((p) => p.product).map((p) => p.id)
-  const tankCount = sheet.tanks || 1
-  // Water to meter into each tank = the tank's share of the spray mix minus the
-  // liquid products going in it (dry products dissolve). For the flow meter.
-  const waterRateM = Number(area.waterRate) || 0
-  const totalMixGal = waterRateM > 0 ? waterRateM * (Number(area.sqft) || 0) / 1000 : 0
-  const perTankMixGal = tankCount > 0 ? totalMixGal / tankCount : totalMixGal
-  const liquidGalPerTank = (sheet.products || []).filter((p) => p.product).reduce((sum, p) => {
-    const { amt, unit } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, tankCount, p.forceGal)
-    if (amt == null) return sum
-    return sum + (unit === 'gal' ? amt : unit === 'oz' ? amt / 128 : 0)
-  }, 0)
-  const waterPerTankGal = perTankMixGal > 0 ? Math.max(0, Math.round((perTankMixGal - liquidGalPerTank) * 10) / 10) : 0
+  // Full tanks + the leftover partial — never rounded. e.g. 6 tanks + 45 gal.
+  const bd = tankBreakdown(area.sqft, area.waterRate, area.galTank)
+  const tankCount = sheet.tanks || bd.tanksToMix || 1
+  const tanksLabel = (bd.fullTanks > 0 || bd.remainderGal > 0)
+    ? `${bd.fullTanks} tank${bd.fullTanks === 1 ? '' : 's'}${bd.remainderGal > 0 ? ` + ${bd.remainderGal} gal` : ''}`
+    : (sheet.tanks ? `${sheet.tanks}` : '—')
+  // The last tank is the partial when there's a remainder; the rest are full.
+  const isPartialTank = (n) => bd.remainderGal > 0.05 && bd.fullTanks < tankCount && n === tankCount
+  const perTankSqftFor = (n) => (isPartialTank(n) ? bd.remainderSqft : bd.sqftPerTank)
+  const tankMixGalFor = (n) => (isPartialTank(n) ? bd.remainderGal : (Number(area.galTank) || bd.totalMix))
+  // Water to meter into THIS tank = the tank's mix minus its liquid products
+  // (dry products dissolve). For the flow meter. Full tanks and the partial differ.
+  const waterForTank = (n) => {
+    const mix = tankMixGalFor(n)
+    if (!(mix > 0)) return 0
+    const liquid = (sheet.products || []).filter((p) => p.product).reduce((sum, p) => {
+      const { amt, unit } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, perTankSqftFor(n), p.forceGal)
+      if (amt == null) return sum
+      return sum + (unit === 'gal' ? amt : unit === 'oz' ? amt / 128 : 0)
+    }, 0)
+    return Math.max(0, Math.round((mix - liquid) * 10) / 10)
+  }
 
   // Which products are in each tank (shared/synced), keyed by tank number.
   const [tankChecks, setTankChecks] = useState(sheet.tankChecks || {})
@@ -3312,6 +3319,10 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
     return 1
   }
   const [curTank, setCurTank] = useState(firstIncomplete())
+  // Values for the tank currently being filled (full tank vs the partial last one).
+  const curPerTankSqft = perTankSqftFor(curTank)
+  const curIsPartial = isPartialTank(curTank)
+  const waterPerTankGal = waterForTank(curTank)
 
   // Live sync: mirror the other iPads' check-offs as they happen. The current
   // tank selection stays local so devices don't fight over it.
@@ -3335,7 +3346,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
   // Save the check-off state (broadcasts to the other iPads). No approval needed.
   const pushChecks = (next) => {
     setTankChecks(next)
-    onLogSpray?.({ ...sheet, tankChecks: next, weather: wx, partialGallons: partialGal === '' ? null : Number(partialGal) }, { quiet: true })
+    onLogSpray?.({ ...sheet, tankChecks: next, weather: wx }, { quiet: true })
   }
   const toggleCheck = (pid) => {
     const c = tankChecks[String(curTank)] || []
@@ -3378,11 +3389,9 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
     onApprove(sig, dirSig)
   }
   const reopen = () => onLogSpray?.({ ...sheet, completed: false })
-  // Save the optional partial-fill add-on (no approval needed — separate spray).
-  const savePartial = (gal) => onLogSpray?.({ ...sheet, partialGallons: gal === '' || gal == null ? null : Number(gal) }, { quiet: true })
-  // Manual save of the current sheet state (weather, check-offs, partial, signature).
+  // Manual save of the current sheet state (weather, check-offs, signature).
   const saveNow = () =>
-    onLogSpray?.({ ...sheet, weather: wx, tankChecks, partialGallons: partialGal === '' ? null : Number(partialGal), applicatorSignature: applicatorSig || sheet.applicatorSignature || '' })
+    onLogSpray?.({ ...sheet, weather: wx, tankChecks, applicatorSignature: applicatorSig || sheet.applicatorSignature || '' })
 
   // Print / export this one record — built as isolated HTML so only this sheet
   // is ever output (fixes the "other sheets show up" + blank-PDF bugs).
@@ -3512,7 +3521,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-3 gap-x-4 font-body text-sm">
               <Row label="Date" value={sheet.date || '—'} />
               <Row label="Applicator" value={sheet.operator || '—'} />
-              <Row label="Tanks" value={sheet.tanks} />
+              <Row label="Tanks" value={tanksLabel} />
               <Row label="Nozzle" value={area.nozzle || '—'} />
               <Row label="PSI" value={area.psi || '—'} />
               <Row label="Gal / Tank" value={area.galTank ?? '—'} />
@@ -3560,10 +3569,12 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
                     const done = tankIsComplete(tankChecks, n)
                     const some = (tankChecks[String(n)] || []).length > 0 && !done
                     const isCur = n === curTank
+                    const partial = isPartialTank(n)
                     const bg = done ? FERN : some ? GOLD : 'white'
                     const fg = done || some ? 'white' : '#64748B'
+                    const bord = isCur ? `2px solid ${FOREST}` : partial ? `1.5px dashed ${FERN}` : '1px solid #E2E8F0'
                     return (
-                      <button key={n} onClick={() => changeTank(n)} className="w-8 h-8 rounded-full font-body text-xs font-bold transition flex items-center justify-center" style={{ backgroundColor: bg, color: fg, border: isCur ? `2px solid ${FOREST}` : '1px solid #E2E8F0' }}>
+                      <button key={n} onClick={() => changeTank(n)} title={partial ? `Partial tank — ${bd.remainderGal} gal` : `Full tank`} className="w-8 h-8 rounded-full font-body text-xs font-bold transition flex items-center justify-center" style={{ backgroundColor: bg, color: fg, border: bord }}>
                         {done ? <Check size={14} /> : n}
                       </button>
                     )
@@ -3572,21 +3583,21 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
                   <span className="font-body text-[10px] font-semibold text-slate-500 ml-auto">{completedCount}/{tankCount} tanks done</span>
                 </div>
                 <p className="font-body text-[11px] mt-1.5 text-slate-500">
-                  Filling <b style={{ color: FOREST }}>Tank {curTank}</b>{tankIsComplete(tankChecks, curTank) ? ' — complete ✓' : ''}. Tap a tank to switch; other iPads can fill different tanks at the same time.
+                  Filling <b style={{ color: FOREST }}>Tank {curTank}</b>{curIsPartial ? <> — <b style={{ color: FERN }}>partial, {bd.remainderGal} gal</b></> : ''}{tankIsComplete(tankChecks, curTank) ? ' — complete ✓' : ''}. Tap a tank to switch; other iPads can fill different tanks at the same time.
                 </p>
               </div>
             )}
 
             {waterPerTankGal > 0 && (
               <div className="flex items-center justify-between rounded-xl px-3 py-2 mb-2" style={{ backgroundColor: '#EEF3EF', border: '1px solid #CFE3D6' }}>
-                <span className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: FERN }}>💧 Meter water per tank</span>
+                <span className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: FERN }}>💧 Meter water · Tank {curTank}{curIsPartial ? ' (partial)' : ''}</span>
                 <span className="font-display text-[17px] font-bold tabular-nums" style={{ color: FOREST }}>{waterPerTankGal} gal</span>
               </div>
             )}
 
             <div className="divide-y divide-slate-100">
               {sortByMixOrder(sheet.products.filter((p) => p.product), (p) => products?.find((pr) => pr.name === p.product), courseInfo?.mixOrder).map((p) => {
-                const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, sheet.tanks, p.forceGal)
+                const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, curPerTankSqft, p.forceGal)
                 const prodInfo = products?.find((pr) => pr.name === p.product)
                 const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
                 const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
@@ -3698,48 +3709,6 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
             )
           })()}
 
-          {/* Optional partial fill — a separate extra spray with the same mix. Does
-              not touch the main sheet above, and needs no re-approval. */}
-          <Card>
-            {!showPartial ? (
-              <button onClick={() => setShowPartial(true)} className="w-full flex items-center justify-center gap-1.5 font-body text-sm font-semibold py-1" style={{ color: FERN }}>
-                <Plus size={15} /> Add partial fill (extra tank)
-              </button>
-            ) : (
-              <>
-                <div className="flex items-center justify-between mb-2">
-                  <FieldLabel noMargin>Partial Fill — Extra Spray</FieldLabel>
-                  <button onClick={() => { setShowPartial(false); setPartialGal(''); savePartial('') }} className="text-red-400 p-1"><Trash2 size={14} /></button>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-body text-[11px] text-slate-400">Gallons of water in this extra tank. Full tank is {area.galTank || '—'} gal.</p>
-                  <input type="number" step="any" value={partialGal} onChange={(e) => setPartialGal(e.target.value)} onBlur={(e) => savePartial(e.target.value)} className="w-24 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body text-center" placeholder="gal" />
-                </div>
-
-                {Number(partialGal) > 0 && Number(area.galTank) > 0 ? (
-                  <>
-                    <p className="font-body text-[11px] font-semibold rounded-lg px-3 py-2 my-2" style={{ backgroundColor: '#FFF6DD', color: '#92660D' }}>
-                      {partialGal} gal = {Math.round((Number(partialGal) / Number(area.galTank)) * 100)}% of a full tank
-                    </p>
-                    <div className="divide-y divide-slate-100">
-                      {sheet.products.filter((p) => p.product).map((p) => {
-                        const { value: amt, unit } = calcAmount(parseFloat(p.rate), p.basis, effectiveSqft(partialGal, area), p.forceGal)
-                        return (
-                          <div key={p.id} className="py-2 flex items-center justify-between font-body">
-                            <span className="text-sm font-semibold text-slate-800">{p.product}</span>
-                            <span className="text-sm font-bold" style={{ color: FERN }}>{amt ?? '—'} {unit}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    <p className="font-body text-[11px] text-slate-400 mt-2">Add these amounts to the partial tank. This is an extra spray — it doesn't change the main sheet above.</p>
-                  </>
-                ) : (
-                  <p className="font-body text-sm text-slate-400 mt-2">Enter the gallons to see the amounts.</p>
-                )}
-              </>
-            )}
-          </Card>
           </div>
 
           {/* Right — reference & sign-off cards, stacked beside the products */}
