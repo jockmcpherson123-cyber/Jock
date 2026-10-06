@@ -125,64 +125,17 @@ const PPE_OPTIONS = ['Gloves', 'Long Sleeves', 'Eye Protection', 'Respirator', '
 const BASIS_OPTIONS = ['oz / M', 'oz / A', 'lbs / M', 'lbs / A', 'g / M', 'g / A', 'gal / M', 'gal / A']
 const QUICK_INSTRUCTIONS = ['Water in 0.1"', 'Do not mow for 24h', 'Avoid overlap near bunkers', 'Spray when turf is dry']
 
-// A full tank (area.galTank of water) covers area.sqft. If the crew only fills a
-// partial tank, they cover proportionally less, so every product scales down by
-// the same fraction. We do that by shrinking the effective area passed into the
-// rate math — which keeps all the existing rounding correct. null/blank/equal =
-// a full tank (no scaling).
-function effectiveSqft(fillGallons, area) {
-  const full = area?.sqft || 0
-  const gt = Number(area?.galTank)
-  const fg = Number(fillGallons)
-  if (gt > 0 && fg > 0 && fg !== gt) return full * (fg / gt)
-  return full
-}
-function isPartialFill(fillGallons, area) {
-  const gt = Number(area?.galTank)
-  const fg = Number(fillGallons)
-  return gt > 0 && fg > 0 && fg !== gt
-}
-
-// ── Inventory deduction helpers (pure) ───────────────────────────────────────
-// Product used by ONE partial-fill tank of `gallons`, per product, in the calc
-// unit. Combined by product name so repeat lines add up.
-function partialDeductions(sheet, area, gallons) {
-  if (!(Number(gallons) > 0) || !(Number(area?.galTank) > 0)) return []
-  const map = {}
-  ;(sheet.products || []).filter((p) => p.product).forEach((p) => {
-    const { value, unit } = calcAmount(parseFloat(p.rate), p.basis, effectiveSqft(gallons, area), p.forceGal)
-    if (value != null) map[p.product] = { name: p.product, unit, total: (map[p.product]?.total || 0) + value }
-  })
-  return Object.values(map)
-}
-
-// Total product to pull from inventory when a sheet is approved: the main tanks
-// PLUS the optional partial-fill extra tank.
+// Total product to pull from inventory when a sheet is approved. The whole-area
+// total already covers every tank (full tanks + the derived partial), so there's
+// no extra partial add-on to tack on.
 function sheetDeductions(sheet, area) {
-  const tanks = sheet.tanks || 1
   const map = {}
   ;(sheet.products || []).filter((p) => p.product).forEach((p) => {
     const { total: amt, unit } = amtPerTankTotal(parseFloat(p.rate), p.basis, area?.sqft, area?.sqft, p.forceGal)
     if (amt == null) return
     map[p.product] = { name: p.product, unit, total: (map[p.product]?.total || 0) + amt }
   })
-  partialDeductions(sheet, area, sheet.partialGallons).forEach((d) => {
-    map[d.name] = { name: d.name, unit: d.unit, total: (map[d.name]?.total || 0) + d.total }
-  })
   return Object.values(map)
-}
-
-// The inventory change when a sheet's partial fill goes from oldGal to newGal —
-// positive totals pull stock, negative totals put it back (partial reduced).
-function partialDelta(sheet, area, oldGal, newGal) {
-  const map = {}
-  partialDeductions(sheet, area, newGal).forEach((d) => { map[d.name] = { name: d.name, unit: d.unit, total: d.total } })
-  partialDeductions(sheet, area, oldGal).forEach((d) => {
-    map[d.name] = map[d.name]
-      ? { ...map[d.name], total: map[d.name].total - d.total }
-      : { name: d.name, unit: d.unit, total: -d.total }
-  })
-  return Object.values(map).filter((d) => Math.abs(d.total) > 1e-6)
 }
 
 // Find the settings area for a sheet's area name, tolerating short/variant names
@@ -836,10 +789,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   }
 
   async function approveSheet(sig, signature = '') {
-    // Record how much partial fill we're deducting now, so later edits to the
-    // partial only adjust the difference.
-    const partialNow = Number(activeSheet.partialGallons) || 0
-    const updated = { ...activeSheet, status: 'approved', directorSig: sig, directorSignature: signature || activeSheet.directorSignature || '', directorDate: new Date().toISOString(), partialStockDeducted: partialNow }
+    const updated = { ...activeSheet, status: 'approved', directorSig: sig, directorSignature: signature || activeSheet.directorSignature || '', directorDate: new Date().toISOString() }
     const saved = await saveSheet(updated)
     if (!saved) return
 
@@ -1099,21 +1049,8 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
             onLogSpray={async (updated, opts = {}) => {
               try {
                 const saved = await db.updateSheet(updated)
-                let finalSheet = saved
-                // Once the main stock is committed (sheet approved or completed),
-                // keep the partial-fill deduction in sync — pulling or restoring
-                // only the difference, so editing the partial never double-counts.
-                if (saved.status === 'approved' || saved.completed) {
-                  const area = withSheetSetup(resolveArea(areas, saved.area) || {}, saved)
-                  const already = Number(saved.partialStockDeducted) || 0
-                  const now = Number(saved.partialGallons) || 0
-                  if (already !== now && Number(area.galTank) > 0) {
-                    await deductStock(partialDelta(saved, area, already, now))
-                    finalSheet = await db.updateSheet({ ...saved, partialStockDeducted: now })
-                  }
-                }
-                setActiveSheet(finalSheet)
-                setSheets((prev) => prev.map((s) => (s.id === finalSheet.id ? finalSheet : s)))
+                setActiveSheet(saved)
+                setSheets((prev) => prev.map((s) => (s.id === saved.id ? saved : s)))
                 if (!opts.quiet) showToast(updated.completed ? 'Filed in Records' : 'Spray details saved')
               } catch (e) {
                 console.error(e)
