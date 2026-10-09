@@ -41,6 +41,23 @@ function bearing(a, b) {
   return (Math.atan2(y, x) * toD + 360) % 360
 }
 
+// Point `distM` metres from (lat,lng) along compass bearing `brgDeg`.
+function destination(lat, lng, brgDeg, distM) {
+  const R = 6371000, toR = Math.PI / 180, toD = 180 / Math.PI
+  const d = distM / R, brg = brgDeg * toR, la1 = lat * toR, lo1 = lng * toR
+  const la2 = Math.asin(Math.sin(la1) * Math.cos(d) + Math.cos(la1) * Math.sin(d) * Math.cos(brg))
+  const lo2 = lo1 + Math.atan2(Math.sin(brg) * Math.sin(d) * Math.cos(la1), Math.cos(d) - Math.sin(la1) * Math.sin(la2))
+  return { lat: la2 * toD, lng: lo2 * toD }
+}
+// Signed cross-track distance (m) of P from the A→B line. Positive = right of it.
+function crossTrack(A, B, P) {
+  const R = 6371000, toR = Math.PI / 180
+  const d13 = haversine(A, P) / R
+  const th13 = bearing(A, P) * toR
+  const th12 = bearing(A, B) * toR
+  return Math.asin(Math.sin(d13) * Math.sin(th13 - th12)) * R
+}
+
 function headingIcon(L, deg) {
   const html = `<div style="width:30px;height:30px;transform:rotate(${deg}deg);transition:transform .2s">
     <svg width="30" height="30" viewBox="0 0 30 30">
@@ -51,6 +68,14 @@ function headingIcon(L, deg) {
   return L.divIcon({ className: 'gps-pos', html, iconSize: [30, 30], iconAnchor: [15, 15] })
 }
 
+function Chevron({ hot, right }) {
+  return (
+    <svg width="10" height="16" viewBox="0 0 11 17" style={{ opacity: hot ? 1 : 0.28, transform: right ? 'scaleX(-1)' : 'none', transition: 'opacity .15s' }}>
+      <path d="M9 1 2 8.5 9 16" fill="none" stroke="#EFEFE7" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 export default function GpsCoverage({ user }) {
   const [ready, setReady] = useState(false)       // leaflet loaded
   const [running, setRunning] = useState(false)
@@ -59,6 +84,8 @@ export default function GpsCoverage({ user }) {
   const [follow, setFollow] = useState(true)
   const [gpsErr, setGpsErr] = useState('')
   const [stats, setStats] = useState({ acres: 0, dist: 0, mph: 0, acc: null, secs: 0 })
+  const [abStage, setAbStage] = useState('none') // none | a | ab
+  const [lb, setLb] = useState({ active: false, off: 0 }) // lightbar: offset (ft) from nearest line
 
   const containerRef = useRef(null)
   const LRef = useRef(null)
@@ -67,6 +94,8 @@ export default function GpsCoverage({ user }) {
   const coverRef = useRef(null)   // layer group of painted swath
   const pathRef = useRef(null)    // centre breadcrumb line
   const markerRef = useRef(null)
+  const lineRef = useRef(null)    // { a:{lat,lng}, b:{lat,lng} } A–B guidance line
+  const guideRef = useRef(null)   // layer group of parallel guidance lines
   const trackRef = useRef([])     // [{lat,lng,t,acc}]
   const distRef = useRef(0)       // running track length in metres
   const watchRef = useRef(null)
@@ -101,6 +130,7 @@ export default function GpsCoverage({ user }) {
       try { const s = await db.fetchSettings(); if (s?.location?.lat != null) center = { lat: s.location.lat, lng: s.location.lng } } catch { /* use fallback */ }
       if (cancelled || mapRef.current || !containerRef.current) return
       const map = L.map(containerRef.current, { center: [center.lat, center.lng], zoom: 18, zoomControl: true, attributionControl: true, preferCanvas: true })
+      map.zoomControl.setPosition('bottomright') // keep it clear of the lightbar up top
       L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, attribution: SAT_ATTR, crossOrigin: true }).addTo(map)
       rendererRef.current = L.canvas({ padding: 0.5 })
       coverRef.current = L.layerGroup().addTo(map)
@@ -161,6 +191,14 @@ export default function GpsCoverage({ user }) {
     if (prev) distRef.current += haversine(prev, fix)
     track.push(fix)
     paint(fix)
+    // Lightbar: how far off the nearest guidance line are we?
+    const line = lineRef.current
+    if (line && line.a && line.b) {
+      const xt = crossTrack(line.a, line.b, fix)
+      const W = widthRef.current / FT_PER_M
+      const off = (xt - Math.round(xt / W) * W) * FT_PER_M
+      setLb({ active: true, off })
+    }
     // Running stats.
     const dist = distRef.current
     const widthM = widthRef.current / FT_PER_M
@@ -200,6 +238,7 @@ export default function GpsCoverage({ user }) {
     distRef.current = 0
     startRef.current = 0
     setStats({ acres: 0, dist: 0, mph: 0, acc: null, secs: 0 })
+    clearLine()
   }
   function recenter() {
     const t = trackRef.current
@@ -207,9 +246,61 @@ export default function GpsCoverage({ user }) {
     if (last && mapRef.current) mapRef.current.setView([last.lat, last.lng], Math.max(18, mapRef.current.getZoom()))
   }
 
+  // Draw the A–B line plus parallel guidance lines one implement-width apart.
+  const drawGuides = useCallback(() => {
+    const L = LRef.current, map = mapRef.current, line = lineRef.current
+    if (!L || !map || !line?.a || !line?.b) return
+    if (!guideRef.current) guideRef.current = L.layerGroup().addTo(map)
+    guideRef.current.clearLayers()
+    const th = bearing(line.a, line.b)
+    const W = widthRef.current / FT_PER_M
+    const aExt = destination(line.a.lat, line.a.lng, th + 180, 120)
+    const bExt = destination(line.b.lat, line.b.lng, th, 120)
+    for (let k = -4; k <= 4; k++) {
+      const o = k * W
+      const p1 = o === 0 ? aExt : destination(aExt.lat, aExt.lng, th + 90, o)
+      const p2 = o === 0 ? bExt : destination(bExt.lat, bExt.lng, th + 90, o)
+      L.polyline([[p1.lat, p1.lng], [p2.lat, p2.lng]], { color: GOLD, weight: k === 0 ? 2.5 : 1.75, opacity: k === 0 ? 0.95 : 0.6, dashArray: k === 0 ? null : '6 7', renderer: rendererRef.current }).addTo(guideRef.current)
+    }
+    ;[line.a, line.b].forEach((pt, i) => {
+      L.circleMarker([pt.lat, pt.lng], { radius: 5, color: '#fff', weight: 2, fillColor: FERN, fillOpacity: 1, renderer: rendererRef.current }).addTo(guideRef.current).bindTooltip(i === 0 ? 'A' : 'B', { permanent: true, direction: 'top', className: 'ab-tip' })
+    })
+  }, [])
+
+  function captureHere(cb) {
+    if (!navigator.geolocation) { setGpsErr('no-gps'); return }
+    const last = trackRef.current[trackRef.current.length - 1]
+    if (last) { cb({ lat: last.lat, lng: last.lng }); return } // use the live fix when we have one
+    navigator.geolocation.getCurrentPosition(
+      (p) => cb({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => setGpsErr('unavailable'),
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
+    )
+  }
+  function abTap() {
+    if (abStage === 'none') captureHere((pt) => { lineRef.current = { a: pt, b: null }; setAbStage('a') })
+    else if (abStage === 'a') captureHere((pt) => { lineRef.current = { ...lineRef.current, b: pt }; setAbStage('ab'); setLb({ active: true, off: 0 }); drawGuides() })
+    else clearLine()
+  }
+  function clearLine() {
+    lineRef.current = null
+    guideRef.current?.clearLayers()
+    setAbStage('none'); setLb({ active: false, off: 0 })
+  }
+
+  // Re-space the guidance lines if the implement width changes after the line is set.
+  useEffect(() => { if (abStage === 'ab') drawGuides() }, [widthFt, abStage, drawGuides])
+
   const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
   const accLabel = stats.acc == null ? '—' : `±${Math.round(stats.acc)} m`
   const accColor = stats.acc == null ? INK_3 : stats.acc <= 6 ? FERN : stats.acc <= 12 ? GOLD : RED
+  // Lightbar display
+  const halfW = Math.max(0.5, widthFt / 2)
+  const lbMag = Math.abs(lb.off)
+  const lbOn = lbMag < 0.3
+  const lbPos = Math.max(5, Math.min(95, 50 + (lb.off / halfW) * 45))
+  const lbStatus = lbOn ? 'On line' : lb.off > 0 ? 'Nudge left' : 'Nudge right'
+  const abLabel = abStage === 'none' ? 'Set A' : abStage === 'a' ? 'Set B' : 'Line ✓'
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
@@ -227,6 +318,12 @@ export default function GpsCoverage({ user }) {
           <button onClick={() => setFollow((f) => !f)} className="font-body text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={follow ? { backgroundColor: FERN, color: '#fff' } : { backgroundColor: PAPER, color: INK_2, border: `1px solid ${HAIR}` }}>
             <Navigation2 size={13} /> Follow
           </button>
+          <button onClick={abTap} className="font-body text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={abStage === 'ab' ? { backgroundColor: GOLD, color: FOREST } : { backgroundColor: PAPER, color: INK_2, border: `1px solid ${HAIR}` }} title="Set an A–B line for pass guidance">
+            {abLabel}
+          </button>
+          {abStage !== 'none' && (
+            <button onClick={clearLine} className="font-body text-xs font-bold px-2.5 py-1.5 rounded-full" style={{ backgroundColor: PAPER, color: RED, border: `1px solid ${HAIR}` }}>Clear line</button>
+          )}
         </div>
       </div>
 
@@ -242,6 +339,32 @@ export default function GpsCoverage({ user }) {
         {!ready && (
           <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: PAPER }}>
             <span className="flex items-center gap-2 font-body text-sm" style={{ color: INK_2 }}><Loader2 size={16} className="animate-spin" /> Loading map…</span>
+          </div>
+        )}
+
+        {/* Lightbar — A–B guidance */}
+        {(running || abStage === 'ab') && (
+          <div className="absolute left-2 right-2 top-2 z-[500] rounded-xl px-3 py-2" style={{ backgroundColor: 'rgba(22,41,31,0.93)', backdropFilter: 'blur(4px)' }}>
+            {abStage === 'ab' ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-0.5"><Chevron hot={lb.off > 0.3} /><Chevron hot={lb.off > 0.3} /></div>
+                  <div className="relative flex-1 h-5 rounded-md" style={{ background: 'rgba(255,255,255,.08)' }}>
+                    <div style={{ position: 'absolute', left: '50%', top: -3, bottom: -3, width: 2, marginLeft: -1, background: GOLD, borderRadius: 2 }} />
+                    <div style={{ position: 'absolute', top: 2, bottom: 2, width: 14, marginLeft: -7, left: lbPos + '%', borderRadius: 4, background: lbOn ? '#EFEFE7' : GOLD, boxShadow: '0 1px 2px rgba(0,0,0,.4)', transition: 'left .12s linear, background .15s' }} />
+                  </div>
+                  <div className="flex gap-0.5"><Chevron right hot={lb.off < -0.3} /><Chevron right hot={lb.off < -0.3} /></div>
+                </div>
+                <div className="flex items-center justify-between mt-1.5">
+                  <span className="font-body text-xs font-bold" style={{ color: lbOn ? '#9FD9B0' : '#EFE7CF' }}>{lbStatus}</span>
+                  <span className="font-body text-xs tabular-nums" style={{ color: '#C9CFC2' }}>{lbMag.toFixed(1)} ft off line</span>
+                </div>
+              </>
+            ) : (
+              <p className="font-body text-xs text-center" style={{ color: '#D7DBD1' }}>
+                For guidance: at the start of your first pass tap <b style={{ color: '#fff' }}>Set A</b>, drive it, then tap <b style={{ color: '#fff' }}>Set B</b> at the end.
+              </p>
+            )}
           </div>
         )}
 
