@@ -1,28 +1,27 @@
 'use client'
 
 // ── GPS Coverage ─────────────────────────────────────────────────────────────
-// Live pass-guidance on the phone, styled like the GreenTrack concept: a clean
-// turf field you paint as you drive, an A–B lightbar to hold your line, a
-// flagged missed strip, and the four job stats. Satellite is a tap away when you
-// want real course context.
+// The GreenTrack concept, for real. A clean, lightweight schematic field (no map
+// tiles, so it's fast) that paints your passes as you drive, with the A–B
+// lightbar, a flagged missed strip, and the four job stats.
 //
-// Phone GPS is ~3–5 m (worse than the RTK on the Deere sprayers), so this is for
-// coverage awareness, not sub-inch guidance — the UI says so.
+// How it works: your first pass sets the line (origin + direction). Every GPS fix
+// is projected onto that line — distance ALONG it places the pass vertically,
+// distance ACROSS it picks the lane (one lane = one implement width). We draw the
+// field as columns, so a covered lane is green, a skipped lane between two driven
+// ones flags red, and the lightbar shows how far off the nearest line you are.
+//
+// Phone GPS is ~3–5 m, so this is coverage awareness, not sub-inch guidance.
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import 'leaflet/dist/leaflet.css'
-import { Play, Pause, Square, Crosshair, Trash2, Loader2, Ruler, Layers, Satellite, Minus, Plus } from 'lucide-react'
+import { Play, Pause, Square, Trash2, Ruler, Minus, Plus, RotateCcw } from 'lucide-react'
 import * as db from '@/lib/db'
-import { FOREST, FERN, GOLD, PAPER, HAIR, INK, INK_2, INK_3, RED } from '@/lib/theme'
+import { FOREST, FERN, GOLD, PAPER, HAIR, INK_2, INK_3, RED } from '@/lib/theme'
 
-const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-const SAT_ATTR = 'Imagery © Esri, Maxar, Earthstar Geographics'
-const FALLBACK = { lat: 38.9803, lng: -77.1636 } // Congressional CC
 const FT_PER_M = 3.28084
 const SQM_PER_ACRE = 4046.8564
-const TURF = '#AEC8AB'          // clean field base
-const COVER = 'rgba(47,90,60,0.42)' // painted swath — overlaps darken
 const OPS = ['Aerating', 'Mowing', 'Topdressing', 'Spraying', 'Rolling', 'Verticutting', 'Seeding']
+const LOCK_M = 10 // lock the line after this much of the first pass
 
 function haversine(a, b) {
   const R = 6371000, toR = Math.PI / 180
@@ -38,33 +37,16 @@ function bearing(a, b) {
   const x = Math.cos(la1) * Math.sin(la2) - Math.sin(la1) * Math.cos(la2) * Math.cos(dLng)
   return (Math.atan2(y, x) * toD + 360) % 360
 }
-function destination(lat, lng, brgDeg, distM) {
-  const R = 6371000, toR = Math.PI / 180, toD = 180 / Math.PI
-  const d = distM / R, brg = brgDeg * toR, la1 = lat * toR, lo1 = lng * toR
-  const la2 = Math.asin(Math.sin(la1) * Math.cos(d) + Math.cos(la1) * Math.sin(d) * Math.cos(brg))
-  const lo2 = lo1 + Math.atan2(Math.sin(brg) * Math.sin(d) * Math.cos(la1), Math.cos(d) - Math.sin(la1) * Math.sin(la2))
-  return { lat: la2 * toD, lng: lo2 * toD }
-}
-function crossTrack(A, B, P) {
-  const R = 6371000, toR = Math.PI / 180
-  const d13 = haversine(A, P) / R
-  const th13 = bearing(A, P) * toR
-  const th12 = bearing(A, B) * toR
-  return Math.asin(Math.sin(d13) * Math.sin(th13 - th12)) * R
+// Project a fix into field metres (along the A–B line, across it) from an origin.
+function project(origin, dirDeg, p) {
+  const toR = Math.PI / 180
+  const cos0 = Math.cos(origin.lat * toR)
+  const dx = (p.lng - origin.lng) * 111320 * cos0
+  const dy = (p.lat - origin.lat) * 111320
+  const th = dirDeg * toR, fx = Math.sin(th), fy = Math.cos(th), rx = Math.cos(th), ry = -Math.sin(th)
+  return { along: dx * fx + dy * fy, cross: dx * rx + dy * ry }
 }
 
-function headingIcon(L, deg) {
-  const html = `<div style="width:30px;height:30px;transform:rotate(${deg}deg);transition:transform .2s">
-    <svg width="30" height="30" viewBox="0 0 30 30">
-      <circle cx="15" cy="15" r="13" fill="rgba(201,168,76,.3)"/>
-      <circle cx="15" cy="15" r="8" fill="${FOREST}" stroke="#fff" stroke-width="2"/>
-      <path d="M15 2 L20 11 L15 8.5 L10 11 Z" fill="${GOLD}" stroke="#fff" stroke-width="1"/>
-    </svg></div>`
-  return L.divIcon({ className: 'gps-pos', html, iconSize: [30, 30], iconAnchor: [15, 15] })
-}
-function missedPill(L) {
-  return L.divIcon({ className: '', html: `<div style="background:${RED};color:#fff;font:700 10px Archivo,sans-serif;padding:3px 9px;border-radius:10px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35)">Missed strip</div>`, iconSize: [90, 18], iconAnchor: [45, 9] })
-}
 function Chevron({ hot, right }) {
   return (
     <svg width="12" height="18" viewBox="0 0 11 17" style={{ opacity: hot ? 1 : 0.26, transform: right ? 'scaleX(-1)' : 'none', transition: 'opacity .15s' }}>
@@ -74,178 +56,187 @@ function Chevron({ hot, right }) {
 }
 
 export default function GpsCoverage() {
-  const [ready, setReady] = useState(false)
   const [running, setRunning] = useState(false)
   const [widthFt, setWidthFt] = useState(20)
   const [widthOpen, setWidthOpen] = useState(false)
-  const [follow, setFollow] = useState(true)
-  const [sat, setSat] = useState(false)
   const [gpsErr, setGpsErr] = useState('')
   const [stats, setStats] = useState({ acres: 0, mph: 0, acc: null, secs: 0 })
-  const [abStage, setAbStage] = useState('none')
   const [lb, setLb] = useState({ active: false, off: 0 })
+  const [locked, setLocked] = useState(false)
   const [areas, setAreas] = useState({})
   const [areaName, setAreaName] = useState('')
   const [op, setOp] = useState('Aerating')
 
-  const containerRef = useRef(null)
-  const LRef = useRef(null)
-  const mapRef = useRef(null)
-  const tileRef = useRef(null)
-  const rendererRef = useRef(null)
-  const coverRef = useRef(null)
-  const pathRef = useRef(null)
-  const markerRef = useRef(null)
-  const lineRef = useRef(null)
-  const guideRef = useRef(null)
-  const missRef = useRef(null)
+  const canvasRef = useRef(null)
   const trackRef = useRef([])
   const distRef = useRef(0)
+  const frameRef = useRef({ origin: null, dirDeg: 0, locked: false })
+  const dataRef = useRef({ lanes: {}, alongMax: 8, cur: null })
   const watchRef = useRef(null)
   const wakeRef = useRef(null)
   const startRef = useRef(0)
   const tickRef = useRef(null)
   const widthRef = useRef(widthFt)
-  const followRef = useRef(follow)
   useEffect(() => { widthRef.current = widthFt }, [widthFt])
-  useEffect(() => { followRef.current = follow }, [follow])
 
   const areaObj = areas[areaName] || null
   const totalAc = areaObj ? (Number(areaObj.acres) || (Number(areaObj.sqft) || 0) / 43560) : 0
-  const courseName = areaObj?.course || ''
   const coveragePct = totalAc > 0 ? Math.min(100, Math.round((stats.acres / totalAc) * 100)) : null
 
-  // Load Leaflet (browser only).
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      try { const mod = await import('leaflet'); if (!cancelled) { LRef.current = mod.default || mod; setReady(true) } } catch (e) { console.error('Leaflet failed to load', e) }
+      try { const s = await db.fetchSettings(); if (cancelled) return; const a = s?.areas || {}; setAreas(a); const f = Object.keys(a)[0]; if (f) setAreaName(f) } catch { /* fine */ }
     })()
     return () => { cancelled = true }
   }, [])
 
-  // Load course settings (areas for the header + coverage %).
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const s = await db.fetchSettings()
-        if (cancelled) return
-        const a = s?.areas || {}
-        setAreas(a)
-        const first = Object.keys(a)[0]
-        if (first) setAreaName(first)
-      } catch { /* fine without areas */ }
-    })()
-    return () => { cancelled = true }
-  }, [])
+  // ── Canvas sizing + render ────────────────────────────────────────────────
+  const render = useCallback(() => {
+    const cv = canvasRef.current
+    if (!cv) return
+    const ctx = cv.getContext('2d')
+    const W = cv.clientWidth, H = cv.clientHeight
+    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1))
+    if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr) }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, W, H)
 
-  // Init the map.
-  useEffect(() => {
-    if (!ready || !containerRef.current || mapRef.current) return
-    const L = LRef.current
-    let cancelled = false
-    ;(async () => {
-      let center = FALLBACK
-      try { const s = await db.fetchSettings(); if (s?.location?.lat != null) center = { lat: s.location.lat, lng: s.location.lng } } catch { /* fallback */ }
-      if (cancelled || mapRef.current || !containerRef.current) return
-      const map = L.map(containerRef.current, { center: [center.lat, center.lng], zoom: 18, zoomControl: true, attributionControl: true, preferCanvas: true })
-      map.zoomControl.setPosition('bottomright')
-      rendererRef.current = L.canvas({ padding: 0.5 })
-      coverRef.current = L.layerGroup().addTo(map)
-      guideRef.current = L.layerGroup().addTo(map)
-      missRef.current = L.layerGroup().addTo(map)
-      pathRef.current = L.polyline([], { color: FOREST, weight: 2, opacity: 0.7, renderer: rendererRef.current }).addTo(map)
-      mapRef.current = map
-      setTimeout(() => map.invalidateSize(), 150)
-    })()
-    return () => { cancelled = true }
-  }, [ready])
+    const m = 14, fl = m, fr = W - m, ft = m, fb = H - m, rad = 26
+    const field = () => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(fl, ft, fr - fl, fb - ft, rad); else ctx.rect(fl, ft, fr - fl, fb - ft) }
+    const widthM = widthRef.current / FT_PER_M
+    const { lanes, alongMax, cur } = dataRef.current
+    const ks = Object.keys(lanes).map(Number)
+    const haveLanes = ks.length > 0
+    const drivenLo = haveLanes ? Math.min(...ks) : 0
+    const drivenHi = haveLanes ? Math.max(...ks) : 0
+    const curLane = cur ? Math.round(cur.cross / widthM) : 0
+    let lo = Math.min(drivenLo, curLane) - 1, hi = Math.max(drivenHi, curLane) + 1
+    while (hi - lo + 1 < 5) { lo -= 1; hi += 1 } // always show a few columns
+    const nCols = hi - lo + 1
+    const colW = (fr - fl) / nCols
+    const aMax = Math.max(alongMax, cur ? cur.along : 0, 8)
+    const yOf = (a) => ft + (Math.max(0, a) / aMax) * (fb - ft)
+    const colLeft = (k) => fl + (k - lo) * colW
 
-  // Satellite tiles on/off.
+    // field base + mow stripes
+    ctx.save(); field(); ctx.clip()
+    ctx.fillStyle = '#AEC8AB'; ctx.fillRect(0, 0, W, H)
+    for (let k = lo; k <= hi; k++) { ctx.fillStyle = ((k - lo) % 2 === 0) ? 'rgba(255,255,255,.25)' : 'rgba(0,0,0,.02)'; ctx.fillRect(colLeft(k), ft, colW, fb - ft) }
+    // covered lanes
+    ctx.fillStyle = 'rgba(47,90,60,.5)'
+    ks.forEach((k) => { const L = lanes[k]; ctx.fillRect(colLeft(k), yOf(L.min), colW, Math.max(2, yOf(L.max) - yOf(L.min))) })
+    // missed strips (un-driven lane between driven ones)
+    for (let k = drivenLo + 1; k < drivenHi; k++) {
+      if (lanes[k]) continue
+      const x = colLeft(k)
+      ctx.fillStyle = '#F6E3E0'; ctx.fillRect(x, ft, colW, fb - ft)
+      ctx.save(); ctx.beginPath(); ctx.rect(x, ft, colW, fb - ft); ctx.clip()
+      ctx.strokeStyle = 'rgba(178,58,46,.5)'; ctx.lineWidth = 1.5
+      for (let d = -(fb - ft); d < colW; d += 8) { ctx.beginPath(); ctx.moveTo(x + d, fb); ctx.lineTo(x + d + (fb - ft), ft); ctx.stroke() }
+      ctx.restore()
+    }
+    ctx.restore() // end field clip
+
+    // field outline
+    field(); ctx.strokeStyle = '#8FB08C'; ctx.lineWidth = 2; ctx.stroke()
+
+    // guidance lines (gold, dashed) at each lane centre once the line is locked
+    if (frameRef.current.locked) {
+      ctx.save(); ctx.setLineDash([6, 7]); ctx.strokeStyle = GOLD; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.6
+      for (let k = lo; k <= hi; k++) { const cx = colLeft(k) + colW / 2; ctx.beginPath(); ctx.moveTo(cx, ft + 4); ctx.lineTo(cx, fb - 4); ctx.stroke() }
+      ctx.restore()
+    }
+
+    // missed-strip pill(s)
+    ctx.font = '700 11px Archivo, system-ui, sans-serif'; ctx.textBaseline = 'middle'
+    for (let k = drivenLo + 1; k < drivenHi; k++) {
+      if (lanes[k]) continue
+      const cx = colLeft(k) + colW / 2, txt = 'Missed strip', tw = ctx.measureText(txt).width + 16
+      const px = Math.max(fl + 2, Math.min(cx - tw / 2, fr - tw - 2))
+      ctx.fillStyle = RED; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(px, ft + 8, tw, 20, 10); else ctx.rect(px, ft + 8, tw, 20); ctx.fill()
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.fillText(txt, px + 8, ft + 18.5)
+    }
+
+    // tractor marker
+    if (cur) {
+      const tx = Math.max(fl + 10, Math.min(fl + (cur.cross / widthM - lo + 0.5) * colW, fr - 10))
+      const ty = Math.max(ft + 12, Math.min(yOf(cur.along), fb - 12))
+      ctx.fillStyle = 'rgba(201,168,76,.3)'; ctx.beginPath(); ctx.arc(tx, ty, 15, 0, 7); ctx.fill()
+      ctx.fillStyle = GOLD; ctx.beginPath(); ctx.moveTo(tx, ty + 14); ctx.lineTo(tx - 6, ty + 4); ctx.lineTo(tx + 6, ty + 4); ctx.closePath(); ctx.fill()
+      ctx.fillStyle = FOREST; ctx.beginPath(); ctx.arc(tx, ty, 8, 0, 7); ctx.fill()
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke()
+    } else if (!haveLanes) {
+      ctx.fillStyle = 'rgba(22,41,31,.45)'; ctx.font = '600 13px Archivo, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText(running ? 'Drive straight to set your line…' : 'Hit Start and drive your first pass', W / 2, H / 2)
+    }
+  }, [running])
+
   useEffect(() => {
-    const L = LRef.current, map = mapRef.current
-    if (!L || !map) return
-    if (sat && !tileRef.current) tileRef.current = L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, attribution: SAT_ATTR, crossOrigin: true }).addTo(map)
-    else if (!sat && tileRef.current) { map.removeLayer(tileRef.current); tileRef.current = null }
-  }, [sat, ready])
+    render()
+    const onResize = () => render()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [render])
 
   useEffect(() => () => {
     if (watchRef.current != null && navigator.geolocation) navigator.geolocation.clearWatch(watchRef.current)
     if (tickRef.current) clearInterval(tickRef.current)
     releaseWake()
-    if (mapRef.current) { mapRef.current.remove(); mapRef.current = null }
   }, [])
 
   async function requestWake() { try { if ('wakeLock' in navigator) wakeRef.current = await navigator.wakeLock.request('screen') } catch { /* optional */ } }
   function releaseWake() { try { wakeRef.current?.release?.(); wakeRef.current = null } catch { /* ignore */ } }
 
-  const paint = useCallback((fix) => {
-    const L = LRef.current, map = mapRef.current
-    if (!L || !map) return
+  const recompute = useCallback(() => {
+    const fr = frameRef.current
     const widthM = widthRef.current / FT_PER_M
-    const prev = trackRef.current[trackRef.current.length - 1]
-    const disc = (lat, lng) => L.circle([lat, lng], { radius: widthM / 2, stroke: false, fillColor: FERN, fillOpacity: 0.42, renderer: rendererRef.current }).addTo(coverRef.current)
-    disc(fix.lat, fix.lng)
-    if (prev) {
-      const d = haversine(prev, fix)
-      if (d > widthM / 2) { const steps = Math.min(10, Math.ceil(d / (widthM / 2))); for (let i = 1; i < steps; i++) { const f = i / steps; disc(prev.lat + (fix.lat - prev.lat) * f, prev.lng + (fix.lng - prev.lng) * f) } }
+    if (!fr.origin) { dataRef.current = { lanes: {}, alongMax: 8, cur: null }; return }
+    const lanes = {}; let alongMax = 8; let cur = null
+    for (const p of trackRef.current) {
+      const q = project(fr.origin, fr.dirDeg, p)
+      const k = Math.round(q.cross / widthM)
+      const L = lanes[k] || { min: Infinity, max: -Infinity }
+      L.min = Math.min(L.min, q.along); L.max = Math.max(L.max, q.along); lanes[k] = L
+      if (q.along > alongMax) alongMax = q.along
+      cur = q
     }
-    pathRef.current.addLatLng([fix.lat, fix.lng])
-    const deg = fix.heading != null ? fix.heading : (prev ? bearing(prev, fix) : 0)
-    if (!markerRef.current) markerRef.current = L.marker([fix.lat, fix.lng], { icon: headingIcon(L, deg), interactive: false, zIndexOffset: 1000 }).addTo(map)
-    else { markerRef.current.setLatLng([fix.lat, fix.lng]); markerRef.current.setIcon(headingIcon(L, deg)) }
-    if (followRef.current) map.panTo([fix.lat, fix.lng], { animate: true, duration: 0.4 })
-  }, [])
-
-  // Flag any un-driven lane that sits between driven ones (a real skip).
-  const checkMissed = useCallback(() => {
-    const L = LRef.current, line = lineRef.current
-    if (!L || !line?.a || !line?.b || !missRef.current) return
-    const W = widthRef.current / FT_PER_M
-    const driven = new Set()
-    trackRef.current.forEach((f) => driven.add(Math.round(crossTrack(line.a, line.b, f) / W)))
-    if (driven.size < 2) { missRef.current.clearLayers(); return }
-    const ks = [...driven].sort((a, b) => a - b)
-    const lo = ks[0], hi = ks[ks.length - 1]
-    missRef.current.clearLayers()
-    const th = bearing(line.a, line.b)
-    const aExt = destination(line.a.lat, line.a.lng, th + 180, 120)
-    const bExt = destination(line.b.lat, line.b.lng, th, 120)
-    for (let k = lo + 1; k < hi; k++) {
-      if (driven.has(k)) continue
-      const c1 = destination(aExt.lat, aExt.lng, th + 90, k * W)
-      const c2 = destination(bExt.lat, bExt.lng, th + 90, k * W)
-      const p1 = destination(c1.lat, c1.lng, th + 90, -W / 2), p2 = destination(c1.lat, c1.lng, th + 90, W / 2)
-      const p3 = destination(c2.lat, c2.lng, th + 90, W / 2), p4 = destination(c2.lat, c2.lng, th + 90, -W / 2)
-      L.polygon([[p1.lat, p1.lng], [p2.lat, p2.lng], [p3.lat, p3.lng], [p4.lat, p4.lng]], { color: RED, weight: 1.5, dashArray: '5 5', fillColor: RED, fillOpacity: 0.2, renderer: rendererRef.current }).addTo(missRef.current)
-      const mid = { lat: (c1.lat + c2.lat) / 2, lng: (c1.lng + c2.lng) / 2 }
-      L.marker([mid.lat, mid.lng], { icon: missedPill(L), interactive: false }).addTo(missRef.current)
-    }
+    dataRef.current = { lanes, alongMax, cur }
   }, [])
 
   const onFix = useCallback((pos) => {
     const c = pos.coords
-    const fix = { lat: c.latitude, lng: c.longitude, t: pos.timestamp, acc: c.accuracy || null, heading: (c.heading != null && !Number.isNaN(c.heading)) ? c.heading : null }
+    const fix = { lat: c.latitude, lng: c.longitude, t: pos.timestamp, acc: c.accuracy || null }
     const track = trackRef.current
     const prev = track[track.length - 1]
     if (prev && haversine(prev, fix) < 0.4) { setStats((s) => ({ ...s, acc: fix.acc })); return }
     if (prev) distRef.current += haversine(prev, fix)
     track.push(fix)
-    paint(fix)
-    const line = lineRef.current
-    if (line && line.a && line.b) {
-      const xt = crossTrack(line.a, line.b, fix)
-      const W = widthRef.current / FT_PER_M
-      setLb({ active: true, off: (xt - Math.round(xt / W) * W) * FT_PER_M })
-      if (track.length % 6 === 0) checkMissed()
+
+    const fr = frameRef.current
+    if (!fr.origin) fr.origin = fix
+    if (!fr.locked) {
+      const run = haversine(fr.origin, fix)
+      if (run >= 0.5) fr.dirDeg = bearing(fr.origin, fix)
+      if (run >= LOCK_M) { fr.locked = true; setLocked(true) }
     }
+    recompute()
+
     const widthM = widthRef.current / FT_PER_M
+    const cur = dataRef.current.cur
+    if (cur && (fr.locked || track.length > 2)) {
+      const off = (cur.cross - Math.round(cur.cross / widthM) * widthM) * FT_PER_M
+      setLb({ active: true, off })
+    }
+    // acres covered = sum of each lane's driven length × width
+    let covSqm = 0
+    Object.values(dataRef.current.lanes).forEach((L) => { if (L.max > L.min) covSqm += (L.max - L.min) * widthM })
     let mph = 0
     if (c.speed != null && !Number.isNaN(c.speed)) mph = c.speed * 2.23694
     else if (prev) { const dt = (fix.t - prev.t) / 1000; if (dt > 0) mph = (haversine(prev, fix) / dt) * 2.23694 }
-    setStats({ acres: (distRef.current * widthM) / SQM_PER_ACRE, mph: Math.max(0, mph), acc: fix.acc, secs: Math.round((Date.now() - startRef.current) / 1000) })
-  }, [paint, checkMissed])
+    setStats({ acres: covSqm / SQM_PER_ACRE, mph: Math.max(0, mph), acc: fix.acc, secs: Math.round((Date.now() - startRef.current) / 1000) })
+    render()
+  }, [recompute, render])
 
   function start() {
     if (!navigator.geolocation) { setGpsErr('no-gps'); return }
@@ -261,48 +252,18 @@ export default function GpsCoverage() {
     if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null }
     releaseWake()
   }
-  function stop() { pause(); checkMissed() }
   function clearAll() {
-    coverRef.current?.clearLayers(); guideRef.current?.clearLayers(); missRef.current?.clearLayers()
-    pathRef.current?.setLatLngs([])
-    if (markerRef.current && mapRef.current) { mapRef.current.removeLayer(markerRef.current); markerRef.current = null }
+    pause()
     trackRef.current = []; distRef.current = 0; startRef.current = 0
-    lineRef.current = null; setAbStage('none'); setLb({ active: false, off: 0 })
-    setStats({ acres: 0, mph: 0, acc: null, secs: 0 })
+    frameRef.current = { origin: null, dirDeg: 0, locked: false }; setLocked(false)
+    dataRef.current = { lanes: {}, alongMax: 8, cur: null }
+    setLb({ active: false, off: 0 }); setStats({ acres: 0, mph: 0, acc: null, secs: 0 })
+    render()
   }
-  function recenter() {
-    const last = trackRef.current[trackRef.current.length - 1]
-    if (last && mapRef.current) mapRef.current.setView([last.lat, last.lng], Math.max(18, mapRef.current.getZoom()))
+  function resetLine() {
+    frameRef.current = { origin: null, dirDeg: 0, locked: false }; setLocked(false)
+    recompute(); setLb({ active: false, off: 0 }); render()
   }
-
-  const drawGuides = useCallback(() => {
-    const L = LRef.current, map = mapRef.current, line = lineRef.current
-    if (!L || !map || !line?.a || !line?.b || !guideRef.current) return
-    guideRef.current.clearLayers()
-    const th = bearing(line.a, line.b)
-    const W = widthRef.current / FT_PER_M
-    const aExt = destination(line.a.lat, line.a.lng, th + 180, 120)
-    const bExt = destination(line.b.lat, line.b.lng, th, 120)
-    for (let k = -5; k <= 5; k++) {
-      const p1 = k === 0 ? aExt : destination(aExt.lat, aExt.lng, th + 90, k * W)
-      const p2 = k === 0 ? bExt : destination(bExt.lat, bExt.lng, th + 90, k * W)
-      L.polyline([[p1.lat, p1.lng], [p2.lat, p2.lng]], { color: GOLD, weight: k === 0 ? 2.5 : 1.75, opacity: k === 0 ? 0.95 : 0.6, dashArray: k === 0 ? null : '6 7', renderer: rendererRef.current }).addTo(guideRef.current)
-    }
-    ;[line.a, line.b].forEach((pt) => L.circleMarker([pt.lat, pt.lng], { radius: 5, color: '#fff', weight: 2, fillColor: FERN, fillOpacity: 1, renderer: rendererRef.current }).addTo(guideRef.current))
-  }, [])
-
-  function captureHere(cb) {
-    if (!navigator.geolocation) { setGpsErr('no-gps'); return }
-    const last = trackRef.current[trackRef.current.length - 1]
-    if (last) { cb({ lat: last.lat, lng: last.lng }); return }
-    navigator.geolocation.getCurrentPosition((p) => cb({ lat: p.coords.latitude, lng: p.coords.longitude }), () => setGpsErr('unavailable'), { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 })
-  }
-  function abTap() {
-    if (abStage === 'none') captureHere((pt) => { lineRef.current = { a: pt, b: null }; setAbStage('a') })
-    else if (abStage === 'a') captureHere((pt) => { lineRef.current = { ...lineRef.current, b: pt }; setAbStage('ab'); setLb({ active: true, off: 0 }); drawGuides(); checkMissed() })
-    else { lineRef.current = null; guideRef.current?.clearLayers(); missRef.current?.clearLayers(); setAbStage('none'); setLb({ active: false, off: 0 }) }
-  }
-  useEffect(() => { if (abStage === 'ab') { drawGuides(); checkMissed() } }, [widthFt, abStage, drawGuides, checkMissed])
 
   const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
   const gpsWord = stats.acc == null ? '—' : stats.acc <= 6 ? 'good' : stats.acc <= 12 ? 'fair' : 'weak'
@@ -312,8 +273,7 @@ export default function GpsCoverage() {
   const lbOn = lbMag < 0.3
   const lbPos = Math.max(5, Math.min(95, 50 + (lb.off / halfW) * 45))
   const lbStatus = lbOn ? 'On line' : lb.off > 0 ? 'Nudge left' : 'Nudge right'
-  const abSub = abStage === 'none' ? 'tap at pass start' : abStage === 'a' ? 'now tap at pass end' : 'line locked'
-  const abLabel = abStage === 'none' ? 'Set A' : abStage === 'a' ? 'Set B' : 'A–B set'
+  const lineSub = locked ? 'line locked' : running ? 'drive straight to set' : 'start to set'
   const selStyle = { appearance: 'none', WebkitAppearance: 'none', background: 'transparent', border: 'none', outline: 'none', cursor: 'pointer', font: 'inherit', color: 'inherit', padding: 0 }
 
   const Tile = ({ k, v, u, sub, color }) => (
@@ -326,7 +286,7 @@ export default function GpsCoverage() {
 
   return (
     <div className="max-w-xl mx-auto px-4 py-4">
-      {/* Header — course · area + operation + GPS pill, like the preview */}
+      {/* Header */}
       <div className="flex items-center justify-between gap-3 mb-3">
         <div className="min-w-0">
           <div className="font-body text-[11px] font-bold uppercase tracking-[0.12em] flex items-center gap-1" style={{ color: GOLD }}>
@@ -343,7 +303,7 @@ export default function GpsCoverage() {
             </select>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 font-body text-xs font-bold px-2.5 py-1.5 rounded-full shrink-0" style={{ backgroundColor: '#EAF1EB', border: `1px solid #CFE3D6`, color: gpsColor }}>
+        <div className="flex items-center gap-1.5 font-body text-xs font-bold px-2.5 py-1.5 rounded-full shrink-0" style={{ backgroundColor: '#EAF1EB', border: '1px solid #CFE3D6', color: gpsColor }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: gpsColor, boxShadow: `0 0 0 3px ${gpsColor}22` }} /> GPS · {gpsWord}
         </div>
       </div>
@@ -356,7 +316,7 @@ export default function GpsCoverage() {
 
       {/* Lightbar */}
       <div className="rounded-xl px-3 py-2.5 mb-2" style={{ backgroundColor: FOREST }}>
-        {abStage === 'ab' ? (
+        {lb.active ? (
           <>
             <div className="flex items-center gap-2.5">
               <div className="flex gap-0.5"><Chevron hot={lb.off > 0.3} /><Chevron hot={lb.off > 0.3} /></div>
@@ -373,25 +333,14 @@ export default function GpsCoverage() {
           </>
         ) : (
           <p className="font-body text-xs text-center py-1" style={{ color: '#D7DBD1' }}>
-            For the guidance line: tap <b style={{ color: '#fff' }}>Set A</b> at the start of your first pass, drive it, then <b style={{ color: '#fff' }}>Set B</b> at the end.
+            Hit <b style={{ color: '#fff' }}>Start</b> and drive your first pass — it sets the guidance line, then the lightbar goes live.
           </p>
         )}
       </div>
 
-      {/* Field */}
-      <div className="relative rounded-2xl overflow-hidden" style={{ border: `1px solid ${HAIR}` }}>
-        <div ref={containerRef} style={{ height: '52vh', minHeight: 360, width: '100%', background: TURF }} />
-        {!ready && (
-          <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: TURF }}>
-            <span className="flex items-center gap-2 font-body text-sm" style={{ color: FOREST }}><Loader2 size={16} className="animate-spin" /> Loading…</span>
-          </div>
-        )}
-        <button onClick={() => setSat((s) => !s)} className="absolute top-2 right-2 z-[500] font-body text-[11px] font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5" style={{ backgroundColor: sat ? FOREST : 'rgba(249,248,245,0.94)', color: sat ? '#fff' : FOREST, border: `1px solid ${HAIR}` }} title="Toggle satellite">
-          {sat ? <Layers size={13} /> : <Satellite size={13} />} {sat ? 'Clean' : 'Satellite'}
-        </button>
-        <button onClick={() => setFollow((f) => !f)} className="absolute top-2 left-2 z-[500] font-body text-[11px] font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5" style={{ backgroundColor: follow ? FERN : 'rgba(249,248,245,0.94)', color: follow ? '#fff' : FOREST, border: `1px solid ${HAIR}` }}>
-          <Crosshair size={13} /> Follow
-        </button>
+      {/* Field (schematic canvas) */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${HAIR}` }}>
+        <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '52vh', minHeight: 360, background: '#AEC8AB' }} />
       </div>
 
       {/* Stat tiles */}
@@ -404,9 +353,9 @@ export default function GpsCoverage() {
 
       {/* Primary controls */}
       <div className="grid grid-cols-3 gap-2 mt-3">
-        <button onClick={abTap} className="rounded-xl py-2.5 px-2 text-center" style={abStage === 'ab' ? { backgroundColor: GOLD, color: FOREST } : { backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }}>
-          <div className="font-body text-sm font-bold">{abLabel}</div>
-          <div className="font-body text-[10px] mt-0.5" style={{ opacity: 0.75 }}>{abSub}</div>
+        <button onClick={resetLine} className="rounded-xl py-2.5 px-2 text-center" style={locked ? { backgroundColor: GOLD, color: FOREST } : { backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }}>
+          <div className="font-body text-sm font-bold flex items-center justify-center gap-1"><RotateCcw size={13} /> A–B line</div>
+          <div className="font-body text-[10px] mt-0.5" style={{ opacity: 0.75 }}>{lineSub}</div>
         </button>
         <div className="relative">
           <button onClick={() => setWidthOpen((o) => !o)} className="w-full rounded-xl py-2.5 px-2 text-center" style={{ backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }}>
@@ -414,10 +363,10 @@ export default function GpsCoverage() {
             <div className="font-body text-[10px] mt-0.5" style={{ color: INK_2 }}>{widthFt} ft</div>
           </button>
           {widthOpen && (
-            <div className="absolute left-0 right-0 bottom-full mb-2 z-[600] rounded-xl p-2 flex items-center gap-2 justify-center" style={{ backgroundColor: PAPER, border: `1px solid ${HAIR}`, boxShadow: '0 8px 24px -8px rgba(21,29,20,.4)' }}>
-              <button onClick={() => setWidthFt((w) => Math.max(1, w - 1))} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: FOREST }}><Minus size={15} /></button>
-              <input type="number" min="1" value={widthFt} onChange={(e) => setWidthFt(Math.max(1, Number(e.target.value) || 1))} className="w-14 text-center font-display text-lg font-bold bg-transparent outline-none" style={{ color: FOREST }} />
-              <button onClick={() => setWidthFt((w) => w + 1)} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: FOREST }}><Plus size={15} /></button>
+            <div className="absolute left-0 right-0 bottom-full mb-2 z-[60] rounded-xl p-2 flex items-center gap-2 justify-center" style={{ backgroundColor: PAPER, border: `1px solid ${HAIR}`, boxShadow: '0 8px 24px -8px rgba(21,29,20,.4)' }}>
+              <button onClick={() => { setWidthFt((w) => Math.max(1, w - 1)); recompute(); render() }} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: FOREST }}><Minus size={15} /></button>
+              <input type="number" min="1" value={widthFt} onChange={(e) => { setWidthFt(Math.max(1, Number(e.target.value) || 1)); recompute(); render() }} className="w-14 text-center font-display text-lg font-bold bg-transparent outline-none" style={{ color: FOREST }} />
+              <button onClick={() => { setWidthFt((w) => w + 1); recompute(); render() }} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: FOREST }}><Plus size={15} /></button>
             </div>
           )}
         </div>
@@ -429,26 +378,25 @@ export default function GpsCoverage() {
         ) : (
           <button onClick={pause} className="rounded-xl py-2.5 px-2 text-center" style={{ backgroundColor: GOLD, color: FOREST }}>
             <div className="font-body text-sm font-bold flex items-center justify-center gap-1"><Pause size={14} /> Pause</div>
-            <div className="font-body text-[10px] mt-0.5" style={{ opacity: 0.75 }}>tracking live · {mmss(stats.secs)}</div>
+            <div className="font-body text-[10px] mt-0.5" style={{ opacity: 0.75 }}>tracking · {mmss(stats.secs)}</div>
           </button>
         )}
       </div>
 
-      {/* Secondary controls */}
+      {/* Secondary */}
       <div className="flex items-center gap-2 mt-2">
-        <button onClick={stop} disabled={!running && !trackRef.current.length} className="flex-1 font-body text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }}><Square size={13} /> Stop</button>
-        <button onClick={recenter} className="flex-1 font-body text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5" style={{ backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }}><Crosshair size={13} /> Recenter</button>
+        <button onClick={pause} disabled={!running} className="flex-1 font-body text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }}><Square size={13} /> Stop</button>
         <button onClick={clearAll} disabled={!trackRef.current.length} className="flex-1 font-body text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: PAPER, color: RED, border: `1px solid ${HAIR}` }}><Trash2 size={13} /> Clear</button>
       </div>
 
-      {/* Legend + honest note */}
+      {/* Legend + note */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 justify-center">
-        <span className="flex items-center gap-1.5 font-body text-[11px] font-semibold" style={{ color: INK_2 }}><span style={{ width: 16, height: 11, borderRadius: 3, background: COVER, outline: `1px solid ${FERN}55` }} /> Covered</span>
+        <span className="flex items-center gap-1.5 font-body text-[11px] font-semibold" style={{ color: INK_2 }}><span style={{ width: 16, height: 11, borderRadius: 3, background: 'rgba(47,90,60,.5)' }} /> Covered</span>
         <span className="flex items-center gap-1.5 font-body text-[11px] font-semibold" style={{ color: INK_2 }}><span style={{ width: 16, height: 11, borderRadius: 3, background: '#F6E3E0', outline: `1px dashed ${RED}` }} /> Missed strip</span>
         <span className="flex items-center gap-1.5 font-body text-[11px] font-semibold" style={{ color: INK_2 }}><span style={{ width: 16, height: 0, borderTop: `3px dashed ${GOLD}` }} /> Guidance line</span>
       </div>
       <p className="font-body text-[11px] mt-2 text-center leading-relaxed" style={{ color: INK_3 }}>
-        Phone GPS is ~10–15 ft, so the painted band shows where you’ve been, not sub-inch guidance. Keep the phone mounted with a clear view of the sky and on cab power.
+        Your first pass sets the line; lanes are one width apart. Phone GPS is ~10–15 ft, so this is coverage awareness, not sub-inch guidance. Keep the phone mounted with a clear view of the sky and on cab power.
       </p>
     </div>
   )
