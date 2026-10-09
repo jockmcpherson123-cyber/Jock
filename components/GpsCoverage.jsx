@@ -119,10 +119,9 @@ export default function GpsCoverage() {
     const yOf = (a) => ft + (Math.max(0, a) / aMax) * (fb - ft)
     const colLeft = (k) => fl + (k - lo) * colW
 
-    // field base + mow stripes
+    // field base
     ctx.save(); field(); ctx.clip()
     ctx.fillStyle = '#AEC8AB'; ctx.fillRect(0, 0, W, H)
-    for (let k = lo; k <= hi; k++) { ctx.fillStyle = ((k - lo) % 2 === 0) ? 'rgba(255,255,255,.25)' : 'rgba(0,0,0,.02)'; ctx.fillRect(colLeft(k), ft, colW, fb - ft) }
     // covered lanes
     ctx.fillStyle = 'rgba(47,90,60,.5)'
     ks.forEach((k) => { const L = lanes[k]; ctx.fillRect(colLeft(k), yOf(L.min), colW, Math.max(2, yOf(L.max) - yOf(L.min))) })
@@ -136,16 +135,19 @@ export default function GpsCoverage() {
       for (let d = -(fb - ft); d < colW; d += 8) { ctx.beginPath(); ctx.moveTo(x + d, fb); ctx.lineTo(x + d + (fb - ft), ft); ctx.stroke() }
       ctx.restore()
     }
+    // faint lane dividers
+    ctx.strokeStyle = 'rgba(22,41,31,.12)'; ctx.lineWidth = 1
+    for (let k = lo; k <= hi + 1; k++) { ctx.beginPath(); ctx.moveTo(colLeft(k), ft); ctx.lineTo(colLeft(k), fb); ctx.stroke() }
     ctx.restore() // end field clip
 
     // field outline
     field(); ctx.strokeStyle = '#8FB08C'; ctx.lineWidth = 2; ctx.stroke()
 
-    // guidance lines (gold, dashed) at each lane centre once the line is locked
-    if (frameRef.current.locked) {
-      ctx.save(); ctx.setLineDash([6, 7]); ctx.strokeStyle = GOLD; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.6
-      for (let k = lo; k <= hi; k++) { const cx = colLeft(k) + colW / 2; ctx.beginPath(); ctx.moveTo(cx, ft + 4); ctx.lineTo(cx, fb - 4); ctx.stroke() }
-      ctx.restore()
+    // guidance: the one gold dashed "next line" the operator is holding
+    if (cur) {
+      const cx = colLeft(curLane) + colW / 2
+      ctx.save(); ctx.setLineDash([6, 7]); ctx.strokeStyle = GOLD; ctx.lineWidth = 2.5
+      ctx.beginPath(); ctx.moveTo(cx, ft + 4); ctx.lineTo(cx, fb - 4); ctx.stroke(); ctx.restore()
     }
 
     // missed-strip pill(s)
