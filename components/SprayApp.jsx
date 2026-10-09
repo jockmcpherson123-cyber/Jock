@@ -93,6 +93,7 @@ import WeeklyReport from '@/components/WeeklyReport'
 import TurfBrief from '@/components/TurfBrief'
 import ProgramAdvice from '@/components/ProgramAdvice'
 import StimpCam from '@/components/StimpCam'
+import GpsCoverage from '@/components/GpsCoverage'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
 import Growth from '@/components/Growth'
@@ -280,6 +281,7 @@ const NAV_MANAGER = [
   ] },
   { title: 'Course & Crew', items: [
     { id: 'irrmap', label: 'Irrigation Map', m: 'map', r: 'map' },
+    { id: 'coverage', label: 'GPS Coverage', m: 'coverage', r: null },
     { id: 'parts', label: 'Parts', m: 'map', r: 'parts' },
     { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
     { id: 'training', label: 'Training', m: 'spray', r: 'training' },
@@ -423,6 +425,7 @@ export default function SprayApp({ user }) {
               : sel.m === 'playbook' ? <PlaybookModule user={user} manage={manage} hideChrome />
               : sel.m === 'tournament' ? <Tournament />
               : sel.m === 'map' ? <IrrigationModule user={user} manage={manage} nav={nav} hideChrome />
+              : sel.m === 'coverage' ? <GpsCoverage user={user} />
               : <WhiteboardModule user={user} nav={nav} hideChrome />}
           </div>
         </div>
