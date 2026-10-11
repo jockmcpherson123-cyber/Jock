@@ -6,14 +6,15 @@
 // club key rides in the link (?k=) and every write goes through /api/crew.
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import {  } from '@/lib/dates'
+import { localDateISO } from '@/lib/dates'
 import { stimpToFeet } from '@/lib/greenspeed'
 
 import { FOREST, FERN, GOLD, HAIR, INK, INK_2, INK_3, BAND } from '@/lib/theme'
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 function stats(values) {
-  const v = values.map(Number).filter((x) => Number.isFinite(x))
+  // Blank boxes are skipped, not counted as 0.
+  const v = values.filter((x) => x !== '' && x != null).map(Number).filter((x) => Number.isFinite(x))
   if (!v.length) return { n: 0, avg: null, cv: null }
   const avg = v.reduce((s, x) => s + x, 0) / v.length
   if (v.length < 2 || avg === 0) return { n: v.length, avg: Math.round(avg * 10) / 10, cv: 0 }
@@ -50,6 +51,8 @@ function FieldData() {
   const [tab, setTab] = useState('moisture')
   const [course, setCourse] = useState(lockedCourse)
   const [toast, setToast] = useState(null)
+  // Date the readings are for — today unless back-filling an earlier day.
+  const [date, setDate] = useState(() => localDateISO())
 
   const load = useCallback(async () => {
     if (!k) { setState('denied'); return }
@@ -64,6 +67,14 @@ function FieldData() {
   useEffect(() => { load() }, [load])
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2600) }
+  // After a save, record it locally so the "already entered" note shows at once.
+  const markEntered = (kind, key) => setCfg((c) => {
+    const entered = { ...(c.entered || {}) }
+    const bucket = { ...(entered[kind] || {}) }
+    bucket[key] = [...new Set([...(bucket[key] || []), date])]
+    entered[kind] = bucket
+    return { ...c, entered }
+  })
 
   if (state === 'loading') return <Center>Loading…</Center>
   if (state === 'denied') return <Center>This data link is invalid or expired.<br />Ask for a fresh QR code.</Center>
@@ -74,6 +85,7 @@ function FieldData() {
   // Scope everything to the chosen course.
   const areas = (cfg.areas || []).filter((a) => inCourse(a, course))
   const wetting = { ...(cfg.wetting || {}), greens: (cfg.wetting?.greens || []).filter((g) => inCourse(g.course, course)) }
+  const entered = cfg.entered || {}
 
   return (
     <div style={{ minHeight: '100vh', background: '#EEF1EE' }}>
@@ -89,16 +101,24 @@ function FieldData() {
             {courses.map((c) => <CourseChip key={c} on={course === c} onClick={() => setCourse(c)}>{c}</CourseChip>)}
           </div>
         )}
+        <div className="flex items-center gap-2 mb-3">
+          <label htmlFor="fd-date" className="font-body text-[12px] font-semibold" style={{ color: INK_2 }}>Date</label>
+          <input id="fd-date" type="date" value={date} max={localDateISO()} onChange={(e) => e.target.value && setDate(e.target.value)}
+            className="rounded-lg px-3 py-1.5 text-base" style={{ border: `1px solid ${HAIR}`, background: 'white', color: INK }} />
+          {date !== localDateISO() && (
+            <button onClick={() => setDate(localDateISO())} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ color: FOREST, border: `1px solid ${HAIR}` }}>Today</button>
+          )}
+        </div>
         <div className="flex gap-1.5 mb-3 overflow-x-auto no-scrollbar [&>*]:shrink-0 pb-1">
           {tabs.map(([key, lab]) => (
             <button key={key} onClick={() => setTab(key)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap"
               style={tab === key ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{lab}</button>
           ))}
         </div>
-        {tab === 'moisture' && <MoistureForm k={k} wetting={wetting} onSaved={flash} />}
-        {tab === 'clippings' && <SimpleReading k={k} areas={areas} action="clipping" label="Clipping volume" unit="mL" onSaved={flash} />}
-        {tab === 'speed' && <SimpleReading k={k} areas={areas} action="greenspeed" label="Stimp reading (ft &amp; in)" onSaved={flash} />}
-        {tab === 'scouting' && <ScoutForm k={k} areas={areas} onSaved={flash} />}
+        {tab === 'moisture' && <MoistureForm k={k} date={date} entered={entered.moisture} wetting={wetting} onSaved={flash} onEntered={(id) => markEntered('moisture', id)} />}
+        {tab === 'clippings' && <SimpleReading k={k} date={date} entered={entered.clipping} areas={areas} action="clipping" label="Clipping volume" unit="mL" onSaved={flash} onEntered={(a) => markEntered('clipping', a)} />}
+        {tab === 'speed' && <SimpleReading k={k} date={date} entered={entered.greenspeed} areas={areas} action="greenspeed" label="Stimp reading (ft &amp; in)" onSaved={flash} onEntered={(a) => markEntered('greenspeed', a)} />}
+        {tab === 'scouting' && <ScoutForm k={k} date={date} areas={areas} onSaved={flash} />}
       </div>
       {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: INK }}>{toast}</div>}
     </div>
@@ -106,7 +126,7 @@ function FieldData() {
 }
 
 // ── Moisture: pick a green, walk the fixed points, enter %VWC ────────────────
-function MoistureForm({ k, wetting, onSaved }) {
+function MoistureForm({ k, date, entered, wetting, onSaved, onEntered }) {
   const greens = wetting.greens || []
   const [greenId, setGreenId] = useState(greens[0]?.id || null)
   const green = greens.find((g) => g.id === greenId) || null
@@ -120,12 +140,13 @@ function MoistureForm({ k, wetting, onSaved }) {
             style={g.id === greenId ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{g.name}</button>
         ))}
       </div>
-      {green && <MoistureSheet key={green.id} k={k} green={green} onSaved={onSaved} />}
+      {green && (entered?.[green.id] || []).includes(date) && <AlreadyNote date={date} />}
+      {green && <MoistureSheet key={green.id} k={k} date={date} green={green} onSaved={onSaved} onEntered={onEntered} />}
     </div>
   )
 }
 
-function MoistureSheet({ k, green, onSaved }) {
+function MoistureSheet({ k, date, green, onSaved, onEntered }) {
   const initialPoints = green.points && green.points.length
     ? green.points
     : Array.from({ length: green.nPoints || 12 }, (_, i) => ({ id: uid(), label: `Point ${i + 1}` }))
@@ -155,9 +176,10 @@ function MoistureSheet({ k, green, onSaved }) {
     if (!s.n || busy) return
     setBusy(true)
     try {
-      const values = points.map((p) => Number(vals[p.id])).filter(Number.isFinite)
-      await postCrew(k, { action: 'moisture', greenId: green.id, values, points })
+      const values = points.map((p) => vals[p.id]).filter((x) => x !== '' && x != null).map(Number).filter(Number.isFinite)
+      await postCrew(k, { action: 'moisture', greenId: green.id, values, points, date })
       onSaved(`${green.name}: ${s.avg}% avg · ${s.cv}% spread saved`)
+      onEntered?.(green.id)
       setVals(Object.fromEntries(points.map((p) => [p.id, ''])))
     } catch (e) { onSaved(`Couldn’t save — ${e.message}`) }
     setBusy(false)
@@ -200,7 +222,7 @@ function MoistureSheet({ k, green, onSaved }) {
 }
 
 // ── Clippings / Greens speed: pick a green, enter one number ─────────────────
-function SimpleReading({ k, areas, action, label, unit, onSaved }) {
+function SimpleReading({ k, date, entered, areas, action, label, unit, onSaved, onEntered }) {
   const greenAreas = areas.filter((a) => /green/i.test(a))
   const list = greenAreas.length ? greenAreas : areas
   const isSpeed = action === 'greenspeed'
@@ -228,8 +250,9 @@ function SimpleReading({ k, areas, action, label, unit, onSaved }) {
     }
     setBusy(true)
     try {
-      await postCrew(k, { action, rows: [row] })
+      await postCrew(k, { action, rows: [row], date })
       onSaved(`${area}: ${saidValue} saved`)
+      onEntered?.(area)
       setValue(''); setFt(''); setInch('')
     } catch (e) { onSaved(`Couldn’t save — ${e.message}`) }
     setBusy(false)
@@ -241,6 +264,7 @@ function SimpleReading({ k, areas, action, label, unit, onSaved }) {
       <select value={area} onChange={(e) => setArea(e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-base mb-3" style={{ border: `1px solid ${HAIR}`, background: 'white', color: INK }}>
         {list.map((a) => <option key={a} value={a}>{a}</option>)}
       </select>
+      {(entered?.[area] || []).includes(date) && <AlreadyNote date={date} />}
       <label className="block font-body text-[12px] font-semibold mb-1" style={{ color: INK_2 }}>{label}</label>
       {isSpeed ? (
         <div className="flex items-center gap-2 mb-4">
@@ -259,7 +283,7 @@ function SimpleReading({ k, areas, action, label, unit, onSaved }) {
 }
 
 // ── Scouting: quick observation ──────────────────────────────────────────────
-function ScoutForm({ k, areas, onSaved }) {
+function ScoutForm({ k, date, areas, onSaved }) {
   const [area, setArea] = useState(areas[0] || '')
   const [kind, setKind] = useState('Disease')
   const [target, setTarget] = useState('')
@@ -271,7 +295,7 @@ function ScoutForm({ k, areas, onSaved }) {
     if (busy) return
     setBusy(true)
     try {
-      await postCrew(k, { action: 'scouting', area, kind, target, severity, notes })
+      await postCrew(k, { action: 'scouting', area, kind, target, severity, notes, date })
       onSaved('Observation saved')
       setTarget(''); setNotes('')
     } catch (e) { onSaved(`Couldn’t save — ${e.message}`) }
@@ -297,6 +321,15 @@ function ScoutForm({ k, areas, onSaved }) {
       <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full rounded-lg px-3 py-2.5 text-base mb-4" style={{ border: `1px solid ${HAIR}`, background: 'white', color: INK }} />
       <button onClick={submit} disabled={busy} className="w-full py-3 rounded-xl text-base font-bold font-body text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save observation'}</button>
     </Card>
+  )
+}
+
+// Shown when this green/area already has a reading saved for the chosen date.
+function AlreadyNote({ date }) {
+  return (
+    <p role="status" data-already-entered={date} className="font-body text-[12px] font-semibold mb-3 px-3 py-2 rounded-lg" style={{ backgroundColor: '#FBF6E6', border: `1px solid ${GOLD}`, color: INK }}>
+      Already has a reading for {date}. Saving adds another one.
+    </p>
   )
 }
 

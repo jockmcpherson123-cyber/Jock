@@ -38,6 +38,18 @@ function rowToTask(r) {
 }
 const noStore = { 'Cache-Control': 'no-store' }
 
+// Page through a table (Supabase caps a select at 1000 rows).
+async function allRows(supabase, table, cols, dateCol, since) {
+  const out = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from(table).select(cols).gte(dateCol, since).range(from, from + 999)
+    if (error || !data?.length) break
+    out.push(...data)
+    if (data.length < 1000) break
+  }
+  return out
+}
+
 export async function GET(request) {
   const supabase = admin()
   if (!supabase) return Response.json({ error: 'Not configured' }, { status: 500 })
@@ -50,11 +62,29 @@ export async function GET(request) {
     // Config the crew's Field Data page needs: indicator greens + wetting
     // products (for moisture), and the area list (for clippings/speed/scouting).
     const { data } = await supabase.from('app_settings').select('areas').eq('id', 1).maybeSingle()
+    // Which dates already have a reading, per green/area, for this year — so
+    // the page can warn before a second entry for the same day (hand entries
+    // and DEACON back-fills share this page).
+    const since = `${new Date().getFullYear()}-01-01`
+    const [clipRows, speedRows] = await Promise.all([
+      allRows(supabase, 'clippings', 'area, clip_date', 'clip_date', since),
+      allRows(supabase, 'greens_speeds', 'area, reading_date', 'reading_date', since),
+    ])
+    const entered = { moisture: {}, clipping: {}, greenspeed: {} }
+    const add = (bucket, key, date) => {
+      if (!key || !date || date < since) return
+      const list = (bucket[key] ||= [])
+      if (!list.includes(date)) list.push(date)
+    }
+    for (const r of courseInfo.wetting?.readings || []) add(entered.moisture, r.greenId, r.date)
+    for (const r of clipRows) add(entered.clipping, r.area, r.clip_date)
+    for (const r of speedRows) add(entered.greenspeed, r.area, r.reading_date)
     return Response.json({
       club: courseInfo.clubName || '',
       wetting: courseInfo.wetting || {},
       areas: Object.keys(data?.areas || {}),
       courses: (courseInfo.courses || []).map((c) => c && c.name).filter(Boolean),
+      entered,
       location,
     }, { headers: noStore })
   }
@@ -104,6 +134,9 @@ export async function GET(request) {
 // The crew's Field Data QR page posts here to record what they collect on
 // morning rounds: moisture, clipping yields, greens speed, scouting.
 const today = () => new Date().toISOString().slice(0, 10)
+// Server clock is UTC; allow one day of slack so a phone's local "today" is
+// accepted everywhere west of UTC (and east of it, early in the day).
+const tomorrow = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10)
 function stats(values) {
   const v = (values || []).map(Number).filter((x) => Number.isFinite(x))
   if (!v.length) return { avg: null, cv: null }
@@ -124,7 +157,9 @@ export async function POST(request) {
   if (!keyOk(courseInfo, body?.k)) return Response.json({ error: 'Not authorized' }, { status: 401 })
 
   const action = body.action
-  const date = body.date || today()
+  // The page sends the reading's date (local, YYYY-MM-DD) — today by default,
+  // or an earlier day when back-filling. Never a future day.
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || '') && body.date <= tomorrow() ? body.date : today()
   try {
     if (action === 'clipping') {
       const rows = (body.rows || []).filter((r) => r.area).map((r) => ({
