@@ -37,6 +37,32 @@ const STATUS = {
   reapply: { color: RED, label: 'Reapply' },
 }
 
+// Forecast the date a GDD-driven product (PGR / DMI) will hit its target and
+// need reapplying. Walks the forward forecast first; if that runs out before
+// the target is reached, projects at the recent GDD/day rate. Returns an ISO
+// date, or null when we can't tell (no data, or growth has stalled).
+export function projectReapplyISO(season = [], gddNowF, targetF, today, base = 32) {
+  const remain = targetF - gddNowF
+  if (remain <= 0) return today
+  const rows = (season || []).filter((x) => x.tMax != null && x.tMin != null)
+  // 1) Walk forward forecast days, accumulating GDD until the target is hit.
+  const fwd = rows.filter((x) => x.date > today).sort((a, b) => a.date.localeCompare(b.date))
+  let acc = 0
+  for (const d of fwd) {
+    acc += Math.max(0, (d.tMax + d.tMin) / 2 - base)
+    if (acc >= remain) return d.date
+  }
+  // 2) Forecast ran out — extend at the recent average GDD/day.
+  const past = rows.filter((x) => x.date <= today).sort((a, b) => a.date.localeCompare(b.date)).slice(-14)
+  if (past.length < 3) return null
+  const rate = past.reduce((s, d) => s + Math.max(0, (d.tMax + d.tMin) / 2 - base), 0) / past.length
+  if (rate <= 0.5) return null // growth stalled (dormancy/cold) — no meaningful date
+  const stillNeed = remain - acc
+  const lastDate = fwd.length ? fwd[fwd.length - 1].date : today
+  const days = Math.ceil(stillNeed / rate)
+  return new Date(Date.parse(lastDate + 'T00:00:00') + days * DAY).toISOString().slice(0, 10)
+}
+
 // The jobs a product does — used to decide when a newer spray supersedes it.
 // An empty list means "we can't classify it", so it never hides and is never
 // hidden by anything but a fresh application of the same product.
@@ -108,10 +134,11 @@ export default function ProductPerformance({ sheets = [], products = [], daily =
           const pct = st.pct
           const status = pct >= 1 ? 'reapply' : pct >= 0.8 ? 'soon' : 'ok'
           const diff = Math.abs(have - target)
+          const proj = status !== 'reapply' ? projectReapplyISO(season, gddF, st.target, today) : null
           return {
             name, tag: kind === 'pgr' ? 'Growth Reg' : (prod?.type || 'Fungicide'),
             have, target, unit: 'GDD', pct, status, down: date,
-            delta: status === 'reapply' ? `${diff} GDD over` : `${diff} GDD to go`,
+            delta: status === 'reapply' ? `${diff} GDD over` : (proj ? `~reapply ${fmtDate(proj)}` : `${diff} GDD to go`),
           }
         }
         const iv = intervalDaysForProduct(prod) || defaultInterval(prod)
