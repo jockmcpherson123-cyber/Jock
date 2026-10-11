@@ -46,8 +46,11 @@ export async function proxy(request) {
   const { pathname } = request.nextUrl
 
   // Paths that a logged-out visitor is allowed to reach.
+  // The crew's Field Data QR page (and the endpoint it saves through) needs no
+  // login — the club key in the link (?k=) is checked by /api/crew itself.
+  const isFieldData = pathname === '/data' || pathname === '/api/crew'
   const isPublicPath =
-    pathname.startsWith('/login') || pathname.startsWith('/auth')
+    pathname.startsWith('/login') || pathname.startsWith('/auth') || isFieldData
 
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone()
