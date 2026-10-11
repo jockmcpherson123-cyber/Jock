@@ -3139,6 +3139,95 @@ function mdaRecordBookHTML(allSheets, products, areas, courseInfo = {}, location
   </div>`
 }
 
+// Backup binder — the one-tap "give it to an inspector or EMS crew" PDF: club
+// + emergency numbers, every applicator's license, every IN-STOCK product with
+// its EPA reg #, signal word, REI and links to its label + SDS, the emergency
+// SOPs, and the last 12 months of application records. Missing items are flagged
+// so nothing silently goes out blank. Full label/SDS PDFs live at their links
+// (an inspector scans or clicks); this binder is the index + compliance data.
+function backupBinderHTML(products = [], sheets = [], licenses = {}, playbook = [], courseInfo = {}, location = {}) {
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const club = courseInfo.clubName || 'Club'
+  const addr = [location.city, location.state].filter(Boolean).join(', ')
+  const miss = '<span style="color:#B23A2E;font-weight:700">missing</span>'
+  const link = (url, label) => (String(url || '').trim() ? `<a href="${esc(url)}" style="color:#2563EB">${label}</a>` : miss)
+
+  const inStock = (products || []).filter((p) => (Number(p.stock) || 0) > 0).sort((a, b) => a.name.localeCompare(b.name))
+  const PEST = ['Fungicide', 'Herbicide', 'Insecticide', 'Growth Reg']
+  const cutoff = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
+  const today = new Date().toISOString().slice(0, 10)
+  const recent = (sheets || []).filter((s) => sheetApplied(s) && s.date && s.date >= cutoff && s.date <= today).sort((a, b) => String(b.date).localeCompare(String(a.date)))
+  const sops = [...(playbook || [])].sort((a, b) => (b.emergency ? 1 : 0) - (a.emergency ? 1 : 0) || (a.sort || 0) - (b.sort || 0))
+  const people = Object.entries(licenses || {}).sort((a, b) => a[0].localeCompare(b[0]))
+
+  const H2 = 'font-size:15px;font-weight:700;color:#16291F;margin:22px 0 8px;border-bottom:2px solid #C9A84C;padding-bottom:4px'
+  const TH = 'border:1px solid #16291F;padding:5px 7px;text-align:left;font-size:9.5px;text-transform:uppercase;color:#fff;background:#16291F'
+  const TD = 'border:1px solid #ccc;padding:4px 7px;font-size:10.5px;vertical-align:top'
+  const tbl = 'width:100%;border-collapse:collapse;margin-bottom:6px'
+  const pageBreak = 'page-break-before:always'
+
+  const productRows = inStock.length ? inStock.map((p) => {
+    const isPest = PEST.includes(p.type)
+    return `<tr>
+      <td style="${TD}"><b>${esc(p.name)}</b><div style="font-size:9px;color:#777">${esc(p.type || '')}</div></td>
+      <td style="${TD}">${esc(p.activeIngredient || '—')}</td>
+      <td style="${TD}">${isPest ? (esc(p.epaReg) || miss) : '—'}</td>
+      <td style="${TD}">${isPest ? (esc(p.signalWord) || miss) : '—'}</td>
+      <td style="${TD}">${isPest ? (esc(p.rei) || miss) : '—'}</td>
+      <td style="${TD}">${link(p.labelUrl, 'Label')}</td>
+      <td style="${TD}">${link(p.sdsUrl, 'SDS')}</td>
+    </tr>`
+  }).join('') : `<tr><td style="${TD}" colspan="7">No products in stock.</td></tr>`
+
+  const peopleRows = people.length ? people.map(([name, lic]) => `<tr>
+      <td style="${TD}"><b>${esc(name)}</b></td>
+      <td style="${TD}">${esc(lic.pesticide) || miss}${lic.pesticideExp ? ` <span style="color:#777">(exp ${esc(lic.pesticideExp)})</span>` : ''}</td>
+      <td style="${TD}">${esc(lic.fertilizer) || '—'}${lic.fertilizerExp ? ` <span style="color:#777">(exp ${esc(lic.fertilizerExp)})</span>` : ''}</td>
+    </tr>`).join('') : `<tr><td style="${TD}" colspan="3">No applicators on file.</td></tr>`
+
+  const sopBlocks = sops.length ? sops.map((s) => `<div style="margin-bottom:12px;${s.emergency ? 'border-left:3px solid #B23A2E;padding-left:10px' : ''}">
+      <div style="font-size:12px;font-weight:700;color:#16291F">${s.emergency ? '🚑 ' : ''}${esc(s.title || 'Untitled')}${s.category ? ` <span style="font-size:9px;color:#777;font-weight:400">· ${esc(s.category)}</span>` : ''}</div>
+      ${s.notes ? `<div style="font-size:10.5px;color:#333;white-space:pre-wrap;margin-top:3px">${esc(s.notes)}</div>` : ''}
+    </div>`).join('') : '<div style="font-size:10.5px;color:#777">No SOPs entered. Add them in the Playbook.</div>'
+
+  const recordRows = recent.length ? recent.map((s) => {
+    const prods = (s.products || []).filter((p) => p.product).map((p) => esc(p.product)).join(', ')
+    return `<tr>
+      <td style="${TD};white-space:nowrap">${esc(s.date)}</td>
+      <td style="${TD}">${esc(s.area || '')}</td>
+      <td style="${TD}">${esc(s.completedBy || s.operator || '')}</td>
+      <td style="${TD}">${prods || '—'}</td>
+    </tr>`
+  }).join('') : `<tr><td style="${TD}" colspan="4">No applications in the last 12 months.</td></tr>`
+
+  return `<div style="font-family:Arial,Helvetica,sans-serif;color:#1a1a16">
+    <div style="text-align:center;margin-bottom:8px">
+      <div style="font-family:Georgia,serif;font-size:24px;font-weight:700;color:#16291F">${esc(club)}</div>
+      <div style="font-size:13px;color:#3A6B4A;font-weight:700">Emergency &amp; Inspection Backup Binder</div>
+      <div style="font-size:11px;color:#777;margin-top:2px">${addr ? esc(addr) + ' · ' : ''}Generated ${esc(new Date().toLocaleDateString())}</div>
+    </div>
+
+    <div style="background:#FEF3DD;border:1px solid #FDE9C8;border-radius:8px;padding:10px 12px;margin-bottom:6px">
+      <div style="font-size:11px;font-weight:700;color:#92660D;text-transform:uppercase;letter-spacing:.04em">Emergency numbers</div>
+      <div style="font-size:12px;color:#1a1a16;margin-top:3px">Emergency: <b>911</b> &nbsp;·&nbsp; Poison Control: <b>1-800-222-1222</b>${courseInfo.emergencyPhone ? ` &nbsp;·&nbsp; Shop: <b>${esc(courseInfo.emergencyPhone)}</b>` : ''}</div>
+    </div>
+
+    <div style="${H2}">Applicator licenses</div>
+    <table style="${tbl}"><tr><th style="${TH}">Name</th><th style="${TH}">Pesticide license</th><th style="${TH}">Fertilizer license</th></tr>${peopleRows}</table>
+
+    <div style="${H2};${pageBreak}">Products in stock — labels, SDS &amp; safety</div>
+    <table style="${tbl}"><tr><th style="${TH}">Product</th><th style="${TH}">Active ingredient</th><th style="${TH}">EPA Reg #</th><th style="${TH}">Signal</th><th style="${TH}">REI</th><th style="${TH}">Label</th><th style="${TH}">SDS</th></tr>${productRows}</table>
+    <div style="font-size:9px;color:#888;margin-top:2px">${inStock.length} product${inStock.length !== 1 ? 's' : ''} in stock. Label &amp; SDS links open the full documents.</div>
+
+    <div style="${H2};${pageBreak}">Emergency SOPs</div>
+    ${sopBlocks}
+
+    <div style="${H2};${pageBreak}">Application records — last 12 months</div>
+    <table style="${tbl}"><tr><th style="${TH}">Date</th><th style="${TH}">Area</th><th style="${TH}">Applicator</th><th style="${TH}">Products</th></tr>${recordRows}</table>
+    <div style="font-size:9px;color:#888;margin-top:2px">${recent.length} application${recent.length !== 1 ? 's' : ''} on record (applied sprays only).</div>
+  </div>`
+}
+
 // Intern training worksheet — the SAME sheet the crew uses, but the rate is
 // blanked so trainees work it BACKWARDS from the amount per tank, with room to
 // research what each product is and what it does. `opts.answers` fills in the
@@ -5715,6 +5804,17 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
     } catch (e) { console.error(e) }
     setMdaBusy(false)
   }
+  const [binderBusy, setBinderBusy] = useState(false)
+  const makeBinder = async () => {
+    setBinderBusy(true)
+    try {
+      let playbook = []
+      try { playbook = await db.fetchPlaybookItems() } catch { /* binder still useful without SOPs */ }
+      const safeClub = (courseInfo.clubName || 'Club').replace(/[^a-z0-9]+/gi, '-')
+      await pdfRecordHTML(backupBinderHTML(products, sheets, applicatorLicenses, playbook, courseInfo, location), `Backup-Binder_${safeClub}_${localDateISO()}.pdf`)
+    } catch (e) { console.error(e) }
+    setBinderBusy(false)
+  }
 
   const totalN = Math.round(npkData.reduce((s, r) => s + r.n, 0) * 100) / 100
   const totalP = Math.round(npkData.reduce((s, r) => s + r.p, 0) * 100) / 100
@@ -5797,6 +5897,16 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
             <ShieldCheck size={14} /> {mdaBusy ? 'Building…' : 'MDA Record Book'}
           </button>
         </div>
+      </div>
+
+      <div className="rounded-2xl border p-3.5 mb-1 flex items-center justify-between gap-3 flex-wrap" style={{ backgroundColor: '#F5FAF6', borderColor: '#D8E6DC' }}>
+        <div className="min-w-0">
+          <p className="font-body text-sm font-bold text-slate-800">Backup Binder</p>
+          <p className="font-body text-[11px] text-slate-500">The binder an inspector or EMS crew asks for — emergency contacts &amp; SOPs, applicator licenses, every in-stock product with its EPA #, signal word, REI, label &amp; SDS links, and the last 12 months of records.</p>
+        </div>
+        <button onClick={makeBinder} disabled={binderBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 disabled:opacity-50 shrink-0 text-white" style={{ backgroundColor: FOREST }}>
+          <ShieldCheck size={14} /> {binderBusy ? 'Building…' : 'Backup Binder PDF'}
+        </button>
       </div>
 
       {report === 'nitrogen' && <NitrogenReport sheets={sheets} products={products} areas={areas} fertSheets={fertSheets} />}
