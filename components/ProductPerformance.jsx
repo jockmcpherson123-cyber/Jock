@@ -7,7 +7,11 @@
 //     (lib/fungicides intervalDaysForProduct).
 //   • PGRs and DMI fungicides run on GDD accumulated from the weather since the
 //     spray (gddSince) vs the per-product regulation target (lib/pgrmodel).
-// Replaces the old split "Recent Fungicide Sprays" + "Growth-Reg Timing" cards.
+//
+// Products are grouped BY JOB, not by SKU. A newer application that does the
+// same job (growth regulation, the same disease, or the same nutrient) resets
+// the clock and HIDES the older product it fully covers — so you see the one
+// product actually protecting the turf, not a stack of overlapping timers.
 
 import { useEffect, useMemo, useState } from 'react'
 import { fmtDate } from '@/lib/calc'
@@ -15,21 +19,35 @@ import { localDateISO } from '@/lib/dates'
 import { gddSince, fetchSeasonDaily } from '@/lib/weather'
 import { suppressionMap } from '@/lib/pgr'
 import { modelForProduct, regulationStatus, withTargets, surfaceCol } from '@/lib/pgrmodel'
-import { intervalDaysForProduct } from '@/lib/fungicides'
+import { intervalDaysForProduct, diseaseJobsForProduct } from '@/lib/fungicides'
 import { sheetApplied } from '@/lib/applied'
 import { classifySurface } from '@/lib/programgen'
-import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, RED, AMBER } from '@/lib/theme'
+import { FOREST, FERN, GOLD, PAPER_2, HAIR, INK_2, INK_3, RED, AMBER } from '@/lib/theme'
 
 const DAY = 86400000
 const LOOKBACK = 120
 const dBetween = (iso, today) => Math.max(0, Math.round((Date.parse(today + 'T00:00:00') - Date.parse(iso + 'T00:00:00')) / DAY))
 const addDaysIso = (iso, n) => new Date(Date.parse(iso + 'T00:00:00') + n * DAY).toISOString().slice(0, 10)
 const defaultInterval = (prod) => ((prod?.type || '').toLowerCase().includes('fert') ? { lower: 14, upper: 21 } : { lower: 10, upper: 14 })
+const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
 
 const STATUS = {
   ok: { color: FERN, label: 'On program' },
   soon: { color: AMBER, label: 'Due soon' },
-  reapply: { color: RED, label: '＋ Reapply now' },
+  reapply: { color: RED, label: 'Reapply' },
+}
+
+// The jobs a product does — used to decide when a newer spray supersedes it.
+// An empty list means "we can't classify it", so it never hides and is never
+// hidden by anything but a fresh application of the same product.
+function jobsForProduct(prod, kind) {
+  const jobs = []
+  if (kind) jobs.push('growth') // true PGR or growth-suppressing DMI — one clock
+  diseaseJobsForProduct(prod).forEach((id) => jobs.push('dis:' + id))
+  if (num(prod?.n) > 0) jobs.push('nut:N')
+  if (num(prod?.p) > 0) jobs.push('nut:P')
+  if (num(prod?.k) > 0) jobs.push('nut:K')
+  return jobs
 }
 
 export default function ProductPerformance({ sheets = [], products = [], daily = [], location = null, courseInfo = {}, title = 'Product Performance' }) {
@@ -55,12 +73,29 @@ export default function ProductPerformance({ sheets = [], products = [], daily =
         const a = (last[s.area] ||= {})
         if (!a[p.product] || s.date > a[p.product]) a[p.product] = s.date
       }))
+
     const out = {}
     Object.keys(last).forEach((area) => {
       const sk = surfaceCol(classifySurface(area))
-      const rows = Object.entries(last[area]).map(([name, date]) => {
+
+      // Build a raw record per product, with its most-recent date and jobs.
+      const raws = Object.entries(last[area]).map(([name, date]) => {
         const prod = prodByName[name]
         const kind = supMap[name] // 'pgr' | 'dmi' | undefined
+        return { name, date, prod, kind, jobs: jobsForProduct(prod, kind) }
+      })
+
+      // Newest application date seen for each job across this area.
+      const newestByJob = {}
+      raws.forEach((r) => r.jobs.forEach((j) => { if (!newestByJob[j] || r.date > newestByJob[j]) newestByJob[j] = r.date }))
+
+      // Keep a product only if it is the newest (or tied) in at least one of its
+      // jobs. If every job it does has a newer product covering it, it's fully
+      // superseded and drops off.
+      const kept = raws.filter((r) => r.jobs.length === 0 || r.jobs.some((j) => newestByJob[j] <= r.date))
+
+      const rows = kept.map((r) => {
+        const { name, date, prod, kind } = r
         if (kind) {
           let model = modelForProduct(prod, kind)
           if (!model) return null
@@ -68,25 +103,33 @@ export default function ProductPerformance({ sheets = [], products = [], daily =
           const gddF = gddSince(season, date, 32)
           if (gddF == null) return null
           const st = regulationStatus(model, gddF, sk)
+          const have = Math.round(gddF / 1.8)
+          const target = Math.round(st.target / 1.8)
           const pct = st.pct
+          const status = pct >= 1 ? 'reapply' : pct >= 0.8 ? 'soon' : 'ok'
+          const diff = Math.abs(have - target)
           return {
-            name, tag: kind === 'pgr' ? 'Growth Reg' : 'DMI · regulates too',
-            metric: `GDD ${Math.round(gddF / 1.8)} / ${Math.round(st.target / 1.8)}`,
-            life: `Down ${fmtDate(date)}`,
-            pct, status: pct >= 1 ? 'reapply' : pct >= 0.8 ? 'soon' : 'ok',
+            name, tag: kind === 'pgr' ? 'Growth Reg' : (prod?.type || 'Fungicide'),
+            have, target, unit: 'GDD', pct, status, down: date,
+            delta: status === 'reapply' ? `${diff} GDD over` : `${diff} GDD to go`,
           }
         }
         const iv = intervalDaysForProduct(prod) || defaultInterval(prod)
         const elapsed = dBetween(date, today)
         const target = iv.upper || 14
         const pct = target > 0 ? elapsed / target : 0
+        const status = pct >= 1 ? 'reapply' : elapsed >= iv.lower ? 'soon' : 'ok'
+        const over = elapsed - target
+        const left = Math.max(0, target - elapsed)
         return {
           name, tag: prod?.type || 'Product',
-          metric: `Days ${elapsed} / ${target}`,
-          life: `Down ${fmtDate(date)} → due ${fmtDate(addDaysIso(date, target))}`,
-          pct, status: pct >= 1 ? 'reapply' : elapsed >= iv.lower ? 'soon' : 'ok',
+          have: elapsed, target, unit: 'd', pct, status, down: date,
+          delta: status === 'reapply'
+            ? `${over} day${over === 1 ? '' : 's'} over`
+            : `${left} day${left === 1 ? '' : 's'} left`,
         }
       }).filter(Boolean).sort((a, b) => b.pct - a.pct)
+
       if (rows.length) out[area] = rows
     })
     return out
@@ -108,11 +151,14 @@ export default function ProductPerformance({ sheets = [], products = [], daily =
     )
   }
 
-  const MARK = 82 // the 100% dashed line sits here, leaving room for Reapply
+  const counts = { reapply: 0, soon: 0, ok: 0 }
+  rows.forEach((r) => { counts[r.status]++ })
+  const MARK = 82 // the 100% dashed line sits here, leaving room for an over-bar
+
   return (
     <section>
-      <SectionTitle title={title} subtitle="How much residual each product has left, by area. Fungicides run on days, growth regulators on GDD — the dashed line is 100% (reapply)." />
-      <div className="paper-card px-4 pt-3 pb-1">
+      <SectionTitle title={title} subtitle="Residual left per product, by area. Days from the label, GDD from your weather — the dashed line is reapply." />
+      <div className="paper-card px-4 pt-3 pb-2">
         {/* area tabs */}
         <div className="flex gap-5 overflow-x-auto border-b" style={{ borderColor: HAIR }}>
           {areaNames.map((a) => (
@@ -123,32 +169,54 @@ export default function ProductPerformance({ sheets = [], products = [], daily =
           ))}
         </div>
 
+        {/* at-a-glance summary for this area */}
+        <div className="flex gap-2 flex-wrap mt-3 mb-1">
+          <SummaryChip n={counts.reapply} label="reapply" color={RED} bg="#F6E7E4" />
+          <SummaryChip n={counts.soon} label="due soon" color={AMBER} bg="#F6EEDC" />
+          <SummaryChip n={counts.ok} label="on program" color={FERN} bg="#E6EFE8" />
+        </div>
+
         {rows.map((r, i) => {
           const s = STATUS[r.status]
           const fillW = Math.min(r.pct, 1.18) * MARK
           return (
-            <div key={r.name} className="py-3.5" style={{ borderBottom: i < rows.length - 1 ? `1px solid #EFEDE8` : 'none' }}>
-              <div className="flex items-center gap-2 flex-wrap mb-2">
-                <span className="font-display text-[17px] font-bold" style={{ color: FOREST }}>{r.name}</span>
-                <span className="font-body text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full" style={{ background: PAPER_2, color: INK_2 }}>{r.tag}</span>
-                <span className="font-body text-[12px] font-semibold px-2.5 py-1 rounded-full" style={{ background: '#fff', border: `1px solid ${HAIR}`, color: INK_2 }}>{r.life}</span>
-                <span className="font-body text-[12px] px-2.5 py-1 rounded-full" style={{ background: '#fff', border: `1px solid ${HAIR}`, color: FOREST, fontWeight: 700 }}>{r.metric}</span>
+            <div key={r.name} className="py-2.5" style={{ borderBottom: i < rows.length - 1 ? '1px solid #EFEDE8' : 'none' }}>
+              <div className="flex items-baseline gap-2">
+                <span className="font-display text-[16px] font-bold leading-tight" style={{ color: FOREST }}>{r.name}</span>
+                <span className="font-body text-[9.5px] font-bold uppercase tracking-wider" style={{ color: INK_3 }}>{r.tag}</span>
                 <span className="flex-1" />
-                <span className="font-body text-[13px] font-bold" style={{ color: s.color }}>{s.label}</span>
+                <span className="font-body text-[12px] font-bold whitespace-nowrap" style={{ color: INK_2, fontVariantNumeric: 'tabular-nums' }}>
+                  {r.have} / {r.target}<span style={{ color: INK_3, fontWeight: 600 }}> {r.unit}</span>
+                </span>
               </div>
-              <div className="relative" style={{ height: 16 }}>
-                <div style={{ position: 'absolute', inset: 0, height: 16, borderRadius: 8, background: '#E7E5DF' }} />
-                <div style={{ position: 'absolute', left: 0, top: 0, height: 16, width: `${Math.max(3, fillW)}%`, borderRadius: 8, background: s.color }} />
-                <div style={{ position: 'absolute', top: -5, bottom: -5, left: `${MARK}%`, borderLeft: '2px dashed #B9B6AE' }} />
+              <div className="relative" style={{ height: 9, margin: '7px 0 6px' }}>
+                <div style={{ position: 'absolute', inset: 0, borderRadius: 6, background: '#E6E4DE' }} />
+                <div style={{ position: 'absolute', left: 0, top: 0, height: 9, width: `${Math.max(3, fillW)}%`, borderRadius: 6, background: s.color }} />
+                <div style={{ position: 'absolute', top: -3, bottom: -3, left: `${MARK}%`, borderLeft: '1.5px dashed #BDBAB2' }} />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-body text-[11px] whitespace-nowrap" style={{ color: INK_3 }}>down {fmtDate(r.down)}</span>
+                <span className="flex-1" />
+                <span className="font-body text-[11.5px] font-extrabold whitespace-nowrap" style={{ color: s.color }}>{r.delta}</span>
               </div>
             </div>
           )
         })}
       </div>
       <p className="font-body text-[10px] mt-1.5" style={{ color: INK_3 }}>
-        Day intervals come from the product label; GDD comes from your weather. A memory aid for reapply timing, not a lab test — the label is the law.
+        A newer spray that does the same job (growth reg, the same disease, or the same nutrient) resets the clock and hides the product it replaced. A memory aid for reapply timing, not a lab test — the label is the law.
       </p>
     </section>
+  )
+}
+
+function SummaryChip({ n, label, color, bg }) {
+  if (!n) return null
+  return (
+    <span className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ background: bg, color }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: color }} />
+      {n} {label}
+    </span>
   )
 }
 
