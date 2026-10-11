@@ -6719,11 +6719,18 @@ const COURSE_COLORS = [
 ]
 const ACRES_PER_SQFT = 1 / 43560
 const areaTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
-// Which course an area belongs to: an explicit tag wins, else guess by first word.
+// Shared areas with no Blue/Gold prefix — map them to a course by name so the
+// course filters and counts can still place them. An explicit tag always wins.
+const UNPREFIXED_AREA_COURSE = { 'natives': 'Blue', 'native': 'Blue', 'driving range': 'Blue', 'range': 'Blue', 'practice range': 'Blue' }
+// Which course an area belongs to: an explicit tag wins, else guess by first
+// word, else a known unprefixed-area default (e.g. Natives, Driving Range).
 function areaCourseOf(area, name, courseNames) {
   if (area?.course) return area.course
   const t = areaTok(name)
-  return courseNames.find((c) => areaTok(c) === t) || ''
+  const byTok = courseNames.find((c) => areaTok(c) === t)
+  if (byTok) return byTok
+  const guess = UNPREFIXED_AREA_COURSE[String(name || '').trim().toLowerCase()]
+  return (guess && courseNames.includes(guess)) ? guess : ''
 }
 const COMMON_AREAS = ['Greens', 'Tees', 'Fairways', 'Approaches', 'Collars', 'Rough', 'Bunkers', 'Practice Green', 'Range', 'Nursery']
 
@@ -6767,9 +6774,9 @@ function CourseAreaRows({ courses, aMap, setAMap, grassTypes = [], soilTypes = [
                   <div key={n} className="rounded-xl p-2.5" style={{ border: `1px solid ${HAIR}`, backgroundColor: PAPER }}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <input defaultValue={n} onBlur={(e) => renameArea(n, e.target.value.trim())} className="font-body text-[13.5px] font-bold border-0 bg-transparent focus:bg-white rounded px-1 py-0.5 w-32" style={{ color: INK }} />
-                      {!course && (
-                        <select value="" onChange={(e) => e.target.value && setArea(n, { course: e.target.value })} className="text-[12px] rounded-lg px-2 py-1" style={{ border: `1px solid ${HAIR}` }}>
-                          <option value="">Assign…</option>
+                      {courseNames.length > 0 && (
+                        <select value={areaCourseOf(a, n, courseNames)} onChange={(e) => setArea(n, { course: e.target.value })} className="text-[12px] rounded-lg px-2 py-1" style={{ border: `1px solid ${HAIR}` }} title="Course">
+                          <option value="">Unassigned</option>
                           {courseNames.map((c) => <option key={c} value={c}>{c}</option>)}
                         </select>
                       )}
