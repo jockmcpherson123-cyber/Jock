@@ -8570,7 +8570,7 @@ function taskErrorText(e) {
 // One place for everything the crew collects on morning maintenance — moisture,
 // clipping yields, greens speed, scouting. This is also what the crew's no-login
 // QR page mirrors. Managers get a "Crew QR" button to print/share the link.
-function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse, course = '', onClip, onClipDel, onSpeed, onSpeedUpd, onSpeedDel, onScout, onScoutUpd, onScoutDel }) {
+function FieldDataHub({ clippings, speeds, firmness = [], scouting, daily, turf, saveTurfCourse, course = '', onClip, onClipDel, onSpeed, onSpeedUpd, onSpeedDel, onScout, onScoutUpd, onScoutDel }) {
   const [tab, setTab] = useState('moisture')
   const [qrOpen, setQrOpen] = useState(false)
   const tabs = [['moisture', 'Moisture'], ['clippings', 'Clipping Yields'], ['speed', 'Greens Speed'], ['scouting', 'Scouting']]
@@ -8600,7 +8600,7 @@ function FieldDataHub({ clippings, speeds, scouting, daily, turf, saveTurfCourse
 
       {tab === 'moisture' && <WettingAgent key={course || 'all'} daily={daily} areas={areas} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} initialView="read" courseFilter={course} />}
       {tab === 'clippings' && <ClippingsTab key={course || 'all'} clippings={clippings} areas={areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} onAddMany={onClip} onDelete={onClipDel} courseFilter={course} />}
-      {tab === 'speed' && <GreensSpeedTab key={course || 'all'} speeds={speeds} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} onAddMany={onSpeed} onUpdate={onSpeedUpd} onDelete={onSpeedDel} courseFilter={course} />}
+      {tab === 'speed' && <GreensSpeedTab key={course || 'all'} speeds={speeds} firmness={firmness} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} onAddMany={onSpeed} onUpdate={onSpeedUpd} onDelete={onSpeedDel} courseFilter={course} />}
       {tab === 'scouting' && <ScoutingTab key={course || 'all'} scouting={scouting} areas={areas} courseInfo={turf.courseInfo} onAdd={onScout} onUpdate={onScoutUpd} onDelete={onScoutDel} courseFilter={course} />}
 
       {qrOpen && <DataQRModal courseInfo={turf.courseInfo} saveCourse={saveTurfCourse} onClose={() => setQrOpen(false)} />}
@@ -8621,6 +8621,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
   const [practices, setPractices] = useState([])
   const [soilTests, setSoilTests] = useState([])
   const [speeds, setSpeeds] = useState([])
+  const [firmness, setFirmness] = useState([])
   const [scouting, setScouting] = useState([])
   const [soilSeries, setSoilSeries] = useState([])
   const [loadingTurf, setLoadingTurf] = useState(true)
@@ -8640,6 +8641,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         setSoilTests(soils)
         setSpeeds(spds)
         setScouting(scts)
+        db.fetchGreensFirmness().then(setFirmness).catch(() => {})
         if (settings.location?.lat != null) {
           const { lat, lng } = settings.location
           // Season archive + forecast merged: the archive lags a few days and has
@@ -8741,7 +8743,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         {route === 'data' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <FieldDataHub
-              clippings={clippings} speeds={speeds} scouting={scouting} daily={daily} turf={turf} saveTurfCourse={saveTurfCourse} course={course}
+              clippings={clippings} speeds={speeds} firmness={firmness} scouting={scouting} daily={daily} turf={turf} saveTurfCourse={saveTurfCourse} course={course}
               onClip={async (list) => { await db.addClippings(list); await reloadClippings() }}
               onClipDel={async (id) => { await db.deleteClipping(id); await reloadClippings() }}
               onSpeed={async (list) => { await db.addGreensSpeeds(list); await reloadSpeeds() }}
@@ -10317,7 +10319,7 @@ const speedErrorText = (e) => saveErrorText(e, 'supabase/phase18.sql')
 // ── GREENS SPEED (STIMPMETER) ───────────────────────────────────────────────
 // Log each green's speed (feet) by date. The win is consistency: the day's
 // spread across greens (fastest vs slowest) matters as much as the average.
-function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate, onDelete, courseFilter = '' }) {
+function GreensSpeedTab({ speeds, firmness = [], courseInfo, onSaveCourse, onAddMany, onUpdate, onDelete, courseFilter = '' }) {
   const greenOptions = greenOptionsFor(courseInfo)
   const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
   const cfTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
@@ -10380,6 +10382,14 @@ function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate,
   const spread = fast != null ? Math.round((fast - slow) * 100) / 100 : null
   const fastGreen = latestSet.find((s) => Number(s.speed) === fast)
   const slowGreen = latestSet.find((s) => Number(s.speed) === slow)
+
+  // Latest firmness (Gravities), scoped to the same course bar — shown next to
+  // speed so the crew reads speed and firmness together, like DEACON/Playbooks.
+  const fScoped = barCourse ? (firmness || []).filter((f) => cfTok(f.area) === cfTok(barCourse)) : (firmness || [])
+  const fLatestDate = fScoped.length ? fScoped.map((f) => f.date).sort().pop() : null
+  const fNums = fLatestDate ? fScoped.filter((f) => f.date === fLatestDate && f.firmness != null).map((f) => Number(f.firmness)).filter((n) => !isNaN(n)) : []
+  const fAvg = fNums.length ? Math.round((fNums.reduce((a, b) => a + b, 0) / fNums.length) * 10) / 10 : null
+  const fUnit = (fScoped.find((f) => f.unit) || {}).unit || 'Gravities'
 
   const shown = filter === 'all' ? scoped : scoped.filter((c) => c.area === filter)
   const byArea = {}
@@ -10466,6 +10476,19 @@ function GreensSpeedTab({ speeds, courseInfo, onSaveCourse, onAddMany, onUpdate,
               Fastest {fastGreen.area.replace('Green ', '')} ({fmtStimp(fast)}) · Slowest {slowGreen.area.replace('Green ', '')} ({fmtStimp(slow)})
             </p>
           )}
+          {fAvg != null && (
+            <p className="font-body text-[11px] opacity-80 mt-2 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.15)' }}>
+              Firmness {fAvg} {fUnit} · avg of {fNums.length} green{fNums.length !== 1 ? 's' : ''}{fLatestDate !== latestDate ? ` · ${fmtDate(fLatestDate)}` : ''}
+            </p>
+          )}
+        </div>
+      )}
+      {/* Firmness with no speed logged yet still deserves a readout */}
+      {!nums.length && fAvg != null && (
+        <div className="rounded-2xl p-4 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Firmness · {fmtDate(fLatestDate)}</p>
+          <p className="font-display text-3xl font-bold mt-0.5">{fAvg} <span className="text-lg font-semibold opacity-80">{fUnit}</span></p>
+          <p className="font-body text-[10px] opacity-70">avg of {fNums.length} green{fNums.length !== 1 ? 's' : ''}</p>
         </div>
       )}
 

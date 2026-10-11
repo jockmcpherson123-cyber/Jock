@@ -80,7 +80,7 @@ function FieldData() {
   if (state === 'denied') return <Center>This data link is invalid or expired.<br />Ask for a fresh QR code.</Center>
   if (state === 'error') return <Center>Couldn’t load. Try again.</Center>
 
-  const tabs = [['moisture', 'Moisture'], ['clippings', 'Clippings'], ['speed', 'Greens Speed'], ['scouting', 'Scouting']]
+  const tabs = [['moisture', 'Moisture'], ['clippings', 'Clippings'], ['speed', 'Greens Speed'], ['firmness', 'Firmness'], ['scouting', 'Scouting']]
   const courses = cfg.courses || []
   // Scope everything to the chosen course.
   const areas = (cfg.areas || []).filter((a) => inCourse(a, course))
@@ -118,6 +118,7 @@ function FieldData() {
         {tab === 'moisture' && <MoistureForm k={k} date={date} entered={entered.moisture} wetting={wetting} onSaved={flash} onEntered={(id) => markEntered('moisture', id)} />}
         {tab === 'clippings' && <SimpleReading k={k} date={date} entered={entered.clipping} areas={areas} action="clipping" label="Clipping volume" unit="mL" onSaved={flash} onEntered={(a) => markEntered('clipping', a)} />}
         {tab === 'speed' && <SimpleReading k={k} date={date} entered={entered.greenspeed} areas={areas} action="greenspeed" label="Stimp reading (ft &amp; in)" onSaved={flash} onEntered={(a) => markEntered('greenspeed', a)} />}
+        {tab === 'firmness' && <SimpleReading k={k} date={date} entered={entered.firmness} areas={areas} action="firmness" label="Firmness (Gravities)" unit="G" onSaved={flash} onEntered={(a) => markEntered('firmness', a)} />}
         {tab === 'scouting' && <ScoutForm k={k} date={date} areas={areas} onSaved={flash} />}
       </div>
       {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: INK }}>{toast}</div>}
@@ -242,6 +243,11 @@ function SimpleReading({ k, date, entered, areas, action, label, unit, onSaved, 
       const speed = stimpToFeet(ft, inch)
       row = { area, speed }
       saidValue = `${Number(ft) || 0}'${Number(inch) || 0}"`
+    } else if (action === 'firmness') {
+      const num = Number(value)
+      if (!Number.isFinite(num) || value === '') return
+      row = { area, firmness: num, unit }
+      saidValue = `${value}${unit ? ' ' + unit : ''}`
     } else {
       const num = Number(value)
       if (!Number.isFinite(num) || value === '') return

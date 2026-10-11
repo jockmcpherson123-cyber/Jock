@@ -66,11 +66,12 @@ export async function GET(request) {
     // the page can warn before a second entry for the same day (hand entries
     // and DEACON back-fills share this page).
     const since = `${new Date().getFullYear()}-01-01`
-    const [clipRows, speedRows] = await Promise.all([
+    const [clipRows, speedRows, firmRows] = await Promise.all([
       allRows(supabase, 'clippings', 'area, clip_date', 'clip_date', since),
       allRows(supabase, 'greens_speeds', 'area, reading_date', 'reading_date', since),
+      allRows(supabase, 'greens_firmness', 'area, reading_date', 'reading_date', since),
     ])
-    const entered = { moisture: {}, clipping: {}, greenspeed: {} }
+    const entered = { moisture: {}, clipping: {}, greenspeed: {}, firmness: {} }
     const add = (bucket, key, date) => {
       if (!key || !date || date < since) return
       const list = (bucket[key] ||= [])
@@ -79,6 +80,7 @@ export async function GET(request) {
     for (const r of courseInfo.wetting?.readings || []) add(entered.moisture, r.greenId, r.date)
     for (const r of clipRows) add(entered.clipping, r.area, r.clip_date)
     for (const r of speedRows) add(entered.greenspeed, r.area, r.reading_date)
+    for (const r of firmRows) add(entered.firmness, r.area, r.reading_date)
     return Response.json({
       club: courseInfo.clubName || '',
       wetting: courseInfo.wetting || {},
@@ -176,6 +178,15 @@ export async function POST(request) {
       }))
       if (!rows.length) return Response.json({ error: 'no_rows' }, { status: 400 })
       const { error } = await supabase.from('greens_speeds').insert(rows)
+      if (error) throw error
+      return Response.json({ ok: true, n: rows.length })
+    }
+    if (action === 'firmness') {
+      const rows = (body.rows || []).filter((r) => r.area).map((r) => ({
+        area: r.area, reading_date: date, firmness: r.firmness ?? null, unit: r.unit || 'Gravities', notes: r.notes || '',
+      }))
+      if (!rows.length) return Response.json({ error: 'no_rows' }, { status: 400 })
+      const { error } = await supabase.from('greens_firmness').insert(rows)
       if (error) throw error
       return Response.json({ ok: true, n: rows.length })
     }
