@@ -60,7 +60,7 @@ import {
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
-  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, productRateForN, eiqLoad, measureOut,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productRateForN, eiqLoad, measureOut,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -1084,7 +1084,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} products={products} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
         {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} courseFilter={course} />}
-        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} onSaveSettings={saveSettings} applicatorLicenses={applicatorLicenses} location={location} />}
+        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} programApps={programApps} onSaveSettings={saveSettings} applicatorLicenses={applicatorLicenses} location={location} />}
         {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} courseFilter={course} />}
         {route === 'training' && manage && <TrainingTab sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
@@ -5552,7 +5552,7 @@ function Inventory({ products, deliveries, onAddDelivery }) {
 }
 
 // ── REPORTS ───────────────────────────────────────────────────────────────
-function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], onSaveSettings, applicatorLicenses = {}, location = {} }) {
+function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], programApps = [], onSaveSettings, applicatorLicenses = {}, location = {} }) {
   const [view, setView] = useState('byArea')
   const [report, setReport] = useState('npk') // 'npk' | 'rotation'
   const npkData = aggregateNPK(sheets, products, areas)
@@ -5666,7 +5666,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], on
 
       {report === 'nitrogen' && <NitrogenReport sheets={sheets} products={products} areas={areas} fertSheets={fertSheets} />}
       {report === 'reorder' && <ReorderReport sheets={sheets} products={products} areas={areas} />}
-      {report === 'cost' && <CostReport sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} onSaveSettings={onSaveSettings} />}
+      {report === 'cost' && <CostReport sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} programApps={programApps} onSaveSettings={onSaveSettings} />}
       {report === 'impact' && <ImpactReport sheets={sheets} products={products} areas={areas} />}
       {report === 'rotation' && <RotationReport sheets={sheets} products={products} />}
       {report === 'usage' && <ProductUsageReport sheets={sheets} products={products} areas={areas} />}
@@ -5950,10 +5950,20 @@ function RotationReport({ sheets, products }) {
 // How much of each product actually went out (from approved/completed sheets).
 // ── COST / BUDGET REPORT ────────────────────────────────────────────────────
 // What the program has actually cost, from applied amounts × case pricing.
-function CostReport({ sheets, products, areas, courseInfo = {}, onSaveSettings }) {
+function CostReport({ sheets, products, areas, courseInfo = {}, programApps = [], onSaveSettings }) {
   const [view, setView] = useState('product') // 'product' | 'area' | 'month'
   const data = productCosts(sheets, products, areas)
   const cpma = costCPMA(sheets, products, areas)
+  const forecast = programForecastByMonth(programApps, products, areas)
+  // Planned (program) vs actual, by month — union of both series.
+  const monthCompare = (() => {
+    const m = {}
+    data.byMonth.forEach((r) => { (m[r.month] ||= { month: r.month, actual: 0, planned: 0 }).actual = r.cost })
+    forecast.byMonth.forEach((r) => { (m[r.month] ||= { month: r.month, actual: 0, planned: 0 }).planned = r.cost })
+    return Object.values(m).sort((a, b) => a.month.localeCompare(b.month))
+  })()
+  const cmpMax = Math.max(1, ...monthCompare.flatMap((r) => [r.actual, r.planned]))
+  const hasForecast = forecast.byMonth.length > 0
   const money = (n) => `$${(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const money0 = (n) => `$${Math.round(n || 0).toLocaleString('en-US')}`
   const monthLabel = (m) => { const [y, mm] = m.split('-'); return new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) }
@@ -6156,22 +6166,55 @@ function CostReport({ sheets, products, areas, courseInfo = {}, onSaveSettings }
               </button>
             ))}
           </div>
-          <div className="space-y-2">
-            {rows.map((r) => (
-              <div key={r.key} className="bg-white rounded-2xl border border-black/5 p-3.5 shadow-sm">
-                <div className="flex items-center justify-between gap-3 mb-1.5">
-                  <div className="min-w-0">
-                    <p className="font-body text-sm font-semibold text-slate-800 truncate">{r.label}</p>
-                    {r.sub && <p className="font-body text-[11px] text-slate-400">{r.sub}</p>}
-                  </div>
-                  <p className="font-display text-base font-bold text-slate-900 shrink-0">{money(r.cost)}</p>
-                </div>
-                <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                  <div className="h-full rounded-full" style={{ width: `${Math.max(3, Math.round((r.cost / max) * 100))}%`, backgroundColor: FERN }} />
-                </div>
+          {view === 'month' && hasForecast ? (
+            <>
+              <div className="flex items-center gap-4 mb-2 px-1">
+                <span className="flex items-center gap-1.5 font-body text-[11px] font-semibold text-slate-500"><span className="inline-block w-3 h-2 rounded-sm" style={{ backgroundColor: FERN }} /> Actual</span>
+                <span className="flex items-center gap-1.5 font-body text-[11px] font-semibold text-slate-500"><span className="inline-block w-3 h-2 rounded-sm" style={{ backgroundColor: GOLD }} /> Planned (program)</span>
               </div>
-            ))}
-          </div>
+              <div className="space-y-2">
+                {monthCompare.map((r) => {
+                  const over = r.actual > r.planned && r.planned > 0
+                  return (
+                    <div key={r.month} className="bg-white rounded-2xl border border-black/5 p-3.5 shadow-sm">
+                      <div className="flex items-center justify-between gap-3 mb-1.5">
+                        <p className="font-body text-sm font-semibold text-slate-800 truncate">{monthLabel(r.month)}</p>
+                        <p className="font-body text-[12px] shrink-0">
+                          <span className="font-display font-bold text-slate-900">{money(r.actual)}</span>
+                          <span className="text-slate-400"> / {money(r.planned)}</span>
+                          {over && <span className="font-bold text-red-600"> · over</span>}
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${Math.max(2, Math.round((r.actual / cmpMax) * 100))}%`, backgroundColor: FERN }} /></div>
+                        <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${Math.max(2, Math.round((r.planned / cmpMax) * 100))}%`, backgroundColor: GOLD }} /></div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {forecast.missing.length > 0 && (
+                <p className="font-body text-[10px] text-slate-400 mt-2">Planned line skips unpriced products: {forecast.missing.join(', ')}. The forecast prices one application pass per planned spray.</p>
+              )}
+            </>
+          ) : (
+            <div className="space-y-2">
+              {rows.map((r) => (
+                <div key={r.key} className="bg-white rounded-2xl border border-black/5 p-3.5 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 mb-1.5">
+                    <div className="min-w-0">
+                      <p className="font-body text-sm font-semibold text-slate-800 truncate">{r.label}</p>
+                      {r.sub && <p className="font-body text-[11px] text-slate-400">{r.sub}</p>}
+                    </div>
+                    <p className="font-display text-base font-bold text-slate-900 shrink-0">{money(r.cost)}</p>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${Math.max(3, Math.round((r.cost / max) * 100))}%`, backgroundColor: FERN }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
