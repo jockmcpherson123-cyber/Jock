@@ -60,7 +60,7 @@ import {
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
-  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, productRateForN, eiqLoad, measureOut,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, productRateForN, eiqLoad, measureOut,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -5953,6 +5953,7 @@ function RotationReport({ sheets, products }) {
 function CostReport({ sheets, products, areas, courseInfo = {}, onSaveSettings }) {
   const [view, setView] = useState('product') // 'product' | 'area' | 'month'
   const data = productCosts(sheets, products, areas)
+  const cpma = costCPMA(sheets, products, areas)
   const money = (n) => `$${(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const money0 = (n) => `$${Math.round(n || 0).toLocaleString('en-US')}`
   const monthLabel = (m) => { const [y, mm] = m.split('-'); return new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) }
@@ -5994,7 +5995,11 @@ function CostReport({ sheets, products, areas, courseInfo = {}, onSaveSettings }
 
   const lists = {
     product: data.rows.map((r) => ({ key: r.name, label: r.name, sub: `${r.apps} application${r.apps !== 1 ? 's' : ''}${r.type ? ` · ${r.type}` : ''}`, cost: r.cost })),
-    area: data.byArea.map((r) => ({ key: r.area, label: r.area, sub: '', cost: r.cost })),
+    area: data.byArea.map((r) => {
+      const sqft = Number(areas[r.area]?.sqft) || (Number(areas[r.area]?.acres) ? Number(areas[r.area].acres) * 43560 : 0)
+      const sub = sqft ? `${money(r.cost / (sqft / 1000))}/M · ${money0(r.cost / (sqft / 43560))}/ac` : 'no size set'
+      return { key: r.area, label: r.area, sub, cost: r.cost }
+    }),
     month: data.byMonth.map((r) => ({ key: r.month, label: monthLabel(r.month), sub: '', cost: r.cost })),
   }
   const rows = lists[view]
@@ -6004,8 +6009,11 @@ function CostReport({ sheets, products, areas, courseInfo = {}, onSaveSettings }
     const out = [['Product', 'Type', 'Applications', 'Cost ($)']]
     data.rows.forEach((r) => out.push([r.name, r.type, r.apps, r.cost]))
     out.push([])
-    out.push(['Area', 'Cost ($)'])
-    data.byArea.forEach((r) => out.push([r.area, r.cost]))
+    out.push(['Area', 'Cost ($)', 'Sq ft', 'Cost / 1,000 sq ft ($)', 'Cost / acre ($)'])
+    data.byArea.forEach((r) => {
+      const sqft = Number(areas[r.area]?.sqft) || (Number(areas[r.area]?.acres) ? Number(areas[r.area].acres) * 43560 : 0)
+      out.push([r.area, r.cost, Math.round(sqft) || '', sqft ? Math.round((r.cost / (sqft / 1000)) * 100) / 100 : '', sqft ? Math.round((r.cost / (sqft / 43560)) * 100) / 100 : ''])
+    })
     out.push([])
     out.push(['Month', 'Cost ($)'])
     data.byMonth.forEach((r) => out.push([r.month, r.cost]))
@@ -6084,6 +6092,26 @@ function CostReport({ sheets, products, areas, courseInfo = {}, onSaveSettings }
           </div>
         )}
       </div>
+
+      {/* Cost per 1,000 sq ft / acre — month- and year-to-date (Playbooks "CPMA") */}
+      {(cpma.ytd.total > 0 || cpma.mtd.total > 0) && (
+        <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4 mb-4">
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Cost per area · normalized</p>
+          <div className="grid grid-cols-2 gap-3">
+            {[['This month', cpma.mtd], ['This year', cpma.ytd]].map(([label, w]) => (
+              <div key={label} className="rounded-xl p-3" style={{ backgroundColor: '#F5FAF6' }}>
+                <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+                <p className="font-display text-xl font-bold text-slate-900 mt-0.5">{money0(w.total)}</p>
+                <p className="font-body text-[11px] text-slate-500 mt-0.5">
+                  {w.per1000 != null ? <>{money(w.per1000)}<span className="text-slate-400">/M</span></> : '—'}
+                  {w.perAcre != null && <> · {money0(w.perAcre)}<span className="text-slate-400">/ac</span></>}
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="font-body text-[10px] text-slate-400 mt-2">Per 1,000 sq ft (/M) and per acre (/ac), using each sprayed area's size from Settings. Counts sprays that have gone out. Switch to the Area view below for a per-area breakdown.</p>
+        </div>
+      )}
 
       {editBudget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditBudget(false)}>
