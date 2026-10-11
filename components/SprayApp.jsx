@@ -60,7 +60,7 @@ import {
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
-  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productRateForN, eiqLoad, measureOut,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productStockValue, productRateForN, eiqLoad, measureOut,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -269,6 +269,7 @@ const NAV_MANAGER = [
     { id: 'sheets', label: 'Spray Sheets', m: 'spray', r: 'list', follow: true },
     { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert', follow: true },
     { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
+    { id: 'invcount', label: 'Inventory Count', m: 'spray', r: 'invcount' },
     { id: 'chemguide', label: 'Chemistry Guide', m: 'spray', r: 'chemguide' },
   ] },
   { title: 'Agronomy', items: [
@@ -1075,6 +1076,9 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
             onSaveProduct={saveProduct} onDeleteProduct={removeProduct} onImport={importProductsFromSheet} onAddDelivery={addDelivery}
           />
         )}
+        {route === 'invcount' && manage && (
+          <InventoryAudit products={products} onSaveProduct={saveProduct} userName={user?.fullName || user?.email || ''} />
+        )}
         {route === 'chemguide' && <ChemistryGuide courseInfo={courseInfo} products={products} grassTypes={grassTypes} manage={manage} onSave={async (chemGuide) => { await saveSettings({ courseInfo: { ...courseInfo, chemGuide } }) }} />}
         {route === 'inventory' && !manage && (
           <Inventory products={products} deliveries={deliveries} onAddDelivery={addDelivery} />
@@ -1474,6 +1478,137 @@ function TodayList({ items }) {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+// Inventory count / audit — a phone-friendly count sheet. Enter the physically
+// counted quantity per product; the screen shows the variance against the
+// computed stock, and "Apply" updates stock and logs each adjustment (who,
+// when, from → to) to the audit trail.
+function InventoryAudit({ products = [], onSaveProduct, userName = '' }) {
+  const [counted, setCounted] = useState({}) // product name -> typed string
+  const [q, setQ] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [history, setHistory] = useState([])
+  const [histOpen, setHistOpen] = useState(false)
+
+  useEffect(() => { db.fetchInventoryCounts(50).then(setHistory).catch(() => {}) }, [])
+
+  const needle = q.trim().toLowerCase()
+  const list = (products || [])
+    .filter((p) => p.name && (!needle || p.name.toLowerCase().includes(needle)))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  const edits = Object.entries(counted)
+    .filter(([, v]) => v !== '' && v != null && Number.isFinite(Number(v)))
+    .map(([name, v]) => {
+      const p = (products || []).find((x) => x.name === name) || {}
+      const prev = Number(p.stock) || 0
+      const cv = Number(v)
+      return { name, prev, counted: cv, variance: Math.round((cv - prev) * 100) / 100, unit: p.unit || '' }
+    })
+    .filter((e) => e.variance !== 0)
+
+  const apply = async () => {
+    if (!edits.length || busy) return
+    setBusy(true); setMsg(null)
+    try {
+      for (const e of edits) {
+        const p = (products || []).find((x) => x.name === e.name)
+        if (p) await onSaveProduct({ ...p, stock: e.counted })
+      }
+      await db.addInventoryCounts(edits.map((e) => ({ countedBy: userName, product: e.name, prevStock: e.prev, countedStock: e.counted, variance: e.variance, unit: e.unit })))
+      setCounted({})
+      setMsg({ type: 'ok', text: `Updated ${edits.length} product${edits.length !== 1 ? 's' : ''} and logged the count.` })
+      db.fetchInventoryCounts(50).then(setHistory).catch(() => {})
+    } catch (e) { setMsg({ type: 'err', text: `Couldn't save — ${e.message}` }) }
+    setBusy(false)
+  }
+
+  const vColor = (v) => (v > 0 ? FERN : RED)
+  return (
+    <div className="pt-6 pb-28">
+      <SectionHeader title="Inventory Count" subtitle="Count the shelf, enter each number, and apply — stock updates and every change is logged." />
+
+      {(() => {
+        let total = 0; let priced = 0
+        ;(products || []).forEach((p) => { const v = productStockValue(p); if (v != null) { total += v; priced++ } })
+        if (!priced) return null
+        return (
+          <div className="rounded-2xl p-4 text-white shadow-sm mt-3" style={{ backgroundColor: FOREST }}>
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Inventory value on hand</p>
+            <p className="font-display text-2xl font-bold mt-0.5">${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="font-body text-[10px] opacity-70">{priced} priced product{priced !== 1 ? 's' : ''} · stock × case price</p>
+          </div>
+        )
+      })()}
+
+      <div className="relative my-3">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search products…" className="w-full border border-slate-200 rounded-full pl-9 pr-3 py-2 text-sm font-body bg-white" />
+      </div>
+
+      <div className="space-y-1.5">
+        {list.map((p) => {
+          const prev = Number(p.stock) || 0
+          const raw = counted[p.name]
+          const has = raw !== '' && raw != null && Number.isFinite(Number(raw))
+          const v = has ? Math.round((Number(raw) - prev) * 100) / 100 : null
+          return (
+            <div key={p.name} className="bg-white rounded-xl border border-black/5 p-3 flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-body text-[13.5px] font-bold truncate" style={{ color: FOREST }}>{p.name}</p>
+                <p className="font-body text-[11px]" style={{ color: INK_3 }}>On hand: {prev}{p.unit ? ` ${p.unit}` : ''}</p>
+              </div>
+              {v != null && v !== 0 && (
+                <span className="font-body text-[12px] font-bold tabular-nums whitespace-nowrap" style={{ color: vColor(v) }}>{v > 0 ? '+' : ''}{v}</span>
+              )}
+              <input inputMode="decimal" value={raw ?? ''} onChange={(e) => setCounted((m) => ({ ...m, [p.name]: e.target.value }))}
+                placeholder="count" className="w-20 shrink-0 rounded-lg px-2 py-2 text-base text-center tabular-nums" style={{ border: `1px solid ${HAIR}`, background: 'white', color: INK }} />
+            </div>
+          )
+        })}
+        {list.length === 0 && <p className="font-body text-sm text-center py-6" style={{ color: INK_3 }}>No products match “{q}”.</p>}
+      </div>
+
+      {history.length > 0 && (
+        <div className="mt-5">
+          <button onClick={() => setHistOpen((o) => !o)} className="font-body text-[12px] font-bold" style={{ color: FERN }}>
+            {histOpen ? 'Hide' : 'Show'} recent counts ({history.length})
+          </button>
+          {histOpen && (
+            <div className="mt-2 space-y-1">
+              {history.slice(0, 40).map((h) => (
+                <div key={h.id} className="flex items-center gap-2 text-[11px] font-body py-1 border-b" style={{ borderColor: '#F1F3EF', color: INK_2 }}>
+                  <span className="font-bold" style={{ color: FOREST }}>{h.product}</span>
+                  <span>{h.prevStock} → {h.countedStock}{h.unit ? ` ${h.unit}` : ''}</span>
+                  <span className="font-bold" style={{ color: vColor(h.variance) }}>({h.variance > 0 ? '+' : ''}{h.variance})</span>
+                  <span className="flex-1" />
+                  <span style={{ color: INK_3 }}>{fmtDate(String(h.countedAt).slice(0, 10))}{h.countedBy ? ` · ${h.countedBy}` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Apply bar */}
+      {edits.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 p-3" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.08), transparent)' }}>
+          <div className="max-w-xl mx-auto bg-white rounded-2xl border-2 shadow-xl p-3 flex items-center gap-3" style={{ borderColor: GOLD }}>
+            <p className="font-body text-[12px] flex-1" style={{ color: INK_2 }}>
+              <b style={{ color: FOREST }}>{edits.length}</b> change{edits.length !== 1 ? 's' : ''} to apply
+            </p>
+            <button onClick={() => setCounted({})} className="font-body text-[12px] font-bold px-3 py-2 rounded-full" style={{ color: INK_3 }}>Clear</button>
+            <button onClick={apply} disabled={busy} className="font-body text-sm font-bold px-4 py-2 rounded-full text-white disabled:opacity-50 flex items-center gap-2" style={{ background: FOREST }}>
+              {busy ? <Loader2 size={14} className="animate-spin" /> : null}{busy ? 'Saving…' : 'Apply counts'}
+            </button>
+          </div>
+        </div>
+      )}
+      {msg && <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: msg.type === 'err' ? RED : INK }}>{msg.text}</div>}
     </div>
   )
 }
