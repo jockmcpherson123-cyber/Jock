@@ -110,7 +110,7 @@ import ChemistryGuide from '@/components/ChemistryGuide'
 const productJug = (prod) => (prod && prod.jugSize > 0 ? { size: Number(prod.jugSize), unit: prod.jugUnit || 'gal' } : null)
 
 // ── PALETTE ───────────────────────────────────────────────────────────────
-import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, AMBER } from '@/lib/theme'
+import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, AMBER, RED } from '@/lib/theme'
 const CREAM = '#F7F5EF'
 // Clubhouse × Instrument restyle: "soft stone" surfaces + warm-neutral inks
 // (warmth dialled out). Mirrors the CSS tokens in globals.css so inline styles
@@ -993,7 +993,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
           />
         )}
         {route === 'list' && (
-          <SheetList sheets={visibleSheets} manage={manage} variant="manage" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} onDelete={removeSheet} onImportHistory={importHistory} />
+          <SheetList sheets={visibleSheets} allSheets={sheets} products={products} manage={manage} variant="manage" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} onDelete={removeSheet} onImportHistory={importHistory} />
         )}
         {route === 'tospray' && (
           <SheetList sheets={visibleSheets} manage={manage} variant="tospray" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
@@ -2041,9 +2041,9 @@ function matchSheetFilter(s, f) {
   return true
 }
 
-function SheetList({ sheets, onOpen, onNew, onDelete, onImportHistory, manage, variant = 'manage' }) {
+function SheetList({ sheets, allSheets, products, onOpen, onNew, onDelete, onImportHistory, manage, variant = 'manage' }) {
   const [confirmDelete, setConfirmDelete] = useState(null) // sheet pending deletion
-  const [histPrev, setHistPrev] = useState(null) // { sheets, count, rowCount, error, fileName }
+  const [histPrev, setHistPrev] = useState(null) // { sheets, count, rowCount, error, fileName, dupCount, newCount, unknownNames, skip:Set }
   const [histBusy, setHistBusy] = useState(false)
   const histFileRef = useRef(null)
 
@@ -2052,17 +2052,34 @@ function SheetList({ sheets, onOpen, onNew, onDelete, onImportHistory, manage, v
     e.target.value = ''
     if (!file) return
     try {
-      const { parseSprayHistory } = await import('@/lib/importXlsx')
+      const { parseSprayHistory, annotateSprayImport } = await import('@/lib/importXlsx')
       const res = parseSprayHistory(await file.arrayBuffer())
-      setHistPrev({ ...res, fileName: file.name })
+      if (res.error || !res.sheets?.length) { setHistPrev({ ...res, fileName: file.name }); return }
+      // Canonicalize product names (aliases) + flag likely duplicates and
+      // products not yet in the library. Duplicates default to skip.
+      const ann = annotateSprayImport(res.sheets, allSheets || [], products || [])
+      const skip = new Set(ann.sheets.map((s, i) => (s._skip ? i : -1)).filter((i) => i >= 0))
+      setHistPrev({ ...res, sheets: ann.sheets, dupCount: ann.dupCount, newCount: ann.newCount, unknownNames: ann.unknownNames, skip, fileName: file.name })
     } catch {
       setHistPrev({ sheets: [], count: 0, error: 'Could not read that file. Make sure it is a .xlsx spreadsheet.', fileName: file.name })
     }
   }
+  const toggleSkip = (i) => setHistPrev((p) => {
+    if (!p) return p
+    const skip = new Set(p.skip)
+    skip.has(i) ? skip.delete(i) : skip.add(i)
+    return { ...p, skip }
+  })
   const confirmHist = async () => {
     if (!histPrev?.sheets?.length) return
+    const skip = histPrev.skip || new Set()
+    // Keep only non-skipped sheets, and strip the annotation fields before save.
+    const toSave = histPrev.sheets
+      .filter((_, i) => !skip.has(i))
+      .map(({ _dup, _skip, _unknown, ...s }) => ({ ...s, products: (s.products || []).map(({ _unknown, ...p }) => p) }))
+    if (!toSave.length) { setHistPrev(null); return }
     setHistBusy(true)
-    try { await onImportHistory(histPrev.sheets); setHistPrev(null) }
+    try { await onImportHistory(toSave); setHistPrev(null) }
     catch { setHistPrev((p) => ({ ...p, error: 'Could not save the import. Try again.' })) }
     setHistBusy(false)
   }
@@ -2127,20 +2144,63 @@ function SheetList({ sheets, onOpen, onNew, onDelete, onImportHistory, manage, v
           <p className="font-display text-base font-semibold text-slate-900 mb-1">Import history from “{histPrev.fileName}”</p>
           {histPrev.error ? (
             <p className="font-body text-sm text-red-600 mt-1">{histPrev.error}</p>
-          ) : (
-            <p className="font-body text-sm text-slate-600">
-              Found <b>{histPrev.rowCount}</b> product line{histPrev.rowCount !== 1 ? 's' : ''} across <b>{histPrev.count}</b> spray day{histPrev.count !== 1 ? 's' : ''}. These import as completed sprays so they feed all your reports (rotation, usage, GDD, days-since). Nothing is deleted.
-            </p>
+          ) : (() => {
+            const skip = histPrev.skip || new Set()
+            const willImport = histPrev.sheets.filter((_, i) => !skip.has(i)).length
+            return (
+              <>
+                <p className="font-body text-sm text-slate-600">
+                  Found <b>{histPrev.rowCount}</b> product line{histPrev.rowCount !== 1 ? 's' : ''} across <b>{histPrev.count}</b> spray day{histPrev.count !== 1 ? 's' : ''}. These import as completed sprays so they feed all your reports. Nothing is deleted.
+                </p>
+                {(histPrev.dupCount > 0 || histPrev.unknownNames?.length > 0) && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {histPrev.dupCount > 0 && (
+                      <span className="font-body text-[11px] font-bold px-2 py-1 rounded-full" style={{ background: '#FBEAE7', color: RED }}>
+                        {histPrev.dupCount} look like duplicates — skipped
+                      </span>
+                    )}
+                    {histPrev.unknownNames?.length > 0 && (
+                      <span className="font-body text-[11px] font-bold px-2 py-1 rounded-full" style={{ background: '#FDF3DF', color: AMBER }}>
+                        {histPrev.unknownNames.length} product{histPrev.unknownNames.length !== 1 ? 's' : ''} not in your library
+                      </span>
+                    )}
+                  </div>
+                )}
+                {histPrev.unknownNames?.length > 0 && (
+                  <p className="font-body text-[11px] mt-1.5" style={{ color: INK_3 }}>
+                    Not in the library (they still import, but won’t count for nutrients/AI until added): {histPrev.unknownNames.join(', ')}
+                  </p>
+                )}
+                <div className="mt-3 max-h-60 overflow-y-auto rounded-xl border" style={{ borderColor: '#EEF0EC' }}>
+                  {histPrev.sheets.map((s, i) => {
+                    const skipped = skip.has(i)
+                    return (
+                      <label key={i} className="flex items-center gap-2.5 px-3 py-2 border-b last:border-b-0 cursor-pointer" style={{ borderColor: '#F1F3EF', opacity: skipped ? 0.55 : 1 }}>
+                        <input type="checkbox" checked={!skipped} onChange={() => toggleSkip(i)} className="shrink-0" />
+                        <span className="font-body text-[11px] font-bold whitespace-nowrap" style={{ color: INK_2 }}>{fmtDate(s.date)}</span>
+                        <span className="font-body text-[11px] font-semibold truncate" style={{ color: FOREST }}>{s.area}</span>
+                        {s._dup && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: '#FBEAE7', color: RED }}>DUP</span>}
+                        <span className="flex-1" />
+                        <span className="font-body text-[10px] whitespace-nowrap" style={{ color: INK_3 }}>{(s.products || []).length} prod</span>
+                      </label>
+                    )
+                  })}
+                </div>
+                <div className="flex gap-2 pt-3">
+                  <button onClick={() => setHistPrev(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+                  <button onClick={confirmHist} disabled={histBusy || willImport === 0} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-60 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
+                    {histBusy ? <Loader2 size={15} className="animate-spin" /> : null}
+                    {histBusy ? 'Importing…' : `Import ${willImport} spray day${willImport !== 1 ? 's' : ''}`}
+                  </button>
+                </div>
+              </>
+            )
+          })()}
+          {histPrev.error && (
+            <div className="flex gap-2 pt-3">
+              <button onClick={() => setHistPrev(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Close</button>
+            </div>
           )}
-          <div className="flex gap-2 pt-3">
-            <button onClick={() => setHistPrev(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
-            {!histPrev.error && histPrev.count > 0 && (
-              <button onClick={confirmHist} disabled={histBusy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-60 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
-                {histBusy ? <Loader2 size={15} className="animate-spin" /> : null}
-                {histBusy ? 'Importing…' : `Import ${histPrev.count} spray day${histPrev.count !== 1 ? 's' : ''}`}
-              </button>
-            )}
-          </div>
         </div>
       )}
 
