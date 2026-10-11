@@ -10,7 +10,7 @@
 //    • It receives the current `user` (with role) from the server.
 // ════════════════════════════════════════════════════════════════════════
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import {
   Plus,
   Trash2,
