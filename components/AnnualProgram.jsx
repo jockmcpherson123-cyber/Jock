@@ -5,7 +5,7 @@
 // then browse it by area. (Editing individual applications, the early-order
 // calculator and auto-populating spray sheets come in the next phase.)
 import { useState, useEffect, useRef } from 'react'
-import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid, Sparkles, X } from 'lucide-react'
+import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid, Sparkles, TrendingUp, X } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
 import { downloadCSV } from '@/lib/calc'
@@ -20,6 +20,7 @@ import { localDateISO } from '@/lib/dates'
 import { diseasesForProduct } from '@/lib/fungicides'
 import { DEFAULT_TARGETS, sortByMixOrder } from '@/lib/defaults'
 import { MultiSelect, SearchSelect } from '@/components/pickers'
+import ProductPerformance from '@/components/ProductPerformance'
 
 // ── Coverage grid helpers ────────────────────────────────────────────────────
 // Every application protects its area for a stretch (coverageDays). We paint the
@@ -1479,7 +1480,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           {/* View toggle — scrolls sideways on a phone instead of forcing the
               whole page wide (5 pills don't fit an iPhone width). */}
           <div className="flex items-center gap-2 mb-3 overflow-x-auto no-scrollbar [&>*]:shrink-0">
-            {[['sheet', 'Sheet', FileSpreadsheet], ['now', 'This Week', Gauge], ['coverage', 'Coverage', LayoutGrid], ['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
+            {[['sheet', 'Sheet', FileSpreadsheet], ['now', 'This Week', Gauge], ['performance', 'Performance', TrendingUp], ['coverage', 'Coverage', LayoutGrid], ['timeline', 'Timeline', CalendarDays], ['area', 'By Area', MapPin], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setViewMode(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 transition" style={viewMode === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
                 <Icon size={13} /> {label}
               </button>
@@ -1498,7 +1499,9 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
             ))}
           </div>
 
-          {visibleApps.length === 0 ? (
+          {viewMode === 'performance' ? (
+            <ProductPerformance sheets={sheets} products={products} daily={season} location={location} courseInfo={courseInfo} />
+          ) : visibleApps.length === 0 ? (
             <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No applications in this program.</div>
           ) : viewMode === 'sheet' ? (
             (() => {

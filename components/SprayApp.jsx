@@ -94,6 +94,7 @@ import TurfBrief from '@/components/TurfBrief'
 import ProgramAdvice from '@/components/ProgramAdvice'
 import StimpCam from '@/components/StimpCam'
 import GpsCoverage from '@/components/GpsCoverage'
+import ProductPerformance from '@/components/ProductPerformance'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
 import Growth from '@/components/Growth'
@@ -1654,18 +1655,10 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
             onCreateFromProgram={manage ? onCreateFromProgram : undefined}
           />
 
-          {/* Insight cards — two-across on very wide screens so there's less scrolling */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-            {/* Recent fungicide sprays — a plain record of what went down & covers */}
-            {manage && fungLog.length > 0 && (
-              <FungicideLogCard areas={fungLog} />
-            )}
-
-            {/* PGR reapply timing — GDD since each area's last growth-reg spray */}
-            {manage && pgrRows.length > 0 && (
-              <PgrTimingCard rows={pgrRows} target={PGR_TARGET} />
-            )}
-          </div>
+          {/* Product performance — one unified residual tracker (days + GDD), by area */}
+          {manage && (
+            <ProductPerformance sheets={sheets} products={products} daily={wx.season} location={location} courseInfo={courseInfo} />
+          )}
 
           {/* From the Program — turn the plan into spray sheets */}
           {create && upcomingGroups.length > 0 && (
