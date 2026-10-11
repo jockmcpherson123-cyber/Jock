@@ -95,6 +95,7 @@ import ProgramAdvice from '@/components/ProgramAdvice'
 import StimpCam from '@/components/StimpCam'
 import GpsCoverage from '@/components/GpsCoverage'
 import ProductPerformance from '@/components/ProductPerformance'
+import { libraryComplianceGaps } from '@/lib/compliance'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
 import Growth from '@/components/Growth'
@@ -983,6 +984,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
           <Dashboard
             sheets={visibleSheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
             manage={manage} programApps={course ? programApps.filter((a) => inCourse(a.area)) : programApps} location={location} courseInfo={courseInfo}
+            applicatorLicenses={applicatorLicenses} onGoSettings={() => setRoute('settings')}
             homeMode={homeMode}
             onOpen={(s) => { setActiveSheet(s); setRoute('view') }}
             onNew={newSheet}
@@ -1476,7 +1478,61 @@ function TodayList({ items }) {
   )
 }
 
-function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, courseInfo, onGoWeather, onGo, homeMode }) {
+// Compliance completeness — the per-sheet "missing for an inspection record"
+// check, run across the whole library. Shows nothing when everything's on file;
+// otherwise lists products and people with paperwork gaps, recently-used first.
+function ComplianceCard({ products = [], sheets = [], licenses = {}, onGoSettings }) {
+  const [open, setOpen] = useState(false)
+  const gaps = useMemo(() => libraryComplianceGaps(products, sheets, licenses), [products, sheets, licenses])
+  if (!gaps.total) return null
+  const shown = open ? gaps.productGaps : gaps.productGaps.slice(0, 5)
+  return (
+    <section>
+      <div className="rounded-2xl border-2 p-4" style={{ background: '#FEF3DD', borderColor: '#FDE9C8' }}>
+        <div className="flex items-start gap-2.5">
+          <AlertTriangle size={18} className="shrink-0 mt-0.5" style={{ color: '#92660D' }} />
+          <div className="flex-1 min-w-0">
+            <p className="font-body text-sm font-bold" style={{ color: '#92660D' }}>
+              Compliance records — {gaps.total} gap{gaps.total !== 1 ? 's' : ''} to fill
+            </p>
+            <p className="font-body text-[12px] mt-0.5" style={{ color: '#92660D' }}>
+              Missing paperwork an inspector or EMS crew would ask for{gaps.recentGapCount > 0 ? `, including ${gaps.recentGapCount} product${gaps.recentGapCount !== 1 ? 's' : ''} you've used in the last year` : ''}.
+            </p>
+
+            <div className="mt-2.5 space-y-1">
+              {shown.map((g) => (
+                <div key={g.name} className="flex items-center gap-2 flex-wrap">
+                  {g.used && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: '#FBEAE7', color: RED }}>USED</span>}
+                  <span className="font-body text-[12.5px] font-bold" style={{ color: FOREST }}>{g.name}</span>
+                  <span className="font-body text-[11px]" style={{ color: '#92660D' }}>{g.missing.join(' · ')}</span>
+                </div>
+              ))}
+              {!open && gaps.productGaps.length > 5 && (
+                <button onClick={() => setOpen(true)} className="font-body text-[11px] font-bold underline" style={{ color: '#92660D' }}>
+                  +{gaps.productGaps.length - 5} more product{gaps.productGaps.length - 5 !== 1 ? 's' : ''}
+                </button>
+              )}
+              {gaps.peopleGaps.map((p) => (
+                <div key={p.name} className="flex items-center gap-2 flex-wrap">
+                  <span className="font-body text-[12.5px] font-bold" style={{ color: FOREST }}>{p.name}</span>
+                  <span className="font-body text-[11px]" style={{ color: '#92660D' }}>{p.missing.join(' · ')}</span>
+                </div>
+              ))}
+            </div>
+
+            {onGoSettings && (
+              <button onClick={onGoSettings} className="mt-3 font-body text-[12px] font-bold px-3 py-1.5 rounded-full inline-flex items-center gap-1" style={{ background: '#fff', border: '1px solid #FDE9C8', color: '#92660D' }}>
+                Fix in Settings <ChevronRight size={13} />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function Dashboard({ sheets, pending, approved, todaySheets, products, areas, onOpen, onNew, onSeeAll, manage, programApps = [], onCreateFromProgram, location, courseInfo, onGoWeather, onGo, homeMode, applicatorLicenses = {}, onGoSettings }) {
   // Home is a read-only overview — the create-a-spray-sheet affordances live on
   // the Annual Program and Spray Sheets screens, not here.
   const create = manage && !homeMode
@@ -1654,6 +1710,9 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
             onOpenSheet={onOpen}
             onCreateFromProgram={manage ? onCreateFromProgram : undefined}
           />
+
+          {/* Compliance completeness — paperwork gaps across the whole library */}
+          {manage && <ComplianceCard products={products} sheets={sheets} licenses={applicatorLicenses} onGoSettings={onGoSettings} />}
 
           {/* Product performance — one unified residual tracker (days + GDD), by area */}
           {manage && (
