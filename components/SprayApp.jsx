@@ -7047,8 +7047,32 @@ function SprayersSettings({ courseInfo = {}, onSave }) {
     printRecordSinglePage(html)
   }
 
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const readingsUrl = `${origin}/api/readings`
+  const enableFeed = async () => {
+    const gen = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)).replace(/-/g, '').slice(0, 16)
+    await save(sprayers, { partsKey: gen })
+  }
+  const copy = (text) => { try { navigator.clipboard?.writeText(text) } catch { /* ignore */ } }
+
   return (
     <div className="max-w-2xl space-y-4">
+      {/* Sensor / DEACON data feed — POST readings straight into Field Data */}
+      <div className="bg-white rounded-2xl border border-black/5 p-5 shadow-sm">
+        <p className="font-display text-base font-semibold text-slate-900 mb-1">Sensor / DEACON data feed</p>
+        <p className="font-body text-[13px] text-slate-500 mb-3">Let DEACON, POGO, Spiio or a scheduled job POST moisture, green speed, firmness &amp; clipping readings straight into Field Data — no browser scraping. They go to this URL with your club key.</p>
+        {key ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <code className="flex-1 min-w-0 truncate font-mono text-[12px] bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2">{readingsUrl}?k={key}</code>
+              <button onClick={() => copy(`${readingsUrl}?k=${key}`)} className="font-body text-[11px] font-bold px-3 py-2 rounded-full shrink-0" style={{ color: FOREST, border: `1px solid ${HAIR}` }}>Copy</button>
+            </div>
+            <p className="font-body text-[11px] text-slate-400">POST JSON <code className="font-mono">{'{ k, readings:[{type, area, date, value, unit}] }'}</code> or CSV (<code className="font-mono">type,area,date,value,unit</code>). Types: moisture, clipping, greenspeed, firmness. It uses the same key as the crew QR codes.</p>
+          </div>
+        ) : (
+          <button onClick={enableFeed} className="font-body text-sm font-bold px-4 py-2.5 rounded-xl text-white" style={{ backgroundColor: FOREST }}>Enable data feed</button>
+        )}
+      </div>
       <div className="bg-white rounded-2xl border border-black/5 p-5 shadow-sm">
         <p className="font-display text-base font-semibold text-slate-900 mb-1">Sprayers &amp; rigs</p>
         <p className="font-body text-[13px] text-slate-500 mb-4">Register each spray machine and print it a permanent QR sticker. From any spray record, tap <b>“Set as sprayer mix”</b> to tie that mix to a rig — then scanning the sticker shows what’s loaded and links to the labels.</p>
