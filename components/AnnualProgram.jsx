@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid, Sparkles, TrendingUp, X } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
-import { downloadCSV, areaRate } from '@/lib/calc'
+import { downloadCSV, areaRate, sheetsToApplications, sprayYears } from '@/lib/calc'
 import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
 import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
 import { buildProgram, toApplications, classifySurface, SURFACE_LABEL, grassesForSurface } from '@/lib/programgen'
@@ -100,7 +100,7 @@ const STATUS_STYLE = {
   done:    { bg: '#E8EAE6', fg: '#6B7280', label: 'Done' },
 }
 
-import { FOREST, FERN, GOLD } from '@/lib/theme'
+import { FOREST, FERN, GOLD, HAIR, PAPER, INK_2, AMBER } from '@/lib/theme'
 
 // A live-status pill for an application/event in the Living Calendar.
 function StatusChip({ status, size = 'sm' }) {
@@ -366,6 +366,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   // The build+save runs inside the dialog (BuildSetup); the parent just opens
   // it, refreshes on save, and runs the optional climate refinement.
   const [bpSetup, setBpSetup] = useState(null) // { year, selected: {areaName:bool} }
+  const [fromSprays, setFromSprays] = useState(null) // open = the "build from logged sprays" picker
 
   function openBuildSetup() {
     const names = Object.keys(areas || {})
@@ -473,6 +474,29 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     } catch (e) {
       console.error(e)
     }
+  }
+
+  // Build (or add to) a year's program from the logged spray sheets — one
+  // application per product line, linked back to its sheet so the program and
+  // the records stay tied together.
+  async function buildFromSprays(year) {
+    setBusy(true)
+    try {
+      const apps = sheetsToApplications(sheets, year, products)
+      if (!apps.length) { showToast(`No logged sprays found for ${year}`); setBusy(false); return }
+      let prog = programs.find((p) => Number(p.year) === Number(year))
+      if (!prog) prog = await db.createProgram({ year: Number(year), name: `${year} Program (from logged sprays)` })
+      await db.bulkInsertApplications(prog.id, apps)
+      await loadPrograms()
+      const fresh = (await db.fetchPrograms()).find((p) => p.id === prog.id) || prog
+      await selectProgram(fresh)
+      setFromSprays(null)
+      showToast(`Built ${year} program — ${apps.length} application${apps.length !== 1 ? 's' : ''} from your sprays`)
+    } catch (e) {
+      console.error(e)
+      showToast('Could not build from sprays — ' + (e?.message || 'unknown error'))
+    }
+    setBusy(false)
   }
 
   async function onFileChosen(e) {
@@ -978,6 +1002,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                 <div className="fixed inset-0 z-40" onClick={() => setToolsOpen(false)} />
                 <div className="absolute right-0 mt-1 z-50 w-52 rounded-xl shadow-xl py-1 bg-white" style={{ border: '1px solid #E2E8F0' }}>
                   {[
+                    ['Build from logged sprays', () => setFromSprays(true), true],
                     ['Build from Models', () => openBuildSetup(), true],
                     ['Import full plan (Excel)', () => fileRef.current?.click(), true],
                     ...(activeProgram ? [['Import sprays (Excel)', () => flatFileRef.current?.click(), true], ['Download blank template', () => downloadFlatTemplate(), true]] : []),
@@ -990,6 +1015,38 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           </div>
         </div>
       </div>
+
+      {fromSprays && (() => {
+        const yrs = sprayYears(sheets)
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => !busy && setFromSprays(null)}>
+            <div className="bg-white rounded-2xl border-2 p-4 shadow-2xl w-full max-w-sm" style={{ borderColor: GOLD }} onClick={(e) => e.stopPropagation()}>
+              <p className="font-display text-base font-semibold mb-1" style={{ color: FOREST }}>Build a program from logged sprays</p>
+              <p className="font-body text-xs text-slate-500 mb-3">Turns the sprays you&apos;ve logged for a year into that year&apos;s Annual Program — one application per product, linked back to the spray record. Pick a year:</p>
+              {yrs.length === 0 ? (
+                <p className="font-body text-sm text-slate-400 py-3 text-center">No logged sprays found yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {yrs.map(({ year, sprays }) => {
+                    const exists = programs.find((p) => Number(p.year) === Number(year))
+                    return (
+                      <button key={year} onClick={() => !busy && buildFromSprays(year)} disabled={busy} className="w-full flex items-center justify-between gap-3 rounded-xl border p-3 text-left disabled:opacity-50" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
+                        <div>
+                          <span className="font-display text-[15px] font-bold" style={{ color: FOREST }}>{year}</span>
+                          <span className="font-body text-[12px] ml-2" style={{ color: INK_2 }}>{sprays} spray{sprays !== 1 ? 's' : ''} logged</span>
+                          {exists && <div className="font-body text-[11px] mt-0.5" style={{ color: AMBER }}>A {year} program exists — these will be added to it</div>}
+                        </div>
+                        <span className="font-body text-xs font-bold px-3 py-1.5 rounded-full text-white shrink-0" style={{ backgroundColor: FOREST }}>{exists ? 'Add' : 'Build'}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              <button onClick={() => !busy && setFromSprays(null)} className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">{busy ? 'Building…' : 'Cancel'}</button>
+            </div>
+          </div>
+        )
+      })()}
 
       {bpSetup && (
         <BuildSetup
