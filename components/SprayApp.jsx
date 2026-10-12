@@ -3255,7 +3255,8 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
   const FOR = '#16291F', MUT = '#8A8984', LINE = '#E2E0DB', GLD = '#C9A84C'
   const g = (v) => (v == null || v === '' ? '—' : esc(v))
   const acres = area.sqft ? (area.sqft / 43560).toFixed(2) : null
-  const bdT = tankBreakdown(area.sqft, area.waterRate, area.galTank)
+  const manualTanksT = sheet.tanksManual && Number(sheet.tanks) > 0 ? Number(sheet.tanks) : null
+  const bdT = tankBreakdown(area.sqft, area.waterRate, area.galTank, manualTanksT)
   const perTankSqftT = bdT.sqftPerTank > 0 ? Math.min(area.sqft || bdT.sqftPerTank, bdT.sqftPerTank) : (area.sqft || 0)
 
   const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p) => {
@@ -3578,15 +3579,25 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
   const area = { ...baseArea, sqft: numOr2(sheet.sqft, baseArea.sqft), galTank: numOr2(sheet.galTank, baseArea.galTank), nozzle: sheet.nozzle ?? baseArea.nozzle, psi: sheet.psi ?? baseArea.psi, waterRate: numOr2(sheet.waterRate, impliedRate2) }
   const productIds = sheet.products.filter((p) => p.product).map((p) => p.id)
   // Full tanks + the leftover partial — never rounded. e.g. 6 tanks + 45 gal.
-  const bd = tankBreakdown(area.sqft, area.waterRate, area.galTank)
-  const tankCount = sheet.tanks || bd.tanksToMix || 1
+  // Honor a hand-set tank count so the split, per-tank amounts and label match.
+  const manualTanksV = sheet.tanksManual && Number(sheet.tanks) > 0 ? Number(sheet.tanks) : null
+  const bd = tankBreakdown(area.sqft, area.waterRate, area.galTank, manualTanksV)
+  const tankCount = manualTanksV || sheet.tanks || bd.tanksToMix || 1
   const tanksLabel = (bd.fullTanks > 0 || bd.remainderGal > 0)
     ? `${bd.fullTanks} tank${bd.fullTanks === 1 ? '' : 's'}${bd.remainderGal > 0 ? ` + ${bd.remainderGal} gal` : ''}`
     : (sheet.tanks ? `${sheet.tanks}` : '—')
   // The last tank is the partial when there's a remainder; the rest are full.
   const isPartialTank = (n) => bd.remainderGal > 0.05 && bd.fullTanks < tankCount && n === tankCount
   const perTankSqftFor = (n) => (isPartialTank(n) ? bd.remainderSqft : bd.sqftPerTank)
-  const tankMixGalFor = (n) => (isPartialTank(n) ? bd.remainderGal : (Number(area.galTank) || bd.totalMix))
+  const tankMixGalFor = (n) => {
+    if (isPartialTank(n)) return bd.remainderGal
+    // Mix volume for this tank = its share of the area × the water rate. For a
+    // computed full tank that equals the tank size; for a hand-set tank count it
+    // splits the whole job's mix evenly across the tanks.
+    const wr = Number(area.waterRate) || 0
+    const byWater = wr > 0 ? Math.round((perTankSqftFor(n) / 1000) * wr * 10) / 10 : 0
+    return byWater > 0 ? byWater : (Number(area.galTank) || bd.totalMix)
+  }
   // Water to meter into THIS tank = the tank's mix minus its liquid products
   // (dry products dissolve). For the flow meter. Full tanks and the partial differ.
   const waterForTank = (n) => {
