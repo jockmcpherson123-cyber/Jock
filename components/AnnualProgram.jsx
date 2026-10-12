@@ -484,14 +484,26 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
     try {
       const apps = sheetsToApplications(sheets, year, products)
       if (!apps.length) { showToast(`No logged sprays found for ${year}`); setBusy(false); return }
+      const keyOf = (a) => `${a.linkedSheetId}|${a.product}|${a.area}`
       let prog = programs.find((p) => Number(p.year) === Number(year))
+      // Guard against duplicates: if the year's program already has these linked
+      // sprays, skip them so re-running only adds what's genuinely new.
+      const existing = new Set()
+      if (prog) (await db.fetchApplications(prog.id)).forEach((a) => { if (a.linkedSheetId) existing.add(keyOf(a)) })
+      const toAdd = apps.filter((a) => !existing.has(keyOf(a)))
+      if (!toAdd.length) {
+        showToast(`${year} already has all ${apps.length} logged sprays — nothing to add`)
+        if (prog) await selectProgram(prog)
+        setFromSprays(null); setBusy(false); return
+      }
       if (!prog) prog = await db.createProgram({ year: Number(year), name: `${year} Program (from logged sprays)` })
-      await db.bulkInsertApplications(prog.id, apps)
+      await db.bulkInsertApplications(prog.id, toAdd)
       await loadPrograms()
       const fresh = (await db.fetchPrograms()).find((p) => p.id === prog.id) || prog
       await selectProgram(fresh)
       setFromSprays(null)
-      showToast(`Built ${year} program — ${apps.length} application${apps.length !== 1 ? 's' : ''} from your sprays`)
+      const skipped = apps.length - toAdd.length
+      showToast(`Built ${year} — added ${toAdd.length} application${toAdd.length !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped} already there` : ''}`)
     } catch (e) {
       console.error(e)
       showToast('Could not build from sprays — ' + (e?.message || 'unknown error'))
