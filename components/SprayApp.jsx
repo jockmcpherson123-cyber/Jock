@@ -64,6 +64,7 @@ import {
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
+import { duplicateCandidates } from '@/lib/products'
 import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, fetchNbmForecast, overlayForecastTemps, projectGddReachDate, buildRainYear, weatherCodeInfo } from '@/lib/weather'
 import { fungicideLogByArea } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
@@ -687,6 +688,22 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
     }
   }
 
+  // Merge a near-duplicate product into the kept one: repoint all history, fold
+  // the records together, drop the duplicate. Returns a summary or throws.
+  async function mergeProductsHandler(keepName, dropName) {
+    const summary = await db.mergeProducts(keepName, dropName)
+    // Refresh everything the merge touched from the server.
+    const [prods, shts] = await Promise.all([db.fetchProducts(), db.fetchSheets()])
+    setProducts(prods)
+    setSheets(shts)
+    const bits = []
+    if (summary.sheets) bits.push(`${summary.sheets} spray sheet${summary.sheets === 1 ? '' : 's'}`)
+    if (summary.fertSheets) bits.push(`${summary.fertSheets} fert sheet${summary.fertSheets === 1 ? '' : 's'}`)
+    if (summary.applications) bits.push(`${summary.applications} planned application${summary.applications === 1 ? '' : 's'}`)
+    showToast(`Merged “${dropName}” into “${keepName}”${bits.length ? ` · moved ${bits.join(', ')}` : ''}`)
+    return summary
+  }
+
   async function importHistory(sheets) {
     const n = await db.bulkInsertSheets(sheets)
     setSheets(await db.fetchSheets())
@@ -1080,7 +1097,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         {route === 'chemicals' && manage && (
           <ChemicalHub
             products={products} grassTypes={grassTypes} deliveries={deliveries} manage={manage}
-            onSaveProduct={saveProduct} onDeleteProduct={removeProduct} onImport={importProductsFromSheet} onAddDelivery={addDelivery} areas={areas}
+            onSaveProduct={saveProduct} onDeleteProduct={removeProduct} onMergeProducts={mergeProductsHandler} onImport={importProductsFromSheet} onAddDelivery={addDelivery} areas={areas}
           />
         )}
         {route === 'invcount' && manage && (
@@ -4705,7 +4722,7 @@ const CHEM_SECTIONS = [
   { key: 'documents', label: 'Labels & SDS', icon: Info },
   { key: 'inventory', label: 'Inventory', icon: Package },
 ]
-function ChemicalHub({ products, grassTypes, deliveries, manage, onSaveProduct, onDeleteProduct, onImport, onAddDelivery, areas = {} }) {
+function ChemicalHub({ products, grassTypes, deliveries, manage, onSaveProduct, onDeleteProduct, onMergeProducts, onImport, onAddDelivery, areas = {} }) {
   const [section, setSection] = useState('library')
   return (
     <div className="md:flex md:gap-6">
@@ -4730,7 +4747,7 @@ function ChemicalHub({ products, grassTypes, deliveries, manage, onSaveProduct, 
         </div>
       </aside>
       <div className="flex-1 min-w-0">
-        {section === 'library' && <ChemicalLibrary products={products} grassTypes={grassTypes} onSaveProduct={onSaveProduct} onDeleteProduct={onDeleteProduct} onImport={onImport} areas={areas} />}
+        {section === 'library' && <ChemicalLibrary products={products} grassTypes={grassTypes} onSaveProduct={onSaveProduct} onDeleteProduct={onDeleteProduct} onMergeProducts={onMergeProducts} onImport={onImport} areas={areas} />}
         {section === 'documents' && <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? onSaveProduct : undefined} />}
         {section === 'inventory' && <Inventory products={products} deliveries={deliveries} onAddDelivery={onAddDelivery} />}
       </div>
@@ -4882,8 +4899,16 @@ function ActiveConverter({ products = [], onClose }) {
   )
 }
 
-function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeleteProduct, onImport, areas = {} }) {
+function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeleteProduct, onMergeProducts, onImport, areas = {} }) {
   const areaNames = Object.keys(areas || {})
+  const dupePairs = useMemo(() => duplicateCandidates(products), [products])
+  const [mergeBusy, setMergeBusy] = useState('')
+  const runMerge = async (keep, drop) => {
+    if (!onMergeProducts || mergeBusy) return
+    if (!window.confirm(`Merge “${drop}” into “${keep}”?\n\nAll spray sheets, fert sheets and planned applications that use “${drop}” will be repointed to “${keep}”, then “${drop}” is removed. This can’t be undone.`)) return
+    setMergeBusy(drop)
+    try { await onMergeProducts(keep, drop) } catch (e) { console.error(e); window.alert(`Could not merge: ${e.message || e}`) } finally { setMergeBusy('') }
+  }
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
   const [filter, setFilter] = useState('All')
@@ -5306,6 +5331,28 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       <p className="font-body text-[11px] text-slate-400 mt-1.5">
         First time importing? <button onClick={downloadTemplate} className="font-bold underline" style={{ color: FERN }}>Download a blank template</button> with the right columns, fill it in, then import it. The <span className="font-semibold">Mixing Order</span> column sets the tank fill order — enter a formulation like Dry, Flowable, EC, or Adjuvant (or leave it blank and we'll guess).
       </p>
+
+      {onMergeProducts && dupePairs.length > 0 && (
+        <div className="bg-white rounded-2xl border p-4 mt-4 mb-2 shadow-sm" style={{ borderColor: '#F0C98B' }}>
+          <div className="flex items-center gap-1.5 mb-1">
+            <AlertTriangle size={15} style={{ color: AMBER }} />
+            <p className="font-display text-base font-semibold text-slate-900">Possible duplicate products ({dupePairs.length})</p>
+          </div>
+          <p className="font-body text-[12px] text-slate-500 mb-3">These look like the same product spelled two ways. Merging moves all history (spray sheets, fert sheets, planned applications) onto the kept name, folds the records together, then removes the duplicate.</p>
+          <div className="space-y-1.5">
+            {dupePairs.map(({ keep, drop }) => (
+              <div key={`${keep}|${drop}`} className="flex items-center gap-2 flex-wrap rounded-xl px-3 py-2" style={{ background: '#FBF6EC' }}>
+                <span className="font-body text-[13px] min-w-0">
+                  Keep <b style={{ color: FOREST }}>{keep}</b> · remove <span className="line-through text-slate-500">{drop}</span>
+                </span>
+                <button onClick={() => runMerge(keep, drop)} disabled={!!mergeBusy} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white flex items-center gap-1 disabled:opacity-40 ml-auto" style={{ backgroundColor: FOREST }}>
+                  {mergeBusy === drop ? <Loader2 size={12} className="animate-spin" /> : null} Merge
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {importPreview && (() => {
         const plan = importPreview.plan
