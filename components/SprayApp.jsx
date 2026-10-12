@@ -2499,7 +2499,12 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   // If the user set the tank count by hand, force the job across that many.
   const manualTanks = s.tanksManual && numOr(s.tanks, 0) > 0 ? Number(s.tanks) : null
   const bd = tankBreakdown(area.sqft, area.waterRate, area.galTank, manualTanks)
-  const perTankSqft = bd.sqftPerTank > 0 ? Math.min(area.sqft || bd.sqftPerTank, bd.sqftPerTank) : (area.sqft || 0)
+  // Hand-set tank count → each tank is a FULL tank, so per-tank uses the full
+  // per-tank coverage and the TOTAL column multiplies by the tank count.
+  const perTankSqft = manualTanks && bd.sqftPerTank > 0
+    ? bd.sqftPerTank
+    : (bd.sqftPerTank > 0 ? Math.min(area.sqft || bd.sqftPerTank, bd.sqftPerTank) : (area.sqft || 0))
+  const totalSqft = bd.effectiveSqft ?? area.sqft
   const tanksLabel = (bd.fullTanks > 0 || bd.remainderGal > 0)
     ? `${bd.fullTanks} tank${bd.fullTanks === 1 ? '' : 's'}${bd.remainderGal > 0 ? ` + ${bd.remainderGal} gal` : ''}`
     : '—'
@@ -2648,7 +2653,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
           <MultiSelect selected={s.products.map((p) => p.product).filter(Boolean)} options={products.map((pr) => pr.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mt-3 items-start">
             {sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p, mixIdx) => {
-              const { amt, unit: amtUnit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, perTankSqft, p.forceGal)
+              const { amt, unit: amtUnit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, totalSqft, perTankSqft, p.forceGal)
               const prodInfo = products.find((pr) => pr.name === p.product)
               const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
               const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
@@ -2811,12 +2816,16 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
 
   // Whole-area model: the total already covers the entire area (full tanks + the
   // derived partial), so it needs no extra add-on. Amt/tank shows one full tank.
-  const bdR = tankBreakdown(area.sqft, area.waterRate, area.galTank)
+  const manualTanksR = sheet.tanksManual && Number(sheet.tanks) > 0 ? Number(sheet.tanks) : null
+  const bdR = tankBreakdown(area.sqft, area.waterRate, area.galTank, manualTanksR)
   const hasPartial = bdR.remainderGal > 0.05 && area.galTank
-  const perTankSqftR = bdR.sqftPerTank > 0 ? Math.min(area.sqft || bdR.sqftPerTank, bdR.sqftPerTank) : (area.sqft || 0)
+  const perTankSqftR = manualTanksR && bdR.sqftPerTank > 0
+    ? bdR.sqftPerTank
+    : (bdR.sqftPerTank > 0 ? Math.min(area.sqft || bdR.sqftPerTank, bdR.sqftPerTank) : (area.sqft || 0))
+  const totalSqftR = bdR.effectiveSqft ?? area.sqft
   const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p) => {
     const prodInfo = products.find((pr) => pr.name === p.product) || {}
-    const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, perTankSqftR, p.forceGal)
+    const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, totalSqftR, perTankSqftR, p.forceGal)
     return { ...p, amt, total, unit, epaReg: prodInfo.epaReg, ai: prodInfo.activeIngredient, rei: prodInfo.rei, signalWord: prodInfo.signalWord }
   })
   // Restricted-entry summary: the longest REI on the sheet, and — if signed off
@@ -3257,11 +3266,14 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
   const acres = area.sqft ? (area.sqft / 43560).toFixed(2) : null
   const manualTanksT = sheet.tanksManual && Number(sheet.tanks) > 0 ? Number(sheet.tanks) : null
   const bdT = tankBreakdown(area.sqft, area.waterRate, area.galTank, manualTanksT)
-  const perTankSqftT = bdT.sqftPerTank > 0 ? Math.min(area.sqft || bdT.sqftPerTank, bdT.sqftPerTank) : (area.sqft || 0)
+  const perTankSqftT = manualTanksT && bdT.sqftPerTank > 0
+    ? bdT.sqftPerTank
+    : (bdT.sqftPerTank > 0 ? Math.min(area.sqft || bdT.sqftPerTank, bdT.sqftPerTank) : (area.sqft || 0))
+  const totalSqftT = bdT.effectiveSqft ?? area.sqft
 
   const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p) => {
     const prodInfo = products.find((pr) => pr.name === p.product) || {}
-    const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, perTankSqftT, p.forceGal)
+    const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, totalSqftT, perTankSqftT, p.forceGal)
     return { ...p, amt, total, unit, prodInfo }
   })
 
@@ -3610,6 +3622,8 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
     }, 0)
     return Math.max(0, Math.round((mix - liquid) * 10) / 10)
   }
+  // Hand-set tank count multiplies the whole-job total up by the tank count.
+  const totalSqft = bd.effectiveSqft ?? area.sqft
 
   // Which products are in each tank (shared/synced), keyed by tank number.
   const [tankChecks, setTankChecks] = useState(sheet.tankChecks || {})
@@ -3926,7 +3940,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
 
             <div className="divide-y divide-slate-100">
               {sortByMixOrder(sheet.products.filter((p) => p.product), (p) => products?.find((pr) => pr.name === p.product), courseInfo?.mixOrder).map((p) => {
-                const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, area.sqft, curPerTankSqft, p.forceGal)
+                const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, totalSqft, curPerTankSqft, p.forceGal)
                 const prodInfo = products?.find((pr) => pr.name === p.product)
                 const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
                 const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
