@@ -60,7 +60,7 @@ import {
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
-  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productStockValue, productRateForN, eiqLoad, measureOut,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productStockValue, areaRate, productRateForN, eiqLoad, measureOut,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -2515,16 +2515,23 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   // Area is now the sheet's identity — keep sheetType mirroring it so older
   // records and any place that still reads sheetType show the area name.
   const handleAreaChange = (areaName) => update({ area: areaName, sheetType: areaName, tanks: undefined, tanksManual: false, sqft: undefined, galTank: undefined, waterRate: undefined, nozzle: undefined, psi: undefined })
+  // Pre-fill a product row's rate from its per-area rate (oz/M) for this sheet's
+  // area, falling back to the product's default rate + basis. Still editable.
+  const rowRateFill = (prod) => {
+    const ar = areaRate(prod, s.area)
+    if (ar != null) return { basis: 'oz / M', rate: String(ar), defaultRate: prod?.rate ?? null }
+    return { basis: prod?.basis || '', rate: (prod?.rate != null && prod?.rate !== '') ? String(prod.rate) : '', defaultRate: prod?.rate ?? null }
+  }
   const handleProductSelect = (id, name) => {
     const prod = products.find((p) => p.name === name)
-    updateProduct(id, { product: name, basis: prod?.basis || '', defaultRate: prod?.rate ?? null })
+    updateProduct(id, { product: name, ...rowRateFill(prod) })
   }
   // Add or remove a product from the tank mix — tap several at once, like the
   // Annual Program. Fills a leading blank row first, else appends.
   const toggleProductRow = (name) => setS((prev) => {
     if (prev.products.some((p) => p.product === name)) return { ...prev, products: prev.products.filter((p) => p.product !== name) }
     const prod = products.find((pr) => pr.name === name)
-    const filled = { product: name, basis: prod?.basis || '', defaultRate: prod?.rate ?? null }
+    const filled = { product: name, ...rowRateFill(prod) }
     const blankIdx = prev.products.findIndex((p) => !p.product)
     if (blankIdx >= 0) { const copy = [...prev.products]; copy[blankIdx] = { ...copy[blankIdx], ...filled }; return { ...prev, products: copy } }
     return { ...prev, products: [...prev.products, { id: uid(), rate: '', forceGal: false, ...filled }] }
@@ -4992,6 +4999,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       setImportPreview({ mode: 'simple', products: [], columns: [], count: 0, error: 'Could not read that file. Make sure it is a .xlsx or .xls spreadsheet.', fileName: file.name })
     }
   }
+  const areaRateCols = areaNames.map((a) => `Rate ${a} /M`)
   const downloadTemplate = async () => {
     const XLSX = await import('xlsx')
     const headers = [
@@ -5000,22 +5008,25 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A',
       'Stock', 'Low Stock', 'Fert Form', 'N', 'P', 'K', 'N lbs/gal', 'P lbs/gal', 'K lbs/gal',
       'Case Size', 'Oz/Case', 'Cost/Case', 'Label link', 'SDS link', 'Avoid Grasses',
+      'EPA Reg #', 'Container Size', ...areaRateCols,
     ]
     const example = [
-      'Daconil Action', 'Fungicide', 'Flowable (SC)', 'Chlorothalonil + Acibenzolar-S-methyl', 20.3, 'Syngenta',
-      'M05', 14, 14, 33.4, 'Warning', 12,
+      'Daconil Action', 'Fungicide', 'Flowable (SC)', 'Chlorothalonil + Acibenzolar-S-methyl', '20.3 + 0.79', 'Syngenta',
+      'M05 + P01', 14, 14, 33.4, 'Warning', 12,
       1.8, 'oz / M', 'oz', 1.8, 3.6, '', '',
       0, 0, '', '', '', '', '', '', '',
       '2.5 Gal', 320, 240, 'https://example.com/label.pdf', 'https://example.com/sds.pdf', 'Bentgrass, Poa Annua',
+      '50534-209', '2.5 gal', ...areaNames.map(() => ''),
     ]
-    // A second example — a dry-formulated fertilizer — shows the Mixing Order and
-    // fertilizer columns in use.
+    // A second example — shows the Mixing Order, fertilizer and per-area rate
+    // columns in use (a couple of areas filled, the rest left for the default).
     const example2 = [
-      'Primo Maxx', 'Growth Reg', 'Emulsifiable (EC)', 'Trinexapac-ethyl', 11.3, 'Syngenta',
+      'Primo MAXX', 'Growth Reg', 'Emulsifiable (EC)', 'Trinexapac-ethyl', 11.3, 'Syngenta',
       'PGR', '', 21, '', 'Caution', 12,
       0.25, 'oz / M', 'oz', 0.125, 0.75, '', '',
       0, 0, '', '', '', '', '', '', '',
       '1 Gal', 128, 420, '', '', '',
+      '100-937', '1 gal', ...areaNames.map((a) => (/blue greens/i.test(a) ? 0.3 : /gold greens/i.test(a) ? 0.138 : '')),
     ]
     const ws = XLSX.utils.aoa_to_sheet([headers, example, example2])
     const wb = XLSX.utils.book_new()
@@ -5032,17 +5043,23 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       'Rate', 'Basis', 'Unit', 'Label Min /M', 'Label Max /M', 'Label Min /A', 'Label Max /A',
       'Stock', 'Low Stock', 'Fert Form', 'N', 'P', 'K', 'N lbs/gal', 'P lbs/gal', 'K lbs/gal',
       'Case Size', 'Oz/Case', 'Cost/Case', 'Label link', 'SDS link', 'Avoid Grasses',
+      'EPA Reg #', 'Container Size', ...areaRateCols,
     ]
     const blank = (v) => (v == null ? '' : v)
+    // Multi-active products round-trip as "A + B" / "% + %".
+    const aiOf = (p) => (Array.isArray(p.actives) && p.actives.length ? p.actives.map((a) => a.name).filter(Boolean).join(' + ') : (p.activeIngredient || ''))
+    const pctOf = (p) => (Array.isArray(p.actives) && p.actives.length ? p.actives.map((a) => (a.pct === '' || a.pct == null ? '' : a.pct)).join(' + ') : blank(p.activePct))
+    const containerOf = (p) => (p.jugSize ? `${p.jugSize} ${p.jugUnit || 'gal'}` : '')
     const rows = [...products]
       .sort((a, b) => String(a.type || '').localeCompare(String(b.type || '')) || String(a.name || '').localeCompare(String(b.name || '')))
       .map((p) => [
-        p.name || '', p.type || '', FORMULATION_LABEL[effectiveFormulation(p)] || '', p.activeIngredient || '', blank(p.activePct), p.manufacturer || '',
+        p.name || '', p.type || '', FORMULATION_LABEL[effectiveFormulation(p)] || '', aiOf(p), pctOf(p), p.manufacturer || '',
         p.moaGroup || '', blank(p.rotationDays), blank(p.sprayInterval), blank(p.eiq), p.signalWord || '', blank(p.rei),
         blank(p.rate), p.basis || '', p.unit || '', blank(p.labelMinM), blank(p.labelMaxM), blank(p.labelMinA), blank(p.labelMaxA),
         blank(p.stock), blank(p.lowStockThreshold), p.fertForm || '', blank(p.n), blank(p.p), blank(p.k), blank(p.nPerGal), blank(p.pPerGal), blank(p.kPerGal),
         p.caseSize || '', blank(p.ozPerCase), blank(p.costPerCase), p.labelUrl || '', p.sdsUrl || '',
         Array.isArray(p.avoidGrasses) ? p.avoidGrasses.join(', ') : (p.avoidGrasses || ''),
+        p.epaReg || '', containerOf(p), ...areaNames.map((a) => blank(p.areaRates?.[a])),
       ])
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
     const wb = XLSX.utils.book_new()
@@ -5352,6 +5369,22 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               </div>
               <div><FieldLabel>Default Basis</FieldLabel><Select value={draft.basis} onChange={(v) => setDraft({ ...draft, basis: v })} options={BASIS_OPTIONS} /></div>
             </div>
+            {areaNames.length > 0 && (
+              <div className="rounded-xl p-3" style={{ backgroundColor: '#F5FAF6' }}>
+                <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: FERN }}>Rates by area (oz / M)</p>
+                <p className="font-body text-[10px] text-slate-500 mb-2">Per-area rate in oz product per 1,000 sq ft — this program sprays the same product at different rates by area. Blank uses the Default Rate above. These pre-fill spray sheets and drive Early-Order totals.</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {areaNames.map((a) => (
+                    <div key={a}>
+                      <FieldLabel>{a}</FieldLabel>
+                      <input type="number" step="any" value={draft.areaRates?.[a] ?? ''}
+                        onChange={(e) => setDraft((d) => { const v = e.target.value; const next = { ...(d.areaRates || {}) }; if (v === '') delete next[a]; else next[a] = Number(v); return { ...d, areaRates: next } })}
+                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder={draft.rate ? `default ${draft.rate}` : 'default'} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="rounded-xl p-3" style={{ backgroundColor: '#FEF2F2' }}>
               <p className="font-body text-[11px] font-bold text-red-500 uppercase tracking-wide mb-2">Label Rate Range</p>
               <p className="font-body text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">Per 1,000 sq ft {verifyTag('labelMinM') || verifyTag('labelMaxM')}</p>
