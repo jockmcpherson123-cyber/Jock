@@ -8886,7 +8886,7 @@ function taskErrorText(e) {
 // One place for everything the crew collects on morning maintenance — moisture,
 // clipping yields, greens speed, scouting. This is also what the crew's no-login
 // QR page mirrors. Managers get a "Crew QR" button to print/share the link.
-function FieldDataHub({ clippings, speeds, firmness = [], scouting, daily, turf, saveTurfCourse, course = '', onClip, onClipDel, onSpeed, onSpeedUpd, onSpeedDel, onScout, onScoutUpd, onScoutDel }) {
+function FieldDataHub({ clippings, speeds, firmness = [], practices = [], scouting, daily, turf, saveTurfCourse, course = '', onClip, onClipDel, onSpeed, onSpeedUpd, onSpeedDel, onScout, onScoutUpd, onScoutDel }) {
   const [tab, setTab] = useState('moisture')
   const [qrOpen, setQrOpen] = useState(false)
   const tabs = [['moisture', 'Moisture'], ['clippings', 'Clipping Yields'], ['speed', 'Greens Speed'], ['scouting', 'Scouting']]
@@ -8916,7 +8916,7 @@ function FieldDataHub({ clippings, speeds, firmness = [], scouting, daily, turf,
 
       {tab === 'moisture' && <WettingAgent key={course || 'all'} daily={daily} areas={areas} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} initialView="read" courseFilter={course} />}
       {tab === 'clippings' && <ClippingsTab key={course || 'all'} clippings={clippings} areas={areas} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} onAddMany={onClip} onDelete={onClipDel} courseFilter={course} />}
-      {tab === 'speed' && <GreensSpeedTab key={course || 'all'} speeds={speeds} firmness={firmness} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} onAddMany={onSpeed} onUpdate={onSpeedUpd} onDelete={onSpeedDel} courseFilter={course} />}
+      {tab === 'speed' && <GreensSpeedTab key={course || 'all'} speeds={speeds} firmness={firmness} practices={practices} courseInfo={turf.courseInfo} onSaveCourse={saveTurfCourse} onAddMany={onSpeed} onUpdate={onSpeedUpd} onDelete={onSpeedDel} courseFilter={course} />}
       {tab === 'scouting' && <ScoutingTab key={course || 'all'} scouting={scouting} areas={areas} courseInfo={turf.courseInfo} onAdd={onScout} onUpdate={onScoutUpd} onDelete={onScoutDel} courseFilter={course} />}
 
       {qrOpen && <DataQRModal courseInfo={turf.courseInfo} saveCourse={saveTurfCourse} onClose={() => setQrOpen(false)} />}
@@ -9059,7 +9059,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         {route === 'data' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <FieldDataHub
-              clippings={clippings} speeds={speeds} firmness={firmness} scouting={scouting} daily={daily} turf={turf} saveTurfCourse={saveTurfCourse} course={course}
+              clippings={clippings} speeds={speeds} firmness={firmness} practices={practices} scouting={scouting} daily={daily} turf={turf} saveTurfCourse={saveTurfCourse} course={course}
               onClip={async (list) => { await db.addClippings(list); await reloadClippings() }}
               onClipDel={async (id) => { await db.deleteClipping(id); await reloadClippings() }}
               onSpeed={async (list) => { await db.addGreensSpeeds(list); await reloadSpeeds() }}
@@ -10062,7 +10062,7 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
 // trackers, inside a shaded target window (between the lowest and highest guide).
 // Soft palette, values labelled on the line ends. Tapping a daily point edits it.
 const OV_RAW = '#B7B2A8', OV_7 = FERN, OV_14 = '#C08A2E', OV_30 = '#5B8DB8'
-function TrailingOverlayChart({ points = [], unit = '', guides = [], onPick = null, height = 250 }) {
+function TrailingOverlayChart({ points = [], unit = '', guides = [], onPick = null, height = 250, markers = [] }) {
   const [wrapRef, W] = useMeasuredWidth(560)
   // Aggregate to ONE point per day (average across greens) so the daily line is
   // clean, then smooth from there.
@@ -10116,10 +10116,30 @@ function TrailingOverlayChart({ points = [], unit = '', guides = [], onPick = nu
         {onPick && raw.map((d, i) => (
           <circle key={`h${i}`} cx={X(d.t)} cy={Y(d.value)} r="10" fill="transparent" style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onPick(d.recs[d.recs.length - 1]) }}><title>Tap to edit {chartMmDd(d.t)}</title></circle>
         ))}
+        {/* Cultural-input markers along the baseline — a tick per input day, so
+            mow/roll/brush line up under the speed they produced. */}
+        {markers.filter((m) => m.t >= tMin && m.t <= tMax).map((m, i) => (
+          <g key={`mk${i}`}>
+            <line x1={X(m.t)} x2={X(m.t)} y1={padT + plotH} y2={padT + plotH + 6} stroke={m.color} strokeWidth="2" />
+            <circle cx={X(m.t)} cy={padT + plotH + 8} r="2.6" fill={m.color}><title>{m.label}</title></circle>
+          </g>
+        ))}
         {xt.map((tk, i) => <text key={i} x={X(tk.t)} y={height - 5} textAnchor={X(tk.t) <= padL + 2 ? 'start' : X(tk.t) >= W - padR - 2 ? 'end' : 'middle'} fontSize="8.5" fill="#9AA6A0" style={{ fontVariantNumeric: 'tabular-nums' }}>{tk.label}</text>)}
       </svg>
     </div>
   )
+}
+
+// Map a cultural practice to a marker color by type, for the inputs-vs-speed
+// overlay. Keyword match so new practice names still land somewhere sensible.
+const PRACTICE_MARKER_COLORS = [
+  [/mow|cut/, FERN], [/roll/, '#2563EB'], [/brush|groom|verticut|vertical/, AMBER],
+  [/topdress|sand|dress/, GOLD], [/aerif|aerat|punch|tine|vent/, '#7C3AED'],
+]
+function practiceColor(name) {
+  const n = String(name || '').toLowerCase()
+  const hit = PRACTICE_MARKER_COLORS.find(([re]) => re.test(n))
+  return hit ? hit[1] : INK_3
 }
 
 // Two solid lines over time on their own axes: daily average clip yield (left)
@@ -10635,7 +10655,7 @@ const speedErrorText = (e) => saveErrorText(e, 'supabase/phase18.sql')
 // ── GREENS SPEED (STIMPMETER) ───────────────────────────────────────────────
 // Log each green's speed (feet) by date. The win is consistency: the day's
 // spread across greens (fastest vs slowest) matters as much as the average.
-function GreensSpeedTab({ speeds, firmness = [], courseInfo, onSaveCourse, onAddMany, onUpdate, onDelete, courseFilter = '' }) {
+function GreensSpeedTab({ speeds, firmness = [], practices = [], courseInfo, onSaveCourse, onAddMany, onUpdate, onDelete, courseFilter = '' }) {
   const greenOptions = greenOptionsFor(courseInfo)
   const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
   const cfTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
@@ -10819,14 +10839,28 @@ function GreensSpeedTab({ speeds, firmness = [], courseInfo, onSaveCourse, onAdd
           .sort((a, b) => String(a.date).localeCompare(String(b.date)))
           .map((c) => ({ date: c.date, value: Number(c.speed), rec: c }))
         if (allLogs.length < 2) return null
+        // Cultural inputs (mow/roll/brush…) as baseline markers under the speed
+        // line — scoped to the same course bar so inputs and speed line up.
+        const pracScoped = barCourse ? (practices || []).filter((p) => cfTok(p.area) === cfTok(barCourse)) : (practices || [])
+        const markers = pracScoped.filter((p) => p.date).map((p) => ({ t: chartMs(p.date), label: `${p.practice || 'Input'} · ${shortGreen(p.area || '')} ${p.date}`, color: practiceColor(p.practice) }))
+        const pracTypes = [...new Set(pracScoped.map((p) => p.practice).filter(Boolean))].slice(0, 8)
         return (
           <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
             <div className="flex items-center justify-between mb-1">
               <p className="font-display text-base font-semibold text-slate-900">Green speed{filter !== 'all' ? ` — ${shortGreen(filter)}` : ''}</p>
               <p className="font-body text-[10px] text-slate-400">tap a point to edit</p>
             </div>
-            <p className="font-body text-[11px] text-slate-400 mb-2">Daily readings with 7 / 14 / 30-day trailing trackers, inside your target window.</p>
-            <TrailingOverlayChart points={allLogs} unit="ft" guides={guidesFor(courseInfo, 'speed')} onPick={(p) => setPicked(p.rec)} />
+            <p className="font-body text-[11px] text-slate-400 mb-2">Daily readings with 7 / 14 / 30-day trailing trackers{markers.length ? '; ticks below mark the day’s mow / roll / brush inputs' : ''}.</p>
+            <TrailingOverlayChart points={allLogs} unit="ft" guides={guidesFor(courseInfo, 'speed')} onPick={(p) => setPicked(p.rec)} markers={markers} />
+            {pracTypes.length > 0 && (
+              <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 justify-center">
+                {pracTypes.map((t) => (
+                  <span key={t} className="inline-flex items-center gap-1.5 font-body text-[10.5px] font-semibold" style={{ color: INK_2 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: practiceColor(t), flexShrink: 0 }} />{t}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )
       })()}

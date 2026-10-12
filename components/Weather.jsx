@@ -140,7 +140,12 @@ function RainfallYearCard({ rain, prev, canEdit, onEditDay }) {
   const delta = prev ? Math.round((rain.ytd - prev.ytd) * 100) / 100 : null
   return (
     <div>
-      <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Rainfall · {rain.year}</p>
+      <div className="flex items-center justify-between mb-2">
+        <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide">Rainfall · {rain.year}</p>
+        {canEdit && (
+          <button onClick={() => onEditDay(new Date().toISOString().slice(0, 10), null)} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ color: RAIN_BLUE, border: `1px solid #DBEAFE`, backgroundColor: '#F0F6FF' }}>+ Add gauge reading</button>
+        )}
+      </div>
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
         <div className="flex items-end justify-between mb-2 flex-wrap gap-2">
           <div>
