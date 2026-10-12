@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid, Sparkles, TrendingUp, X } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
-import { downloadCSV } from '@/lib/calc'
+import { downloadCSV, areaRate } from '@/lib/calc'
 import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
 import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
 import { buildProgram, toApplications, classifySurface, SURFACE_LABEL, grassesForSurface } from '@/lib/programgen'
@@ -244,6 +244,14 @@ function computeEarlyOrder(apps, products, areas) {
     let oz = 0
     if (a.rateOzM != null && a.rateOzM !== '') oz = Number(a.rateOzM) * (sqft / 1000)
     else if (a.rateOzA != null && a.rateOzA !== '') oz = Number(a.rateOzA) * (sqft / 43560)
+    else {
+      // No rate on the application — fall back to the product's per-area rate
+      // (oz/M) for this area, then its default rate + basis.
+      const prod = prodByName[a.product]
+      const ar = areaRate(prod, a.area)
+      if (ar != null) oz = ar * (sqft / 1000)
+      else if (prod?.rate != null && prod?.rate !== '') oz = Number(prod.rate) * (/\/\s*A/.test(prod.basis || '') ? sqft / 43560 : sqft / 1000)
+    }
     if (!oz || !isFinite(oz)) return
     areaSet.add(a.area)
     if (!perProduct[a.product]) perProduct[a.product] = { name: a.product, type: prodByName[a.product]?.type || a.type || 'Other', totalOz: 0, byArea: {} }
