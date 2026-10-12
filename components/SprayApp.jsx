@@ -556,6 +556,11 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   const [products, setProducts] = useState([])
   const [fertSheets, setFertSheets] = useState([])
   const [activeSheet, setActiveSheet] = useState(null)
+  // Remember which list a sheet was opened from, so "Back" returns there
+  // instead of always dropping to the dashboard.
+  const [sheetOrigin, setSheetOrigin] = useState(null)
+  const openSheet = (s) => { setSheetOrigin((r) => (route === 'view' || route === 'edit' ? r : route)); setActiveSheet(s); setRoute('view') }
+  const backFromSheet = () => setRoute(sheetOrigin || (manage ? 'list' : 'tospray'))
   // Global search can deep-open a specific sheet — open it once the sheets load.
   // Guarded so a later data refresh doesn't yank the user back to that sheet.
   const focusHandled = useRef(null)
@@ -807,6 +812,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   }
 
   function newSheet(presetArea) {
+    setSheetOrigin((r) => (route === 'view' || route === 'edit' ? r : route))
     const areaKeys = Object.keys(areas)
     // Preset the area when the Advisor (or anywhere) starts a sheet for a
     // specific area; otherwise default to the first area.
@@ -987,7 +993,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
             manage={manage} programApps={course ? programApps.filter((a) => inCourse(a.area)) : programApps} location={location} courseInfo={courseInfo}
             applicatorLicenses={applicatorLicenses} onGoSettings={() => setRoute('settings')}
             homeMode={homeMode}
-            onOpen={(s) => { setActiveSheet(s); setRoute('view') }}
+            onOpen={openSheet}
             onNew={newSheet}
             onSeeAll={() => setRoute('list')}
             onCreateFromProgram={createSheetFromProgram}
@@ -996,13 +1002,13 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
           />
         )}
         {route === 'list' && (
-          <SheetList sheets={visibleSheets} allSheets={sheets} products={products} manage={manage} variant="manage" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} onDelete={removeSheet} onImportHistory={importHistory} />
+          <SheetList sheets={visibleSheets} allSheets={sheets} products={products} manage={manage} variant="manage" onOpen={openSheet} onNew={newSheet} onDelete={removeSheet} onImportHistory={importHistory} />
         )}
         {route === 'tospray' && (
-          <SheetList sheets={visibleSheets} manage={manage} variant="tospray" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
+          <SheetList sheets={visibleSheets} manage={manage} variant="tospray" onOpen={openSheet} onNew={newSheet} />
         )}
         {route === 'records' && (
-          <SheetList sheets={visibleSheets} manage={manage} variant="records" onOpen={(s) => { setActiveSheet(s); setRoute('view') }} onNew={newSheet} />
+          <SheetList sheets={visibleSheets} manage={manage} variant="records" onOpen={openSheet} onNew={newSheet} />
         )}
         {route === 'edit' && activeSheet && manage && (
           <SheetEditor
@@ -1022,7 +1028,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
                 setActiveSheet(saved); setRoute('view'); showToast('Spray sheet saved')
               }
             }}
-            onCancel={() => setRoute('dashboard')}
+            onCancel={() => setRoute(activeSheet && sheets.some((x) => x.id === activeSheet.id) ? 'view' : (sheetOrigin || (manage ? 'list' : 'tospray')))}
           />
         )}
         {route === 'view' && activeSheet && (
@@ -1032,7 +1038,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
             applicatorLicenses={applicatorLicenses} directorPins={directorPins}
             location={location} courseInfo={courseInfo}
             manage={manage} approve={canApprove(user.role)}
-            onBack={() => setRoute(manage ? 'dashboard' : 'tospray')}
+            onBack={backFromSheet}
             onEdit={() => setRoute('edit')}
             onDelete={() => removeSheet(activeSheet)}
             onSprayAgain={() => sprayAgain(activeSheet)}
@@ -2591,15 +2597,15 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             </div>
             <div>
               <FieldLabel>Tanks needed</FieldLabel>
-              <input type="number" inputMode="numeric" min="1" step="1"
+              <input type="number" inputMode="decimal" min="0" step="0.5"
                 value={s.tanksManual ? (s.tanks ?? '') : ''}
                 placeholder={String(bd.tanksToMix || 1)}
-                onChange={(e) => { const v = e.target.value; if (v === '') update({ tanks: undefined, tanksManual: false }); else update({ tanks: Math.max(1, Math.round(Number(v) || 1)), tanksManual: true }) }}
+                onChange={(e) => { const v = e.target.value; if (v === '') update({ tanks: undefined, tanksManual: false }); else { const n = Math.max(0, Math.round((Number(v) || 0) * 100) / 100); update({ tanks: n > 0 ? n : undefined, tanksManual: n > 0 }) } }}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body font-semibold tabular-nums" style={{ color: FOREST }} />
               <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>
                 {s.tanksManual
-                  ? <>Set by hand · <button type="button" onClick={() => update({ tanks: undefined, tanksManual: false })} className="font-bold underline" style={{ color: FERN }}>use calculated ({tanksLabel})</button></>
-                  : <>Calculated: <b style={{ color: INK_2 }}>{tanksLabel}</b> — type a number to override</>}
+                  ? <>Set by hand ({tanksLabel}) · <button type="button" onClick={() => update({ tanks: undefined, tanksManual: false })} className="font-bold underline" style={{ color: FERN }}>use calculated</button></>
+                  : <>Calculated: <b style={{ color: INK_2 }}>{tanksLabel}</b> — type a number to override (decimals OK for a partial, e.g. 6.5)</>}
               </p>
             </div>
             <div>
@@ -3594,7 +3600,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
   // Honor a hand-set tank count so the split, per-tank amounts and label match.
   const manualTanksV = sheet.tanksManual && Number(sheet.tanks) > 0 ? Number(sheet.tanks) : null
   const bd = tankBreakdown(area.sqft, area.waterRate, area.galTank, manualTanksV)
-  const tankCount = manualTanksV || sheet.tanks || bd.tanksToMix || 1
+  const tankCount = manualTanksV ? bd.tanksToMix : (sheet.tanks || bd.tanksToMix || 1)
   const tanksLabel = (bd.fullTanks > 0 || bd.remainderGal > 0)
     ? `${bd.fullTanks} tank${bd.fullTanks === 1 ? '' : 's'}${bd.remainderGal > 0 ? ` + ${bd.remainderGal} gal` : ''}`
     : (sheet.tanks ? `${sheet.tanks}` : '—')
