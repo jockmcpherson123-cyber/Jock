@@ -2496,7 +2496,9 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   // is what shows in the inputs, `area` (merged) is what the sheet's math uses.
   const area = { ...baseArea, sqft: numOr(s.sqft, baseArea.sqft), galTank: numOr(s.galTank, baseArea.galTank), nozzle: s.nozzle ?? baseArea.nozzle, psi: s.psi ?? baseArea.psi, waterRate: numOr(s.waterRate, impliedRate) }
   // Whole job broken into whole tanks + the leftover partial (never rounded).
-  const bd = tankBreakdown(area.sqft, area.waterRate, area.galTank)
+  // If the user set the tank count by hand, force the job across that many.
+  const manualTanks = s.tanksManual && numOr(s.tanks, 0) > 0 ? Number(s.tanks) : null
+  const bd = tankBreakdown(area.sqft, area.waterRate, area.galTank, manualTanks)
   const perTankSqft = bd.sqftPerTank > 0 ? Math.min(area.sqft || bd.sqftPerTank, bd.sqftPerTank) : (area.sqft || 0)
   const tanksLabel = (bd.fullTanks > 0 || bd.remainderGal > 0)
     ? `${bd.fullTanks} tank${bd.fullTanks === 1 ? '' : 's'}${bd.remainderGal > 0 ? ` + ${bd.remainderGal} gal` : ''}`
@@ -2584,7 +2586,16 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             </div>
             <div>
               <FieldLabel>Tanks needed</FieldLabel>
-              <div className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body font-semibold tabular-nums" style={{ backgroundColor: '#F8FAF8', color: FOREST }}>{tanksLabel}</div>
+              <input type="number" inputMode="numeric" min="1" step="1"
+                value={s.tanksManual ? (s.tanks ?? '') : ''}
+                placeholder={String(bd.tanksToMix || 1)}
+                onChange={(e) => { const v = e.target.value; if (v === '') update({ tanks: undefined, tanksManual: false }); else update({ tanks: Math.max(1, Math.round(Number(v) || 1)), tanksManual: true }) }}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body font-semibold tabular-nums" style={{ color: FOREST }} />
+              <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>
+                {s.tanksManual
+                  ? <>Set by hand · <button type="button" onClick={() => update({ tanks: undefined, tanksManual: false })} className="font-bold underline" style={{ color: FERN }}>use calculated ({tanksLabel})</button></>
+                  : <>Calculated: <b style={{ color: INK_2 }}>{tanksLabel}</b> — type a number to override</>}
+              </p>
             </div>
             <div>
               <FieldLabel>Nozzle</FieldLabel>
