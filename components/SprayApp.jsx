@@ -1073,7 +1073,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         {route === 'chemicals' && manage && (
           <ChemicalHub
             products={products} grassTypes={grassTypes} deliveries={deliveries} manage={manage}
-            onSaveProduct={saveProduct} onDeleteProduct={removeProduct} onImport={importProductsFromSheet} onAddDelivery={addDelivery}
+            onSaveProduct={saveProduct} onDeleteProduct={removeProduct} onImport={importProductsFromSheet} onAddDelivery={addDelivery} areas={areas}
           />
         )}
         {route === 'invcount' && manage && (
@@ -4635,7 +4635,7 @@ const CHEM_SECTIONS = [
   { key: 'documents', label: 'Labels & SDS', icon: Info },
   { key: 'inventory', label: 'Inventory', icon: Package },
 ]
-function ChemicalHub({ products, grassTypes, deliveries, manage, onSaveProduct, onDeleteProduct, onImport, onAddDelivery }) {
+function ChemicalHub({ products, grassTypes, deliveries, manage, onSaveProduct, onDeleteProduct, onImport, onAddDelivery, areas = {} }) {
   const [section, setSection] = useState('library')
   return (
     <div className="md:flex md:gap-6">
@@ -4660,7 +4660,7 @@ function ChemicalHub({ products, grassTypes, deliveries, manage, onSaveProduct, 
         </div>
       </aside>
       <div className="flex-1 min-w-0">
-        {section === 'library' && <ChemicalLibrary products={products} grassTypes={grassTypes} onSaveProduct={onSaveProduct} onDeleteProduct={onDeleteProduct} onImport={onImport} />}
+        {section === 'library' && <ChemicalLibrary products={products} grassTypes={grassTypes} onSaveProduct={onSaveProduct} onDeleteProduct={onDeleteProduct} onImport={onImport} areas={areas} />}
         {section === 'documents' && <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? onSaveProduct : undefined} />}
         {section === 'inventory' && <Inventory products={products} deliveries={deliveries} onAddDelivery={onAddDelivery} />}
       </div>
@@ -4812,7 +4812,8 @@ function ActiveConverter({ products = [], onClose }) {
   )
 }
 
-function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeleteProduct, onImport }) {
+function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeleteProduct, onImport, areas = {} }) {
+  const areaNames = Object.keys(areas || {})
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
   const [filter, setFilter] = useState('All')
@@ -4975,12 +4976,20 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
     e.target.value = '' // allow re-picking the same file
     if (!file) return
     try {
-      const { parseChemicalLibrary } = await import('@/lib/importXlsx')
+      const { parseChemicalLibrary, parseChemicalWorkbook, buildProductUpsertPlan } = await import('@/lib/importXlsx')
       const buf = await file.arrayBuffer()
-      const res = parseChemicalLibrary(buf)
-      setImportPreview({ ...res, fileName: file.name })
+      // Prefer the named-sheet upsert workbook (Chemical Library + Updates -
+      // Existing). Fall back to the plain single-sheet importer for other files.
+      const wbRes = parseChemicalWorkbook(buf, areaNames)
+      if (!wbRes.error && wbRes.rows.length) {
+        const plan = buildProductUpsertPlan(wbRes.rows, products)
+        setImportPreview({ mode: 'plan', plan, areaWarnings: wbRes.areaWarnings, sheets: wbRes.sheets, fileName: file.name })
+      } else {
+        const res = parseChemicalLibrary(buf)
+        setImportPreview({ mode: 'simple', ...res, fileName: file.name })
+      }
     } catch (err) {
-      setImportPreview({ products: [], columns: [], count: 0, error: 'Could not read that file. Make sure it is a .xlsx or .xls spreadsheet.', fileName: file.name })
+      setImportPreview({ mode: 'simple', products: [], columns: [], count: 0, error: 'Could not read that file. Make sure it is a .xlsx or .xls spreadsheet.', fileName: file.name })
     }
   }
   const downloadTemplate = async () => {
@@ -5041,10 +5050,14 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
     XLSX.writeFile(wb, `chemical-library-${localDateISO()}.xlsx`)
   }
   const confirmImport = async () => {
-    if (!importPreview?.products?.length) return
+    const plan = importPreview?.plan
+    const toApply = plan
+      ? [...plan.creates, ...plan.updates.map((u) => u.merged)]
+      : (importPreview?.products || [])
+    if (!toApply.length) { setImportPreview(null); return }
     setImporting(true)
     try {
-      await onImport(importPreview.products)
+      await onImport(toApply)
       setImportPreview(null)
     } catch (err) {
       setImportPreview((prev) => ({ ...prev, error: 'Could not save the import. Try again.' }))
@@ -5214,37 +5227,65 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
         First time importing? <button onClick={downloadTemplate} className="font-bold underline" style={{ color: FERN }}>Download a blank template</button> with the right columns, fill it in, then import it. The <span className="font-semibold">Mixing Order</span> column sets the tank fill order — enter a formulation like Dry, Flowable, EC, or Adjuvant (or leave it blank and we'll guess).
       </p>
 
-      {importPreview && (
+      {importPreview && (() => {
+        const plan = importPreview.plan
+        const nCreate = plan ? plan.creates.length : (importPreview.count || 0)
+        const nUpdate = plan ? plan.updates.length : 0
+        const nErr = plan ? plan.errors.length : 0
+        const applyN = nCreate + nUpdate
+        return (
         <div className="bg-white rounded-2xl border-2 p-4 mt-4 mb-2 shadow-sm" style={{ borderColor: GOLD }}>
           <p className="font-display text-base font-semibold text-slate-900 mb-1">Import from “{importPreview.fileName}”</p>
           {importPreview.error ? (
             <p className="font-body text-sm text-red-600 mt-1">{importPreview.error}</p>
+          ) : plan ? (
+            <>
+              <div className="flex flex-wrap gap-1.5 my-2">
+                <span className="font-body text-[12px] font-bold px-2.5 py-1 rounded-full" style={{ background: '#E6EFE8', color: FERN }}>{nCreate} to create</span>
+                <span className="font-body text-[12px] font-bold px-2.5 py-1 rounded-full" style={{ background: '#EEF3F8', color: '#2563EB' }}>{nUpdate} to update</span>
+                {nErr > 0 && <span className="font-body text-[12px] font-bold px-2.5 py-1 rounded-full" style={{ background: '#F6E7E4', color: RED }}>{nErr} error{nErr !== 1 ? 's' : ''}</span>}
+              </div>
+              {importPreview.sheets?.length > 0 && <p className="font-body text-[11px] text-slate-400">Read sheets: {importPreview.sheets.join(', ')}. Blank cells are left as-is — nothing is cleared or deleted.</p>}
+              {importPreview.areaWarnings?.length > 0 && (
+                <p className="font-body text-[11px] mt-1.5" style={{ color: AMBER }}>Rate columns with no matching area (skipped): {importPreview.areaWarnings.join(', ')}</p>
+              )}
+              {nUpdate > 0 && (
+                <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border" style={{ borderColor: '#EEF0EC' }}>
+                  {plan.updates.slice(0, 200).map((u) => (
+                    <div key={u.name} className="px-3 py-1.5 border-b last:border-b-0" style={{ borderColor: '#F1F3EF' }}>
+                      <span className="font-body text-[12px] font-bold" style={{ color: FOREST }}>{u.name}</span>
+                      <span className="font-body text-[11px]" style={{ color: INK_3 }}> — {u.changes.join(', ')}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {nErr > 0 && (
+                <p className="font-body text-[11px] mt-1.5" style={{ color: RED }}>{plan.errors.slice(0, 20).map((e) => `${e.name}: ${e.error}`).join(' · ')}</p>
+              )}
+            </>
           ) : (
             <>
-              <p className="font-body text-sm text-slate-600">
-                Found <b>{importPreview.count}</b> product{importPreview.count !== 1 ? 's' : ''}. Columns recognized:
-              </p>
+              <p className="font-body text-sm text-slate-600">Found <b>{importPreview.count}</b> product{importPreview.count !== 1 ? 's' : ''}. Columns recognized:</p>
               <div className="flex flex-wrap gap-1.5 my-2">
-                {importPreview.columns.map((c) => (
+                {(importPreview.columns || []).map((c) => (
                   <span key={c} className="font-body text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{c}</span>
                 ))}
               </div>
-              <p className="font-body text-[11px] text-slate-400">
-                Matched to existing products by name — those get updated, new names get added. Any column you left out of the sheet keeps its current value. Nothing is deleted.
-              </p>
+              <p className="font-body text-[11px] text-slate-400">Matched to existing products by name — those get updated, new names get added. Any column you left out keeps its current value. Nothing is deleted.</p>
             </>
           )}
           <div className="flex gap-2 pt-3">
             <button onClick={() => setImportPreview(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
-            {!importPreview.error && importPreview.count > 0 && (
+            {!importPreview.error && applyN > 0 && (
               <button onClick={confirmImport} disabled={importing} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-60 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>
                 {importing ? <Loader2 size={15} className="animate-spin" /> : null}
-                {importing ? 'Importing…' : `Import ${importPreview.count} product${importPreview.count !== 1 ? 's' : ''}`}
+                {importing ? 'Importing…' : (plan ? `Apply ${nCreate} new · ${nUpdate} update${nUpdate !== 1 ? 's' : ''}` : `Import ${nCreate} product${nCreate !== 1 ? 's' : ''}`)}
               </button>
             )}
           </div>
         </div>
-      )}
+        )
+      })()}
 
       <div className="relative mt-4 mb-3">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
