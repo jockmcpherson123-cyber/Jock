@@ -3814,6 +3814,30 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
             </div>
           </Card>
 
+          {(() => {
+            const seen = new Set()
+            const pulas = (sheet.products || [])
+              .map((p) => products.find((pr) => pr.name === p.product))
+              .filter((pr) => pr && String(pr.pulaUrl || '').trim() && !seen.has(pr.name) && seen.add(pr.name))
+            if (!pulas.length) return null
+            return (
+              <div className="rounded-2xl border-2 p-3" style={{ background: '#FEF3DD', borderColor: '#FDE9C8' }}>
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={16} className="shrink-0 mt-0.5" style={{ color: '#92660D' }} />
+                  <div className="min-w-0">
+                    <p className="font-body text-[13px] font-bold" style={{ color: '#92660D' }}>Check the PULA bulletin before spraying</p>
+                    <p className="font-body text-[11px]" style={{ color: '#92660D' }}>EPA Endangered-Species bulletins apply to this mix. Confirm today&apos;s bulletin for the course location.</p>
+                    <div className="flex flex-wrap gap-2 mt-1.5">
+                      {pulas.map((p) => (
+                        <a key={p.name} href={p.pulaUrl} target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ background: '#fff', border: '1px solid #FDE9C8', color: '#92660D' }}>{p.name} bulletin ›</a>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+
           {(sheet.weather.temp || sheet.weather.wind) && (
             <Card>
               <FieldLabel>Weather</FieldLabel>
@@ -5645,6 +5669,11 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 <div>
                   <FieldLabel>SDS link</FieldLabel>
                   <input value={draft.sdsUrl ?? ''} onChange={(e) => setDraft({ ...draft, sdsUrl: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="https://…" inputMode="url" />
+                </div>
+                <div>
+                  <FieldLabel>PULA bulletin link</FieldLabel>
+                  <input value={draft.pulaUrl ?? ''} onChange={(e) => setDraft({ ...draft, pulaUrl: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="https://www.epa.gov/endangered-species/bulletins-live-two…" inputMode="url" />
+                  <p className="font-body text-[10px] text-slate-400 mt-1">EPA Endangered-Species (Bulletins Live! Two) bulletin for this product. When set, the spray sheet reminds the crew to check it before applying.</p>
                 </div>
               </div>
             </div>
