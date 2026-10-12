@@ -59,7 +59,7 @@ import {
   Pencil,
 } from 'lucide-react'
 import {
-  uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
+  uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, sheetBreakdown, lineAmounts, sheetLineAmts, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
   productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productStockValue, areaRate, productRateForN, eiqLoad, measureOut,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
@@ -128,13 +128,14 @@ const PPE_OPTIONS = ['Gloves', 'Long Sleeves', 'Eye Protection', 'Respirator', '
 const BASIS_OPTIONS = ['oz / M', 'oz / A', 'lbs / M', 'lbs / A', 'g / M', 'g / A', 'gal / M', 'gal / A']
 const QUICK_INSTRUCTIONS = ['Water in 0.1"', 'Do not mow for 24h', 'Avoid overlap near bunkers', 'Spray when turf is dry']
 
-// Total product to pull from inventory when a sheet is approved. The whole-area
-// total already covers every tank (full tanks + the derived partial), so there's
-// no extra partial add-on to tack on.
+// Total product to pull from inventory when a sheet is approved — the whole-job
+// total (full tanks + the partial, honoring a hand-set tank count), the same
+// figure shown on the sheet so stock, the sheet and the records all reconcile.
 function sheetDeductions(sheet, area) {
   const map = {}
+  const bd = sheetBreakdown(sheet, area)
   ;(sheet.products || []).filter((p) => p.product).forEach((p) => {
-    const { total: amt, unit } = amtPerTankTotal(parseFloat(p.rate), p.basis, area?.sqft, area?.sqft, p.forceGal)
+    const { total: amt, unit } = lineAmounts(parseFloat(p.rate), p.basis, bd, p.forceGal)
     if (amt == null) return
     map[p.product] = { name: p.product, unit, total: (map[p.product]?.total || 0) + amt }
   })
@@ -2510,7 +2511,6 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   const perTankSqft = manualTanks && bd.sqftPerTank > 0
     ? bd.sqftPerTank
     : (bd.sqftPerTank > 0 ? Math.min(area.sqft || bd.sqftPerTank, bd.sqftPerTank) : (area.sqft || 0))
-  const totalSqft = bd.effectiveSqft ?? area.sqft
   const tanksLabel = (bd.fullTanks > 0 || bd.remainderGal > 0)
     ? `${bd.fullTanks} tank${bd.fullTanks === 1 ? '' : 's'}${bd.remainderGal > 0 ? ` + ${bd.remainderGal} gal` : ''}`
     : '—'
@@ -2659,7 +2659,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
           <MultiSelect selected={s.products.map((p) => p.product).filter(Boolean)} options={products.map((pr) => pr.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mt-3 items-start">
             {sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p, mixIdx) => {
-              const { amt, unit: amtUnit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, totalSqft, perTankSqft, p.forceGal)
+              const { amt, unit: amtUnit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bd, perTankSqft, p.forceGal)
               const prodInfo = products.find((pr) => pr.name === p.product)
               const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
               const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
@@ -2785,7 +2785,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             <Card>
               <div className="flex items-center justify-between">
                 <FieldLabel noMargin>Tank &amp; Stock Check</FieldLabel>
-                <span className="font-body text-[11px] text-slate-400">{plan.totalSolutionGal} gal · {plan.tanks} tank{plan.tanks > 1 ? 's' : ''}{plan.totalLiquidPct != null ? ` · products ~${plan.totalLiquidPct}% of tank` : ''}</span>
+                <span className="font-body text-[11px] text-slate-400">{plan.totalSolutionGal} gal · {plan.fullTanks} tank{plan.fullTanks === 1 ? '' : 's'}{plan.partialGal > 0 ? ` + ${plan.partialGal} gal` : ''}{plan.totalLiquidPct != null ? ` · products ~${plan.totalLiquidPct}% of tank` : ''}</span>
               </div>
               {plan.stockIssues.length > 0 ? (
                 <div className="rounded-lg px-3 py-2 mt-2 font-body text-[12px] flex items-start gap-1.5" style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}>
@@ -2828,10 +2828,9 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
   const perTankSqftR = manualTanksR && bdR.sqftPerTank > 0
     ? bdR.sqftPerTank
     : (bdR.sqftPerTank > 0 ? Math.min(area.sqft || bdR.sqftPerTank, bdR.sqftPerTank) : (area.sqft || 0))
-  const totalSqftR = bdR.effectiveSqft ?? area.sqft
   const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p) => {
     const prodInfo = products.find((pr) => pr.name === p.product) || {}
-    const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, totalSqftR, perTankSqftR, p.forceGal)
+    const { amt, unit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bdR, perTankSqftR, p.forceGal)
     return { ...p, amt, total, unit, epaReg: prodInfo.epaReg, ai: prodInfo.activeIngredient, rei: prodInfo.rei, signalWord: prodInfo.signalWord }
   })
   // Restricted-entry summary: the longest REI on the sheet, and — if signed off
@@ -3132,9 +3131,10 @@ function mdaRecordBookHTML(allSheets, products, areas, courseInfo = {}, location
     const lic = s.applicatorPesticideLicense || applicatorLicenses[applicator]?.pesticide || ''
     const dateStr = s.date ? fmtDate(s.date) : '—'
     const prods = (s.products || []).filter((p) => p.product)
+    const bd = sheetBreakdown(s, area)
     prods.forEach((p, i) => {
       const info = products.find((pr) => pr.name === p.product) || {}
-      const { unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, sqft, sqft, p.forceGal)
+      const { unit, total } = lineAmounts(parseFloat(p.rate), p.basis, bd, p.forceGal)
       rows.push(`<tr>
         <td style="${TD}">${i === 0 ? esc2(dateStr) : ''}</td>
         <td style="${TD}">${i === 0 ? esc2(s.area) : ''}</td>
@@ -3275,11 +3275,10 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
   const perTankSqftT = manualTanksT && bdT.sqftPerTank > 0
     ? bdT.sqftPerTank
     : (bdT.sqftPerTank > 0 ? Math.min(area.sqft || bdT.sqftPerTank, bdT.sqftPerTank) : (area.sqft || 0))
-  const totalSqftT = bdT.effectiveSqft ?? area.sqft
 
   const rows = sortByMixOrder((sheet.products || []).filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p) => {
     const prodInfo = products.find((pr) => pr.name === p.product) || {}
-    const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, totalSqftT, perTankSqftT, p.forceGal)
+    const { amt, unit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bdT, perTankSqftT, p.forceGal)
     return { ...p, amt, total, unit, prodInfo }
   })
 
@@ -3628,8 +3627,6 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
     }, 0)
     return Math.max(0, Math.round((mix - liquid) * 10) / 10)
   }
-  // Hand-set tank count multiplies the whole-job total up by the tank count.
-  const totalSqft = bd.effectiveSqft ?? area.sqft
 
   // Which products are in each tank (shared/synced), keyed by tank number.
   const [tankChecks, setTankChecks] = useState(sheet.tankChecks || {})
@@ -3946,7 +3943,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
 
             <div className="divide-y divide-slate-100">
               {sortByMixOrder(sheet.products.filter((p) => p.product), (p) => products?.find((pr) => pr.name === p.product), courseInfo?.mixOrder).map((p) => {
-                const { amt, unit, total } = amtPerTankTotal(parseFloat(p.rate), p.basis, totalSqft, curPerTankSqft, p.forceGal)
+                const { amt, unit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bd, curPerTankSqft, p.forceGal)
                 const prodInfo = products?.find((pr) => pr.name === p.product)
                 const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
                 const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
@@ -4025,7 +4022,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
               <Card>
                 <div className="flex items-center justify-between mb-1">
                   <FieldLabel noMargin>Mix &amp; Fill Order</FieldLabel>
-                  <span className="font-body text-[11px] text-slate-400">{plan.totalSolutionGal} gal solution · {plan.tanks} tank{plan.tanks > 1 ? 's' : ''}</span>
+                  <span className="font-body text-[11px] text-slate-400">{plan.totalSolutionGal} gal solution · {plan.fullTanks} tank{plan.fullTanks === 1 ? '' : 's'}{plan.partialGal > 0 ? ` + ${plan.partialGal} gal` : ''}</span>
                 </div>
                 <p className="font-body text-[11px] text-slate-400 mb-2.5">Fill the tank about half with water, add each product in this order agitating between each, then top off.</p>
                 {plan.stockIssues.length > 0 && (
