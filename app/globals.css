@@ -90,3 +90,11 @@ html { overscroll-behavior: none; }
   scrollbar-width: none;
 }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Annual Program Sheet — figure columns. On desktop they shrink to share the
+   row width (no scroll). On a phone they hold a readable minimum and the strip
+   scrolls sideways instead. --apw is set per column to its content width. */
+.ap-fig { min-width: 0; }
+@media (max-width: 767px) {
+  .ap-fig { min-width: var(--apw, 60px); }
+}
