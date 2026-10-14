@@ -339,7 +339,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [buildPrev, setBuildPrev] = useState(null) // Build From Last Year preview
   const [editProgForm, setEditProgForm] = useState(null) // rename/edit-season form
   const [orderEdit, setOrderEdit] = useState(null) // { name, caseSize, ozPerCase } for early-order inline edit
-  const [viewMode, setViewMode] = useState('now') // 'now' | 'timeline' | 'area' | 'order'
+  const [viewMode, setViewMode] = useState('sheet') // 'sheet' | 'performance' | 'coverage' | 'order'
   const [covFilter, setCovFilter] = useState('all') // coverage grid: 'all' | product type
   const [covSel, setCovSel] = useState(null) // selected coverage cell: { area, start, end, state }
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
@@ -1687,16 +1687,22 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                           // read the same as tank days, just without the Tank pill.
                           return (
                             <div key={ev.key}>
-                              <button onClick={() => setOpenTanks((p) => ({ ...p, [ev.key]: !(p[ev.key] === undefined ? true : p[ev.key]) }))} className="w-full text-left flex items-center gap-3 px-3.5 py-2.5 border-t-2 hover:brightness-[.98] transition" style={{ borderTopColor: '#D8D5C4', borderLeft: `4px solid ${lead}`, backgroundColor: open ? '#EEF3EE' : '#F7F9F7' }}>
-                                {open ? <ChevronDown size={14} className="shrink-0" style={{ color: FERN }} /> : <ChevronRight size={14} className="shrink-0" style={{ color: FERN }} />}
-                                <span className="shrink-0 leading-none flex items-baseline gap-1.5" style={{ minWidth: 92 }}>
-                                  <span className="font-display text-[16px] font-bold" style={{ color: FOREST }}>{fmtDate(ev.date)}</span>
-                                  <span className="font-body text-[9.5px] font-bold uppercase tracking-wide" style={{ color: '#b7a86a' }}>{fmtWeekday(ev.date)}</span>
-                                </span>
-                                {showArea && <span className="font-body text-[10.5px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EAF2EC', color: FERN }}>{ev.area}</span>}
-                                {!open && <span className="font-body text-[10.5px] text-slate-400 whitespace-nowrap shrink-0">{items.length} product{items.length !== 1 ? 's' : ''}</span>}
-                                <span className="flex-1" />
-                              </button>
+                              <div className="flex items-center gap-3 px-3.5 py-2.5 border-t-2" style={{ borderTopColor: '#D8D5C4', borderLeft: `4px solid ${lead}`, backgroundColor: open ? '#EEF3EE' : '#F7F9F7' }}>
+                                <button onClick={() => setOpenTanks((p) => ({ ...p, [ev.key]: !(p[ev.key] === undefined ? true : p[ev.key]) }))} className="flex-1 min-w-0 text-left flex items-center gap-3 hover:opacity-80 transition">
+                                  {open ? <ChevronDown size={14} className="shrink-0" style={{ color: FERN }} /> : <ChevronRight size={14} className="shrink-0" style={{ color: FERN }} />}
+                                  <span className="shrink-0 leading-none flex items-baseline gap-1.5" style={{ minWidth: 92 }}>
+                                    <span className="font-display text-[16px] font-bold" style={{ color: FOREST }}>{fmtDate(ev.date)}</span>
+                                    <span className="font-body text-[9.5px] font-bold uppercase tracking-wide" style={{ color: '#b7a86a' }}>{fmtWeekday(ev.date)}</span>
+                                  </span>
+                                  {showArea && <span className="font-body text-[10.5px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EAF2EC', color: FERN }}>{ev.area}</span>}
+                                  {!open && <span className="font-body text-[10.5px] text-slate-400 whitespace-nowrap shrink-0">{items.length} product{items.length !== 1 ? 's' : ''}</span>}
+                                </button>
+                                {onCreateSheet && (
+                                  <button onClick={() => onCreateSheet(items)} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-dashed font-body text-[11px] font-bold transition hover:bg-white" style={{ color: FOREST, borderColor: GOLD, backgroundColor: '#FFFDF6' }}>
+                                    <ClipboardList size={12} /> <span className="hidden sm:inline">Create spray sheet</span><span className="sm:hidden">Sheet</span>
+                                  </button>
+                                )}
+                              </div>
                               {open && items.map((a) => {
                                 const tc = typeColor(a.type); const ai = aiOf(a)
                                 if (inlineEdit?.id === a.id) return <div key={a.id} className="pl-4">{inlineRow('py-1.5 pl-4 pr-3.5')}</div>
@@ -1736,13 +1742,6 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                   </div>
                                 )
                               })}
-                              {open && onCreateSheet && (
-                                <div className="pl-8 pr-3.5 py-1.5" style={{ borderLeft: `4px solid ${lead}`, backgroundColor: '#FCFBF6' }}>
-                                  <button onClick={() => onCreateSheet(items)} className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed font-body text-[11px] font-bold transition hover:bg-white" style={{ color: FOREST, borderColor: GOLD, backgroundColor: '#FFFDF6' }}>
-                                    <ClipboardList size={12} /> Create spray sheet for this
-                                  </button>
-                                </div>
-                              )}
                             </div>
                           )
                         })}
