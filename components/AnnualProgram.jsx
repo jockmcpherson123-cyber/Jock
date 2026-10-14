@@ -1564,13 +1564,10 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
             ))}
           </div>
 
-          {/* Area filter */}
+          {/* Area filter — tap an area to narrow to it, tap it again to see all. */}
           <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-            <button onClick={() => setAreaFilter('all')} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={areaFilter === 'all' ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
-              All areas ({apps.length})
-            </button>
             {areaNames.map((a) => (
-              <button key={a} onClick={() => setAreaFilter(a)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={areaFilter === a ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
+              <button key={a} onClick={() => setAreaFilter((cur) => (cur === a ? 'all' : a))} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap transition" style={areaFilter === a ? { backgroundColor: FERN, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
                 {a} ({areaCounts[a]})
               </button>
             ))}

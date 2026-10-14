@@ -267,7 +267,7 @@ class ErrorBoundary extends React.Component {
 const NAV_MANAGER = [
   { items: [{ id: 'home', label: 'Home', m: 'spray', r: 'dashboard', home: true, icon: BarChart3, follow: true }] },
   { title: 'Spray Program', items: [
-    { id: 'program', label: 'Annual Program', m: 'spray', r: 'program', follow: true },
+    { id: 'program', label: 'Annual Program', m: 'spray', r: 'program', follow: true, noAll: true },
     { id: 'sheets', label: 'Spray Sheets', m: 'spray', r: 'list', follow: true },
     { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert', follow: true },
     { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
