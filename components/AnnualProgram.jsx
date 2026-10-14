@@ -345,7 +345,6 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const [openTanks, setOpenTanks] = useState({}) // sheet view: event key -> true when the tank is expanded
   const [inlineEdit, setInlineEdit] = useState(null) // sheet view: quick inline edit of one product row
-  const [openDetail, setOpenDetail] = useState({}) // sheet view: app id -> true when its full detail grid is shown
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
   // ── Build From Models: pick a year + which surfaces, then auto-fill the
   // Annual Program tab with a per-surface, grass-matched, site-tuned program.
@@ -1699,41 +1698,29 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                               {open && items.map((a) => {
                                 const tc = typeColor(a.type); const ai = aiOf(a)
                                 if (inlineEdit?.id === a.id) return <div key={a.id} className="pl-4">{inlineRow('py-1.5 pl-4 pr-3.5')}</div>
-                                // Product for THIS area: rate (shown), amount per tank, and
-                                // total product — from the same formula the Early Order uses.
-                                const amt = planAppOz(a, areaMatch(areas, a.area), products.find((p) => p.name === a.product))
-                                const showDetail = !!openDetail[a.id]
+                                // One product = one row: the product name on the left, then
+                                // every plan-sheet figure laid out across the width to its
+                                // right (stacks below on a phone). Figures use the shared
+                                // planAppOz formula, so they reconcile with the Early Order.
                                 return (
-                                  <div key={a.id}>
-                                    <div onClick={() => startInline(a)} className="cursor-pointer w-full flex items-center gap-2.5 py-1.5 pl-8 pr-3.5 border-t border-black/5 hover:brightness-[.97] active:brightness-95 transition" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: showDetail ? '#FBFAF4' : '#FCFBF6' }}>
-                                      <span className="min-w-0 flex-1">
-                                        <span className="font-body text-[12px] font-bold text-slate-800">{a.product}</span>
+                                  <div key={a.id} className="md:flex md:items-center gap-3 py-2 pl-8 pr-3.5 border-t border-black/5" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: a.tanks === 0 ? '#FAFAF7' : '#FCFBF6' }}>
+                                    <button onClick={() => startInline(a)} className="text-left flex items-center gap-2 md:w-52 md:shrink-0 min-w-0 mb-1.5 md:mb-0 hover:opacity-80 transition" title="Tap to edit the rate">
+                                      <span className="min-w-0 truncate">
+                                        <span className="font-body text-[12px] font-bold" style={{ color: a.tanks === 0 ? '#9A998F' : '#1A1A16' }}>{a.product}</span>
                                         {ai && <span className="font-body text-[10px] text-slate-400 ml-1.5">{ai}</span>}
                                       </span>
-                                      <span className="font-body text-[10.5px] text-slate-400 truncate min-w-0 hidden md:block" style={{ flex: '0 1 auto' }}>{a.target || ''}</span>
                                       {a.tanks === 0 && <span className="font-body text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0" style={{ background: '#F1F0EC', color: '#9A998F' }}>skipped</span>}
                                       {a.tanks != null && a.tanks !== 1 && a.tanks !== 0 && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 tabular-nums" style={{ background: '#EEF3F8', color: '#2563EB' }}>×{a.tanks}</span>}
-                                      <span className="font-body text-[11px] font-bold text-slate-500 whitespace-nowrap tabular-nums">{rateOf(a)}</span>
-                                      {amt && (
-                                        <span className="font-body text-[11px] whitespace-nowrap tabular-nums text-right shrink-0" title="Total product for this area = rate × area size ÷ 1,000 × tanks">
-                                          <span className="font-bold" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{round1(amt.oz).toLocaleString()} oz</span>
-                                        </span>
-                                      )}
-                                      <button onClick={(e) => { e.stopPropagation(); setOpenDetail((p) => ({ ...p, [a.id]: !p[a.id] })) }} className="shrink-0 transition" style={{ color: showDetail ? FERN : '#cbd5c7' }} title="Full figures (rate, tanks, product, cost)">{showDetail ? <ChevronDown size={13} /> : <LayoutGrid size={12} />}</button>
-                                      <button onClick={(e) => { e.stopPropagation(); openEvent(items) }} className="shrink-0 text-slate-300 hover:text-slate-500 transition" title="Full editor (date, timing, targets)"><Pencil size={12} /></button>
-                                    </div>
-                                    {showDetail && (
-                                      <div className="pl-8 pr-3.5 py-2.5 border-t border-black/5" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: '#FBFAF4' }}>
-                                        <div className="grid gap-x-4 gap-y-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(84px, 1fr))' }}>
-                                          {detailFor(a).map(([label, value]) => (
-                                            <div key={label} className="min-w-0">
-                                              <div className="font-body text-[8.5px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
-                                              <div className="font-body text-[12px] font-bold tabular-nums truncate" style={{ color: FOREST }}>{value}</div>
-                                            </div>
-                                          ))}
+                                    </button>
+                                    <div className="grid gap-x-3 gap-y-1.5 md:flex-1 min-w-0" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(72px, 1fr))' }}>
+                                      {detailFor(a).map(([label, value]) => (
+                                        <div key={label} className="min-w-0">
+                                          <div className="font-body text-[8px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
+                                          <div className="font-body text-[12px] font-bold tabular-nums truncate" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{value}</div>
                                         </div>
-                                      </div>
-                                    )}
+                                      ))}
+                                    </div>
+                                    <button onClick={(e) => { e.stopPropagation(); openEvent(items) }} className="hidden md:block shrink-0 text-slate-300 hover:text-slate-500 transition self-center" title="Full editor (date, timing, targets)"><Pencil size={12} /></button>
                                   </div>
                                 )
                               })}
@@ -1744,7 +1731,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                     )
                   })}
                   <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-black/5" style={{ backgroundColor: '#F8FAF8' }}>
-                    <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a day to open · tap a product to edit its rate · <LayoutGrid size={10} className="inline align-[-1px]" /> for all figures · <Pencil size={10} className="inline align-[-1px]" /> for the full editor</span>
+                    <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a day to open · tap a product to edit its rate · <Pencil size={10} className="inline align-[-1px]" /> for the full editor</span>
                     <button onClick={startAddApp} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={12} /> Add</button>
                   </div>
                 </div>
