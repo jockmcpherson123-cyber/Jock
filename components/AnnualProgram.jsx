@@ -616,7 +616,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const startInline = (a) => setInlineEdit({
     id: a.id, area: a.area, plannedDate: a.plannedDate || null, trigger: a.trigger || { mode: 'date' },
     product: a.product, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', basis: a.basis || 'oz / M', type: a.type || '', target: a.target || '',
-    tanks: a.tanks ?? null, // carried through so a quick rate edit doesn't wipe it
+    tanks: a.tanks ?? null, notes: a.notes || '', // carried through so a quick edit doesn't wipe them
   })
   // Swap the product mid-edit — re-fills rate + type + basis from the library live.
   const swapInline = (name) => setInlineEdit((prev) => {
@@ -635,7 +635,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
         rateOzA: inlineEdit.rateOzA === '' ? null : Number(inlineEdit.rateOzA),
         basis: inlineEdit.basis || 'oz / M', type: inlineEdit.type || null,
         target: inlineEdit.target || null, trigger: inlineEdit.trigger || { mode: 'date' },
-        tanks: inlineEdit.tanks,
+        tanks: inlineEdit.tanks, notes: inlineEdit.notes,
       })
       setAllApps(await db.fetchApplications(activeProgram.id))
       setInlineEdit(null)
@@ -1589,13 +1589,12 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               // an editable rate, and Save / Cancel — no modal.
               const inlineRow = (pad) => {
                 const tc = typeColor(inlineEdit.type)
-                const ai = products.find((p) => p.name === inlineEdit.product)?.activeIngredient || ''
                 return (
                   <div className={`flex items-center gap-2 ${pad} border-t border-black/5`} style={{ borderLeft: `4px solid ${tc}`, backgroundColor: '#FFF9E8' }}>
                     <div className="w-44 shrink-0"><SearchSelect value={inlineEdit.product} options={products.map((p) => p.name)} onPick={swapInline} placeholder="Search product…" /></div>
-                    <span className="font-body text-[10px] text-slate-400 truncate flex-1 min-w-0 hidden md:block">{ai}{inlineEdit.type ? ` · ${inlineEdit.type}` : ''}</span>
-                    <input type="number" step="any" value={inlineEdit.rateOzM} onChange={(e) => setInlineEdit((p) => ({ ...p, rateOzM: e.target.value }))} className="w-16 text-right border rounded-lg px-2 py-1.5 text-[12px] font-bold font-body" style={{ borderColor: GOLD, backgroundColor: '#fff' }} />
+                    <input type="number" step="any" value={inlineEdit.rateOzM} onChange={(e) => setInlineEdit((p) => ({ ...p, rateOzM: e.target.value }))} className="w-16 text-right border rounded-lg px-2 py-1.5 text-[12px] font-bold font-body shrink-0" style={{ borderColor: GOLD, backgroundColor: '#fff' }} />
                     <span className="font-body text-[9px] text-slate-400 shrink-0">oz/M</span>
+                    <input value={inlineEdit.notes || ''} onChange={(e) => setInlineEdit((p) => ({ ...p, notes: e.target.value }))} placeholder="Notes — e.g. 2nd app of Dimension, water in 5 min" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] font-body bg-white" />
                     <button onClick={saveInline} disabled={busy} className="font-body text-[11px] font-bold text-white px-3 py-1.5 rounded-lg shrink-0 disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? '…' : 'Save'}</button>
                     <button onClick={() => setInlineEdit(null)} className="font-body text-[11px] font-semibold text-slate-500 px-2.5 py-1.5 rounded-lg border border-slate-200 shrink-0">Cancel</button>
                   </div>
@@ -1620,7 +1619,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                 'For': 96, 'Rate oz/M': 50, 'Rate oz/A': 52, 'Label rate': 84, 'Area (sq ft)': 62, '# Tanks': 42,
                 'oz / Tank': 52, 'Amount / Tank': 92, 'Total (oz)': 54, 'Total product': 92,
                 'Case size': 58, 'Package': 60, 'Oz / case': 50, 'Unit conv': 66, 'Cases needed': 58,
-                'Cost / unit': 74, 'Total cost': 80,
+                'Cost / unit': 74, 'Total cost': 80, 'Notes': 140,
               }
               // Every spreadsheet column for one planned application in its area —
               // all derived, so the detail panel reads like the plan workbook row.
@@ -1664,6 +1663,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                   ['Cases needed', casesExact != null ? Math.round(casesExact * 100) / 100 : '—'],
                   ['Cost / unit', money(costPerUnit)],
                   ['Total cost', money(totalCost)],
+                  ['Notes', a.notes || '—'],
                 ]
               }
               // One tidy line per single spray; a multi-product day collapses to a
