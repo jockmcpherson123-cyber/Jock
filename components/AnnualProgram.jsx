@@ -1672,14 +1672,15 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                         </div>
                         {events.map((ev) => {
                           const items = ev.items
-                          const open = !!openTanks[ev.key]
+                          // Spray days are expanded by default; a tap collapses one.
+                          const open = openTanks[ev.key] === undefined ? true : openTanks[ev.key]
                           const lead = typeColor(items[0].type)
                           const multi = items.length > 1
                           // Every spray day is a banner you can open — single sprays
                           // read the same as tank days, just without the Tank pill.
                           return (
                             <div key={ev.key}>
-                              <button onClick={() => setOpenTanks((p) => ({ ...p, [ev.key]: !p[ev.key] }))} className="w-full text-left flex items-center gap-2 px-3.5 py-2 border-t-2 hover:brightness-[.98] transition" style={{ borderTopColor: '#E7E4D6', borderLeft: `4px solid ${lead}`, backgroundColor: open ? '#FBFAF4' : 'white' }}>
+                              <button onClick={() => setOpenTanks((p) => ({ ...p, [ev.key]: !(p[ev.key] === undefined ? true : p[ev.key]) }))} className="w-full text-left flex items-center gap-2 px-3.5 py-2 border-t-2 hover:brightness-[.98] transition" style={{ borderTopColor: '#E7E4D6', borderLeft: `4px solid ${lead}`, backgroundColor: open ? '#FBFAF4' : 'white' }}>
                                 {open ? <ChevronDown size={13} className="shrink-0" style={{ color: '#b7a86a' }} /> : <ChevronRight size={13} className="shrink-0" style={{ color: '#b7a86a' }} />}
                                 <span className="w-11 shrink-0 leading-none">
                                   <span className="font-body text-[11px] font-bold block" style={{ color: FOREST }}>{fmtDate(ev.date)}</span>
@@ -1703,26 +1704,26 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                 // right (stacks below on a phone). Figures use the shared
                                 // planAppOz formula, so they reconcile with the Early Order.
                                 return (
-                                  <div key={a.id} className="md:flex md:items-center gap-3 py-2 pl-8 pr-3.5 border-t border-black/5" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: a.tanks === 0 ? '#FAFAF7' : '#FCFBF6' }}>
-                                    <button onClick={() => startInline(a)} className="text-left flex items-center gap-2 md:w-52 md:shrink-0 min-w-0 mb-1.5 md:mb-0 hover:opacity-80 transition" title="Tap to edit the rate">
+                                  <div key={a.id} className="md:flex md:items-center gap-2 py-1 pl-8 pr-2.5 border-t border-black/5" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: a.tanks === 0 ? '#FAFAF7' : '#FCFBF6' }}>
+                                    <button onClick={() => startInline(a)} className="text-left flex items-center gap-1.5 md:w-40 md:shrink-0 min-w-0 py-1 md:py-0 hover:opacity-80 transition" title="Tap to edit the rate">
                                       <span className="min-w-0 truncate">
                                         <span className="font-body text-[12px] font-bold" style={{ color: a.tanks === 0 ? '#9A998F' : '#1A1A16' }}>{a.product}</span>
-                                        {ai && <span className="font-body text-[10px] text-slate-400 ml-1.5">{ai}</span>}
+                                        {ai && <span className="font-body text-[9px] text-slate-400 ml-1 hidden lg:inline">{ai}</span>}
                                       </span>
-                                      {a.tanks === 0 && <span className="font-body text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0" style={{ background: '#F1F0EC', color: '#9A998F' }}>skipped</span>}
-                                      {a.tanks != null && a.tanks !== 1 && a.tanks !== 0 && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 tabular-nums" style={{ background: '#EEF3F8', color: '#2563EB' }}>×{a.tanks}</span>}
+                                      {a.tanks === 0 && <span className="font-body text-[8px] font-bold uppercase tracking-wide px-1 py-0.5 rounded-full shrink-0" style={{ background: '#F1F0EC', color: '#9A998F' }}>skip</span>}
+                                      {a.tanks != null && a.tanks !== 1 && a.tanks !== 0 && <span className="font-body text-[8px] font-bold px-1 py-0.5 rounded-full shrink-0 tabular-nums" style={{ background: '#EEF3F8', color: '#2563EB' }}>×{a.tanks}</span>}
                                     </button>
-                                    <div className="grid gap-x-3 gap-y-1.5 md:flex-1 min-w-0" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(74px, 1fr))' }}>
-                                      {detailFor(a).map(([label, value]) => {
-                                        // The text-heavy figures get two tracks so they read in full.
-                                        const wide = label === 'Amount / Tank' || label === 'Total product' || label === 'Label rate' || label === 'Total cost'
-                                        return (
-                                          <div key={label} className="min-w-0" style={wide ? { gridColumn: 'span 2' } : undefined}>
-                                            <div className="font-body text-[8px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
-                                            <div className="font-body text-[12px] font-bold tabular-nums truncate" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{value}</div>
+                                    {/* All figures on ONE line — they share the width and only
+                                        scroll sideways on a narrow phone, never wrap down. */}
+                                    <div className="md:flex-1 min-w-0 overflow-x-auto md:overflow-visible">
+                                      <div className="flex gap-2.5">
+                                        {detailFor(a).map(([label, value]) => (
+                                          <div key={label} className="min-w-0 leading-tight" style={{ flex: '1 1 0', minWidth: 60 }}>
+                                            <div className="font-body text-[7.5px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
+                                            <div className="font-body text-[11.5px] font-bold tabular-nums truncate" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{value}</div>
                                           </div>
-                                        )
-                                      })}
+                                        ))}
+                                      </div>
                                     </div>
                                     <button onClick={(e) => { e.stopPropagation(); openEvent(items) }} className="hidden md:block shrink-0 text-slate-300 hover:text-slate-500 transition self-center" title="Full editor (date, timing, targets)"><Pencil size={12} /></button>
                                   </div>
@@ -1735,7 +1736,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                     )
                   })}
                   <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-black/5" style={{ backgroundColor: '#F8FAF8' }}>
-                    <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a day to open · tap a product to edit its rate · <Pencil size={10} className="inline align-[-1px]" /> for the full editor</span>
+                    <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a day to collapse · tap a product to edit its rate · <Pencil size={10} className="inline align-[-1px]" /> for the full editor</span>
                     <button onClick={startAddApp} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={12} /> Add</button>
                   </div>
                 </div>
