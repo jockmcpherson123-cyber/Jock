@@ -345,6 +345,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const [openTanks, setOpenTanks] = useState({}) // sheet view: event key -> true when the tank is expanded
   const [inlineEdit, setInlineEdit] = useState(null) // sheet view: quick inline edit of one product row
+  const [openDetail, setOpenDetail] = useState({}) // sheet view: app id -> true when its full detail grid is shown
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
   // ── Build From Models: pick a year + which surfaces, then auto-fill the
   // Annual Program tab with a per-surface, grass-matched, site-tuned program.
@@ -1601,6 +1602,61 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                   </div>
                 )
               }
+              // Whole packages + leftover oz, e.g. 166.67 oz → "1 gal + 38.67 oz"
+              // (128 oz/gal for liquids, 16 oz/lb for dry). Mirrors the plan sheet.
+              const galOz = (oz, unit) => {
+                if (oz == null || !isFinite(oz)) return '—'
+                const per = unit === 'lbs' ? 16 : 128
+                const big = unit === 'lbs' ? 'lb' : 'gal'
+                const whole = Math.floor(oz / per + 1e-9)
+                const rem = Math.round((oz - whole * per) * 100) / 100
+                if (whole <= 0) return `${round1(oz)} oz`
+                return `${whole} ${big}${rem > 0.009 ? ` + ${rem} oz` : ''}`
+              }
+              const money = (n) => (n == null || !isFinite(n) ? '—' : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+              // Every spreadsheet column for one planned application in its area —
+              // all derived, so the detail panel reads like the plan workbook row.
+              const detailFor = (a) => {
+                const prod = products.find((p) => p.name === a.product) || {}
+                const area = areaMatch(areas, a.area)
+                const sqft = Number(area?.sqft) || 0
+                const amt = planAppOz(a, area, prod) // { oz(total), rateM, tanks, perTankOz }
+                const rateM = amt?.rateM ?? (a.rateOzM != null && a.rateOzM !== '' ? Number(a.rateOzM) : null)
+                const tanks = amt?.tanks ?? 1
+                const unit = prod.unit || 'oz'
+                const perM = unit === 'lbs' ? 16 : 128
+                const ozPerTank = rateM != null && sqft ? rateM * (sqft / 1000) : null // one full pass
+                const totalOz = amt?.oz ?? (ozPerTank != null ? ozPerTank * tanks : null)
+                const ozPerCase = Number(prod.ozPerCase) || null
+                const casesExact = ozPerCase && totalOz != null ? totalOz / ozPerCase : null
+                const costPerUnit = Number(prod.costPerCase) || null
+                const totalCost = casesExact != null && costPerUnit ? casesExact * costPerUnit : null
+                const labelRate = (() => {
+                  const mn = prod.labelMinM ?? prod.labelMinA, mx = prod.labelMaxM ?? prod.labelMaxA
+                  const per = (prod.labelMinM ?? prod.labelMaxM) != null ? '/M' : '/A'
+                  if (mn == null && mx == null) return '—'
+                  return `${mn ?? ''}${mx != null ? `–${mx}` : ''} oz${per}`
+                })()
+                const pkg = prod.jugSize ? `${prod.jugSize} ${prod.jugUnit || 'gal'}` : (prod.caseSize || '—')
+                return [
+                  ['Rate oz/M', rateM != null ? round1(rateM) : '—'],
+                  ['Rate oz/A', rateM != null ? round1(rateM * 43.56) : '—'],
+                  ['Label rate', labelRate],
+                  ['Area (sq ft)', sqft ? sqft.toLocaleString() : '—'],
+                  ['# Tanks', tanks],
+                  ['oz / Tank', ozPerTank != null ? round1(ozPerTank) : '—'],
+                  ['Amount / Tank', galOz(ozPerTank, unit)],
+                  ['Total (oz)', totalOz != null ? round1(totalOz).toLocaleString() : '—'],
+                  ['Total product', galOz(totalOz, unit)],
+                  ['Case size', prod.caseSize || '—'],
+                  ['Package', pkg],
+                  ['Oz / case', ozPerCase != null ? ozPerCase.toLocaleString() : '—'],
+                  ['Unit conv', `${perM} oz/${unit === 'lbs' ? 'lb' : 'gal'}`],
+                  ['Cases needed', casesExact != null ? Math.round(casesExact * 100) / 100 : '—'],
+                  ['Cost / unit', money(costPerUnit)],
+                  ['Total cost', money(totalCost)],
+                ]
+              }
               // One tidy line per single spray; a multi-product day collapses to a
               // banner listing every product (shortened, colored by type) with a
               // drop-down to the full editable rows.
@@ -1646,24 +1702,38 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                 // Product for THIS area: rate (shown), amount per tank, and
                                 // total product — from the same formula the Early Order uses.
                                 const amt = planAppOz(a, areaMatch(areas, a.area), products.find((p) => p.name === a.product))
+                                const showDetail = !!openDetail[a.id]
                                 return (
-                                  <div key={a.id} onClick={() => startInline(a)} className="cursor-pointer w-full flex items-center gap-2.5 py-1.5 pl-8 pr-3.5 border-t border-black/5 hover:brightness-[.97] active:brightness-95 transition" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: '#FCFBF6' }}>
-                                    <span className="min-w-0 flex-1">
-                                      <span className="font-body text-[12px] font-bold text-slate-800">{a.product}</span>
-                                      {ai && <span className="font-body text-[10px] text-slate-400 ml-1.5">{ai}</span>}
-                                    </span>
-                                    <span className="font-body text-[10.5px] text-slate-400 truncate min-w-0 hidden md:block" style={{ flex: '0 1 auto' }}>{a.target || ''}</span>
-                                    {a.tanks === 0 && <span className="font-body text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0" style={{ background: '#F1F0EC', color: '#9A998F' }}>skipped</span>}
-                                    {a.tanks != null && a.tanks !== 1 && a.tanks !== 0 && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 tabular-nums" style={{ background: '#EEF3F8', color: '#2563EB' }}>×{a.tanks}</span>}
-                                    <span className="font-body text-[11px] font-bold text-slate-500 whitespace-nowrap tabular-nums">{rateOf(a)}</span>
-                                    {amt && (
-                                      <span className="font-body text-[11px] whitespace-nowrap tabular-nums text-right shrink-0" title="Total product for this area = rate × area size ÷ 1,000 × tanks">
-                                        <span className="font-bold" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{round1(amt.oz).toLocaleString()} oz</span>
-                                        {amt.perTankOz != null && <span className="text-slate-400"> · {round1(amt.perTankOz)}/tank</span>}
+                                  <div key={a.id}>
+                                    <div onClick={() => startInline(a)} className="cursor-pointer w-full flex items-center gap-2.5 py-1.5 pl-8 pr-3.5 border-t border-black/5 hover:brightness-[.97] active:brightness-95 transition" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: showDetail ? '#FBFAF4' : '#FCFBF6' }}>
+                                      <span className="min-w-0 flex-1">
+                                        <span className="font-body text-[12px] font-bold text-slate-800">{a.product}</span>
+                                        {ai && <span className="font-body text-[10px] text-slate-400 ml-1.5">{ai}</span>}
                                       </span>
+                                      <span className="font-body text-[10.5px] text-slate-400 truncate min-w-0 hidden md:block" style={{ flex: '0 1 auto' }}>{a.target || ''}</span>
+                                      {a.tanks === 0 && <span className="font-body text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0" style={{ background: '#F1F0EC', color: '#9A998F' }}>skipped</span>}
+                                      {a.tanks != null && a.tanks !== 1 && a.tanks !== 0 && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 tabular-nums" style={{ background: '#EEF3F8', color: '#2563EB' }}>×{a.tanks}</span>}
+                                      <span className="font-body text-[11px] font-bold text-slate-500 whitespace-nowrap tabular-nums">{rateOf(a)}</span>
+                                      {amt && (
+                                        <span className="font-body text-[11px] whitespace-nowrap tabular-nums text-right shrink-0" title="Total product for this area = rate × area size ÷ 1,000 × tanks">
+                                          <span className="font-bold" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{round1(amt.oz).toLocaleString()} oz</span>
+                                        </span>
+                                      )}
+                                      <button onClick={(e) => { e.stopPropagation(); setOpenDetail((p) => ({ ...p, [a.id]: !p[a.id] })) }} className="shrink-0 transition" style={{ color: showDetail ? FERN : '#cbd5c7' }} title="Full figures (rate, tanks, product, cost)">{showDetail ? <ChevronDown size={13} /> : <LayoutGrid size={12} />}</button>
+                                      <button onClick={(e) => { e.stopPropagation(); openEvent(items) }} className="shrink-0 text-slate-300 hover:text-slate-500 transition" title="Full editor (date, timing, targets)"><Pencil size={12} /></button>
+                                    </div>
+                                    {showDetail && (
+                                      <div className="pl-8 pr-3.5 py-2.5 border-t border-black/5" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: '#FBFAF4' }}>
+                                        <div className="grid gap-x-4 gap-y-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(84px, 1fr))' }}>
+                                          {detailFor(a).map(([label, value]) => (
+                                            <div key={label} className="min-w-0">
+                                              <div className="font-body text-[8.5px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
+                                              <div className="font-body text-[12px] font-bold tabular-nums truncate" style={{ color: FOREST }}>{value}</div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
                                     )}
-                                    <span className="font-body text-[8.5px] font-bold uppercase tracking-wide whitespace-nowrap shrink-0 hidden sm:inline" style={{ color: tc }}>{a.type || ''}</span>
-                                    <button onClick={(e) => { e.stopPropagation(); openEvent(items) }} className="shrink-0 text-slate-300 hover:text-slate-500 transition" title="Full editor (date, timing, targets)"><Pencil size={12} /></button>
                                   </div>
                                 )
                               })}
@@ -1674,7 +1744,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                     )
                   })}
                   <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-black/5" style={{ backgroundColor: '#F8FAF8' }}>
-                    <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a day to open · tap a product to edit in place · <Pencil size={10} className="inline align-[-1px]" /> for the full editor</span>
+                    <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a day to open · tap a product to edit its rate · <LayoutGrid size={10} className="inline align-[-1px]" /> for all figures · <Pencil size={10} className="inline align-[-1px]" /> for the full editor</span>
                     <button onClick={startAddApp} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={12} /> Add</button>
                   </div>
                 </div>
