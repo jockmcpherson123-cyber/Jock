@@ -1557,7 +1557,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           {/* View toggle — scrolls sideways on a phone instead of forcing the
               whole page wide (5 pills don't fit an iPhone width). */}
           <div className="flex items-center gap-2 mb-3 overflow-x-auto no-scrollbar [&>*]:shrink-0">
-            {[['sheet', 'Sheet', FileSpreadsheet], ['now', 'This Week', Gauge], ['performance', 'Performance', TrendingUp], ['coverage', 'Coverage', LayoutGrid], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
+            {[['sheet', 'Sheet', FileSpreadsheet], ['performance', 'Performance', TrendingUp], ['coverage', 'Coverage', LayoutGrid], ['order', 'Early Order', DollarSign]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setViewMode(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 transition" style={viewMode === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
                 <Icon size={13} /> {label}
               </button>
@@ -1736,6 +1736,13 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                   </div>
                                 )
                               })}
+                              {open && onCreateSheet && (
+                                <div className="pl-8 pr-3.5 py-1.5" style={{ borderLeft: `4px solid ${lead}`, backgroundColor: '#FCFBF6' }}>
+                                  <button onClick={() => onCreateSheet(items)} className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed font-body text-[11px] font-bold transition hover:bg-white" style={{ color: FOREST, borderColor: GOLD, backgroundColor: '#FFFDF6' }}>
+                                    <ClipboardList size={12} /> Create spray sheet for this
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )
                         })}
