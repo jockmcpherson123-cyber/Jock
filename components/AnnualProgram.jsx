@@ -613,10 +613,11 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   })
   // ── Sheet view: quick inline edit of a single product line ────────────────
   // Tap a row → it becomes editable in place (searchable product + rate + Save).
-  const startInline = (a) => setInlineEdit({
+  const startInline = (a, opts = {}) => setInlineEdit({
     id: a.id, area: a.area, plannedDate: a.plannedDate || null, trigger: a.trigger || { mode: 'date' },
     product: a.product, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', basis: a.basis || 'oz / M', type: a.type || '', target: a.target || '',
     tanks: a.tanks ?? null, notes: a.notes || '', // carried through so a quick edit doesn't wipe them
+    focusNotes: !!opts.focusNotes,
   })
   // Swap the product mid-edit — re-fills rate + type + basis from the library live.
   const swapInline = (name) => setInlineEdit((prev) => {
@@ -1594,7 +1595,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                     <div className="w-44 shrink-0"><SearchSelect value={inlineEdit.product} options={products.map((p) => p.name)} onPick={swapInline} placeholder="Search product…" /></div>
                     <input type="number" step="any" value={inlineEdit.rateOzM} onChange={(e) => setInlineEdit((p) => ({ ...p, rateOzM: e.target.value }))} className="w-16 text-right border rounded-lg px-2 py-1.5 text-[12px] font-bold font-body shrink-0" style={{ borderColor: GOLD, backgroundColor: '#fff' }} />
                     <span className="font-body text-[9px] text-slate-400 shrink-0">oz/M</span>
-                    <input value={inlineEdit.notes || ''} onChange={(e) => setInlineEdit((p) => ({ ...p, notes: e.target.value }))} placeholder="Notes — e.g. 2nd app of Dimension, water in 5 min" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] font-body bg-white" />
+                    <input value={inlineEdit.notes || ''} autoFocus={inlineEdit.focusNotes} onChange={(e) => setInlineEdit((p) => ({ ...p, notes: e.target.value }))} placeholder="Notes — e.g. 2nd app of Dimension, water in 5 min" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] font-body bg-white" />
                     <button onClick={saveInline} disabled={busy} className="font-body text-[11px] font-bold text-white px-3 py-1.5 rounded-lg shrink-0 disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? '…' : 'Save'}</button>
                     <button onClick={() => setInlineEdit(null)} className="font-body text-[11px] font-semibold text-slate-500 px-2.5 py-1.5 rounded-lg border border-slate-200 shrink-0">Cancel</button>
                   </div>
@@ -1722,12 +1723,16 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                         sideways. Wider columns get more room via weighted grow. */}
                                     <div className="md:flex-1 min-w-0 overflow-x-auto md:overflow-x-visible no-scrollbar md:pr-1">
                                       <div className="flex gap-1.5">
-                                        {detailFor(a).map(([label, value]) => (
-                                          <div key={label} className="ap-fig leading-tight" style={{ flex: `${COLW[label] || 60} ${COLW[label] || 60} 0`, '--apw': `${COLW[label] || 60}px` }}>
-                                            <div className="font-body text-[7px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
-                                            <div className="font-body text-[10.5px] font-bold tabular-nums truncate" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{value}</div>
-                                          </div>
-                                        ))}
+                                        {detailFor(a).map(([label, value]) => {
+                                          const isNotes = label === 'Notes'
+                                          const empty = value === '—'
+                                          return (
+                                            <div key={label} onClick={isNotes ? () => startInline(a, { focusNotes: true }) : undefined} className={`ap-fig leading-tight ${isNotes ? 'cursor-text' : ''}`} style={{ flex: `${COLW[label] || 60} ${COLW[label] || 60} 0`, '--apw': `${COLW[label] || 60}px` }} title={isNotes ? 'Tap to add a note' : undefined}>
+                                              <div className="font-body text-[7px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
+                                              <div className={`font-body text-[10.5px] font-bold tabular-nums truncate ${isNotes && empty ? 'italic' : ''}`} style={{ color: a.tanks === 0 ? '#9A998F' : (isNotes && empty ? '#B7A86A' : FOREST) }}>{isNotes && empty ? '+ note' : value}</div>
+                                            </div>
+                                          )
+                                        })}
                                       </div>
                                     </div>
                                     <button onClick={(e) => { e.stopPropagation(); openEvent(items) }} className="hidden md:block shrink-0 text-slate-300 hover:text-slate-500 transition self-center" title="Full editor (date, timing, targets)"><Pencil size={12} /></button>
