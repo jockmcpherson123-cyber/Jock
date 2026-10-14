@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid, Sparkles, TrendingUp, X } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
-import { downloadCSV, areaRate, sheetsToApplications, sprayYears } from '@/lib/calc'
+import { downloadCSV, areaMatch, planAppOz, sheetsToApplications, sprayYears } from '@/lib/calc'
 import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
 import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
 import { buildProgram, toApplications, classifySurface, SURFACE_LABEL, grassesForSurface } from '@/lib/programgen'
@@ -222,36 +222,21 @@ function shortName(name) {
 
 // Early Order: add up the whole program into how much of each product to buy,
 // like the spreadsheet's Totals tab. For each planned application, total product
-// (oz) = rate × the area's size. Then oz → cases using the product's case size,
-// with a breakdown of ounces by area. No cost — quantities and cases only.
+// (oz) = rate × the area's size × tanks. Then oz → cases using the product's
+// case size, with a breakdown of ounces by area. No cost — quantities and cases only.
 function computeEarlyOrder(apps, products, areas) {
   const prodByName = {}
   products.forEach((p) => { prodByName[p.name] = p })
-  const areaKeys = Object.keys(areas || {})
-  const sqftFor = (name) => {
-    if (areas[name]?.sqft) return areas[name].sqft
-    const n = String(name || '').toLowerCase()
-    const k = areaKeys.find((x) => x.toLowerCase().startsWith(n)) || areaKeys.find((x) => x.toLowerCase().includes(n))
-    return k ? areas[k].sqft || 0 : 0
-  }
 
   const perProduct = {}
   const areaSet = new Set()
   let missingSqft = false
   apps.forEach((a) => {
-    const sqft = sqftFor(a.area)
-    if (!sqft) { missingSqft = true; return }
-    let oz = 0
-    if (a.rateOzM != null && a.rateOzM !== '') oz = Number(a.rateOzM) * (sqft / 1000)
-    else if (a.rateOzA != null && a.rateOzA !== '') oz = Number(a.rateOzA) * (sqft / 43560)
-    else {
-      // No rate on the application — fall back to the product's per-area rate
-      // (oz/M) for this area, then its default rate + basis.
-      const prod = prodByName[a.product]
-      const ar = areaRate(prod, a.area)
-      if (ar != null) oz = ar * (sqft / 1000)
-      else if (prod?.rate != null && prod?.rate !== '') oz = Number(prod.rate) * (/\/\s*A/.test(prod.basis || '') ? sqft / 43560 : sqft / 1000)
-    }
+    const area = areaMatch(areas, a.area)
+    if (!area?.sqft) { missingSqft = true; return }
+    const prod = prodByName[a.product]
+    const r = planAppOz(a, area, prod)
+    const oz = r?.oz
     if (!oz || !isFinite(oz)) return
     areaSet.add(a.area)
     if (!perProduct[a.product]) perProduct[a.product] = { name: a.product, type: prodByName[a.product]?.type || a.type || 'Other', totalOz: 0, byArea: {} }
@@ -1644,15 +1629,24 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                               {open && items.map((a) => {
                                 const tc = typeColor(a.type); const ai = aiOf(a)
                                 if (inlineEdit?.id === a.id) return <div key={a.id} className="pl-4">{inlineRow('py-1.5 pl-4 pr-3.5')}</div>
+                                // Product for THIS area: rate (shown), amount per tank, and
+                                // total product — from the same formula the Early Order uses.
+                                const amt = planAppOz(a, areaMatch(areas, a.area), products.find((p) => p.name === a.product))
                                 return (
                                   <div key={a.id} onClick={() => startInline(a)} className="cursor-pointer w-full flex items-center gap-2.5 py-1.5 pl-8 pr-3.5 border-t border-black/5 hover:brightness-[.97] active:brightness-95 transition" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: '#FCFBF6' }}>
                                     <span className="min-w-0 flex-1">
                                       <span className="font-body text-[12px] font-bold text-slate-800">{a.product}</span>
                                       {ai && <span className="font-body text-[10px] text-slate-400 ml-1.5">{ai}</span>}
                                     </span>
-                                    <span className="font-body text-[10.5px] text-slate-400 truncate flex-1 min-w-0 hidden sm:block">{a.target || ''}</span>
+                                    <span className="font-body text-[10.5px] text-slate-400 truncate min-w-0 hidden md:block" style={{ flex: '0 1 auto' }}>{a.target || ''}</span>
                                     <span className="font-body text-[11px] font-bold text-slate-500 whitespace-nowrap tabular-nums">{rateOf(a)}</span>
-                                    <span className="font-body text-[8.5px] font-bold uppercase tracking-wide whitespace-nowrap shrink-0" style={{ color: tc }}>{a.type || ''}</span>
+                                    {amt && (
+                                      <span className="font-body text-[11px] whitespace-nowrap tabular-nums text-right shrink-0" title="Total product for this area = rate × area size ÷ 1,000 × tanks">
+                                        <span className="font-bold" style={{ color: FOREST }}>{round1(amt.oz).toLocaleString()} oz</span>
+                                        {amt.perTankOz != null && <span className="text-slate-400"> · {round1(amt.perTankOz)}/tank</span>}
+                                      </span>
+                                    )}
+                                    <span className="font-body text-[8.5px] font-bold uppercase tracking-wide whitespace-nowrap shrink-0 hidden sm:inline" style={{ color: tc }}>{a.type || ''}</span>
                                     <button onClick={(e) => { e.stopPropagation(); openEvent(items) }} className="shrink-0 text-slate-300 hover:text-slate-500 transition" title="Full editor (date, timing, targets)"><Pencil size={12} /></button>
                                   </div>
                                 )
