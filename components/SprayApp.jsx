@@ -665,6 +665,18 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
     }
   }
 
+  // Add / edit / remove a single area from inside the Annual Program, operating
+  // on the FULL areas map (the program only sees the course-scoped subset).
+  // patch === null removes the area; otherwise it's merged onto the existing one
+  // (or creates a new area when the name is new).
+  async function saveAreaInProgram(name, patch) {
+    if (!name) return
+    const next = { ...areas }
+    if (patch === null) delete next[name]
+    else next[name] = { ...(areas[name] || {}), ...patch }
+    await saveSettings({ areas: next })
+  }
+
   async function saveProduct(product) {
     setProducts((prev) => {
       const exists = prev.some((p) => p.name === product.name)
@@ -1111,7 +1123,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
           <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? saveProduct : undefined} />
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} products={products} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
-        {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} courseFilter={course} />}
+        {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} onSaveArea={saveAreaInProgram} courseFilter={course} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} programApps={programApps} onSaveSettings={saveSettings} applicatorLicenses={applicatorLicenses} location={location} />}
         {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} courseFilter={course} />}
         {route === 'training' && manage && <TrainingTab sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
