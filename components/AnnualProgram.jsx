@@ -291,7 +291,7 @@ function typeColor(type) {
   }[type] || '#94A3B8'
 }
 
-export default function AnnualProgram({ areas, products = [], sheets = [], location, courseInfo = {}, onProductsChanged, onCreateSheet, onSaveArea, courseFilter = '' }) {
+export default function AnnualProgram({ areas, products = [], sheets = [], location, courseInfo = {}, onProductsChanged, onCreateSheet, courseFilter = '' }) {
   const apTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
   const [programs, setPrograms] = useState([])
   const [toolsOpen, setToolsOpen] = useState(false)   // import/build menu
@@ -346,8 +346,6 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [openTanks, setOpenTanks] = useState({}) // sheet view: event key -> true when the tank is expanded
   const [inlineEdit, setInlineEdit] = useState(null) // sheet view: quick inline edit of one product row
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
-  const [areaEditOpen, setAreaEditOpen] = useState(false) // early order: area-sizes editor
-  const [newArea, setNewArea] = useState({ name: '', sqft: '' }) // add-area row
   // ── Build From Models: pick a year + which surfaces, then auto-fill the
   // Annual Program tab with a per-surface, grass-matched, site-tuned program.
   // The build+save runs inside the dialog (BuildSetup); the parent just opens
@@ -574,7 +572,6 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
       plannedDate: localDateISO(),
       trigger: { mode: 'date' },
       tanks: 1,
-      notes: '',
       products: [blankRow()],
     })
   }
@@ -587,7 +584,6 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
       plannedDate: items[0].plannedDate || '',
       trigger: normalizeTrigger(items[0].trigger, items[0].type),
       tanks: items[0].tanks ?? 1,
-      notes: items[0].notes || '',
       products: items.map((i) => ({
         key: i.id, id: i.id, product: i.product,
         rateOzM: i.rateOzM ?? '', rateOzA: i.rateOzA ?? '',
@@ -620,7 +616,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const startInline = (a) => setInlineEdit({
     id: a.id, area: a.area, plannedDate: a.plannedDate || null, trigger: a.trigger || { mode: 'date' },
     product: a.product, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', basis: a.basis || 'oz / M', type: a.type || '', target: a.target || '',
-    tanks: a.tanks ?? null, notes: a.notes || '', // carried through so a quick rate edit doesn't wipe them
+    tanks: a.tanks ?? null, // carried through so a quick rate edit doesn't wipe it
   })
   // Swap the product mid-edit — re-fills rate + type + basis from the library live.
   const swapInline = (name) => setInlineEdit((prev) => {
@@ -639,7 +635,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
         rateOzA: inlineEdit.rateOzA === '' ? null : Number(inlineEdit.rateOzA),
         basis: inlineEdit.basis || 'oz / M', type: inlineEdit.type || null,
         target: inlineEdit.target || null, trigger: inlineEdit.trigger || { mode: 'date' },
-        tanks: inlineEdit.tanks, notes: inlineEdit.notes,
+        tanks: inlineEdit.tanks,
       })
       setAllApps(await db.fetchApplications(activeProgram.id))
       setInlineEdit(null)
@@ -681,7 +677,6 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           target: r.target || null,
           trigger: editApp.trigger || { mode: 'date' },
           tanks: editApp.tanks,
-          notes: editApp.notes,
         })
       }
       // Delete any products that were removed from the mix.
@@ -1173,19 +1168,13 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Tanks</label>
-                <input type="number" min="0" step="0.5" inputMode="decimal"
-                  value={editApp.tanks ?? ''}
-                  onChange={(e) => setEditApp({ ...editApp, tanks: e.target.value === '' ? null : Number(e.target.value) })}
-                  placeholder="1" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tabular-nums" />
-                <p className="font-body text-[10px] text-slate-400 mt-1">Multiplies the total · 0 = planned but skipped</p>
-              </div>
-              <div className="col-span-2">
-                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Notes</label>
-                <input value={editApp.notes || ''} onChange={(e) => setEditApp({ ...editApp, notes: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder='e.g. "water in 0.1 in"' />
-              </div>
+            <div>
+              <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Tanks</label>
+              <input type="number" min="0" step="0.5" inputMode="decimal"
+                value={editApp.tanks ?? ''}
+                onChange={(e) => setEditApp({ ...editApp, tanks: e.target.value === '' ? null : Number(e.target.value) })}
+                placeholder="1" className="w-28 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tabular-nums" />
+              <p className="font-body text-[10px] text-slate-400 mt-1">Multiplies the total · 0 = planned but skipped</p>
             </div>
 
             {/* ── Trigger: when this spray should fire ─────────────── */}
@@ -1663,7 +1652,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                       <span className="font-body text-[12px] font-bold text-slate-800">{a.product}</span>
                                       {ai && <span className="font-body text-[10px] text-slate-400 ml-1.5">{ai}</span>}
                                     </span>
-                                    <span className="font-body text-[10.5px] text-slate-400 truncate min-w-0 hidden md:block" style={{ flex: '0 1 auto' }}>{a.notes ? <span className="italic">📝 {a.notes}</span> : (a.target || '')}</span>
+                                    <span className="font-body text-[10.5px] text-slate-400 truncate min-w-0 hidden md:block" style={{ flex: '0 1 auto' }}>{a.target || ''}</span>
                                     {a.tanks === 0 && <span className="font-body text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0" style={{ background: '#F1F0EC', color: '#9A998F' }}>skipped</span>}
                                     {a.tanks != null && a.tanks !== 1 && a.tanks !== 0 && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 tabular-nums" style={{ background: '#EEF3F8', color: '#2563EB' }}>×{a.tanks}</span>}
                                     <span className="font-body text-[11px] font-bold text-slate-500 whitespace-nowrap tabular-nums">{rateOf(a)}</span>
@@ -1954,59 +1943,10 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                   <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
                   <p className="font-body text-[11px] text-amber-700">
                     {earlyOrder.missingCaseCount > 0 && <>{earlyOrder.missingCaseCount} product{earlyOrder.missingCaseCount !== 1 ? 's' : ''} missing “Oz/case” — add it in the Chemical Library (Ordering section) to get its cases-needed. </>}
-                    {earlyOrder.missingSqft && <>Some areas have no square footage set, so their totals can't be calculated. {onSaveArea && <button onClick={() => setAreaEditOpen(true)} className="font-bold underline">Set area sizes</button>}.</>}
+                    {earlyOrder.missingSqft && <>Some areas have no square footage set (Settings → Sprayer Areas), so their totals can't be calculated.</>}
                   </p>
                 </div>
               )}
-
-              {onSaveArea && (() => {
-                const entries = Object.entries(areas || {}).sort((a, b) => a[0].localeCompare(b[0]))
-                const commitSize = (name, raw) => {
-                  const n = raw === '' ? 0 : Number(String(raw).replace(/,/g, ''))
-                  if (!isFinite(n) || n === (Number(areas[name]?.sqft) || 0)) return
-                  onSaveArea(name, { sqft: n })
-                }
-                const removeArea = (name) => { if (confirm(`Remove area “${name}”? Planned sprays and sheets that use it keep the name but lose its size until you re-add it. This doesn't delete any sprays.`)) onSaveArea(name, null) }
-                const addArea = () => {
-                  const nm = newArea.name.trim()
-                  if (!nm) return
-                  if (areas[nm]) { setAreaEditOpen(true); return }
-                  onSaveArea(nm, { sqft: newArea.sqft === '' ? 0 : Number(String(newArea.sqft).replace(/,/g, '')) })
-                  setNewArea({ name: '', sqft: '' })
-                }
-                return (
-                  <div className="bg-white rounded-2xl border border-black/5 shadow-sm mb-3 overflow-hidden">
-                    <button onClick={() => setAreaEditOpen((o) => !o)} className="w-full flex items-center justify-between px-3.5 py-2.5 text-left">
-                      <span className="font-body text-[12px] font-bold" style={{ color: FOREST }}>Area sizes ({entries.length})</span>
-                      <span className="flex items-center gap-1 font-body text-[11px] text-slate-400">Totals use these {areaEditOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
-                    </button>
-                    {areaEditOpen && (
-                      <div className="px-3.5 pb-3 border-t border-black/5">
-                        <p className="font-body text-[10.5px] text-slate-400 my-2">Square footage per area — the Early Order and all totals multiply each rate by these. Also in Settings → Sprayer Areas.</p>
-                        <div className="space-y-1.5">
-                          {entries.map(([name, a]) => (
-                            <div key={name} className="flex items-center gap-2">
-                              <span className="font-body text-[12px] text-slate-700 flex-1 min-w-0 truncate">{name}</span>
-                              <input type="number" min="0" step="1" inputMode="numeric" defaultValue={a?.sqft ?? ''} key={`${name}-${a?.sqft ?? ''}`}
-                                onBlur={(e) => commitSize(name, e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                                className="w-28 text-right border border-slate-200 rounded-lg px-2 py-1.5 text-[12px] font-body tabular-nums" placeholder="sq ft" />
-                              <span className="font-body text-[10px] text-slate-400 w-7">ft²</span>
-                              <button onClick={() => removeArea(name)} className="text-red-400 hover:text-red-600 p-1 shrink-0" title={`Remove ${name}`}><Trash2 size={14} /></button>
-                            </div>
-                          ))}
-                          {entries.length === 0 && <p className="font-body text-[11px] text-slate-400 py-1">No areas yet — add one below.</p>}
-                        </div>
-                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-black/5">
-                          <input value={newArea.name} onChange={(e) => setNewArea((p) => ({ ...p, name: e.target.value }))} placeholder="New area name" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] font-body" />
-                          <input type="number" min="0" step="1" inputMode="numeric" value={newArea.sqft} onChange={(e) => setNewArea((p) => ({ ...p, sqft: e.target.value }))} placeholder="sq ft" className="w-24 text-right border border-slate-200 rounded-lg px-2 py-1.5 text-[12px] font-body tabular-nums" />
-                          <button onClick={addArea} disabled={!newArea.name.trim()} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1 disabled:opacity-40" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={12} /> Add</button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
 
               <div className="space-y-2">
                 {earlyOrder.rows.map((r) => {
