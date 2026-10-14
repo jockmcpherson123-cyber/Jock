@@ -1617,10 +1617,10 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               // nothing overlaps or clips — text/money columns get more room than
               // the plain numbers. Columns still grow to fill any extra width.
               const COLW = {
-                'Rate oz/M': 56, 'Rate oz/A': 60, 'Label rate': 94, 'Area (sq ft)': 68, '# Tanks': 48,
-                'oz / Tank': 58, 'Amount / Tank': 104, 'Total (oz)': 60, 'Total product': 104,
-                'Case size': 66, 'Package': 68, 'Oz / case': 56, 'Unit conv': 76, 'Cases needed': 66,
-                'Cost / unit': 82, 'Total cost': 88,
+                'For': 96, 'Rate oz/M': 50, 'Rate oz/A': 52, 'Label rate': 84, 'Area (sq ft)': 62, '# Tanks': 42,
+                'oz / Tank': 52, 'Amount / Tank': 92, 'Total (oz)': 54, 'Total product': 92,
+                'Case size': 58, 'Package': 60, 'Oz / case': 50, 'Unit conv': 66, 'Cases needed': 58,
+                'Cost / unit': 74, 'Total cost': 80,
               }
               // Every spreadsheet column for one planned application in its area —
               // all derived, so the detail panel reads like the plan workbook row.
@@ -1647,6 +1647,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                 })()
                 const pkg = prod.jugSize ? `${prod.jugSize} ${prod.jugUnit || 'gal'}` : (prod.caseSize || '—')
                 return [
+                  ['For', a.target || '—'],
                   ['Rate oz/M', rateM != null ? round1(rateM) : '—'],
                   ['Rate oz/A', rateM != null ? round1(rateM * 43.56) : '—'],
                   ['Label rate', labelRate],
@@ -1707,10 +1708,10 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                 // planAppOz formula, so they reconcile with the Early Order.
                                 return (
                                   <div key={a.id} className="md:flex md:items-center gap-2 py-1 pl-8 pr-2.5 border-t border-black/5" style={{ borderLeft: `4px solid ${tc}`, backgroundColor: a.tanks === 0 ? '#FAFAF7' : '#FCFBF6' }}>
-                                    <button onClick={() => startInline(a)} className="text-left flex items-center gap-1.5 md:w-40 md:shrink-0 min-w-0 py-1 md:py-0 hover:opacity-80 transition" title="Tap to edit the rate">
-                                      <span className="min-w-0 truncate">
-                                        <span className="font-body text-[12px] font-bold" style={{ color: a.tanks === 0 ? '#9A998F' : '#1A1A16' }}>{a.product}</span>
-                                        {ai && <span className="font-body text-[9px] text-slate-400 ml-1 hidden lg:inline">{ai}</span>}
+                                    <button onClick={() => startInline(a)} className="text-left flex items-center gap-1.5 md:w-44 md:shrink-0 min-w-0 py-1 md:py-0 hover:opacity-80 transition" title="Tap to edit the rate">
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block font-body text-[12px] font-bold truncate" style={{ color: a.tanks === 0 ? '#9A998F' : '#1A1A16' }}>{a.product}</span>
+                                        {ai && <span className="block font-body text-[9px] text-slate-400 truncate leading-tight">{ai}</span>}
                                       </span>
                                       {a.tanks === 0 && <span className="font-body text-[8px] font-bold uppercase tracking-wide px-1 py-0.5 rounded-full shrink-0" style={{ background: '#F1F0EC', color: '#9A998F' }}>skip</span>}
                                       {a.tanks != null && a.tanks !== 1 && a.tanks !== 0 && <span className="font-body text-[8px] font-bold px-1 py-0.5 rounded-full shrink-0 tabular-nums" style={{ background: '#EEF3F8', color: '#2563EB' }}>×{a.tanks}</span>}
@@ -1719,12 +1720,12 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                         fit — no scroll. Phone: each column holds a readable
                                         minimum (via .ap-fig + --apw) and the strip scrolls
                                         sideways. Wider columns get more room via weighted grow. */}
-                                    <div className="md:flex-1 min-w-0 overflow-x-auto md:overflow-x-visible no-scrollbar">
-                                      <div className="flex gap-2">
+                                    <div className="md:flex-1 min-w-0 overflow-x-auto md:overflow-x-visible no-scrollbar md:pr-1">
+                                      <div className="flex gap-1.5">
                                         {detailFor(a).map(([label, value]) => (
                                           <div key={label} className="ap-fig leading-tight" style={{ flex: `${COLW[label] || 60} ${COLW[label] || 60} 0`, '--apw': `${COLW[label] || 60}px` }}>
-                                            <div className="font-body text-[7.5px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
-                                            <div className="font-body text-[11px] font-bold tabular-nums truncate" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{value}</div>
+                                            <div className="font-body text-[7px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
+                                            <div className="font-body text-[10.5px] font-bold tabular-nums truncate" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{value}</div>
                                           </div>
                                         ))}
                                       </div>
