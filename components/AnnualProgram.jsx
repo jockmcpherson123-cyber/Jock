@@ -1608,9 +1608,9 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                 const per = unit === 'lbs' ? 16 : 128
                 const big = unit === 'lbs' ? 'lb' : 'gal'
                 const whole = Math.floor(oz / per + 1e-9)
-                const rem = Math.round((oz - whole * per) * 100) / 100
+                const rem = Math.round((oz - whole * per) * 10) / 10
                 if (whole <= 0) return `${round1(oz)} oz`
-                return `${whole} ${big}${rem > 0.009 ? ` + ${rem} oz` : ''}`
+                return `${whole} ${big}${rem > 0.049 ? ` + ${rem} oz` : ''}`
               }
               const money = (n) => (n == null || !isFinite(n) ? '—' : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
               // Every spreadsheet column for one planned application in its area —
@@ -1712,13 +1712,17 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                       {a.tanks === 0 && <span className="font-body text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0" style={{ background: '#F1F0EC', color: '#9A998F' }}>skipped</span>}
                                       {a.tanks != null && a.tanks !== 1 && a.tanks !== 0 && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 tabular-nums" style={{ background: '#EEF3F8', color: '#2563EB' }}>×{a.tanks}</span>}
                                     </button>
-                                    <div className="grid gap-x-3 gap-y-1.5 md:flex-1 min-w-0" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(72px, 1fr))' }}>
-                                      {detailFor(a).map(([label, value]) => (
-                                        <div key={label} className="min-w-0">
-                                          <div className="font-body text-[8px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
-                                          <div className="font-body text-[12px] font-bold tabular-nums truncate" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{value}</div>
-                                        </div>
-                                      ))}
+                                    <div className="grid gap-x-3 gap-y-1.5 md:flex-1 min-w-0" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(74px, 1fr))' }}>
+                                      {detailFor(a).map(([label, value]) => {
+                                        // The text-heavy figures get two tracks so they read in full.
+                                        const wide = label === 'Amount / Tank' || label === 'Total product' || label === 'Label rate' || label === 'Total cost'
+                                        return (
+                                          <div key={label} className="min-w-0" style={wide ? { gridColumn: 'span 2' } : undefined}>
+                                            <div className="font-body text-[8px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
+                                            <div className="font-body text-[12px] font-bold tabular-nums truncate" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{value}</div>
+                                          </div>
+                                        )
+                                      })}
                                     </div>
                                     <button onClick={(e) => { e.stopPropagation(); openEvent(items) }} className="hidden md:block shrink-0 text-slate-300 hover:text-slate-500 transition self-center" title="Full editor (date, timing, targets)"><Pencil size={12} /></button>
                                   </div>
