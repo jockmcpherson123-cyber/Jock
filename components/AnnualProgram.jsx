@@ -1683,11 +1683,16 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                           // Spray days are expanded by default; a tap collapses one.
                           const open = openTanks[ev.key] === undefined ? true : openTanks[ev.key]
                           const lead = typeColor(items[0].type)
+                          // A day is "Completed" once its spray sheet has been signed off
+                          // and submitted (isEventComplete). "Started" = a sheet was made
+                          // but isn't signed/submitted yet.
+                          const completed = isEventComplete(ev)
+                          const sheetStarted = !completed && items.some((i) => i.linkedSheetId)
                           // Every spray day is a banner you can open — single sprays
                           // read the same as tank days, just without the Tank pill.
                           return (
                             <div key={ev.key}>
-                              <div className="flex items-center gap-3 px-3.5 py-2.5 border-t-2" style={{ borderTopColor: '#D8D5C4', borderLeft: `4px solid ${lead}`, backgroundColor: open ? '#EEF3EE' : '#F7F9F7' }}>
+                              <div className="flex items-center gap-3 px-3.5 py-2.5 border-t-2" style={{ borderTopColor: '#D8D5C4', borderLeft: `4px solid ${completed ? '#3A6B4A' : lead}`, backgroundColor: completed ? '#E8F1EA' : (open ? '#EEF3EE' : '#F7F9F7') }}>
                                 <button onClick={() => setOpenTanks((p) => ({ ...p, [ev.key]: !(p[ev.key] === undefined ? true : p[ev.key]) }))} className="flex-1 min-w-0 text-left flex items-center gap-3 hover:opacity-80 transition">
                                   {open ? <ChevronDown size={14} className="shrink-0" style={{ color: FERN }} /> : <ChevronRight size={14} className="shrink-0" style={{ color: FERN }} />}
                                   <span className="shrink-0 leading-none flex items-baseline gap-1.5" style={{ minWidth: 92 }}>
@@ -1697,11 +1702,19 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                   {showArea && <span className="font-body text-[10.5px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EAF2EC', color: FERN }}>{ev.area}</span>}
                                   {!open && <span className="font-body text-[10.5px] text-slate-400 whitespace-nowrap shrink-0">{items.length} product{items.length !== 1 ? 's' : ''}</span>}
                                 </button>
-                                {onCreateSheet && (
+                                {completed ? (
+                                  <span className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full font-body text-[11px] font-bold" style={{ backgroundColor: '#D9EADF', color: '#2F5A3C' }} title="Spray sheet signed off and submitted">
+                                    <Check size={13} /> Completed
+                                  </span>
+                                ) : sheetStarted ? (
+                                  <span className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full font-body text-[11px] font-bold" style={{ backgroundColor: '#FBF1DD', color: '#92660D' }} title="Spray sheet created — waiting for the applicator to sign off">
+                                    Awaiting sign-off
+                                  </span>
+                                ) : onCreateSheet ? (
                                   <button onClick={() => onCreateSheet(items)} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-dashed font-body text-[11px] font-bold transition hover:bg-white" style={{ color: FOREST, borderColor: GOLD, backgroundColor: '#FFFDF6' }}>
                                     <ClipboardList size={12} /> <span className="hidden sm:inline">Create spray sheet</span><span className="sm:hidden">Sheet</span>
                                   </button>
-                                )}
+                                ) : null}
                               </div>
                               {open && items.map((a) => {
                                 const tc = typeColor(a.type); const ai = aiOf(a)
