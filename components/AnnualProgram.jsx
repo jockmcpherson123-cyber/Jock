@@ -1613,6 +1613,15 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                 return `${whole} ${big}${rem > 0.049 ? ` + ${rem} oz` : ''}`
               }
               const money = (n) => (n == null || !isFinite(n) ? '—' : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+              // Per-column minimum width (px), tuned to each figure's content so
+              // nothing overlaps or clips — text/money columns get more room than
+              // the plain numbers. Columns still grow to fill any extra width.
+              const COLW = {
+                'Rate oz/M': 56, 'Rate oz/A': 60, 'Label rate': 94, 'Area (sq ft)': 68, '# Tanks': 48,
+                'oz / Tank': 58, 'Amount / Tank': 104, 'Total (oz)': 60, 'Total product': 104,
+                'Case size': 66, 'Package': 68, 'Oz / case': 56, 'Unit conv': 76, 'Cases needed': 66,
+                'Cost / unit': 82, 'Total cost': 88,
+              }
               // Every spreadsheet column for one planned application in its area —
               // all derived, so the detail panel reads like the plan workbook row.
               const detailFor = (a) => {
@@ -1675,26 +1684,19 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                           // Spray days are expanded by default; a tap collapses one.
                           const open = openTanks[ev.key] === undefined ? true : openTanks[ev.key]
                           const lead = typeColor(items[0].type)
-                          const multi = items.length > 1
                           // Every spray day is a banner you can open — single sprays
                           // read the same as tank days, just without the Tank pill.
                           return (
                             <div key={ev.key}>
-                              <button onClick={() => setOpenTanks((p) => ({ ...p, [ev.key]: !(p[ev.key] === undefined ? true : p[ev.key]) }))} className="w-full text-left flex items-center gap-2 px-3.5 py-2 border-t-2 hover:brightness-[.98] transition" style={{ borderTopColor: '#E7E4D6', borderLeft: `4px solid ${lead}`, backgroundColor: open ? '#FBFAF4' : 'white' }}>
-                                {open ? <ChevronDown size={13} className="shrink-0" style={{ color: '#b7a86a' }} /> : <ChevronRight size={13} className="shrink-0" style={{ color: '#b7a86a' }} />}
-                                <span className="w-11 shrink-0 leading-none">
-                                  <span className="font-body text-[11px] font-bold block" style={{ color: FOREST }}>{fmtDate(ev.date)}</span>
-                                  <span className="font-body text-[9px] font-semibold block mt-0.5" style={{ color: '#9aa69d' }}>{fmtWeekday(ev.date)}</span>
+                              <button onClick={() => setOpenTanks((p) => ({ ...p, [ev.key]: !(p[ev.key] === undefined ? true : p[ev.key]) }))} className="w-full text-left flex items-center gap-3 px-3.5 py-2.5 border-t-2 hover:brightness-[.98] transition" style={{ borderTopColor: '#D8D5C4', borderLeft: `4px solid ${lead}`, backgroundColor: open ? '#EEF3EE' : '#F7F9F7' }}>
+                                {open ? <ChevronDown size={14} className="shrink-0" style={{ color: FERN }} /> : <ChevronRight size={14} className="shrink-0" style={{ color: FERN }} />}
+                                <span className="shrink-0 leading-none flex items-baseline gap-1.5" style={{ minWidth: 92 }}>
+                                  <span className="font-display text-[16px] font-bold" style={{ color: FOREST }}>{fmtDate(ev.date)}</span>
+                                  <span className="font-body text-[9.5px] font-bold uppercase tracking-wide" style={{ color: '#b7a86a' }}>{fmtWeekday(ev.date)}</span>
                                 </span>
-                                {showArea && <span className="font-body text-[10px] text-slate-400 whitespace-nowrap shrink-0">{ev.area}</span>}
-                                <span className="flex-1 min-w-0 truncate text-[11.5px]">
-                                  {items.map((a, k) => (
-                                    <span key={a.id} className="whitespace-nowrap">
-                                      {k > 0 && <span className="mx-1" style={{ color: '#cfcbba' }}>·</span>}
-                                      <span className="font-bold" style={{ color: typeColor(a.type) }}>{multi ? shortName(a.product) : a.product}</span>
-                                    </span>
-                                  ))}
-                                </span>
+                                {showArea && <span className="font-body text-[10.5px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EAF2EC', color: FERN }}>{ev.area}</span>}
+                                {!open && <span className="font-body text-[10.5px] text-slate-400 whitespace-nowrap shrink-0">{items.length} product{items.length !== 1 ? 's' : ''}</span>}
+                                <span className="flex-1" />
                               </button>
                               {open && items.map((a) => {
                                 const tc = typeColor(a.type); const ai = aiOf(a)
@@ -1713,12 +1715,14 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                       {a.tanks === 0 && <span className="font-body text-[8px] font-bold uppercase tracking-wide px-1 py-0.5 rounded-full shrink-0" style={{ background: '#F1F0EC', color: '#9A998F' }}>skip</span>}
                                       {a.tanks != null && a.tanks !== 1 && a.tanks !== 0 && <span className="font-body text-[8px] font-bold px-1 py-0.5 rounded-full shrink-0 tabular-nums" style={{ background: '#EEF3F8', color: '#2563EB' }}>×{a.tanks}</span>}
                                     </button>
-                                    {/* All figures on ONE line — they share the width and only
-                                        scroll sideways on a narrow phone, never wrap down. */}
-                                    <div className="md:flex-1 min-w-0 overflow-x-auto md:overflow-visible">
+                                    {/* All figures on ONE line — each column is sized to its
+                                        content so everything reads clearly. The strip fills the
+                                        width; if a screen is too narrow it scrolls sideways
+                                        rather than wrapping down or clipping. */}
+                                    <div className="md:flex-1 min-w-0 overflow-x-auto">
                                       <div className="flex gap-2.5">
                                         {detailFor(a).map(([label, value]) => (
-                                          <div key={label} className="min-w-0 leading-tight" style={{ flex: '1 1 0', minWidth: 60 }}>
+                                          <div key={label} className="min-w-0 leading-tight" style={{ flex: '1 1 0', minWidth: COLW[label] || 60 }}>
                                             <div className="font-body text-[7.5px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
                                             <div className="font-body text-[11.5px] font-bold tabular-nums truncate" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{value}</div>
                                           </div>
