@@ -1004,7 +1004,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         )
       })()}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-24">
+      <div className={`${route === 'program' ? 'max-w-[1800px]' : 'max-w-7xl'} mx-auto px-4 sm:px-6 pb-24`}>
         {route === 'dashboard' && (
           <Dashboard
             sheets={visibleSheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}

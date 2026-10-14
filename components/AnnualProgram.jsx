@@ -1715,16 +1715,16 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                                       {a.tanks === 0 && <span className="font-body text-[8px] font-bold uppercase tracking-wide px-1 py-0.5 rounded-full shrink-0" style={{ background: '#F1F0EC', color: '#9A998F' }}>skip</span>}
                                       {a.tanks != null && a.tanks !== 1 && a.tanks !== 0 && <span className="font-body text-[8px] font-bold px-1 py-0.5 rounded-full shrink-0 tabular-nums" style={{ background: '#EEF3F8', color: '#2563EB' }}>×{a.tanks}</span>}
                                     </button>
-                                    {/* All figures on ONE line — each column is sized to its
-                                        content so everything reads clearly. The strip fills the
-                                        width; if a screen is too narrow it scrolls sideways
-                                        rather than wrapping down or clipping. */}
-                                    <div className="md:flex-1 min-w-0 overflow-x-auto">
-                                      <div className="flex gap-2.5">
+                                    {/* All figures on ONE line, NEVER scrolling: the columns
+                                        share the available width (wider ones get more room via
+                                        a weighted flex-grow) and shrink the text to fit on a
+                                        narrow screen rather than overflowing. */}
+                                    <div className="md:flex-1 min-w-0">
+                                      <div className="flex gap-2">
                                         {detailFor(a).map(([label, value]) => (
-                                          <div key={label} className="min-w-0 leading-tight" style={{ flex: '1 1 0', minWidth: COLW[label] || 60 }}>
+                                          <div key={label} className="leading-tight" style={{ flex: `${COLW[label] || 60} ${COLW[label] || 60} 0`, minWidth: 0 }}>
                                             <div className="font-body text-[7.5px] font-bold uppercase tracking-wide text-slate-400 truncate">{label}</div>
-                                            <div className="font-body text-[11.5px] font-bold tabular-nums truncate" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{value}</div>
+                                            <div className="font-body text-[11px] font-bold tabular-nums truncate" style={{ color: a.tanks === 0 ? '#9A998F' : FOREST }}>{value}</div>
                                           </div>
                                         ))}
                                       </div>
