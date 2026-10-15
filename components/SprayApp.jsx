@@ -60,7 +60,7 @@ import {
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, sheetBreakdown, lineAmounts, sheetLineAmts, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
-  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productStockValue, areaRate, productRateForN, eiqLoad, measureOut,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productStockValue, areaRate, sprayRateGalAc, productRateForN, eiqLoad, measureOut,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -2913,7 +2913,7 @@ function sheetRecordHTML(sheet, area = {}, products = [], sheetTargets = [], cou
 
     <div style="${card};padding:2px;margin-bottom:10px"><table style="width:100%;border-collapse:collapse"><tbody>
       <tr>${specCell('Applicator', sheet.operator)}${specCell('Tanks', tanksStr)}${specCell('Nozzle', area.nozzle)}</tr>
-      <tr>${specCell('PSI', area.psi)}${specCell('Spray Rate', area.sprayRate ? `${area.sprayRate} gal/ac` : null)}${specCell('Sq Ft', area.sqft ? Number(area.sqft).toLocaleString() : null)}</tr>
+      <tr>${specCell('PSI', area.psi)}${specCell('Spray Rate', sprayRateGalAc(area) != null ? `${sprayRateGalAc(area)} gal/ac` : null)}${specCell('Sq Ft', area.sqft ? Number(area.sqft).toLocaleString() : null)}</tr>
       <tr>${specCell('Acres', acres)}${specCell('Weather', weatherStr)}<td style="padding:6px 12px"><span style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT}">Target</span> <span style="font-size:13px;font-weight:700;color:${FOR};margin-left:6px">${esc(sheetTargets.join(' · ') || '—')}</span></td></tr>
     </tbody></table></div>
 
@@ -3303,7 +3303,7 @@ function sheetTrainingHTML(sheet, area = {}, products = [], courseInfo = {}, opt
   const specs = [
     ['Date', sheet.date], ['Applicator', sheet.operator], ['Tanks', sheet.tanks],
     ['Nozzle', area.nozzle], ['PSI', area.psi], ['Gal / Tank', area.galTank],
-    ['Spray Rate', area.sprayRate ? `${area.sprayRate} gal/ac` : null], ['Sq Ft', area.sqft ? Number(area.sqft).toLocaleString() : null], ['Acres', acres],
+    ['Spray Rate', sprayRateGalAc(area) != null ? `${sprayRateGalAc(area)} gal/ac` : null], ['Sq Ft', area.sqft ? Number(area.sqft).toLocaleString() : null], ['Acres', acres],
   ]
   const specCells = specs.map(([l, v]) => `<td style="padding:3px 9px;vertical-align:middle;width:33%;white-space:nowrap">
     <span style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${MUT}">${esc(l)}</span>
@@ -3864,7 +3864,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
               <Row label="Nozzle" value={area.nozzle || '—'} />
               <Row label="PSI" value={area.psi || '—'} />
               <Row label="Gal / Tank" value={area.galTank ?? '—'} />
-              <Row label="Spray Rate" value={area.sprayRate ? `${area.sprayRate} gal/ac` : '—'} />
+              <Row label="Spray Rate" value={sprayRateGalAc(area) != null ? `${sprayRateGalAc(area)} gal/ac` : '—'} />
               <Row label="Sq Ft" value={area.sqft ? area.sqft.toLocaleString() : '—'} />
               <Row label="Acres" value={area.sqft ? (area.sqft / 43560).toFixed(2) : '—'} />
             </div>
