@@ -281,12 +281,10 @@ const NAV_MANAGER = [
     { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
     { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true, noAll: true },
     { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc', follow: true },
-    { id: 'practices', label: 'Practices', m: 'turf', r: 'practices', follow: true, noAll: true },
     { id: 'reference', label: 'Reference', m: 'turf', r: 'knowledge' },
   ] },
   { title: 'Course & Crew', items: [
     { id: 'irrmap', label: 'Irrigation Map', m: 'map', r: 'map' },
-    { id: 'coverage', label: 'GPS Coverage', m: 'coverage', r: null },
     { id: 'parts', label: 'Parts', m: 'map', r: 'parts' },
     { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
     { id: 'training', label: 'Training', m: 'spray', r: 'training' },
