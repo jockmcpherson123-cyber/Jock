@@ -1002,7 +1002,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         )
       })()}
 
-      <div className={`${route === 'program' ? 'max-w-[1800px]' : 'max-w-7xl'} mx-auto px-4 sm:px-6 pb-24`}>
+      <div className={`${route === 'program' || route === 'chemicals' ? 'max-w-[1800px]' : 'max-w-7xl'} mx-auto px-4 sm:px-6 pb-24`}>
         {route === 'dashboard' && (
           <Dashboard
             sheets={visibleSheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
@@ -5452,7 +5452,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               <span>{oneAiMsg.text}{/not set up|ANTHROPIC/i.test(oneAiMsg.text) ? ' — say the word and I’ll walk you through adding the AI key.' : ''}</span>
             </div>
           )}
-          <div className="lg:columns-2 lg:gap-x-4 [&>div]:mb-2 [&>div]:break-inside-avoid [&_input]:!py-1.5 [&_.spa-field-label]:!mb-0.5">
+          <div className="lg:columns-2 2xl:columns-3 lg:gap-x-4 [&>div]:mb-2 [&>div]:break-inside-avoid [&_input]:!py-1.5 [&_.spa-field-label]:!mb-0.5">
             <div>
               <FieldLabel>Product Name</FieldLabel>
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} disabled={editing !== 'new'} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body disabled:bg-slate-50 disabled:text-slate-400" />
