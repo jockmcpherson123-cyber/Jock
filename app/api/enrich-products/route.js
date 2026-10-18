@@ -98,17 +98,41 @@ export async function POST(request) {
   }
   const JSON_KEYS = 'name, found, confidence, activeIngredient, activePct, manufacturer, formulation, signalWord, rei, moaGroup, epaReg, labelMinM, labelMaxM, labelMinA, labelMaxA, sprayInterval'
 
+  // Pull {"results":[...]} out of one chunk of model text. Tolerates code
+  // fences and surrounding prose by scanning from the LAST '{' that yields a
+  // valid object carrying a results array.
+  const extract = (raw) => {
+    if (!raw) return null
+    const stripped = raw.replace(/```json\s*/gi, '').replace(/```/g, '').trim()
+    try { const o = JSON.parse(stripped); if (Array.isArray(o?.results)) return o.results } catch { /* keep scanning */ }
+    const opens = []
+    for (let i = 0; i < stripped.length; i++) if (stripped[i] === '{') opens.push(i)
+    // Try widest spans first (last close with each open) so a trailing object wins.
+    for (let k = opens.length - 1; k >= 0; k--) {
+      const start = opens[k]
+      const end = stripped.lastIndexOf('}')
+      if (end <= start) continue
+      try { const o = JSON.parse(stripped.slice(start, end + 1)); if (Array.isArray(o?.results)) return o.results } catch { /* try next */ }
+    }
+    return null
+  }
+
   const parse = (response) => {
     if (response?.stop_reason === 'refusal') return { error: 'The AI declined this request.', status: 422 }
-    const textBlock = (response?.content || []).find((b) => b.type === 'text')
-    let raw = textBlock?.text || ''
-    // Be lenient: strip code fences / grab the first JSON object if needed.
-    try { return { results: JSON.parse(raw).results || [] } }
-    catch {
-      const m = raw.match(/\{[\s\S]*\}/)
-      if (m) { try { return { results: JSON.parse(m[0]).results || [] } } catch { /* fall through */ } }
-      return { error: 'The AI response was malformed. Try again.', status: 502 }
+    // With the web-fetch path the model emits preamble/thinking and tool blocks
+    // before the final answer, so read the LAST text block first, then fall
+    // back to earlier ones and to all text joined together.
+    const texts = (response?.content || []).filter((b) => b.type === 'text').map((b) => b.text || '')
+    for (let i = texts.length - 1; i >= 0; i--) {
+      const r = extract(texts[i])
+      if (r) return { results: r }
     }
+    const joined = extract(texts.join('\n'))
+    if (joined) return { results: joined }
+    if (response?.stop_reason === 'pause_turn' || response?.stop_reason === 'max_tokens') {
+      return { error: 'The AI ran out of time reading the label. Try again, or clear the label link to fill from name only.', status: 504 }
+    }
+    return { error: 'The AI response was malformed. Try again.', status: 502 }
   }
 
   let response
@@ -118,14 +142,19 @@ export async function POST(request) {
   // account/model, fall back to the plain structured call so it still works.
   if (withLabels.length > 0) {
     try {
-      response = await client.messages.create({
-        ...base,
-        tools: [{ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: Math.min(20, withLabels.length + 3) }],
-        messages: [{
-          role: 'user',
-          content: userMsg + `\n\nReply with ONLY a JSON object of the form {"results":[ ... ]}, one item per input product, each with these keys: ${JSON_KEYS}. Every value is a string except "found" (boolean) and "confidence" (one of "high","medium","low"). Echo "name" exactly as given.`,
-        }],
-      })
+      const tools = [{ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: Math.min(20, withLabels.length + 3) }]
+      const messages = [{
+        role: 'user',
+        content: userMsg + `\n\nReply with ONLY a JSON object of the form {"results":[ ... ]}, one item per input product, each with these keys: ${JSON_KEYS}. Every value is a string except "found" (boolean) and "confidence" (one of "high","medium","low"). Echo "name" exactly as given.`,
+      }]
+      response = await client.messages.create({ ...base, tools, messages })
+      // A long label fetch can pause the turn; feed the model's own turn back
+      // so it resumes and reaches its final JSON answer. Cap the continuations.
+      let guard = 0
+      while (response?.stop_reason === 'pause_turn' && guard++ < 4) {
+        messages.push({ role: 'assistant', content: response.content })
+        response = await client.messages.create({ ...base, tools, messages })
+      }
     } catch { response = null }
   }
   if (!response) {
