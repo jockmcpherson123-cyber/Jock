@@ -5728,7 +5728,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                   <FieldLabel>Label link</FieldLabel>
                   <div className="flex items-stretch gap-2">
                     <input value={draft.labelUrl ?? ''} onChange={(e) => setDraft({ ...draft, labelUrl: e.target.value })} className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="https://…" inputMode="url" />
-                    <button onClick={autofillOne} disabled={oneAiBusy || !(draft.labelUrl || '').trim()} title="Read this label and auto-fill the product" className="shrink-0 font-body text-xs font-bold px-3 rounded-xl flex items-center gap-1.5 border disabled:opacity-40 whitespace-nowrap" style={{ color: '#6D4AC2', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}>
+                    <button onClick={autofillOne} disabled={oneAiBusy || !(draft.labelUrl || '').trim()} title="Read this label and auto-fill the product" className="shrink-0 font-body text-xs font-bold px-4 rounded-xl flex items-center gap-1.5 text-white transition-opacity disabled:opacity-40 whitespace-nowrap" style={{ backgroundColor: FERN }}>
                       {oneAiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {oneAiBusy ? 'Reading…' : 'Fill from label'}
                     </button>
                   </div>
