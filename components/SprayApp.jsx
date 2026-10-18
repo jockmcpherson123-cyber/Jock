@@ -5452,7 +5452,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               <span>{oneAiMsg.text}{/not set up|ANTHROPIC/i.test(oneAiMsg.text) ? ' — say the word and I’ll walk you through adding the AI key.' : ''}</span>
             </div>
           )}
-          <div className="space-y-2 [&_input]:!py-1.5 [&_.spa-field-label]:!mb-0.5">
+          <div className="lg:columns-2 lg:gap-x-4 [&>div]:mb-2 [&>div]:break-inside-avoid [&_input]:!py-1.5 [&_.spa-field-label]:!mb-0.5">
             <div>
               <FieldLabel>Product Name</FieldLabel>
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} disabled={editing !== 'new'} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body disabled:bg-slate-50 disabled:text-slate-400" />
@@ -5479,9 +5479,8 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
             </div>
             {areaNames.length > 0 && (
               <div className="rounded-xl p-3" style={{ backgroundColor: '#F5FAF6' }}>
-                <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: FERN }}>Rates by area (oz / M)</p>
-                <p className="font-body text-[10px] text-slate-500 mb-2">Per-area rate in oz product per 1,000 sq ft — this program sprays the same product at different rates by area. Blank uses the Default Rate above. These pre-fill spray sheets and drive Early-Order totals.</p>
-                <div className="grid grid-cols-2 gap-2">
+                <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: FERN }}>Rates by area (oz / M) <span className="font-normal normal-case text-slate-400">· blank = default; pre-fills sheets &amp; Early-Order</span></p>
+                <div className="grid grid-cols-2 gap-x-2 gap-y-1">
                   {areaNames.map((a) => (
                     <div key={a}>
                       <FieldLabel>{a}</FieldLabel>
@@ -5493,40 +5492,22 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 </div>
               </div>
             )}
-            <div className="rounded-xl p-3" style={{ backgroundColor: '#FEF2F2' }}>
-              <p className="font-body text-[11px] font-bold text-red-500 uppercase tracking-wide mb-2">Label Rate Range</p>
-              <p className="font-body text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">Per 1,000 sq ft {verifyTag('labelMinM') || verifyTag('labelMaxM')}</p>
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <div>
-                  <FieldLabel>Min</FieldLabel>
-                  <input type="number" step="any" value={draft.labelMinM ?? ''} onChange={(e) => setField('labelMinM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" />
-                </div>
-                <div>
-                  <FieldLabel>Max</FieldLabel>
-                  <input type="number" step="any" value={draft.labelMaxM ?? ''} onChange={(e) => setField('labelMaxM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" />
-                </div>
+            <div className="rounded-xl p-2.5" style={{ backgroundColor: '#FEF2F2' }}>
+              <p className="font-body text-[11px] font-bold text-red-500 uppercase tracking-wide mb-1.5">Label Rate Range <span className="font-normal normal-case text-red-300">· outside = red warning on sheets</span></p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-2 gap-y-1">
+                <div><FieldLabel>Min / M {verifyTag('labelMinM')}</FieldLabel><input type="number" step="any" value={draft.labelMinM ?? ''} onChange={(e) => setField('labelMinM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
+                <div><FieldLabel>Max / M {verifyTag('labelMaxM')}</FieldLabel><input type="number" step="any" value={draft.labelMaxM ?? ''} onChange={(e) => setField('labelMaxM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
+                <div><FieldLabel>Min / A {verifyTag('labelMinA')}</FieldLabel><input type="number" step="any" value={draft.labelMinA ?? ''} onChange={(e) => setField('labelMinA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
+                <div><FieldLabel>Max / A {verifyTag('labelMaxA')}</FieldLabel><input type="number" step="any" value={draft.labelMaxA ?? ''} onChange={(e) => setField('labelMaxA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
               </div>
-              <p className="font-body text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">Per Acre {verifyTag('labelMinA') || verifyTag('labelMaxA')}</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <FieldLabel>Min</FieldLabel>
-                  <input type="number" step="any" value={draft.labelMinA ?? ''} onChange={(e) => setField('labelMinA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" />
-                </div>
-                <div>
-                  <FieldLabel>Max</FieldLabel>
-                  <input type="number" step="any" value={draft.labelMaxA ?? ''} onChange={(e) => setField('labelMaxA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" />
-                </div>
-              </div>
-              <p className="font-body text-[10px] text-red-400 mt-2">Leave blank if not applicable. Rates outside this range show a red warning on spray sheets.</p>
             </div>
             {/* Container / jug size — drives the "measure out" note on spray sheets. */}
-            <div className="rounded-xl p-3" style={{ backgroundColor: '#F1F5F3' }}>
-              <FieldLabel noMargin>Container / jug size (optional)</FieldLabel>
-              <div className="grid grid-cols-2 gap-3 mt-1.5">
+            <div className="rounded-xl p-2.5" style={{ backgroundColor: '#F1F5F3' }}>
+              <FieldLabel noMargin>Container / jug size <span className="font-normal normal-case text-slate-400">· for the measure-out note (optional)</span></FieldLabel>
+              <div className="grid grid-cols-2 gap-2 mt-1">
                 <input type="number" step="any" value={draft.jugSize ?? ''} onChange={(e) => setDraft({ ...draft, jugSize: e.target.value })} placeholder="e.g. 2.5" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" />
                 <SearchSelect value={draft.jugUnit || 'gal'} options={['gal', 'oz', 'qt', 'L']} onPick={(v) => setDraft({ ...draft, jugUnit: v })} sort={false} />
               </div>
-              <p className="font-body text-[10px] text-slate-400 mt-2">The biggest jug this product comes in. The spray sheet uses it to say how to measure the amount out — e.g. <b>“2 × 2.5 gal + 2 gal.”</b> Leave blank and it just breaks the amount into gallons + ounces (1-gal jug).</p>
             </div>
             {draft.type === 'Fertilizer' && (
               <div className="rounded-xl p-3" style={{ backgroundColor: '#FFFBF0' }}>
