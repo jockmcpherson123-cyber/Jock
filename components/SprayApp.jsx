@@ -4936,7 +4936,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   const runAiEnrich = async () => {
     setAiBusy(true); setAiReview(null)
     try {
-      const r = await fetch('/api/enrich-products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: products.map((p) => ({ name: p.name, type: p.type })) }) })
+      const r = await fetch('/api/enrich-products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: products.map((p) => ({ name: p.name, type: p.type, labelUrl: p.labelUrl || '', sdsUrl: p.sdsUrl || '', epaReg: p.epaReg || '' })) }) })
       const d = await r.json().catch(() => null)
       if (!r.ok) { setAiReview({ error: d?.error || `Server error ${r.status}` }); setAiBusy(false); return }
       const byName = {}
@@ -4963,7 +4963,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
     if (!draft?.name?.trim()) { setOneAiMsg({ text: 'Enter a product name first.', tone: 'warn' }); return }
     setOneAiBusy(true); setOneAiMsg(null)
     try {
-      const r = await fetch('/api/enrich-products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: [{ name: draft.name, type: draft.type }] }) })
+      const r = await fetch('/api/enrich-products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: [{ name: draft.name, type: draft.type, labelUrl: draft.labelUrl || '', sdsUrl: draft.sdsUrl || '', epaReg: draft.epaReg || '' }] }) })
       const d = await r.json().catch(() => null)
       if (!r.ok) { setOneAiMsg({ text: d?.error || `Server error ${r.status}`, tone: 'err' }); setOneAiBusy(false); return }
       const res = (d.results || [])[0]
@@ -5749,6 +5749,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 <div>
                   <FieldLabel>Label link</FieldLabel>
                   <input value={draft.labelUrl ?? ''} onChange={(e) => setDraft({ ...draft, labelUrl: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="https://…" inputMode="url" />
+                  <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>Paste the product's label PDF link — the AI reads it to fill this product exactly, instead of guessing from the name.</p>
                 </div>
                 <div>
                   <FieldLabel>SDS link</FieldLabel>

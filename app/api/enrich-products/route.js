@@ -26,11 +26,22 @@ export async function POST(request) {
   let body
   try { body = await request.json() } catch { return Response.json({ error: 'Bad request.' }, { status: 400 }) }
 
+  const cleanUrl = (u) => {
+    const s = String(u || '').trim()
+    return /^https?:\/\//i.test(s) ? s.slice(0, 500) : ''
+  }
   const products = (Array.isArray(body.products) ? body.products : [])
     .filter((p) => p && typeof p.name === 'string' && p.name.trim())
     .slice(0, 40)
-    .map((p) => ({ name: p.name.trim().slice(0, 120), type: (p.type || '').slice(0, 40) }))
+    .map((p) => ({
+      name: p.name.trim().slice(0, 120),
+      type: (p.type || '').slice(0, 40),
+      labelUrl: cleanUrl(p.labelUrl),
+      sdsUrl: cleanUrl(p.sdsUrl),
+      epaReg: String(p.epaReg || '').trim().slice(0, 40),
+    }))
   if (products.length === 0) return Response.json({ results: [] })
+  const withLabels = products.filter((p) => p.labelUrl)
 
   const productSchema = {
     type: 'object',
@@ -62,39 +73,71 @@ export async function POST(request) {
     additionalProperties: false,
   }
 
+  const system =
+    'You are a turfgrass agronomy assistant that fills in reference data for a golf course chemical library. ' +
+    'When a product includes a "labelUrl", FETCH that page with the web_fetch tool and read that exact label as ' +
+    'the AUTHORITATIVE source for that product — so you identify the precise product/formulation and never second-' +
+    'guess which one it is. If no labelUrl is given (or the fetch fails), fall back to your own knowledge. ' +
+    'Never invent data: when a field is not stated on the label (or you are not confident), return an empty string. ' +
+    'Be especially conservative with EPA registration numbers and exact label rates — leave them empty unless the ' +
+    'label (or your confident knowledge) states them. This is decision-support only; a licensed applicator verifies ' +
+    'the physical label before use.'
+  const userMsg =
+    'Fill in the label reference data for each of these turf products. For any product with a labelUrl, read that ' +
+    'label first and use it. Rate ranges: use oz per 1,000 sq ft (labelMinM/labelMaxM) for products applied to ' +
+    'greens/tees, and oz per acre (labelMinA/labelMaxA) for broadcast/fairway/rough products; fill whichever the ' +
+    'label uses and leave the other empty.\n\n' + JSON.stringify(products)
+
   const client = new Anthropic({ apiKey })
-  let response
-  try {
-    response = await client.messages.create({
-      model: 'claude-opus-5',
-      max_tokens: 8000,
-      thinking: { type: 'adaptive' },
-      system:
-        'You are a turfgrass agronomy assistant that fills in reference data for a golf course chemical library. ' +
-        'For each product you recognize, return its label facts from your knowledge. Never invent data: when a field ' +
-        'is not something you are confident about, return an empty string. Be especially conservative with EPA ' +
-        'registration numbers and exact label rates — leave them empty unless you are confident. This is ' +
-        'decision-support only; a licensed applicator verifies the physical label before use.',
-      output_config: { format: { type: 'json_schema', schema } },
-      messages: [{
-        role: 'user',
-        content:
-          'Fill in the label reference data for each of these turf products. Rate ranges: use oz per 1,000 sq ft ' +
-          '(labelMinM/labelMaxM) for products applied to greens/tees, and oz per acre (labelMinA/labelMaxA) for ' +
-          'broadcast/fairway/rough products; fill whichever the label uses and leave the other empty.\n\n' +
-          JSON.stringify(products),
-      }],
-    })
-  } catch (err) {
-    const msg = err?.status === 401 ? 'The AI key was rejected. Check ANTHROPIC_API_KEY in Vercel.' : 'The AI service could not be reached. Try again.'
-    return Response.json({ error: msg }, { status: 502 })
+  const base = {
+    model: 'claude-opus-5',
+    max_tokens: 8000,
+    thinking: { type: 'adaptive' },
+    system,
+    messages: [{ role: 'user', content: userMsg }],
+  }
+  const JSON_KEYS = 'name, found, confidence, activeIngredient, activePct, manufacturer, formulation, signalWord, rei, moaGroup, epaReg, labelMinM, labelMaxM, labelMinA, labelMaxA, sprayInterval'
+
+  const parse = (response) => {
+    if (response?.stop_reason === 'refusal') return { error: 'The AI declined this request.', status: 422 }
+    const textBlock = (response?.content || []).find((b) => b.type === 'text')
+    let raw = textBlock?.text || ''
+    // Be lenient: strip code fences / grab the first JSON object if needed.
+    try { return { results: JSON.parse(raw).results || [] } }
+    catch {
+      const m = raw.match(/\{[\s\S]*\}/)
+      if (m) { try { return { results: JSON.parse(m[0]).results || [] } } catch { /* fall through */ } }
+      return { error: 'The AI response was malformed. Try again.', status: 502 }
+    }
   }
 
-  if (response.stop_reason === 'refusal') {
-    return Response.json({ error: 'The AI declined this request.' }, { status: 422 })
+  let response
+  // When the user supplied label links, let the model fetch and read them so it
+  // identifies the exact product. (Prompt-driven JSON here — tools + structured
+  // output don't combine.) If the web-fetch tool isn't available on this
+  // account/model, fall back to the plain structured call so it still works.
+  if (withLabels.length > 0) {
+    try {
+      response = await client.messages.create({
+        ...base,
+        tools: [{ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: Math.min(20, withLabels.length + 3) }],
+        messages: [{
+          role: 'user',
+          content: userMsg + `\n\nReply with ONLY a JSON object of the form {"results":[ ... ]}, one item per input product, each with these keys: ${JSON_KEYS}. Every value is a string except "found" (boolean) and "confidence" (one of "high","medium","low"). Echo "name" exactly as given.`,
+        }],
+      })
+    } catch { response = null }
   }
-  const textBlock = (response.content || []).find((b) => b.type === 'text')
-  let data
-  try { data = JSON.parse(textBlock?.text || '{}') } catch { return Response.json({ error: 'The AI response was malformed. Try again.' }, { status: 502 }) }
-  return Response.json({ results: Array.isArray(data.results) ? data.results : [] })
+  if (!response) {
+    try {
+      response = await client.messages.create({ ...base, output_config: { format: { type: 'json_schema', schema } } })
+    } catch (err) {
+      const msg = err?.status === 401 ? 'The AI key was rejected. Check ANTHROPIC_API_KEY in Vercel.' : 'The AI service could not be reached. Try again.'
+      return Response.json({ error: msg }, { status: 502 })
+    }
+  }
+
+  const out = parse(response)
+  if (out.error) return Response.json({ error: out.error }, { status: out.status })
+  return Response.json({ results: Array.isArray(out.results) ? out.results : [] })
 }
