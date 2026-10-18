@@ -5440,9 +5440,6 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
           <div className="flex items-center justify-between gap-2 mb-3 flex-wrap sticky top-0 z-10 bg-white/95 backdrop-blur -mx-4 px-4 py-2 border-b border-slate-100">
             <p className="font-display text-base font-semibold text-slate-900">{editing === 'new' ? 'Add Product' : `Edit ${editing}`}</p>
             <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={autofillOne} disabled={oneAiBusy} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border disabled:opacity-50 shrink-0" style={{ color: '#6D4AC2', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}>
-                {oneAiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {oneAiBusy ? 'Reading…' : 'Fill with AI'}
-              </button>
               <button onClick={cancelEdit} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full text-slate-500 border border-slate-200 shrink-0">Cancel</button>
               <button onClick={saveDraft} className="font-body text-xs font-bold px-4 py-2 rounded-full text-white shrink-0" style={{ backgroundColor: FOREST }}>Save</button>
             </div>
@@ -5729,8 +5726,13 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               <div className="space-y-2">
                 <div>
                   <FieldLabel>Label link</FieldLabel>
-                  <input value={draft.labelUrl ?? ''} onChange={(e) => setDraft({ ...draft, labelUrl: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="https://…" inputMode="url" />
-                  <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>Paste the product's label PDF link — the AI reads it to fill this product exactly, instead of guessing from the name.</p>
+                  <div className="flex items-stretch gap-2">
+                    <input value={draft.labelUrl ?? ''} onChange={(e) => setDraft({ ...draft, labelUrl: e.target.value })} className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="https://…" inputMode="url" />
+                    <button onClick={autofillOne} disabled={oneAiBusy || !(draft.labelUrl || '').trim()} title="Read this label and auto-fill the product" className="shrink-0 font-body text-xs font-bold px-3 rounded-xl flex items-center gap-1.5 border disabled:opacity-40 whitespace-nowrap" style={{ color: '#6D4AC2', borderColor: '#D6C9F2', backgroundColor: '#F7F4FD' }}>
+                      {oneAiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {oneAiBusy ? 'Reading…' : 'Fill from label'}
+                    </button>
+                  </div>
+                  <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>Paste the label PDF link, then tap <b>Fill from label</b> — the AI reads it and fills this product exactly, instead of guessing from the name.</p>
                 </div>
                 <div>
                   <FieldLabel>SDS link</FieldLabel>
