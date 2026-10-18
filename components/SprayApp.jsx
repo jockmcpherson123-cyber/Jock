@@ -5729,7 +5729,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                   <div className="flex items-stretch gap-2">
                     <input value={draft.labelUrl ?? ''} onChange={(e) => setDraft({ ...draft, labelUrl: e.target.value })} className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="https://…" inputMode="url" />
                     <button onClick={autofillOne} disabled={oneAiBusy || !(draft.labelUrl || '').trim()} title="Read this label and auto-fill the product" className="shrink-0 font-body text-xs font-bold px-4 rounded-xl flex items-center gap-1.5 text-white transition-opacity disabled:opacity-40 whitespace-nowrap" style={{ backgroundColor: FERN }}>
-                      {oneAiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {oneAiBusy ? 'Reading…' : 'Fill from label'}
+                      {oneAiBusy && <Loader2 size={14} className="animate-spin" />} {oneAiBusy ? 'Reading…' : 'Fill from label'}
                     </button>
                   </div>
                   <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>Paste the label PDF link, then tap <b>Fill from label</b> — the AI reads it and fills this product exactly, instead of guessing from the name.</p>
