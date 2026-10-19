@@ -4967,7 +4967,12 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       const d = await r.json().catch(() => null)
       if (!r.ok) { setOneAiMsg({ text: d?.error || `Server error ${r.status}`, tone: 'err' }); setOneAiBusy(false); return }
       const res = (d.results || [])[0]
-      if (!res || !res.found) { setOneAiMsg({ text: 'The AI wasn’t confident about this product — fill it by hand.', tone: 'warn' }); setOneAiBusy(false); return }
+      // Did the pasted label link actually open? A Salesforce/portal link or a
+      // folder path isn't a readable PDF, so the AI falls back to the name — say so.
+      const labelTried = !!(draft.labelUrl || '').trim()
+      const labelFailed = labelTried && (d.labelFetch === 'failed' || d.labelFetch === 'none')
+      const linkNote = labelFailed ? ' Couldn’t open that label link — it looks like a portal/landing page, not a direct PDF, so this was filled from the product name. Paste the direct PDF link (it opens the document itself) to read the exact label.' : ''
+      if (!res || !res.found) { setOneAiMsg({ text: `The AI wasn’t confident about this product — fill it by hand.${linkNote}`, tone: 'warn' }); setOneAiBusy(false); return }
       const fills = {}
       ;['activeIngredient', 'manufacturer', 'formulation', 'signalWord', 'rei', 'moaGroup', 'epaReg'].forEach((f) => { if (!AI_BLANK(res[f]) && AI_BLANK(draft[f])) fills[f] = res[f] })
       if (AI_NUM(res.activePct) != null && AI_BLANK(draft.activePct)) fills.activePct = AI_NUM(res.activePct)
@@ -4997,13 +5002,14 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       const gotRates = ['labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA'].some((f) => f in fills)
       const rateStillBlank = !gotRates && AI_BLANK(draft.labelMinM) && AI_BLANK(draft.labelMinA)
       if (n === 0 && !gotDocs) {
-        setOneAiMsg({ text: `Nothing to add by name${rateStillBlank ? ' — for a generic, snap the label photo above and the AI reads the rate table and links straight off it.' : ' — the blanks here are already filled.'}`, tone: rateStillBlank ? 'warn' : 'ok' })
+        const tail = labelFailed ? linkNote : (rateStillBlank ? ' — for a generic, snap the label photo above and the AI reads the rate table and links straight off it.' : ' — the blanks here are already filled.')
+        setOneAiMsg({ text: `Nothing to add by name${tail}`, tone: (labelFailed || rateStillBlank) ? 'warn' : 'ok' })
       } else {
         const flagged = Object.keys(verifySet).length
         const bits = []
         if (n > 0) bits.push(`filled ${n} field${n !== 1 ? 's' : ''}`)
         if (gotDocs) bits.push('found label/SDS links')
-        setOneAiMsg({ text: `Done — ${bits.join(' and ')}.${flagged ? ' Rate/label fields are tagged “verify vs. label.”' : ''}${rateStillBlank ? ' No rate range by name — snap the label photo to read it off the table.' : ''}`, tone: 'ok' })
+        setOneAiMsg({ text: `Done — ${bits.join(' and ')}.${flagged ? ' Rate/label fields are tagged “verify vs. label.”' : ''}${rateStillBlank ? ' No rate range by name — snap the label photo to read it off the table.' : ''}${linkNote}`, tone: labelFailed ? 'warn' : 'ok' })
       }
     } catch (e) { setOneAiMsg({ text: String(e?.message || e), tone: 'err' }) }
     setOneAiBusy(false)

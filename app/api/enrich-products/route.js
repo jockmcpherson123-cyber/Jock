@@ -135,25 +135,43 @@ export async function POST(request) {
     return { error: 'The AI response was malformed. Try again.', status: 502 }
   }
 
+  // Classify each web_fetch attempt in an assistant turn as 'ok' or an error
+  // code, so we can tell the user honestly whether the label link opened.
+  const scanFetch = (content, acc) => {
+    for (const b of (content || [])) {
+      if (b?.type !== 'web_fetch_tool_result') continue
+      const c = b.content
+      const errCode = c?.error_code || (c?.type === 'web_fetch_tool_error' ? (c.error_code || 'error') : null)
+      if (errCode) acc.errors.push(errCode)
+      else acc.ok += 1
+    }
+    return acc
+  }
+
   let response
+  let fetchAcc = { ok: 0, errors: [] }
+  let triedFetch = false
   // When the user supplied label links, let the model fetch and read them so it
   // identifies the exact product. (Prompt-driven JSON here — tools + structured
   // output don't combine.) If the web-fetch tool isn't available on this
   // account/model, fall back to the plain structured call so it still works.
   if (withLabels.length > 0) {
     try {
+      triedFetch = true
       const tools = [{ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: Math.min(20, withLabels.length + 3) }]
       const messages = [{
         role: 'user',
         content: userMsg + `\n\nReply with ONLY a JSON object of the form {"results":[ ... ]}, one item per input product, each with these keys: ${JSON_KEYS}. Every value is a string except "found" (boolean) and "confidence" (one of "high","medium","low"). Echo "name" exactly as given.`,
       }]
       response = await client.messages.create({ ...base, tools, messages })
+      scanFetch(response.content, fetchAcc)
       // A long label fetch can pause the turn; feed the model's own turn back
       // so it resumes and reaches its final JSON answer. Cap the continuations.
       let guard = 0
       while (response?.stop_reason === 'pause_turn' && guard++ < 4) {
         messages.push({ role: 'assistant', content: response.content })
         response = await client.messages.create({ ...base, tools, messages })
+        scanFetch(response.content, fetchAcc)
       }
     } catch { response = null }
   }
@@ -168,5 +186,10 @@ export async function POST(request) {
 
   const out = parse(response)
   if (out.error) return Response.json({ error: out.error }, { status: out.status })
-  return Response.json({ results: Array.isArray(out.results) ? out.results : [] })
+  // Tell the client whether the label link actually opened, so it can say so
+  // instead of pretending it read a page it never reached.
+  const labelFetch = triedFetch
+    ? (fetchAcc.ok > 0 ? 'ok' : (fetchAcc.errors.length > 0 ? 'failed' : 'none'))
+    : 'skipped'
+  return Response.json({ results: Array.isArray(out.results) ? out.results : [], labelFetch, fetchErrors: fetchAcc.errors })
 }
