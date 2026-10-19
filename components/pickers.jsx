@@ -53,7 +53,7 @@ export function SearchSelect({ value, options = [], onPick, placeholder = 'Searc
 // several at once without re-opening.
 // `dimmed` names render greyed with a small tag (e.g. "on a job") — a hint that
 // they're already spoken for elsewhere, while still being selectable.
-export function MultiSelect({ selected = [], options = [], onToggle, placeholder = 'Search…', accent = FERN, hideChips = false, dimmed = [], dimmedLabel = 'busy', autoOpen = false }) {
+export function MultiSelect({ selected = [], options = [], onToggle, placeholder = 'Search…', accent = FERN, hideChips = false, dimmed = [], dimmedLabel = 'busy', autoOpen = false, compact = false }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const wrapRef = useRef(null)
@@ -70,16 +70,16 @@ export function MultiSelect({ selected = [], options = [], onToggle, placeholder
   return (
     <div ref={wrapRef} className="relative">
       {!hideChips && selected.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-1.5">
+        <div className={`flex flex-wrap gap-1.5 ${compact ? 'mb-1' : 'mb-1.5'}`}>
           {selected.map((tg) => (
-            <span key={tg} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ backgroundColor: '#EAF2EC', color: accent, border: '1px solid #D5E5DA' }}>
+            <span key={tg} className={`font-body font-semibold rounded-full flex items-center gap-1 ${compact ? 'text-[10px] px-2 py-0.5' : 'text-[11px] px-2.5 py-1'}`} style={{ backgroundColor: '#EAF2EC', color: accent, border: '1px solid #D5E5DA' }}>
               {tg}<button type="button" onClick={() => onToggle(tg)} className="opacity-60 hover:opacity-100">×</button>
             </span>
           ))}
         </div>
       )}
       <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)} placeholder={placeholder}
-        className="w-full border border-slate-200 rounded-lg px-2.5 py-2.5 text-base font-body bg-white" />
+        className={`w-full border border-slate-200 rounded-lg font-body bg-white ${compact ? 'px-2.5 py-1.5 text-sm' : 'px-2.5 py-2.5 text-base'}`} />
       {open && (
         <div className="absolute z-40 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
           {matches.length === 0 && <div className="px-3 py-2 text-sm text-slate-400 font-body">No matches</div>}
@@ -87,7 +87,7 @@ export function MultiSelect({ selected = [], options = [], onToggle, placeholder
             const on = selected.includes(o)
             const busy = !on && dimmed.includes(o)
             return (
-              <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); onToggle(o) }} className="w-full text-left px-3 py-3 text-base font-body hover:bg-slate-50 flex items-center gap-2.5" style={busy ? { backgroundColor: '#F8FAFB' } : {}}>
+              <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); onToggle(o) }} className={`w-full text-left font-body hover:bg-slate-50 flex items-center gap-2.5 ${compact ? 'px-3 py-2 text-sm' : 'px-3 py-3 text-base'}`} style={busy ? { backgroundColor: '#F8FAFB' } : {}}>
                 <span className="inline-flex items-center justify-center rounded shrink-0" style={{ width: 20, height: 20, border: `1.5px solid ${on ? accent : '#CBD5E1'}`, backgroundColor: on ? accent : 'white' }}>{on && <Check size={13} color="white" />}</span>
                 <span className="flex-1" style={busy ? { color: '#94A3B8' } : {}}>{o}</span>
                 {busy && <span className="font-body text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF1F4', color: '#94A3B8' }}>{dimmedLabel}</span>}

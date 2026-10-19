@@ -2683,8 +2683,8 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               // Only flag going OVER the label rate — under-rate is intentional often.
               const outOfRange = overLimit
               return (
-                <div key={p.id} className="border rounded-xl p-3" style={{ borderColor: outOfRange ? '#FCA5A5' : '#E2E8F0' }}>
-                  <div className="flex items-center gap-2 mb-2">
+                <div key={p.id} className="border rounded-xl p-2.5" style={{ borderColor: outOfRange ? '#FCA5A5' : '#E2E8F0' }}>
+                  <div className="flex items-center gap-2 mb-1.5">
                     <span className="shrink-0 inline-flex items-center justify-center font-body text-[11px] font-extrabold rounded" style={{ width: 20, height: 20, backgroundColor: '#EAF2EC', color: FOREST }}>{mixIdx + 1}</span>
                     <span className="font-body text-sm font-bold min-w-0 truncate" style={{ color: FOREST }}>{p.product}</span>
                     <span className="font-body text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>
@@ -2692,8 +2692,8 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                   </div>
                   {p.product && (
                     <>
-                      <div className="grid grid-cols-2 gap-2 mb-1">
-                        <input type="number" step="any" placeholder={p.defaultRate ? `Default ${p.defaultRate}` : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="border-2 rounded-lg px-2.5 py-2 text-sm font-semibold font-body" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
+                      <div className="grid grid-cols-2 gap-2 mb-1.5">
+                        <input type="number" step="any" placeholder={p.defaultRate ? `Default ${p.defaultRate}` : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="border-2 rounded-lg px-2.5 py-1.5 text-sm font-semibold font-body" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
                         <SearchSelect value={p.basis} options={BASIS_OPTIONS} onPick={(v) => updateProduct(p.id, { basis: v })} sort={false} placeholder="Basis…" />
                       </div>
 
@@ -2708,9 +2708,9 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                         const allOpts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...(targetOptions || [])].filter(Boolean)))
                         const toggleT = (tg) => updateProduct(p.id, { target: (sel.includes(tg) ? sel.filter((x) => x !== tg) : [...sel, tg]).join(', ') })
                         return (
-                          <div className="mb-2">
-                            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1 mb-1"><Target size={11} /> Spraying for</label>
-                            <MultiSelect selected={sel} options={allOpts} onToggle={toggleT} placeholder="Search what you’re spraying for — tap several…" />
+                          <div className="mb-1.5">
+                            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1 mb-0.5"><Target size={11} /> Spraying for</label>
+                            <MultiSelect selected={sel} options={allOpts} onToggle={toggleT} placeholder="Search what you’re spraying for — tap several…" compact />
                           </div>
                         )
                       })()}
@@ -2748,17 +2748,18 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                         <p className="font-body text-[10px] text-slate-400 mb-2">Label range: {labelMin ?? '—'}–{labelMax ?? '—'} {p.basis}</p>
                       )}
 
-                      <label className="flex items-center gap-2 mb-2 cursor-pointer select-none">
-                        <input type="checkbox" checked={p.forceGal} onChange={(e) => updateProduct(p.id, { forceGal: e.target.checked })} className="w-4 h-4 rounded" style={{ accentColor: FERN }} />
-                        <span className="font-body text-xs text-slate-500">Show final amount in gallons</span>
-                      </label>
-
-                      {amt !== null && (
-                        <div className="flex items-center justify-between text-xs font-body rounded-lg px-3 py-2" style={{ backgroundColor: outOfRange ? '#FEF2F2' : '#F0F6F2' }}>
-                          <span className="text-slate-500">Amt/Tank: <b className="text-slate-800">{amt} {amtUnit}</b></span>
-                          <span className="text-slate-500">Total: <b style={{ color: outOfRange ? '#DC2626' : FERN }}>{total} {amtUnit}</b></span>
-                        </div>
-                      )}
+                      <div className="flex items-center justify-between gap-2 text-xs font-body rounded-lg px-2.5 py-1.5" style={{ backgroundColor: outOfRange ? '#FEF2F2' : '#F0F6F2' }}>
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0" title="Show the final amount in gallons instead of ounces">
+                          <input type="checkbox" checked={p.forceGal} onChange={(e) => updateProduct(p.id, { forceGal: e.target.checked })} className="w-3.5 h-3.5 rounded" style={{ accentColor: FERN }} />
+                          <span className="text-slate-500">in gal</span>
+                        </label>
+                        {amt !== null && (
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="text-slate-500 truncate">Tank: <b className="text-slate-800">{amt} {amtUnit}</b></span>
+                            <span className="text-slate-500 truncate">Total: <b style={{ color: outOfRange ? '#DC2626' : FERN }}>{total} {amtUnit}</b></span>
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
                 </div>
