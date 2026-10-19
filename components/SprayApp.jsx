@@ -1002,7 +1002,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         )
       })()}
 
-      <div className={`${route === 'program' || route === 'chemicals' ? 'max-w-[1800px]' : 'max-w-7xl'} mx-auto px-4 sm:px-6 pb-24`}>
+      <div className={`${route === 'program' || route === 'chemicals' || route === 'edit' ? 'max-w-[1800px]' : 'max-w-7xl'} mx-auto px-4 sm:px-6 pb-24`}>
         {route === 'dashboard' && (
           <Dashboard
             sheets={visibleSheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
@@ -2571,7 +2571,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   const productTargets = [...new Set((s.products || []).flatMap((p) => splitTargets(p.target)))]
 
   return (
-    <div className="pt-6 pb-10 max-w-7xl mx-auto">
+    <div className="pt-6 pb-10 max-w-[1800px] mx-auto">
       <div className="flex items-center justify-between mb-5">
         <button onClick={onCancel} className="font-body text-sm font-medium text-slate-400">Cancel</button>
         <h2 className="font-display text-lg font-semibold text-slate-900">{sheet.status === 'pending' && sheet.directorSig === '' ? 'Spray Sheet' : 'Edit Sheet'}</h2>
@@ -2672,7 +2672,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
         <Card>
           <FieldLabel>Products</FieldLabel>
           <MultiSelect selected={s.products.map((p) => p.product).filter(Boolean)} options={products.map((pr) => pr.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mt-3 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 mt-3 items-start">
             {sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p, mixIdx) => {
               const { amt, unit: amtUnit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bd, perTankSqft, p.forceGal)
               const prodInfo = products.find((pr) => pr.name === p.product)
