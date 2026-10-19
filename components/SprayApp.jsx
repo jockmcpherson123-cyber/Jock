@@ -2582,10 +2582,14 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
 
       <div className="space-y-4">
         <Card>
-          <FieldLabel>Area</FieldLabel>
-          <Select value={s.area} onChange={handleAreaChange} options={Object.keys(areas)} />
-
-          <div className="grid grid-cols-2 gap-3 mt-3">
+          {/* The essentials — prefilled from the area, edit any of them here.
+              One dense grid that fans out to 4 columns on wide screens so the
+              whole header stays short and the products sit higher up. */}
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-2.5 items-start">
+            <div className="col-span-2 md:col-span-1">
+              <FieldLabel>Area</FieldLabel>
+              <Select value={s.area} onChange={handleAreaChange} options={Object.keys(areas)} />
+            </div>
             <div>
               <FieldLabel>Date</FieldLabel>
               <input type="date" value={s.date} onChange={(e) => update({ date: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
@@ -2594,10 +2598,6 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               <FieldLabel>Operator</FieldLabel>
               <Select value={s.operator} onChange={(v) => update({ operator: v })} options={operators} placeholder="Select..." />
             </div>
-          </div>
-
-          {/* The essentials — prefilled from the area, edit any of them here */}
-          <div className="grid grid-cols-2 gap-3 mt-3">
             <div>
               <FieldLabel>Area (sq ft)</FieldLabel>
               <input type="number" inputMode="numeric" value={disp.sqft} onChange={(e) => update({ sqft: e.target.value })} placeholder="30,000" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tabular-nums" />
@@ -2617,10 +2617,10 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                 placeholder={String(bd.tanksToMix || 1)}
                 onChange={(e) => { const v = e.target.value; if (v === '') update({ tanks: undefined, tanksManual: false }); else { const n = Math.max(0, Math.round((Number(v) || 0) * 100) / 100); update({ tanks: n > 0 ? n : undefined, tanksManual: n > 0 }) } }}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body font-semibold tabular-nums" style={{ color: FOREST }} />
-              <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>
+              <p className="font-body text-[11px] mt-1 leading-tight" style={{ color: INK_3 }}>
                 {s.tanksManual
-                  ? <>Set by hand ({tanksLabel}) · <button type="button" onClick={() => update({ tanks: undefined, tanksManual: false })} className="font-bold underline" style={{ color: FERN }}>use calculated</button></>
-                  : <>Calculated: <b style={{ color: INK_2 }}>{tanksLabel}</b> — type a number to override (decimals OK for a partial, e.g. 6.5)</>}
+                  ? <>Set by hand ({tanksLabel}) · <button type="button" onClick={() => update({ tanks: undefined, tanksManual: false })} className="font-bold underline" style={{ color: FERN }}>use calc</button></>
+                  : <>Calc: <b style={{ color: INK_2 }}>{tanksLabel}</b> · type to override (e.g. 6.5)</>}
               </p>
             </div>
             <div>
