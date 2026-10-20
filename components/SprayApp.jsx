@@ -2511,7 +2511,6 @@ function InfoChip({ label, value }) {
 function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes, location, sheets = [], courseInfo = {} }) {
   const [s, setS] = useState({ ...sheet, targets: sheet.targets || (sheet.target ? [sheet.target] : []) })
   const [nTargets, setNTargets] = useState({}) // per-line "feed by N" target (lb N/M)
-  const [targetEditId, setTargetEditId] = useState(null) // which product's "spraying for" picker is open
   const baseArea = resolveArea(areas, s.area) || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
   const numOr = (v, d) => (v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : d)
   const impliedRate = baseArea.sqft && baseArea.galTank ? Math.round((baseArea.galTank / (baseArea.sqft / 1000)) * 100) / 100 : ''
@@ -2584,7 +2583,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
       </div>
 
       <div className="space-y-4">
-        <Card>
+        <div className="bg-white rounded-xl border-2 p-3" style={{ borderColor: INK }}>
           {/* The essentials — prefilled from the area, edit any of them here.
               One dense grid that fans out to 4 columns on wide screens so the
               whole header stays short and the products sit higher up. */}
@@ -2635,7 +2634,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               <input value={disp.psi} onChange={(e) => update({ psi: e.target.value })} placeholder="e.g. 40" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
             </div>
           </div>
-        </Card>
+        </div>
 
         {rotationAlerts.length > 0 && (
           <div className="rounded-2xl border p-3" style={{ backgroundColor: '#FEF2F2', borderColor: '#FECACA' }}>
@@ -2686,58 +2685,23 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               // Only flag going OVER the label rate — under-rate is intentional often.
               const outOfRange = overLimit
               return (
-                <div key={p.id} className="border rounded-lg p-2" style={{ borderColor: outOfRange ? '#FCA5A5' : '#E2E8F0' }}>
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className="shrink-0 inline-flex items-center justify-center font-body text-[10px] font-extrabold rounded" style={{ width: 18, height: 18, backgroundColor: '#EAF2EC', color: FOREST }}>{mixIdx + 1}</span>
-                    <span className="font-body text-[13px] font-bold min-w-0 truncate" style={{ color: FOREST }}>{p.product}</span>
-                    <span className="font-body text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>
-                    <button onClick={() => removeRow(p.id)} className="text-red-400 p-0.5 shrink-0 ml-auto"><Trash2 size={14} /></button>
+                <div key={p.id} className="border rounded-xl p-2.5" style={{ borderColor: outOfRange ? '#FCA5A5' : '#E2E8F0' }}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="shrink-0 inline-flex items-center justify-center font-body text-[11px] font-extrabold rounded" style={{ width: 20, height: 20, backgroundColor: '#EAF2EC', color: FOREST }}>{mixIdx + 1}</span>
+                    <span className="font-body text-sm font-bold min-w-0 truncate" style={{ color: FOREST }}>{p.product}</span>
+                    <span className="font-body text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>
+                    <button onClick={() => removeRow(p.id)} className="text-red-400 p-1 shrink-0 ml-auto"><Trash2 size={15} /></button>
                   </div>
                   {p.product && (
                     <>
-                      {/* Rate + basis, with the tank/total readout inline on the right. */}
-                      <div className="flex items-center gap-1.5">
-                        <input type="number" step="any" placeholder={p.defaultRate ? `${p.defaultRate}` : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="w-16 shrink-0 border-2 rounded-lg px-2 py-1.5 text-sm font-semibold font-body tabular-nums" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
-                        <div className="w-[88px] shrink-0"><SearchSelect value={p.basis} options={BASIS_OPTIONS} onPick={(v) => updateProduct(p.id, { basis: v })} sort={false} placeholder="Basis…" compact /></div>
-                        {amt !== null && (
-                          <span className="ml-auto font-body text-[11px] text-slate-500 shrink-0 tabular-nums text-right leading-tight">
-                            Tank <b className="text-slate-800">{amt}</b> · Total <b style={{ color: outOfRange ? '#DC2626' : FERN }}>{total} {amtUnit}</b>
-                          </span>
-                        )}
+                      <div className="grid grid-cols-2 gap-2 mb-1.5">
+                        <input type="number" step="any" placeholder={p.defaultRate ? `Default ${p.defaultRate}` : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="border-2 rounded-lg px-2.5 py-1.5 text-sm font-semibold font-body" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
+                        <SearchSelect value={p.basis} options={BASIS_OPTIONS} onPick={(v) => updateProduct(p.id, { basis: v })} sort={false} placeholder="Basis…" />
                       </div>
 
-                      {prodInfo?.type === 'Fertilizer' && (() => {
-                        const canN = productRateForN(1, prodInfo) != null
-                        return (
-                          <div className="flex items-center gap-2 mt-1 rounded-lg px-2 py-1 flex-wrap" style={{ backgroundColor: '#EFF6FF' }}>
-                            <span className="font-body text-[10px] font-bold shrink-0" style={{ color: '#2563EB' }}>Feed by N</span>
-                            {canN ? (
-                              <>
-                                <input type="number" step="any" inputMode="decimal" value={nTargets[p.id] ?? ''} onChange={(e) => setNTargets((t) => ({ ...t, [p.id]: e.target.value }))} placeholder="0.10" className="w-14 border border-slate-200 rounded-lg px-2 py-0.5 text-sm font-body bg-white" />
-                                <span className="font-body text-[10px] text-slate-500">lb N / M</span>
-                                <button type="button" onClick={() => { const r = productRateForN(nTargets[p.id], prodInfo); if (r) updateProduct(p.id, r) }} className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full text-white shrink-0" style={{ backgroundColor: '#2563EB' }}>Set rate</button>
-                              </>
-                            ) : (
-                              <span className="font-body text-[10px] text-slate-500">Add N % in the Chemical Library to dose by nitrogen.</span>
-                            )}
-                          </div>
-                        )
-                      })()}
-
-                      {overLimit && (
-                        <p className="font-body text-[10px] font-semibold text-red-600 mt-1 flex items-center gap-1">⚠ Over label max — limit {labelMax} {p.basis}</p>
-                      )}
-                      {!overLimit && labelMin && rateNum > 0 && rateNum < labelMin && (
-                        <p className="font-body text-[10px] font-semibold mt-1 flex items-center gap-1" style={{ color: '#B45309' }}>↓ Below label min ({labelMin} {p.basis}) — light rate.</p>
-                      )}
-                      {grassConflicts(prodInfo, area).length > 0 && (
-                        <p className="font-body text-[10px] font-semibold text-red-600 mt-1 rounded-lg px-2 py-1" style={{ backgroundColor: '#FEF2F2' }}>
-                          ⚠ Grass safety: {p.product} can damage {grassConflicts(prodInfo, area).join(', ')}. Check the label.
-                        </p>
-                      )}
-
-                      {/* What are we spraying this for — collapsed to inline chips;
-                          tap "+" to open the picker so it doesn't eat a whole row. */}
+                      {/* What are we spraying this for — the crew sees this on the sheet.
+                          Multi-select: pick one or more. Options are the likely diseases
+                          for this product, its purpose, and your saved target list. */}
                       {(() => {
                         const suggested = diseasesForProduct({ name: p.product, activeIngredient: prodInfo?.activeIngredient })
                         const t = String(prodInfo?.type || '').toLowerCase()
@@ -2745,35 +2709,59 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                         const sel = splitTargets(p.target)
                         const allOpts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...(targetOptions || [])].filter(Boolean)))
                         const toggleT = (tg) => updateProduct(p.id, { target: (sel.includes(tg) ? sel.filter((x) => x !== tg) : [...sel, tg]).join(', ') })
-                        const editing = targetEditId === p.id
-                        if (editing) return (
-                          <div className="mt-1.5">
-                            <MultiSelect selected={sel} options={allOpts} onToggle={toggleT} placeholder="Search what you’re spraying for…" compact autoOpen />
-                            <button type="button" onClick={() => setTargetEditId(null)} className="font-body text-[10px] font-bold mt-1" style={{ color: FERN }}>Done</button>
-                          </div>
-                        )
                         return (
-                          <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-                            <Target size={11} className="text-slate-400 shrink-0" />
-                            {sel.length === 0 ? (
-                              <button type="button" onClick={() => setTargetEditId(p.id)} className="font-body text-[11px] italic text-slate-400">+ spraying for…</button>
-                            ) : (
-                              <>
-                                {sel.map((tg) => (
-                                  <span key={tg} className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: '#EAF2EC', color: FERN, border: '1px solid #D5E5DA' }}>
-                                    {tg}<button type="button" onClick={() => toggleT(tg)} className="opacity-60 hover:opacity-100">×</button>
-                                  </span>
-                                ))}
-                                <button type="button" onClick={() => setTargetEditId(p.id)} className="font-body text-[13px] font-bold leading-none px-1" style={{ color: FERN }} title="Add target">＋</button>
-                              </>
-                            )}
-                            <label className="ml-auto flex items-center gap-1 cursor-pointer select-none shrink-0" title="Show final amount in gallons">
-                              <input type="checkbox" checked={p.forceGal} onChange={(e) => updateProduct(p.id, { forceGal: e.target.checked })} className="w-3 h-3 rounded" style={{ accentColor: FERN }} />
-                              <span className="font-body text-[10px] text-slate-400">gal</span>
-                            </label>
+                          <div className="mb-1.5">
+                            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1 mb-0.5"><Target size={11} /> Spraying for</label>
+                            <MultiSelect selected={sel} options={allOpts} onToggle={toggleT} placeholder="Search what you’re spraying for — tap several…" compact />
                           </div>
                         )
                       })()}
+
+                      {prodInfo?.type === 'Fertilizer' && (() => {
+                        const canN = productRateForN(1, prodInfo) != null
+                        return (
+                          <div className="flex items-center gap-2 mb-2 rounded-lg px-2.5 py-1.5 flex-wrap" style={{ backgroundColor: '#EFF6FF' }}>
+                            <span className="font-body text-[11px] font-bold shrink-0" style={{ color: '#2563EB' }}>Feed by N</span>
+                            {canN ? (
+                              <>
+                                <input type="number" step="any" inputMode="decimal" value={nTargets[p.id] ?? ''} onChange={(e) => setNTargets((t) => ({ ...t, [p.id]: e.target.value }))} placeholder="0.10" className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body bg-white" />
+                                <span className="font-body text-[11px] text-slate-500">lb N / M</span>
+                                <button type="button" onClick={() => { const r = productRateForN(nTargets[p.id], prodInfo); if (r) updateProduct(p.id, r) }} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full text-white shrink-0" style={{ backgroundColor: '#2563EB' }}>Set rate</button>
+                              </>
+                            ) : (
+                              <span className="font-body text-[11px] text-slate-500">Add this product's N {prodInfo.fertForm === 'liquid' ? '(lb N/gal)' : '%'} in the Chemical Library to dose by nitrogen.</span>
+                            )}
+                          </div>
+                        )
+                      })()}
+
+                      {overLimit && (
+                        <p className="font-body text-[11px] font-semibold text-red-600 mb-2 flex items-center gap-1">⚠ Over label maximum — limit is {labelMax} {p.basis}</p>
+                      )}
+                      {!overLimit && labelMin && rateNum > 0 && rateNum < labelMin && (
+                        <p className="font-body text-[11px] font-semibold mb-2 flex items-center gap-1" style={{ color: '#B45309' }}>↓ Below label minimum ({labelMin} {p.basis}) — light rate. Fine if that's intended.</p>
+                      )}
+                      {grassConflicts(prodInfo, area).length > 0 && (
+                        <p className="font-body text-[11px] font-semibold text-red-600 mb-2 rounded-lg px-2 py-1.5" style={{ backgroundColor: '#FEF2F2' }}>
+                          ⚠ Grass safety: {p.product} can damage {grassConflicts(prodInfo, area).join(', ')} — this area ({(area.grasses || []).join(', ')}) has it. Check the label.
+                        </p>
+                      )}
+                      {!outOfRange && (labelMin || labelMax) && (
+                        <p className="font-body text-[10px] text-slate-400 mb-2">Label range: {labelMin ?? '—'}–{labelMax ?? '—'} {p.basis}</p>
+                      )}
+
+                      <div className="flex items-center justify-between gap-2 text-xs font-body rounded-lg px-2.5 py-1.5" style={{ backgroundColor: outOfRange ? '#FEF2F2' : '#F0F6F2' }}>
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0" title="Show the final amount in gallons instead of ounces">
+                          <input type="checkbox" checked={p.forceGal} onChange={(e) => updateProduct(p.id, { forceGal: e.target.checked })} className="w-3.5 h-3.5 rounded" style={{ accentColor: FERN }} />
+                          <span className="text-slate-500">in gal</span>
+                        </label>
+                        {amt !== null && (
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="text-slate-500 truncate">Tank: <b className="text-slate-800">{amt} {amtUnit}</b></span>
+                            <span className="text-slate-500 truncate">Total: <b style={{ color: outOfRange ? '#DC2626' : FERN }}>{total} {amtUnit}</b></span>
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
                 </div>
