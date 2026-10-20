@@ -112,7 +112,7 @@ import ChemistryGuide from '@/components/ChemistryGuide'
 const productJug = (prod) => (prod && prod.jugSize > 0 ? { size: Number(prod.jugSize), unit: prod.jugUnit || 'gal' } : null)
 
 // ── PALETTE ───────────────────────────────────────────────────────────────
-import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, AMBER, RED } from '@/lib/theme'
+import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, AMBER, RED, BLUE } from '@/lib/theme'
 const CREAM = '#F7F5EF'
 // Clubhouse × Instrument restyle: "soft stone" surfaces + warm-neutral inks
 // (warmth dialled out). Mirrors the CSS tokens in globals.css so inline styles
@@ -2511,6 +2511,9 @@ function InfoChip({ label, value }) {
 function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operators, targets: targetOptions, sheetTypes, location, sheets = [], courseInfo = {} }) {
   const [s, setS] = useState({ ...sheet, targets: sheet.targets || (sheet.target ? [sheet.target] : []) })
   const [nTargets, setNTargets] = useState({}) // per-line "feed by N" target (lb N/M)
+  const [openRow, setOpenRow] = useState(null)   // product row expanded for notes/targets/gal
+  const [libQuery, setLibQuery] = useState('')    // chemical-library search in the builder
+  const [libCat, setLibCat] = useState('all')     // chemical-library type filter
   const baseArea = resolveArea(areas, s.area) || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
   const numOr = (v, d) => (v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : d)
   const impliedRate = baseArea.sqft && baseArea.galTank ? Math.round((baseArea.galTank / (baseArea.sqft / 1000)) * 100) / 100 : ''
@@ -2571,6 +2574,29 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   // The sheet's overall targets are derived from the per-product "Spraying for"
   // choices — there's no separate sheet-level target picker any more.
   const productTargets = [...new Set((s.products || []).flatMap((p) => splitTargets(p.target)))]
+
+  // ── Chemical-library builder (left pane) ──────────────────────────────────
+  // Group a product into a coarse category for the filter tabs + its dot color.
+  const catOf = (prod) => {
+    const t = String(prod?.type || '').toLowerCase()
+    if (t.includes('fung')) return 'fungicide'
+    if (t.includes('growth') || t.includes('pgr') || t.includes('regulat')) return 'pgr'
+    if (t.includes('fert')) return 'fert'
+    if (t.includes('bio')) return 'bio'
+    if (t.includes('herb')) return 'herbicide'
+    if (t.includes('insect')) return 'insecticide'
+    return 'other'
+  }
+  const catDot = (c) => c === 'fungicide' ? RED : c === 'pgr' ? GOLD : (c === 'fert' || c === 'bio') ? FERN : c === 'herbicide' ? BLUE : '#94A3B8'
+  const LIB_TABS = [{ k: 'all', label: 'All' }, { k: 'fungicide', label: 'Fungicide' }, { k: 'pgr', label: 'PGR' }, { k: 'bio', label: 'Bio' }, { k: 'fert', label: 'Fert' }]
+  const addedNames = new Set((s.products || []).map((p) => p.product).filter(Boolean))
+  const libList = [...products]
+    .filter((pr) => (libCat === 'all' || catOf(pr) === libCat) && (!libQuery.trim() || pr.name.toLowerCase().includes(libQuery.trim().toLowerCase())))
+    // Products already in the tank float to the top (shown ticked), then A–Z.
+    .sort((a, b) => (addedNames.has(b.name) - addedNames.has(a.name)) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+  const builtRows = sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder)
+  // Columns shared by the grid header and every product row.
+  const GRID_COLS = '26px minmax(120px,1.4fr) 84px 96px minmax(108px,1.3fr) 118px 28px'
 
   return (
     <div className="pt-6 pb-10 max-w-[1800px] mx-auto">
@@ -2672,101 +2698,151 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
         })()}
 
         <Card>
-          <FieldLabel>Products</FieldLabel>
-          <MultiSelect selected={s.products.map((p) => p.product).filter(Boolean)} options={products.map((pr) => pr.name)} onToggle={toggleProductRow} hideChips placeholder="Search products — tap to add several…" />
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 mt-3 items-start">
-            {sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder).map((p, mixIdx) => {
-              const { amt, unit: amtUnit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bd, perTankSqft, p.forceGal)
-              const prodInfo = products.find((pr) => pr.name === p.product)
-              const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
-              const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
-              const rateNum = parseFloat(p.rate)
-              const overLimit = labelMax && rateNum && rateNum > labelMax
-              // Only flag going OVER the label rate — under-rate is intentional often.
-              const outOfRange = overLimit
-              return (
-                <div key={p.id} className="border rounded-xl p-2.5" style={{ borderColor: outOfRange ? '#FCA5A5' : '#E2E8F0' }}>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="shrink-0 inline-flex items-center justify-center font-body text-[11px] font-extrabold rounded" style={{ width: 20, height: 20, backgroundColor: '#EAF2EC', color: FOREST }}>{mixIdx + 1}</span>
-                    <span className="font-body text-sm font-bold min-w-0 truncate" style={{ color: FOREST }}>{p.product}</span>
-                    <span className="font-body text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>
-                    <button onClick={() => removeRow(p.id)} className="text-red-400 p-1 shrink-0 ml-auto"><Trash2 size={15} /></button>
+          <div className="flex items-center justify-between mb-2">
+            <FieldLabel noMargin>Products</FieldLabel>
+            <span className="font-body text-[11px] text-slate-400">{addedNames.size} in tank</span>
+          </div>
+          <div className="lg:flex lg:gap-3 lg:items-start">
+            {/* LEFT — chemical library: search, filter, tap + to drop onto the sheet */}
+            <div className="lg:w-56 lg:flex-none mb-3 lg:mb-0 border border-slate-200 rounded-xl p-2 bg-white">
+              <div className="relative mb-2">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-300" />
+                <input value={libQuery} onChange={(e) => setLibQuery(e.target.value)} placeholder="Search products…" className="w-full border border-slate-200 rounded-lg pl-7 pr-2 py-1.5 text-sm font-body bg-white" />
+              </div>
+              <div className="flex flex-wrap gap-1 mb-2">
+                {LIB_TABS.map((t) => (
+                  <button key={t.k} type="button" onClick={() => setLibCat(t.k)} className="font-body text-[10px] font-semibold px-2 py-1 rounded-full" style={libCat === t.k ? { backgroundColor: FOREST, color: '#fff' } : { backgroundColor: '#F1EFEA', color: INK_2 }}>{t.label}</button>
+                ))}
+              </div>
+              <div className="max-h-[380px] overflow-y-auto overscroll-contain pr-0.5">
+                {libList.map((prod) => {
+                  const on = addedNames.has(prod.name)
+                  return (
+                    <button key={prod.name} type="button" onClick={() => toggleProductRow(prod.name)} className="w-full flex items-center gap-2 px-1.5 py-1.5 rounded-lg hover:bg-slate-50 text-left">
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: catDot(catOf(prod)) }} />
+                      <span className="flex-1 min-w-0 truncate font-body text-[12.5px]" style={{ color: on ? INK_3 : INK }}>{prod.name}</span>
+                      <span className="w-5 h-5 rounded-md grid place-items-center text-[13px] font-bold shrink-0" style={on ? { backgroundColor: FERN, color: '#fff', border: `1px solid ${FERN}` } : { backgroundColor: '#EAF2EC', color: '#2F5A3D', border: '1px solid #D5E5DA' }}>{on ? '✓' : '+'}</span>
+                    </button>
+                  )
+                })}
+                {libList.length === 0 && <p className="font-body text-xs text-slate-400 px-2 py-3">No products match.</p>}
+              </div>
+            </div>
+
+            {/* RIGHT — the sheet as a spreadsheet grid */}
+            <div className="flex-1 min-w-0">
+              {builtRows.length === 0 ? (
+                <div className="border border-dashed border-slate-200 rounded-xl py-10 text-center font-body text-sm text-slate-400">Tap products in the library to build the tank mix.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <div className="min-w-[620px] border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="grid items-center bg-[#F3F1EC] border-b border-slate-200 px-2.5 py-2 font-body text-[9px] font-bold uppercase tracking-wide text-slate-400" style={{ gridTemplateColumns: GRID_COLS }}>
+                      <span>#</span><span>Product</span><span>Rate</span><span>Unit</span><span>Spraying for</span><span className="text-right">Total</span><span></span>
+                    </div>
+                    {builtRows.map((p, mixIdx) => {
+                      const { amt, unit: amtUnit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bd, perTankSqft, p.forceGal)
+                      const prodInfo = products.find((pr) => pr.name === p.product)
+                      const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
+                      const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
+                      const rateNum = parseFloat(p.rate)
+                      const overLimit = labelMax && rateNum && rateNum > labelMax
+                      const underLimit = !overLimit && labelMin && rateNum > 0 && rateNum < labelMin
+                      const outOfRange = overLimit
+                      const sel = splitTargets(p.target)
+                      const suggested = diseasesForProduct({ name: p.product, activeIngredient: prodInfo?.activeIngredient })
+                      const t = String(prodInfo?.type || '').toLowerCase()
+                      const tp = t.includes('growth') ? 'Growth Reg' : t.includes('herb') ? 'Weed control' : t.includes('insect') ? 'Insect control' : t.includes('fert') ? 'Feed / nutrition' : null
+                      const allOpts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...(targetOptions || [])].filter(Boolean)))
+                      const toggleT = (tg) => updateProduct(p.id, { target: (sel.includes(tg) ? sel.filter((x) => x !== tg) : [...sel, tg]).join(', ') })
+                      const grass = grassConflicts(prodInfo, area)
+                      const open = openRow === p.id
+                      const toggleOpen = () => setOpenRow(open ? null : p.id)
+                      return (
+                        <div key={p.id} className="border-b border-slate-100 last:border-b-0" style={outOfRange ? { backgroundColor: '#FEF6F5' } : {}}>
+                          <div className="grid items-center px-2.5 py-1.5 gap-1.5" style={{ gridTemplateColumns: GRID_COLS }}>
+                            <span className="inline-flex items-center justify-center font-body text-[10px] font-extrabold rounded" style={{ width: 19, height: 19, backgroundColor: '#EAF2EC', color: FOREST }}>{mixIdx + 1}</span>
+                            <button type="button" onClick={toggleOpen} className="min-w-0 text-left">
+                              <span className="font-body text-[13px] font-bold block truncate" style={{ color: FOREST }}>{p.product}</span>
+                              <span className="font-body text-[9px] font-semibold text-slate-400">{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>
+                            </button>
+                            <input type="number" step="any" placeholder={p.defaultRate ? String(p.defaultRate) : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="w-full border rounded-lg px-2 py-1.5 text-sm font-semibold font-body tabular-nums" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
+                            <SearchSelect value={p.basis} options={BASIS_OPTIONS} onPick={(v) => updateProduct(p.id, { basis: v })} sort={false} placeholder="Unit…" compact />
+                            <button type="button" onClick={toggleOpen} className="min-w-0 flex flex-wrap items-center gap-1 text-left">
+                              {sel.length === 0
+                                ? <span className="font-body text-[11px] italic text-slate-400">+ spraying for…</span>
+                                : sel.map((tg) => <span key={tg} className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EAF2EC', color: FERN, border: '1px solid #D5E5DA' }}>{tg}</span>)}
+                            </button>
+                            <div className="text-right">
+                              {amt !== null ? <span className="font-body text-[13px] font-bold tabular-nums" style={{ color: outOfRange ? RED : FERN }}>{total} {amtUnit}</span> : <span className="text-slate-300">—</span>}
+                              <span className="block font-body text-[9px] font-bold" style={{ color: overLimit ? RED : underLimit ? AMBER : FERN }}>
+                                {overLimit ? '⚠ over max' : underLimit ? '↓ under min' : (labelMin || labelMax) ? '✓ in label' : ''}
+                              </span>
+                            </div>
+                            <button type="button" onClick={toggleOpen} className="text-slate-400 justify-self-end p-0.5" title={open ? 'Collapse' : 'Details, notes & targets'}>
+                              {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                            </button>
+                          </div>
+
+                          {open && (
+                            <div className="px-3 pb-3 pt-1 border-t border-slate-100 grid md:grid-cols-2 gap-x-4 gap-y-3" style={{ backgroundColor: '#FBFAF7' }}>
+                              <div>
+                                <label className="font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1 mb-1"><Target size={11} /> Spraying for</label>
+                                <MultiSelect selected={sel} options={allOpts} onToggle={toggleT} placeholder="Search what you’re spraying for…" compact />
+                              </div>
+                              <div>
+                                <label className="font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Notes <span className="text-slate-300 normal-case font-normal">· the crew sees this</span></label>
+                                <input value={p.note || ''} onChange={(e) => updateProduct(p.id, { note: e.target.value })} placeholder="e.g. water in 5 min · 2nd app of Dimension" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-body bg-white" />
+                              </div>
+
+                              {prodInfo?.type === 'Fertilizer' && (() => {
+                                const canN = productRateForN(1, prodInfo) != null
+                                return (
+                                  <div className="md:col-span-2 flex items-center gap-2 rounded-lg px-2.5 py-1.5 flex-wrap" style={{ backgroundColor: '#EFF6FF' }}>
+                                    <span className="font-body text-[11px] font-bold shrink-0" style={{ color: BLUE }}>Feed by N</span>
+                                    {canN ? (
+                                      <>
+                                        <input type="number" step="any" inputMode="decimal" value={nTargets[p.id] ?? ''} onChange={(e) => setNTargets((x) => ({ ...x, [p.id]: e.target.value }))} placeholder="0.10" className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body bg-white" />
+                                        <span className="font-body text-[11px] text-slate-500">lb N / M</span>
+                                        <button type="button" onClick={() => { const r = productRateForN(nTargets[p.id], prodInfo); if (r) updateProduct(p.id, r) }} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full text-white shrink-0" style={{ backgroundColor: BLUE }}>Set rate</button>
+                                      </>
+                                    ) : (
+                                      <span className="font-body text-[11px] text-slate-500">Add this product's N {prodInfo.fertForm === 'liquid' ? '(lb N/gal)' : '%'} in the Chemical Library to dose by nitrogen.</span>
+                                    )}
+                                  </div>
+                                )
+                              })()}
+
+                              {grass.length > 0 && (
+                                <p className="md:col-span-2 font-body text-[11px] font-semibold text-red-600 rounded-lg px-2.5 py-1.5" style={{ backgroundColor: '#FEF2F2' }}>
+                                  ⚠ Grass safety: {p.product} can damage {grass.join(', ')} — this area ({(area.grasses || []).join(', ')}) has it. Check the label.
+                                </p>
+                              )}
+
+                              <div className="md:col-span-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+                                <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Show the final amount in gallons instead of ounces">
+                                  <input type="checkbox" checked={p.forceGal} onChange={(e) => updateProduct(p.id, { forceGal: e.target.checked })} className="w-3.5 h-3.5 rounded" style={{ accentColor: FERN }} />
+                                  <span className="font-body text-xs text-slate-500">Show amount in gallons</span>
+                                </label>
+                                {(labelMin || labelMax) && (
+                                  <span className="font-body text-[11px] text-slate-400">Label range: {labelMin ?? '—'}–{labelMax ?? '—'} {p.basis}</span>
+                                )}
+                                {amt !== null && <span className="font-body text-[11px] text-slate-500">Per tank: <b className="text-slate-700 tabular-nums">{amt} {amtUnit}</b></span>}
+                                <button type="button" onClick={() => { setOpenRow(null); removeRow(p.id) }} className="ml-auto font-body text-[11px] font-semibold text-red-500 flex items-center gap-1"><Trash2 size={13} /> Remove</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+
+                    <div className="flex items-center justify-between px-3 py-2 bg-[#F3F1EC] border-t border-slate-200 font-body text-[11px]">
+                      <span className="font-bold text-slate-600">{builtRows.length} product{builtRows.length !== 1 ? 's' : ''}</span>
+                      <span className="text-slate-500">Tank <b className="text-slate-800 tabular-nums">{disp.galTank || bd.galTank || 0} gal</b> · <b className="text-slate-800">{tanksLabel}</b></span>
+                    </div>
                   </div>
-                  {p.product && (
-                    <>
-                      <div className="grid grid-cols-2 gap-2 mb-1.5">
-                        <input type="number" step="any" placeholder={p.defaultRate ? `Default ${p.defaultRate}` : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="border-2 rounded-lg px-2.5 py-1.5 text-sm font-semibold font-body" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
-                        <SearchSelect value={p.basis} options={BASIS_OPTIONS} onPick={(v) => updateProduct(p.id, { basis: v })} sort={false} placeholder="Basis…" />
-                      </div>
-
-                      {/* What are we spraying this for — the crew sees this on the sheet.
-                          Multi-select: pick one or more. Options are the likely diseases
-                          for this product, its purpose, and your saved target list. */}
-                      {(() => {
-                        const suggested = diseasesForProduct({ name: p.product, activeIngredient: prodInfo?.activeIngredient })
-                        const t = String(prodInfo?.type || '').toLowerCase()
-                        const tp = t.includes('growth') ? 'Growth Reg' : t.includes('herb') ? 'Weed control' : t.includes('insect') ? 'Insect control' : t.includes('fert') ? 'Feed / nutrition' : null
-                        const sel = splitTargets(p.target)
-                        const allOpts = Array.from(new Set([...(suggested || []), ...(tp ? [tp] : []), ...(targetOptions || [])].filter(Boolean)))
-                        const toggleT = (tg) => updateProduct(p.id, { target: (sel.includes(tg) ? sel.filter((x) => x !== tg) : [...sel, tg]).join(', ') })
-                        return (
-                          <div className="mb-1.5">
-                            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1 mb-0.5"><Target size={11} /> Spraying for</label>
-                            <MultiSelect selected={sel} options={allOpts} onToggle={toggleT} placeholder="Search what you’re spraying for — tap several…" compact />
-                          </div>
-                        )
-                      })()}
-
-                      {prodInfo?.type === 'Fertilizer' && (() => {
-                        const canN = productRateForN(1, prodInfo) != null
-                        return (
-                          <div className="flex items-center gap-2 mb-2 rounded-lg px-2.5 py-1.5 flex-wrap" style={{ backgroundColor: '#EFF6FF' }}>
-                            <span className="font-body text-[11px] font-bold shrink-0" style={{ color: '#2563EB' }}>Feed by N</span>
-                            {canN ? (
-                              <>
-                                <input type="number" step="any" inputMode="decimal" value={nTargets[p.id] ?? ''} onChange={(e) => setNTargets((t) => ({ ...t, [p.id]: e.target.value }))} placeholder="0.10" className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body bg-white" />
-                                <span className="font-body text-[11px] text-slate-500">lb N / M</span>
-                                <button type="button" onClick={() => { const r = productRateForN(nTargets[p.id], prodInfo); if (r) updateProduct(p.id, r) }} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full text-white shrink-0" style={{ backgroundColor: '#2563EB' }}>Set rate</button>
-                              </>
-                            ) : (
-                              <span className="font-body text-[11px] text-slate-500">Add this product's N {prodInfo.fertForm === 'liquid' ? '(lb N/gal)' : '%'} in the Chemical Library to dose by nitrogen.</span>
-                            )}
-                          </div>
-                        )
-                      })()}
-
-                      {overLimit && (
-                        <p className="font-body text-[11px] font-semibold text-red-600 mb-2 flex items-center gap-1">⚠ Over label maximum — limit is {labelMax} {p.basis}</p>
-                      )}
-                      {!overLimit && labelMin && rateNum > 0 && rateNum < labelMin && (
-                        <p className="font-body text-[11px] font-semibold mb-2 flex items-center gap-1" style={{ color: '#B45309' }}>↓ Below label minimum ({labelMin} {p.basis}) — light rate. Fine if that's intended.</p>
-                      )}
-                      {grassConflicts(prodInfo, area).length > 0 && (
-                        <p className="font-body text-[11px] font-semibold text-red-600 mb-2 rounded-lg px-2 py-1.5" style={{ backgroundColor: '#FEF2F2' }}>
-                          ⚠ Grass safety: {p.product} can damage {grassConflicts(prodInfo, area).join(', ')} — this area ({(area.grasses || []).join(', ')}) has it. Check the label.
-                        </p>
-                      )}
-                      {!outOfRange && (labelMin || labelMax) && (
-                        <p className="font-body text-[10px] text-slate-400 mb-2">Label range: {labelMin ?? '—'}–{labelMax ?? '—'} {p.basis}</p>
-                      )}
-
-                      <div className="flex items-center justify-between gap-2 text-xs font-body rounded-lg px-2.5 py-1.5" style={{ backgroundColor: outOfRange ? '#FEF2F2' : '#F0F6F2' }}>
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0" title="Show the final amount in gallons instead of ounces">
-                          <input type="checkbox" checked={p.forceGal} onChange={(e) => updateProduct(p.id, { forceGal: e.target.checked })} className="w-3.5 h-3.5 rounded" style={{ accentColor: FERN }} />
-                          <span className="text-slate-500">in gal</span>
-                        </label>
-                        {amt !== null && (
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span className="text-slate-500 truncate">Tank: <b className="text-slate-800">{amt} {amtUnit}</b></span>
-                            <span className="text-slate-500 truncate">Total: <b style={{ color: outOfRange ? '#DC2626' : FERN }}>{total} {amtUnit}</b></span>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
                 </div>
-              )
-            })}
+              )}
+            </div>
           </div>
         </Card>
 
