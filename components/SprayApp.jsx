@@ -2596,7 +2596,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
     .sort((a, b) => (addedNames.has(b.name) - addedNames.has(a.name)) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
   const builtRows = sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder)
   // Columns shared by the grid header and every product row.
-  const GRID_COLS = '26px minmax(120px,1.4fr) 84px 96px minmax(108px,1.3fr) 118px 28px'
+  const GRID_COLS = '26px minmax(116px,1.3fr) 84px 92px minmax(100px,1.2fr) 134px 28px'
 
   return (
     <div className="pt-6 pb-10 max-w-[1800px] mx-auto">
@@ -2737,7 +2737,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                 <div className="overflow-x-auto">
                   <div className="min-w-[620px] border border-slate-200 rounded-xl overflow-hidden">
                     <div className="grid items-center bg-[#F3F1EC] border-b border-slate-200 px-2.5 py-2 font-body text-[9px] font-bold uppercase tracking-wide text-slate-400" style={{ gridTemplateColumns: GRID_COLS }}>
-                      <span>#</span><span>Product</span><span>Rate</span><span>Unit</span><span>Spraying for</span><span className="text-right">Total</span><span></span>
+                      <span>#</span><span>Product</span><span>Rate</span><span>Unit</span><span>Spraying for</span><span className="text-right">Tank / total</span><span></span>
                     </div>
                     {builtRows.map((p, mixIdx) => {
                       const { amt, unit: amtUnit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bd, perTankSqft, p.forceGal)
@@ -2772,8 +2772,14 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                                 ? <span className="font-body text-[11px] italic text-slate-400">+ spraying for…</span>
                                 : sel.map((tg) => <span key={tg} className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EAF2EC', color: FERN, border: '1px solid #D5E5DA' }}>{tg}</span>)}
                             </button>
-                            <div className="text-right">
-                              {amt !== null ? <span className="font-body text-[13px] font-bold tabular-nums" style={{ color: outOfRange ? RED : FERN }}>{total} {amtUnit}</span> : <span className="text-slate-300">—</span>}
+                            <div className="text-right leading-tight">
+                              {amt !== null ? (
+                                <>
+                                  <span className="block font-body text-[10px] text-slate-500">Tank <b className="text-slate-700 tabular-nums">{amt} {amtUnit}</b></span>
+                                  <span className="font-body text-[13px] font-bold tabular-nums" style={{ color: outOfRange ? RED : FERN }}>{total} {amtUnit}</span>
+                                  <span className="font-body text-[9px] text-slate-400"> total</span>
+                                </>
+                              ) : <span className="text-slate-300">—</span>}
                               <span className="block font-body text-[9px] font-bold" style={{ color: overLimit ? RED : underLimit ? AMBER : FERN }}>
                                 {overLimit ? '⚠ over max' : underLimit ? '↓ under min' : (labelMin || labelMax) ? '✓ in label' : ''}
                               </span>
@@ -2826,7 +2832,6 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                                 {(labelMin || labelMax) && (
                                   <span className="font-body text-[11px] text-slate-400">Label range: {labelMin ?? '—'}–{labelMax ?? '—'} {p.basis}</span>
                                 )}
-                                {amt !== null && <span className="font-body text-[11px] text-slate-500">Per tank: <b className="text-slate-700 tabular-nums">{amt} {amtUnit}</b></span>}
                                 <button type="button" onClick={() => { setOpenRow(null); removeRow(p.id) }} className="ml-auto font-body text-[11px] font-semibold text-red-500 flex items-center gap-1"><Trash2 size={13} /> Remove</button>
                               </div>
                             </div>
