@@ -2735,8 +2735,8 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                 <div className="border border-dashed border-slate-200 rounded-xl py-10 text-center font-body text-sm text-slate-400">Tap products in the library to build the tank mix.</div>
               ) : (
                 <div className="overflow-x-auto">
-                  <div className="min-w-[620px] border border-slate-200 rounded-xl overflow-hidden">
-                    <div className="grid items-center bg-[#F3F1EC] border-b border-slate-200 px-2.5 py-2 font-body text-[9px] font-bold uppercase tracking-wide text-slate-400" style={{ gridTemplateColumns: GRID_COLS }}>
+                  <div className="md:min-w-[600px] border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="hidden md:grid items-center bg-[#F3F1EC] border-b border-slate-200 px-2.5 py-2 font-body text-[9px] font-bold uppercase tracking-wide text-slate-400" style={{ gridTemplateColumns: GRID_COLS }}>
                       <span>#</span><span>Product</span><span>Rate</span><span>Unit</span><span>Spraying for</span><span className="text-right">Tank / total</span><span></span>
                     </div>
                     {builtRows.map((p, mixIdx) => {
@@ -2759,7 +2759,37 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                       const toggleOpen = () => setOpenRow(open ? null : p.id)
                       return (
                         <div key={p.id} className="border-b border-slate-100 last:border-b-0" style={outOfRange ? { backgroundColor: '#FEF6F5' } : {}}>
-                          <div className="grid items-center px-2.5 py-1.5 gap-1.5" style={{ gridTemplateColumns: GRID_COLS }}>
+                          {/* Phone: a stacked card so nothing is cut off. Desktop keeps the grid row. */}
+                          <div className="md:hidden px-3 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center justify-center font-body text-[10px] font-extrabold rounded shrink-0" style={{ width: 19, height: 19, backgroundColor: '#EAF2EC', color: FOREST }}>{mixIdx + 1}</span>
+                              <button type="button" onClick={toggleOpen} className="flex-1 min-w-0 text-left">
+                                <span className="font-body text-sm font-bold block truncate" style={{ color: FOREST }}>{p.product}</span>
+                                <span className="font-body text-[9px] font-semibold text-slate-400">{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>
+                              </button>
+                              <div className="text-right leading-tight shrink-0">
+                                {amt !== null ? (
+                                  <>
+                                    <span className="block font-body text-[10px] text-slate-500">Tank <b className="text-slate-700 tabular-nums">{amt} {amtUnit}</b></span>
+                                    <span className="font-body text-[13px] font-bold tabular-nums" style={{ color: outOfRange ? RED : FERN }}>{total} {amtUnit}</span>
+                                    <span className="font-body text-[9px] text-slate-400"> total</span>
+                                    <span className="block font-body text-[9px] font-bold" style={{ color: overLimit ? RED : underLimit ? AMBER : FERN }}>{overLimit ? '⚠ over max' : underLimit ? '↓ under min' : (labelMin || labelMax) ? '✓ in label' : ''}</span>
+                                  </>
+                                ) : <span className="text-slate-300">—</span>}
+                              </div>
+                              <button type="button" onClick={toggleOpen} className="text-slate-400 shrink-0 p-0.5">{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>
+                            </div>
+                            <div className="flex items-center gap-2 mt-2">
+                              <input type="number" step="any" placeholder={p.defaultRate ? String(p.defaultRate) : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="w-20 border rounded-lg px-2 py-1.5 text-sm font-semibold font-body tabular-nums" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
+                              <div className="w-24 shrink-0"><SearchSelect value={p.basis} options={BASIS_OPTIONS} onPick={(v) => updateProduct(p.id, { basis: v })} sort={false} placeholder="Unit…" compact /></div>
+                              <button type="button" onClick={toggleOpen} className="flex-1 min-w-0 flex flex-wrap items-center gap-1 justify-end">
+                                {sel.length === 0
+                                  ? <span className="font-body text-[11px] italic text-slate-400">+ spraying for…</span>
+                                  : sel.map((tg) => <span key={tg} className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EAF2EC', color: FERN, border: '1px solid #D5E5DA' }}>{tg}</span>)}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="hidden md:grid items-center px-2.5 py-1.5 gap-1.5" style={{ gridTemplateColumns: GRID_COLS }}>
                             <span className="inline-flex items-center justify-center font-body text-[10px] font-extrabold rounded" style={{ width: 19, height: 19, backgroundColor: '#EAF2EC', color: FOREST }}>{mixIdx + 1}</span>
                             <button type="button" onClick={toggleOpen} className="min-w-0 text-left">
                               <span className="font-body text-[13px] font-bold block truncate" style={{ color: FOREST }}>{p.product}</span>
