@@ -2596,7 +2596,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
     .sort((a, b) => (addedNames.has(b.name) - addedNames.has(a.name)) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
   const builtRows = sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder)
   // Columns shared by the grid header and every product row.
-  const GRID_COLS = '26px minmax(116px,1.3fr) 84px 92px minmax(100px,1.2fr) 134px 28px'
+  const GRID_COLS = '24px minmax(104px,1.2fr) 78px 86px minmax(92px,1.1fr) 92px 78px 26px'
 
   return (
     <div className="pt-6 pb-10 max-w-[1800px] mx-auto">
@@ -2737,7 +2737,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                 <div className="overflow-x-auto">
                   <div className="md:min-w-[600px] border border-slate-200 rounded-xl overflow-hidden">
                     <div className="hidden md:grid items-center bg-[#F3F1EC] border-b border-slate-200 px-2.5 py-2 font-body text-[9px] font-bold uppercase tracking-wide text-slate-400" style={{ gridTemplateColumns: GRID_COLS }}>
-                      <span>#</span><span>Product</span><span>Rate</span><span>Unit</span><span>Spraying for</span><span className="text-right">Tank / total</span><span></span>
+                      <span>#</span><span>Product</span><span>Rate</span><span>Unit</span><span>Spraying for</span><span className="text-right">Per tank</span><span className="text-right">Total</span><span></span>
                     </div>
                     {builtRows.map((p, mixIdx) => {
                       const { amt, unit: amtUnit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bd, perTankSqft, p.forceGal)
@@ -2770,9 +2770,9 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                               <div className="text-right leading-tight shrink-0">
                                 {amt !== null ? (
                                   <>
-                                    <span className="block font-body text-[10px] text-slate-500">Tank <b className="text-slate-700 tabular-nums">{amt} {amtUnit}</b></span>
-                                    <span className="font-body text-[13px] font-bold tabular-nums" style={{ color: outOfRange ? RED : FERN }}>{total} {amtUnit}</span>
-                                    <span className="font-body text-[9px] text-slate-400"> total</span>
+                                    <span className="block font-body text-[16px] font-extrabold tabular-nums" style={{ color: outOfRange ? RED : FOREST }}>{amt} {amtUnit}</span>
+                                    <span className="block font-body text-[9px] font-semibold text-slate-400 uppercase tracking-wide -mt-0.5">per tank</span>
+                                    <span className="block font-body text-[11px] text-slate-500 tabular-nums">{total} {amtUnit} total</span>
                                     <span className="block font-body text-[9px] font-bold" style={{ color: overLimit ? RED : underLimit ? AMBER : FERN }}>{overLimit ? '⚠ over max' : underLimit ? '↓ under min' : (labelMin || labelMax) ? '✓ in label' : ''}</span>
                                   </>
                                 ) : <span className="text-slate-300">—</span>}
@@ -2805,14 +2805,15 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                             <div className="text-right leading-tight">
                               {amt !== null ? (
                                 <>
-                                  <span className="block font-body text-[10px] text-slate-500">Tank <b className="text-slate-700 tabular-nums">{amt} {amtUnit}</b></span>
-                                  <span className="font-body text-[13px] font-bold tabular-nums" style={{ color: outOfRange ? RED : FERN }}>{total} {amtUnit}</span>
-                                  <span className="font-body text-[9px] text-slate-400"> total</span>
+                                  <span className="block font-body text-[15px] font-extrabold tabular-nums" style={{ color: outOfRange ? RED : FOREST }}>{amt} {amtUnit}</span>
+                                  <span className="block font-body text-[9px] font-bold" style={{ color: overLimit ? RED : underLimit ? AMBER : FERN }}>
+                                    {overLimit ? '⚠ over max' : underLimit ? '↓ under min' : (labelMin || labelMax) ? '✓ in label' : ''}
+                                  </span>
                                 </>
                               ) : <span className="text-slate-300">—</span>}
-                              <span className="block font-body text-[9px] font-bold" style={{ color: overLimit ? RED : underLimit ? AMBER : FERN }}>
-                                {overLimit ? '⚠ over max' : underLimit ? '↓ under min' : (labelMin || labelMax) ? '✓ in label' : ''}
-                              </span>
+                            </div>
+                            <div className="text-right leading-tight">
+                              {amt !== null && <span className="font-body text-[12px] font-semibold tabular-nums text-slate-500">{total} {amtUnit}</span>}
                             </div>
                             <button type="button" onClick={toggleOpen} className="text-slate-400 justify-self-end p-0.5" title={open ? 'Collapse' : 'Details, notes & targets'}>
                               {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
