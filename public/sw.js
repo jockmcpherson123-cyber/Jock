@@ -13,7 +13,7 @@
 // Bump CACHE to force every client to refresh its cached shell (and drop the
 // old hashed /_next/static chunks, which otherwise linger cache-first and can
 // leave a desktop tab on stale app code after a new deploy).
-const CACHE = 'grounds-v6'
+const CACHE = 'grounds-v7'
 const OFFLINE_URL = '/offline.html'
 
 self.addEventListener('install', (event) => {

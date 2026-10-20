@@ -2613,7 +2613,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
           {/* The essentials — prefilled from the area, edit any of them here.
               One dense grid that fans out to 4 columns on wide screens so the
               whole header stays short and the products sit higher up. */}
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-2.5 items-start">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-3.5 items-start">
             <div className="col-span-2 md:col-span-1">
               <FieldLabel>Area</FieldLabel>
               <Select value={s.area} onChange={handleAreaChange} options={Object.keys(areas)} />
@@ -2641,14 +2641,13 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             <div>
               <FieldLabel>Tanks needed</FieldLabel>
               <input type="number" inputMode="decimal" min="0" step="0.5"
-                value={s.tanksManual ? (s.tanks ?? '') : ''}
-                placeholder={String(bd.tanksToMix || 1)}
+                value={s.tanksManual ? (s.tanks ?? '') : (bd.tanksToMix || 1)}
                 onChange={(e) => { const v = e.target.value; if (v === '') update({ tanks: undefined, tanksManual: false }); else { const n = Math.max(0, Math.round((Number(v) || 0) * 100) / 100); update({ tanks: n > 0 ? n : undefined, tanksManual: n > 0 }) } }}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body font-semibold tabular-nums" style={{ color: FOREST }} />
               <p className="font-body text-[11px] mt-1 leading-tight" style={{ color: INK_3 }}>
                 {s.tanksManual
-                  ? <>Set by hand ({tanksLabel}) · <button type="button" onClick={() => update({ tanks: undefined, tanksManual: false })} className="font-bold underline" style={{ color: FERN }}>use calc</button></>
-                  : <>Auto from area: <b style={{ color: INK_2 }}>{tanksLabel}</b> — product totals use this. Type to override (e.g. 6.5).</>}
+                  ? <>Edited · <button type="button" onClick={() => update({ tanks: undefined, tanksManual: false })} className="font-bold underline" style={{ color: FERN }}>reset to area</button></>
+                  : <>Preset from {s.area || 'the area'} — edit to override.</>}
               </p>
             </div>
             <div>
