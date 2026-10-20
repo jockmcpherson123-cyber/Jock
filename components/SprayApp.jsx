@@ -2528,7 +2528,9 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
     ? bd.sqftPerTank
     : (bd.sqftPerTank > 0 ? Math.min(area.sqft || bd.sqftPerTank, bd.sqftPerTank) : (area.sqft || 0))
   const tanksLabel = (bd.fullTanks > 0 || bd.remainderGal > 0)
-    ? `${bd.fullTanks} tank${bd.fullTanks === 1 ? '' : 's'}${bd.remainderGal > 0 ? ` + ${bd.remainderGal} gal` : ''}`
+    ? (bd.fullTanks === 0
+        ? `${bd.remainderGal} gal (part tank)`
+        : `${bd.fullTanks} tank${bd.fullTanks === 1 ? '' : 's'}${bd.remainderGal > 0 ? ` + ${bd.remainderGal} gal` : ''}`)
     : '—'
   const disp = {
     sqft: s.sqft ?? (baseArea.sqft || ''), galTank: s.galTank ?? (baseArea.galTank || ''),
@@ -2621,7 +2623,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               <p className="font-body text-[11px] mt-1 leading-tight" style={{ color: INK_3 }}>
                 {s.tanksManual
                   ? <>Set by hand ({tanksLabel}) · <button type="button" onClick={() => update({ tanks: undefined, tanksManual: false })} className="font-bold underline" style={{ color: FERN }}>use calc</button></>
-                  : <>Calc: <b style={{ color: INK_2 }}>{tanksLabel}</b> · type to override (e.g. 6.5)</>}
+                  : <>Auto from area: <b style={{ color: INK_2 }}>{tanksLabel}</b> — product totals use this. Type to override (e.g. 6.5).</>}
               </p>
             </div>
             <div>
