@@ -5296,7 +5296,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   const startNew = () => {
     setOneAiMsg(null)
     setEditing('new')
-    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '', eiq: '', caseSize: '', ozPerCase: '', costPerCase: '', moaGroup: '', rotationDays: '', sprayInterval: '' })
+    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '', eiq: '', company: '', caseSize: '', ozPerCase: '', costPerCase: '', moaGroup: '', rotationDays: '', sprayInterval: '' })
   }
   const cancelEdit = () => { setOneAiMsg(null); setEditing(null); setDraft(null) }
 
@@ -5724,6 +5724,13 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
             <div className="rounded-xl p-3" style={{ backgroundColor: '#F0FDF4' }}>
               <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: '#15803D' }}>Ordering — for Early Order totals</p>
               <p className="font-body text-[10px] text-slate-500 mb-2">How this product is packaged and priced, so the Annual Program can estimate cases and cost to order.</p>
+              <div className="mb-2">
+                <FieldLabel>Company / brand <span className="normal-case font-normal text-slate-400">· groups the Early Order &amp; drives rebates</span></FieldLabel>
+                <input value={draft.company ?? ''} onChange={(e) => setDraft({ ...draft, company: e.target.value })} list="chem-company-list" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. Syngenta, BASF, Envu, FMC, Corteva" />
+                <datalist id="chem-company-list">
+                  {['Syngenta', 'BASF', 'Envu', 'FMC', 'Corteva', 'Nufarm', 'PBI-Gordon', 'SePRO', 'Prime Source', 'Quali-Pro', 'Harrell\'s', 'SiteOne', 'Andersons', 'Grigg', 'Numerator'].map((c) => <option key={c} value={c} />)}
+                </datalist>
+              </div>
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <FieldLabel>Case size</FieldLabel>

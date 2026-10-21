@@ -259,14 +259,27 @@ function computeEarlyOrder(apps, products, areas) {
     const totalInUnits = ozPerUnit ? r.totalOz / ozPerUnit : null
     const costPerCase = Number(p.costPerCase) || 0
     const estCost = casesToOrder != null && costPerCase ? Math.round(casesToOrder * costPerCase * 100) / 100 : null
-    return { ...r, ozPerCase, unit, caseSize: p.caseSize || '', onHandOz, netOz, casesExact, casesToOrder, totalInUnits, costPerCase, estCost, missingCase: !ozPerCase }
+    return { ...r, company: (p.company || p.manufacturer || '').trim(), ozPerCase, unit, caseSize: p.caseSize || '', onHandOz, netOz, casesExact, casesToOrder, totalInUnits, costPerCase, estCost, missingCase: !ozPerCase }
   }).sort((a, b) => b.totalOz - a.totalOz)
 
   const areaList = [...areaSet].sort()
   const casesTotal = rows.reduce((s, r) => s + (r.casesToOrder || 0), 0)
   const estTotalCost = Math.round(rows.reduce((s, r) => s + (r.estCost || 0), 0) * 100) / 100
   const missingCaseCount = rows.filter((r) => r.missingCase).length
-  return { rows, areaList, casesTotal, estTotalCost, missingCaseCount, missingSqft }
+
+  // Group by company (brand) so the Early Order can total spend per company —
+  // the basis for manufacturer rebate programs. Unassigned products fall last.
+  const byCompanyMap = {}
+  rows.forEach((r) => {
+    const key = r.company || '—'
+    if (!byCompanyMap[key]) byCompanyMap[key] = { company: r.company, rows: [], estCost: 0, cases: 0 }
+    byCompanyMap[key].rows.push(r)
+    byCompanyMap[key].estCost = Math.round((byCompanyMap[key].estCost + (r.estCost || 0)) * 100) / 100
+    byCompanyMap[key].cases += (r.casesToOrder || 0)
+  })
+  const companies = Object.values(byCompanyMap).sort((a, b) => (b.estCost - a.estCost) || (a.company === '' ? 1 : b.company === '' ? -1 : a.company.localeCompare(b.company)))
+  const hasCompanies = rows.some((r) => r.company)
+  return { rows, companies, hasCompanies, areaList, casesTotal, estTotalCost, missingCaseCount, missingSqft }
 }
 
 // Convert a stock amount into ounces so it can be netted against a season total.
@@ -909,17 +922,74 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 
   // Early-order totals for the whole season (respects the area filter).
   const earlyOrder = computeEarlyOrder(visibleApps, products, areas)
+  // One Early-Order product card, reused whether the list is flat or grouped by company.
+  const renderOrderRow = (r) => {
+    const areasUsed = Object.entries(r.byArea).sort((a, b) => b[1] - a[1])
+    const editing = orderEdit?.name === r.name
+    return (
+      <div key={r.name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+        <button onClick={() => startOrderEdit(r)} className="w-full text-left flex items-start gap-3">
+          <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ backgroundColor: typeColor(r.type) }} />
+          <div className="min-w-0 flex-1">
+            <p className="font-body text-sm font-semibold text-slate-800 truncate flex items-center gap-1">{r.name} <Pencil size={11} className="text-slate-300 shrink-0" /></p>
+            <p className="font-body text-[11px] text-slate-400">
+              {Math.round(r.totalOz).toLocaleString()} oz needed{r.onHandOz > 0 ? ` − ${Math.round(r.onHandOz).toLocaleString()} on hand` : ''}{r.caseSize ? ` · ${r.caseSize}` : ''}{r.ozPerCase ? ` @ ${r.ozPerCase} oz/case` : ''}
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            {r.casesToOrder != null ? (
+              <>
+                <p className="font-display text-lg font-bold text-slate-900 leading-none">{r.casesToOrder}</p>
+                <p className="font-body text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">case{r.casesToOrder !== 1 ? 's' : ''} · need {round1(r.casesExact)}</p>
+                {r.estCost != null && <p className="font-body text-[11px] font-bold mt-0.5" style={{ color: FERN }}>${r.estCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>}
+              </>
+            ) : (
+              <p className="font-body text-[11px] font-semibold text-amber-600">add oz/case</p>
+            )}
+          </div>
+        </button>
+        {editing && (
+          <div className="mt-2 pt-2 border-t border-slate-100 grid grid-cols-2 gap-2">
+            <div>
+              <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Case size</label>
+              <input value={orderEdit.caseSize} onChange={(e) => setOrderEdit({ ...orderEdit, caseSize: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="4 x 1 Gal" />
+            </div>
+            <div>
+              <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Oz / case</label>
+              <input type="number" step="any" value={orderEdit.ozPerCase} onChange={(e) => setOrderEdit({ ...orderEdit, ozPerCase: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="512" />
+            </div>
+            <div className="col-span-2 flex gap-2">
+              <button onClick={() => setOrderEdit(null)} className="flex-1 py-2 rounded-lg text-[12px] font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+              <button onClick={saveOrderEdit} disabled={busy} className="flex-1 py-2 rounded-lg text-[12px] font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>Save</button>
+            </div>
+          </div>
+        )}
+        {!editing && areasUsed.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-2 pl-5">
+            {areasUsed.map(([area, oz]) => (
+              <span key={area} className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{area}: {Math.round(oz).toLocaleString()} oz</span>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
   const exportEarlyOrder = () => {
     const areaCols = earlyOrder.areaList
-    const rows = [['Product', 'Type', 'Total oz needed', 'On hand oz', 'Net oz', 'Case size', 'Oz/case', 'Cases needed', 'Cases to order', 'Cost/case', 'Est. cost', ...areaCols]]
-    earlyOrder.rows.forEach((r) => rows.push([
-      r.name, r.type, Math.round(r.totalOz), Math.round(r.onHandOz || 0), Math.round(r.netOz || 0), r.caseSize, r.ozPerCase || '',
-      r.casesExact != null ? round1(r.casesExact) : '', r.casesToOrder != null ? r.casesToOrder : '',
-      r.costPerCase || '', r.estCost != null ? r.estCost : '',
-      ...areaCols.map((a) => Math.round(r.byArea[a] || 0)),
-    ]))
+    const rows = [['Company', 'Product', 'Type', 'Total oz needed', 'On hand oz', 'Net oz', 'Case size', 'Oz/case', 'Cases needed', 'Cases to order', 'Cost/case', 'Est. cost', ...areaCols]]
+    // Group the CSV by company too, with a subtotal line per company.
+    const groups = earlyOrder.hasCompanies ? earlyOrder.companies : [{ company: '', rows: earlyOrder.rows, cases: earlyOrder.casesTotal, estCost: earlyOrder.estTotalCost }]
+    groups.forEach((c) => {
+      c.rows.forEach((r) => rows.push([
+        r.company || '', r.name, r.type, Math.round(r.totalOz), Math.round(r.onHandOz || 0), Math.round(r.netOz || 0), r.caseSize, r.ozPerCase || '',
+        r.casesExact != null ? round1(r.casesExact) : '', r.casesToOrder != null ? r.casesToOrder : '',
+        r.costPerCase || '', r.estCost != null ? r.estCost : '',
+        ...areaCols.map((a) => Math.round(r.byArea[a] || 0)),
+      ]))
+      if (earlyOrder.hasCompanies) rows.push([`${c.company || 'No company'} subtotal`, '', '', '', '', '', '', '', '', c.cases, '', c.estCost])
+    })
     rows.push([])
-    rows.push(['', '', '', '', '', '', '', '', earlyOrder.casesTotal, '', earlyOrder.estTotalCost])
+    rows.push(['TOTAL', '', '', '', '', '', '', '', '', earlyOrder.casesTotal, '', earlyOrder.estTotalCost])
     downloadCSV(rows, `Early_Order_${activeProgram?.year || ''}.csv`)
   }
 
@@ -2036,62 +2106,28 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                 </div>
               )}
 
-              <div className="space-y-2">
-                {earlyOrder.rows.map((r) => {
-                  const areasUsed = Object.entries(r.byArea).sort((a, b) => b[1] - a[1])
-                  const editing = orderEdit?.name === r.name
-                  return (
-                    <div key={r.name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
-                      <button onClick={() => startOrderEdit(r)} className="w-full text-left flex items-start gap-3">
-                        <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ backgroundColor: typeColor(r.type) }} />
-                        <div className="min-w-0 flex-1">
-                          <p className="font-body text-sm font-semibold text-slate-800 truncate flex items-center gap-1">{r.name} <Pencil size={11} className="text-slate-300 shrink-0" /></p>
-                          <p className="font-body text-[11px] text-slate-400">
-                            {Math.round(r.totalOz).toLocaleString()} oz needed{r.onHandOz > 0 ? ` − ${Math.round(r.onHandOz).toLocaleString()} on hand` : ''}{r.caseSize ? ` · ${r.caseSize}` : ''}{r.ozPerCase ? ` @ ${r.ozPerCase} oz/case` : ''}
-                          </p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          {r.casesToOrder != null ? (
-                            <>
-                              <p className="font-display text-lg font-bold text-slate-900 leading-none">{r.casesToOrder}</p>
-                              <p className="font-body text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">case{r.casesToOrder !== 1 ? 's' : ''} · need {round1(r.casesExact)}</p>
-                              {r.estCost != null && <p className="font-body text-[11px] font-bold mt-0.5" style={{ color: FERN }}>${r.estCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>}
-                            </>
-                          ) : (
-                            <p className="font-body text-[11px] font-semibold text-amber-600">add oz/case</p>
-                          )}
-                        </div>
-                      </button>
-                      {editing && (
-                        <div className="mt-2 pt-2 border-t border-slate-100 grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Case size</label>
-                            <input value={orderEdit.caseSize} onChange={(e) => setOrderEdit({ ...orderEdit, caseSize: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="4 x 1 Gal" />
-                          </div>
-                          <div>
-                            <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Oz / case</label>
-                            <input type="number" step="any" value={orderEdit.ozPerCase} onChange={(e) => setOrderEdit({ ...orderEdit, ozPerCase: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="512" />
-                          </div>
-                          <div className="col-span-2 flex gap-2">
-                            <button onClick={() => setOrderEdit(null)} className="flex-1 py-2 rounded-lg text-[12px] font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
-                            <button onClick={saveOrderEdit} disabled={busy} className="flex-1 py-2 rounded-lg text-[12px] font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>Save</button>
-                          </div>
-                        </div>
-                      )}
-                      {!editing && areasUsed.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mt-2 pl-5">
-                          {areasUsed.map(([area, oz]) => (
-                            <span key={area} className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{area}: {Math.round(oz).toLocaleString()} oz</span>
-                          ))}
-                        </div>
-                      )}
+              {earlyOrder.hasCompanies ? (
+                <div className="space-y-4">
+                  {earlyOrder.companies.map((c) => (
+                    <div key={c.company || 'unassigned'}>
+                      <div className="flex items-center justify-between gap-2 mb-1.5 px-1">
+                        <span className="font-body text-[12px] font-bold" style={{ color: c.company ? FOREST : '#94A3B8' }}>{c.company || 'No company set'}</span>
+                        <span className="font-body text-[11px] text-slate-500">
+                          {c.cases} case{c.cases !== 1 ? 's' : ''}{c.estCost > 0 ? <> · <b style={{ color: FERN }}>${c.estCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</b> rebate base</> : ''}
+                        </span>
+                      </div>
+                      <div className="space-y-2">{c.rows.map(renderOrderRow)}</div>
                     </div>
-                  )
-                })}
-                {earlyOrder.rows.length === 0 && (
-                  <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">Nothing to total yet — add planned sprays and set area sizes.</div>
-                )}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {earlyOrder.rows.map(renderOrderRow)}
+                  {earlyOrder.rows.length === 0 && (
+                    <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">Nothing to total yet — add planned sprays and set area sizes.</div>
+                  )}
+                </div>
+              )}
 
               <p className="font-body text-[10px] text-slate-400 mt-3">Estimate for planning. Totals = each application's rate × the area's size, summed over the season, minus current stock on hand, then converted to cases with each product's Oz/case. “Cases” rounds up to whole cases; “need” is the exact amount. Cost = cases × the product's cost per case.</p>
             </div>
