@@ -5042,7 +5042,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   // rate ranges are tagged "verify" because those are the ones to eyeball.
   const AI_BLANK = (v) => v == null || v === ''
   const AI_NUM = (s) => { const n = parseFloat(s); return isNaN(n) ? null : n }
-  const AI_LABELS = { activeIngredient: 'Active ingredient', activePct: 'Active %', manufacturer: 'Manufacturer', formulation: 'Formulation', signalWord: 'Signal word', rei: 'REI', moaGroup: 'Group', epaReg: 'EPA Reg #', labelMinM: 'Min oz/M', labelMaxM: 'Max oz/M', labelMinA: 'Min oz/A', labelMaxA: 'Max oz/A', sprayInterval: 'Interval (days)' }
+  const AI_LABELS = { activeIngredient: 'Active ingredient', activePct: 'Active %', manufacturer: 'Manufacturer', company: 'Company', formulation: 'Formulation', signalWord: 'Signal word', rei: 'REI', moaGroup: 'Group', epaReg: 'EPA Reg #', labelMinM: 'Min oz/M', labelMaxM: 'Max oz/M', labelMinA: 'Min oz/A', labelMaxA: 'Max oz/A', sprayInterval: 'Interval (days)' }
   // The safety-critical fields: when the AI fills one of these, we tag it
   // "verify vs. label" until a human confirms it against the physical jug.
   const AI_VERIFY_FIELDS = ['epaReg', 'labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA', 'rei', 'moaGroup', 'sprayInterval']
@@ -5062,6 +5062,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
         const fills = {}
         const strFields = ['activeIngredient', 'manufacturer', 'formulation', 'signalWord', 'rei', 'moaGroup']
         strFields.forEach((f) => { if (!AI_BLANK(res[f]) && AI_BLANK(p[f])) fills[f] = { value: res[f] } })
+        if (!AI_BLANK(res.manufacturer) && AI_BLANK(p.company)) fills.company = { value: res.manufacturer }
         if (!AI_BLANK(res.epaReg) && AI_BLANK(p.epaReg)) fills.epaReg = { value: res.epaReg, verify: true }
         if (AI_NUM(res.activePct) != null && AI_BLANK(p.activePct)) fills.activePct = { value: AI_NUM(res.activePct) }
         ;['labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA', 'sprayInterval'].forEach((f) => { if (AI_NUM(res[f]) != null && AI_BLANK(p[f])) fills[f] = { value: AI_NUM(res[f]), verify: f.startsWith('label') } })
@@ -5089,6 +5090,8 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       if (!res || !res.found) { setOneAiMsg({ text: `The AI wasn’t confident about this product — fill it by hand.${linkNote}`, tone: 'warn' }); setOneAiBusy(false); return }
       const fills = {}
       ;['activeIngredient', 'manufacturer', 'formulation', 'signalWord', 'rei', 'moaGroup', 'epaReg'].forEach((f) => { if (!AI_BLANK(res[f]) && AI_BLANK(draft[f])) fills[f] = res[f] })
+      // The maker also seeds the Company/brand field (for Early-Order grouping & rebates).
+      if (!AI_BLANK(res.manufacturer) && AI_BLANK(draft.company)) fills.company = res.manufacturer
       if (AI_NUM(res.activePct) != null && AI_BLANK(draft.activePct)) fills.activePct = AI_NUM(res.activePct)
       ;['labelMinM', 'labelMaxM', 'labelMinA', 'labelMaxA', 'sprayInterval'].forEach((f) => { if (AI_NUM(res[f]) != null && AI_BLANK(draft[f])) fills[f] = AI_NUM(res[f]) })
       const n = Object.keys(fills).length
