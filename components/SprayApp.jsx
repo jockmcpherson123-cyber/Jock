@@ -1555,11 +1555,13 @@ function InventoryAudit({ products = [], onSaveProduct, userName = '' }) {
     if (!edits.length || busy) return
     setBusy(true); setMsg(null)
     try {
+      // Log the count FIRST so "every change is logged" holds: if the write
+      // fails (e.g. the table is missing) we abort before touching any stock.
+      await db.addInventoryCounts(edits.map((e) => ({ countedBy: userName, product: e.name, prevStock: e.prev, countedStock: e.counted, variance: e.variance, unit: e.unit })))
       for (const e of edits) {
         const p = (products || []).find((x) => x.name === e.name)
         if (p) await onSaveProduct({ ...p, stock: e.counted })
       }
-      await db.addInventoryCounts(edits.map((e) => ({ countedBy: userName, product: e.name, prevStock: e.prev, countedStock: e.counted, variance: e.variance, unit: e.unit })))
       setCounted({})
       setMsg({ type: 'ok', text: `Updated ${edits.length} product${edits.length !== 1 ? 's' : ''} and logged the count.` })
       db.fetchInventoryCounts(50).then(setHistory).catch(() => {})
