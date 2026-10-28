@@ -928,8 +928,18 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   // (by first-word match on the sheet's area). This filters the view only —
   // the underlying sheet data and all actions stay untouched.
   const cTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
-  const inCourse = (area) => !course || cTok(area) === cTok(course)
-  const scopeAreas = (a) => (!course ? a : Object.fromEntries(Object.entries(a || {}).filter(([n]) => cTok(n) === cTok(course))))
+  // Course scope: an area's explicit Course tag wins ('both' shows under every
+  // course and is counted once); otherwise fall back to a first-word match so
+  // untagged areas still place. Matches on the first word so "Blue Course" and
+  // "Blue" line up.
+  const areaCourseMatch = (tag, name) => {
+    if (!course) return true
+    if (tag === 'both') return true
+    if (tag) return cTok(tag) === cTok(course)
+    return cTok(name) === cTok(course)
+  }
+  const inCourse = (area) => areaCourseMatch(areas?.[area]?.course, area)
+  const scopeAreas = (a) => (!course ? a : Object.fromEntries(Object.entries(a || {}).filter(([n, av]) => areaCourseMatch(av?.course, n))))
   const visibleSheets = course ? sheets.filter((s) => inCourse(s.area)) : sheets
   const pending = visibleSheets.filter((s) => s.status === 'pending')
   const approved = visibleSheets.filter((s) => s.status === 'approved')
@@ -7195,7 +7205,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} grassTypes={grassTypes} onSave={onSave} />}
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
       {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} onSave={onSave} />}
-      {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassChoices} soilTypes={soilTypes} onSave={onSave} />}
+      {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassChoices} soilTypes={soilTypes} courses={courseInfo?.courses || []} onSave={onSave} />}
       {section === 'sprayers' && <SprayersSettings courseInfo={courseInfo} onSave={onSave} />}
       {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} soilTypes={soilTypes} courseInfo={courseInfo} onSave={onSave} />}
       {section === 'backup' && <BackupSettings courseInfo={courseInfo} />}
@@ -7457,7 +7467,10 @@ function CourseAreaRows({ courses, aMap, setAMap, grassTypes = [], soilTypes = [
   return (
     <div className="space-y-5">
       {groups.map(({ course, color }) => {
-        const names = Object.keys(aMap).filter((n) => areaCourseOf(aMap[n], n, courseNames) === course)
+        const names = Object.keys(aMap).filter((n) => {
+          const ac = areaCourseOf(aMap[n], n, courseNames)
+          return course === '' ? ac === '' : (ac === course || ac === 'both')
+        })
         if (course === '' && names.length === 0) return null
         return (
           <div key={course || '__un'}>
@@ -7478,6 +7491,7 @@ function CourseAreaRows({ courses, aMap, setAMap, grassTypes = [], soilTypes = [
                         <select value={areaCourseOf(a, n, courseNames)} onChange={(e) => setArea(n, { course: e.target.value })} className="text-[12px] rounded-lg px-2 py-1" style={{ border: `1px solid ${HAIR}` }} title="Course">
                           <option value="">Unassigned</option>
                           {courseNames.map((c) => <option key={c} value={c}>{c}</option>)}
+                          <option value="both">Both courses</option>
                         </select>
                       )}
                       <button onClick={() => removeArea(n)} className="ml-auto" title="Remove area"><Trash2 size={14} style={{ color: INK_3 }} /></button>
@@ -8051,14 +8065,15 @@ function MixOrderEditor({ courseInfo = {}, onSave }) {
   )
 }
 
-function AreasSettings({ areas, grassTypes = [], soilTypes = [], onSave }) {
+function AreasSettings({ areas, grassTypes = [], soilTypes = [], courses = [], onSave }) {
+  const courseNames = (courses || []).map((c) => c?.name).filter(Boolean)
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState(null)
 
   const startEdit = (name) => { setEditing(name); setDraft({ name, grasses: [], soilType: '', ...areas[name] }) }
   const startNew = () => {
     setEditing('__new__')
-    setDraft({ name: '', gear: '', psi: '', tanks: 1, galTank: 0, sprayRate: 0, nozzle: '', sqft: 0, grasses: [], soilType: '' })
+    setDraft({ name: '', gear: '', psi: '', tanks: 1, galTank: 0, sprayRate: 0, nozzle: '', sqft: 0, course: '', grasses: [], soilType: '' })
   }
   const cancel = () => { setEditing(null); setDraft(null) }
 
@@ -8066,10 +8081,17 @@ function AreasSettings({ areas, grassTypes = [], soilTypes = [], onSave }) {
     if (!draft.name.trim()) return
     const next = { ...areas }
     if (editing !== '__new__' && editing !== draft.name) delete next[editing]
+    const galTank = Number(draft.galTank) || 0, sqft = Number(draft.sqft) || 0
+    // Water rate (gal per 1,000 sq ft) is DERIVED from tank gal ÷ area per tank,
+    // so the carrier volume is always consistent. Also stored as gal/ac for the
+    // legacy sprayRate field. Never used to back-calculate area.
+    const waterRate = (galTank > 0 && sqft > 0) ? Math.round((galTank / (sqft / 1000)) * 100) / 100 : 0
     next[draft.name] = {
       gear: draft.gear, psi: draft.psi,
-      tanks: Number(draft.tanks) || 1, galTank: Number(draft.galTank) || 0,
-      sprayRate: Number(draft.sprayRate) || 0, nozzle: draft.nozzle, sqft: Number(draft.sqft) || 0,
+      tanks: Number(draft.tanks) || 1, galTank, waterRate,
+      sprayRate: waterRate > 0 ? Math.round(waterRate * 43.56 * 10) / 10 : (Number(draft.sprayRate) || 0),
+      nozzle: draft.nozzle, sqft,
+      course: draft.course || '',
       grasses: draft.grasses || [],
       soilType: draft.soilType || '',
     }
@@ -8107,20 +8129,49 @@ function AreasSettings({ areas, grassTypes = [], soilTypes = [], onSave }) {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div><FieldLabel>Default Tanks</FieldLabel>
-                <input type="number" value={draft.tanks} onChange={(e) => setDraft({ ...draft, tanks: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" /></div>
+                <input type="number" step="any" value={draft.tanks} onChange={(e) => setDraft({ ...draft, tanks: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+                <p className="font-body text-[10px] text-slate-400 mt-1">Typical tanks to cover the whole area. Decimals OK (e.g. 1.5).</p></div>
               <div><FieldLabel>Gal / Tank</FieldLabel>
                 <input type="number" value={draft.galTank} onChange={(e) => setDraft({ ...draft, galTank: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><FieldLabel>Spray Rate (Gal/Ac)</FieldLabel>
-                <input type="number" step="any" value={draft.sprayRate} onChange={(e) => setDraft({ ...draft, sprayRate: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" /></div>
+              <div><FieldLabel>Area per tank (sq ft)</FieldLabel>
+                <input type="number" value={draft.sqft} onChange={(e) => setDraft({ ...draft, sqft: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="300000" />
+                <p className="font-body text-[10px] text-slate-400 mt-1">The area ONE tank covers — product totals use this × tanks.</p></div>
               <div><FieldLabel>Nozzle</FieldLabel>
                 <input value={draft.nozzle} onChange={(e) => setDraft({ ...draft, nozzle: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="White Nozzle" /></div>
             </div>
-            <div>
-              <FieldLabel>Area (sq ft)</FieldLabel>
-              <input type="number" value={draft.sqft} onChange={(e) => setDraft({ ...draft, sqft: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="300000" />
-            </div>
+            {(() => {
+              const dGal = Number(draft.galTank) || 0, dSqft = Number(draft.sqft) || 0, dTanks = Number(draft.tanks) || 0
+              const wrM = (dGal > 0 && dSqft > 0) ? Math.round((dGal / (dSqft / 1000)) * 100) / 100 : null
+              const wrA = wrM != null ? Math.round(wrM * 43.56 * 10) / 10 : null
+              const totalArea = (dSqft > 0 && dTanks > 0) ? Math.round(dSqft * dTanks) : null
+              return (
+                <div className="rounded-xl px-3 py-2.5 grid grid-cols-2 gap-2" style={{ backgroundColor: '#F0F6F2' }}>
+                  <div>
+                    <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: FERN }}>Total area</p>
+                    <p className="font-body text-sm font-semibold text-slate-800 tabular-nums">{totalArea != null ? `${totalArea.toLocaleString()} sq ft` : '—'}</p>
+                    <p className="font-body text-[10px] text-slate-400">= area/tank × {dTanks || 0} tank{dTanks !== 1 ? 's' : ''}</p>
+                  </div>
+                  <div>
+                    <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: FERN }}>Water rate</p>
+                    <p className="font-body text-sm font-semibold text-slate-800 tabular-nums">{wrM != null ? `${wrM} gal/M` : '—'}</p>
+                    <p className="font-body text-[10px] text-slate-400">{wrA != null ? `≈ ${wrA} gal/ac · from gal/tank ÷ area/tank` : 'set gal/tank & area/tank'}</p>
+                  </div>
+                </div>
+              )
+            })()}
+            {courseNames.length > 0 && (
+              <div>
+                <FieldLabel>Course</FieldLabel>
+                <div className="flex gap-2 flex-wrap">
+                  {[...courseNames.map((c) => [c, c]), ['both', 'Both']].map(([v, l]) => (
+                    <button key={v} type="button" onClick={() => setDraft({ ...draft, course: v })} className="flex-1 min-w-[88px] py-2 rounded-xl text-sm font-semibold font-body border" style={(draft.course || '') === v ? { backgroundColor: FOREST, color: '#fff', borderColor: FOREST } : { backgroundColor: '#fff', color: '#64748B', borderColor: '#E2E8F0' }}>{l}</button>
+                  ))}
+                </div>
+                <p className="font-body text-[10px] text-slate-400 mt-1">Which course tab this area shows under. “Both” (e.g. Rough) shows under each course and is counted once.</p>
+              </div>
+            )}
             <div>
               <FieldLabel>Grasses on this area</FieldLabel>
               <div className="flex flex-wrap gap-2 mt-1">
