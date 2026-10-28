@@ -350,8 +350,11 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const [activeProgram, setActiveProgram] = useState(null)
   const [allApps, setAllApps] = useState([])
   // Scope every derived view (This Week, calendar, by-area) to the course picked
-  // in the global course bar — matched on the first word of the area name.
-  const apps = courseFilter ? allApps.filter((a) => apTok(a.area) === apTok(courseFilter)) : allApps
+  // in the global course bar. `areas` arrives already filtered to the selected
+  // course by the parent (honoring each area's Course tag, with "Both" areas
+  // included under every course), so an app is in scope when its area resolves
+  // within that scoped set. Empty courseFilter = All courses (each area once).
+  const apps = courseFilter ? allApps.filter((a) => !!areaMatch(areas, a.area)) : allApps
   const [loading, setLoading] = useState(true)
   const [areaFilter, setAreaFilter] = useState('all')
   const [imp, setImp] = useState(null) // import flow state

@@ -896,13 +896,20 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   // which point those applications are marked as executed.
   function createSheetFromProgram(planned) {
     const area = matchSprayArea(planned[0].area)
+    const lead = planned[0]
+    // Carry the PLANNED tank count (and any per-row area/tank override) onto the
+    // sheet so its totals match the program's Early Order; flag it manual so the
+    // tank math multiplies the per-tank amount up instead of using the area once.
+    const plannedTanks = lead.tanks != null && lead.tanks !== '' ? Number(lead.tanks) : null
     setActiveSheet({
       id: crypto.randomUUID(),
       sheetType: area || 'Spray Sheet',
-      date: planned[0].plannedDate || localDateISO(),
+      date: lead.plannedDate || localDateISO(),
       operator: '',
       area,
-      tanks: area && areas[area] ? areas[area].tanks : 1,
+      tanks: plannedTanks != null ? plannedTanks : (area && areas[area] ? areas[area].tanks : 1),
+      tanksManual: plannedTanks != null,
+      ...(lead.sqftPerTankOverride ? { sqft: lead.sqftPerTankOverride } : {}),
       weather: { temp: '', wind: '', humidity: '', windDir: '' },
       products: planned.map((a) => ({
         id: uid(),
@@ -911,6 +918,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         basis: a.basis || 'oz / M',
         forceGal: false,
         target: a.target || '', // carry the plan's target onto the product line
+        ...(a.notes ? { note: a.notes } : {}),
       })),
       targets: [...new Set(planned.map((a) => a.target).filter(Boolean))],
       instructions: '',
@@ -2526,19 +2534,29 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   const [libCat, setLibCat] = useState('all')     // chemical-library type filter
   const baseArea = resolveArea(areas, s.area) || areas[Object.keys(areas)[0]] || { tanks: 1, nozzle: '', psi: '', galTank: 0, sqft: 0 }
   const numOr = (v, d) => (v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : d)
-  const impliedRate = baseArea.sqft && baseArea.galTank ? Math.round((baseArea.galTank / (baseArea.sqft / 1000)) * 100) / 100 : ''
+  // Water rate (gal per 1,000 sq ft): the area's stored rate, else derived from
+  // gal/tank ÷ area-per-tank, else from the legacy gal/ac sprayRate. Never 1.
+  const impliedRate = Number(baseArea.waterRate) > 0 ? Number(baseArea.waterRate)
+    : (baseArea.sqft && baseArea.galTank ? Math.round((baseArea.galTank / (baseArea.sqft / 1000)) * 100) / 100
+      : (Number(baseArea.sprayRate) > 0 ? Math.round((Number(baseArea.sprayRate) / 43.56) * 100) / 100 : ''))
   // The sheet prefills from the chosen area but each field is editable; `disp`
   // is what shows in the inputs, `area` (merged) is what the sheet's math uses.
   const area = { ...baseArea, sqft: numOr(s.sqft, baseArea.sqft), galTank: numOr(s.galTank, baseArea.galTank), nozzle: s.nozzle ?? baseArea.nozzle, psi: s.psi ?? baseArea.psi, waterRate: numOr(s.waterRate, impliedRate) }
   // Whole job broken into whole tanks + the leftover partial (never rounded).
-  // If the user set the tank count by hand, force the job across that many.
+  // Tanks = the user's hand-set count if any, else the area's Default Tanks, so
+  // the sheet covers the WHOLE area (area-per-tank × tanks) and reconciles with
+  // the program's Early Order — one calculator everywhere.
   const manualTanks = s.tanksManual && numOr(s.tanks, 0) > 0 ? Number(s.tanks) : null
-  const bd = tankBreakdown(area.sqft, area.waterRate, area.galTank, manualTanks)
+  const effTanks = manualTanks != null ? manualTanks : (Number(baseArea.tanks) > 0 ? Number(baseArea.tanks) : null)
+  const bd = tankBreakdown(area.sqft, area.waterRate, area.galTank, effTanks)
   // Hand-set tank count → each tank is a FULL tank, so per-tank uses the full
   // per-tank coverage and the TOTAL column multiplies by the tank count.
-  const perTankSqft = manualTanks && bd.sqftPerTank > 0
+  const perTankSqft = effTanks != null && bd.sqftPerTank > 0
     ? bd.sqftPerTank
     : (bd.sqftPerTank > 0 ? Math.min(area.sqft || bd.sqftPerTank, bd.sqftPerTank) : (area.sqft || 0))
+  // Total area this sheet covers = area per tank × tanks (for the header).
+  const totalSqft = effTanks != null ? Math.round((Number(area.sqft) || 0) * effTanks) : (Number(area.sqft) || 0)
+  const totalAcres = totalSqft > 0 ? Math.round((totalSqft / 43560) * 10) / 10 : null
   const tanksLabel = (bd.fullTanks > 0 || bd.remainderGal > 0)
     ? (bd.fullTanks === 0
         ? `${bd.remainderGal} gal (part tank)`
@@ -2637,8 +2655,9 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               <Select value={s.operator} onChange={(v) => update({ operator: v })} options={operators} placeholder="Select..." />
             </div>
             <div>
-              <FieldLabel>Area (sq ft)</FieldLabel>
+              <FieldLabel>Area per tank (sq ft)</FieldLabel>
               <input type="number" inputMode="numeric" value={disp.sqft} onChange={(e) => update({ sqft: e.target.value })} placeholder="30,000" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body tabular-nums" />
+              <p className="font-body text-[11px] mt-1 leading-tight" style={{ color: INK_3 }}>Total: <b style={{ color: INK_2 }}>{totalSqft ? totalSqft.toLocaleString() : '—'} sq ft</b>{totalAcres != null ? ` · ${totalAcres} ac` : ''} (× {effTanks ?? 1} tank{effTanks !== 1 ? 's' : ''})</p>
             </div>
             <div>
               <FieldLabel>Water rate (gal / 1000)</FieldLabel>
@@ -2651,7 +2670,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             <div>
               <FieldLabel>Tanks needed</FieldLabel>
               <input type="number" inputMode="decimal" min="0" step="0.5"
-                value={s.tanksManual ? (s.tanks ?? '') : (bd.tanksToMix || 1)}
+                value={s.tanksManual ? (s.tanks ?? '') : (effTanks ?? bd.tanksToMix ?? 1)}
                 onChange={(e) => { const v = e.target.value; if (v === '') update({ tanks: undefined, tanksManual: false }); else { const n = Math.max(0, Math.round((Number(v) || 0) * 100) / 100); update({ tanks: n > 0 ? n : undefined, tanksManual: n > 0 }) } }}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body font-semibold tabular-nums" style={{ color: FOREST }} />
               <p className="font-body text-[11px] mt-1 leading-tight" style={{ color: INK_3 }}>
