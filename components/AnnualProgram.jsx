@@ -279,7 +279,18 @@ function computeEarlyOrder(apps, products, areas) {
   })
   const companies = Object.values(byCompanyMap).sort((a, b) => (b.estCost - a.estCost) || (a.company === '' ? 1 : b.company === '' ? -1 : a.company.localeCompare(b.company)))
   const hasCompanies = rows.some((r) => r.company)
-  return { rows, companies, hasCompanies, areaList, casesTotal, estTotalCost, missingCaseCount, missingSqft }
+
+  // Cost by Type and by Area, like the sheet's Early Order tab. Each product's
+  // cost is apportioned to its areas by that area's share of the product's oz.
+  const typeCost = {}, areaCost = {}
+  rows.forEach((r) => {
+    typeCost[r.type || 'Other'] = Math.round(((typeCost[r.type || 'Other'] || 0) + (r.estCost || 0)) * 100) / 100
+    const tot = r.totalOz || 0
+    if (r.estCost && tot > 0) Object.entries(r.byArea).forEach(([ar, oz]) => { areaCost[ar] = Math.round(((areaCost[ar] || 0) + r.estCost * (oz / tot)) * 100) / 100 })
+  })
+  const byTypeCost = Object.entries(typeCost).filter(([, v]) => v > 0).map(([type, cost]) => ({ type, cost })).sort((a, b) => b.cost - a.cost)
+  const byAreaCost = Object.entries(areaCost).filter(([, v]) => v > 0).map(([area, cost]) => ({ area, cost: Math.round(cost) })).sort((a, b) => b.cost - a.cost)
+  return { rows, companies, hasCompanies, byTypeCost, byAreaCost, areaList, casesTotal, estTotalCost, missingCaseCount, missingSqft }
 }
 
 // Convert a stock amount into ounces so it can be netted against a season total.
@@ -2103,6 +2114,25 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
                     {earlyOrder.missingCaseCount > 0 && <>{earlyOrder.missingCaseCount} product{earlyOrder.missingCaseCount !== 1 ? 's' : ''} missing “Oz/case” — add it in the Chemical Library (Ordering section) to get its cases-needed. </>}
                     {earlyOrder.missingSqft && <>Some areas have no square footage set (Settings → Sprayer Areas), so their totals can't be calculated.</>}
                   </p>
+                </div>
+              )}
+
+              {(earlyOrder.byTypeCost.length > 0 || earlyOrder.byAreaCost.length > 0) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                  {[['Cost by type', earlyOrder.byTypeCost.map((r) => [r.type, r.cost])], ['Cost by area', earlyOrder.byAreaCost.map((r) => [r.area, r.cost])]].map(([title, items]) => (
+                    <div key={title} className="bg-white rounded-xl border border-black/5 p-3 shadow-sm">
+                      <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">{title}</p>
+                      <div className="space-y-0.5">
+                        {items.map(([label, cost]) => (
+                          <div key={label} className="flex items-center justify-between gap-2 font-body text-[12px]">
+                            <span className="text-slate-600 truncate">{label}</span>
+                            <span className="font-semibold text-slate-900 tabular-nums shrink-0">${Number(cost).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+                          </div>
+                        ))}
+                        {items.length === 0 && <p className="font-body text-[11px] text-slate-400">No priced products yet.</p>}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
 
