@@ -6111,7 +6111,7 @@ function Inventory({ products, deliveries, onAddDelivery }) {
 function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], programApps = [], onSaveSettings, applicatorLicenses = {}, location = {} }) {
   const [view, setView] = useState('byArea')
   const [report, setReport] = useState('npk') // 'npk' | 'rotation'
-  const npkData = aggregateNPK(sheets, products, areas)
+  const npkData = aggregateNPK(sheets, products, areas, fertSheets)
 
   // Season Report: years that actually have sprays, newest first (default to this
   // year if it has any, else the most recent year with data).
@@ -6162,14 +6162,16 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
 
   const byArea = {}
   npkData.forEach((r) => {
-    if (!byArea[r.area]) byArea[r.area] = { area: r.area, n: 0, p: 0, k: 0, sqft: r.sqft, months: [] }
+    if (!byArea[r.area]) byArea[r.area] = { area: r.area, n: 0, p: 0, k: 0, granN: 0, granP: 0, granK: 0, sqft: r.sqft, months: [] }
     byArea[r.area].n += r.n; byArea[r.area].p += r.p; byArea[r.area].k += r.k
+    byArea[r.area].granN += (r.granN || 0); byArea[r.area].granP += (r.granP || 0); byArea[r.area].granK += (r.granK || 0)
     byArea[r.area].months.push(r)
   })
   const areaRows = Object.values(byArea).map((a) => {
     const perM = a.sqft > 0 ? a.sqft / 1000 : 0
     return {
       ...a, n: Math.round(a.n * 100) / 100, p: Math.round(a.p * 100) / 100, k: Math.round(a.k * 100) / 100,
+      granN: Math.round(a.granN * 100) / 100, granP: Math.round(a.granP * 100) / 100, granK: Math.round(a.granK * 100) / 100,
       nPerM: perM > 0 ? Math.round((a.n / perM) * 1000) / 1000 : null,
       pPerM: perM > 0 ? Math.round((a.p / perM) * 1000) / 1000 : null,
       kPerM: perM > 0 ? Math.round((a.k / perM) * 1000) / 1000 : null,
@@ -6289,7 +6291,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
 
       {npkData.length === 0 ? (
         <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
-          No fertilizer applications recorded yet. Approve a spray sheet with a fertilizer product to see totals here.
+          No fertilizer applications recorded yet. Approve a spray sheet with a fertilizer product, or complete a granular fert sheet, to see totals here.
         </div>
       ) : view === 'byArea' ? (
         <div className="space-y-2">
@@ -6305,6 +6307,9 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
                 <NPKMini label="P" value={a.p} color="#D97706" />
                 <NPKMini label="K" value={a.k} color="#7C3AED" />
               </div>
+              {(a.granN > 0 || a.granP > 0 || a.granK > 0) && (
+                <p className="font-body text-[10px] text-slate-400 mb-2">of which granular (fert sheets): N {a.granN} · P {a.granP} · K {a.granK} lb · spray: N {Math.round((a.n - a.granN) * 100) / 100}</p>
+              )}
               {a.nPerM !== null && (
                 <>
                   <p className="font-body text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Per 1,000 sq ft</p>
