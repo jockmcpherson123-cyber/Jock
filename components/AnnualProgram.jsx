@@ -741,7 +741,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
 
   function startCopy() {
     const nextYear = (activeProgram.year || new Date().getFullYear()) + 1
-    setCopyForm({ year: nextYear, name: `${nextYear} Pesticide Plan`, shiftDays: 0 })
+    setCopyForm({ year: nextYear, name: `${nextYear} Pesticide Plan`, matchWeekday: true })
   }
 
   // Shift any planned dates that aren't in the program's year to that year,
@@ -877,7 +877,8 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
       const prog = await db.copyProgram(activeProgram.id, {
         year: Number(copyForm.year),
         name: copyForm.name,
-        shiftDays: Number(copyForm.shiftDays) || 0,
+        fromYear: activeProgram.year,
+        matchWeekday: !!copyForm.matchWeekday,
       })
       setCopyForm(null)
       await loadPrograms()
@@ -1522,7 +1523,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
       {copyForm && (
         <div className="bg-white rounded-2xl border-2 p-4 my-4 shadow-sm" style={{ borderColor: FERN }}>
           <p className="font-display text-base font-semibold text-slate-900 mb-1">Roll forward to a new season</p>
-          <p className="font-body text-xs text-slate-400 mb-3">Copies every application into a new program, shifting each planned date so the sequence stays intact. Adjust individual applications afterward.</p>
+          <p className="font-body text-xs text-slate-400 mb-3">Copies every application (with its tanks and overrides) into a new program, moving each planned date into the new year — same month and day. Adjust individual applications afterward.</p>
           <div className="grid grid-cols-3 gap-3 mb-3">
             <div>
               <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">New year</label>
@@ -1533,10 +1534,10 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
               <input value={copyForm.name} onChange={(e) => setCopyForm({ ...copyForm, name: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
             </div>
           </div>
-          <div className="mb-3">
-            <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Shift all dates by (days)</label>
-            <input type="number" value={copyForm.shiftDays} onChange={(e) => setCopyForm({ ...copyForm, shiftDays: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 365, or 0 to keep the same calendar dates" />
-          </div>
+          <label className="flex items-center gap-2 mb-3 cursor-pointer select-none">
+            <input type="checkbox" checked={!!copyForm.matchWeekday} onChange={(e) => setCopyForm({ ...copyForm, matchWeekday: e.target.checked })} className="w-4 h-4 rounded" style={{ accentColor: FERN }} />
+            <span className="font-body text-xs text-slate-600">Match weekday — nudge each date to the same day of the week (spray days are usually set weekdays)</span>
+          </label>
           <div className="flex gap-2">
             <button onClick={() => setCopyForm(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
             <button onClick={runCopy} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: FERN }}>
