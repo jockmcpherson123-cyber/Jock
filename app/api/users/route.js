@@ -13,7 +13,9 @@ import { getUser } from '@/lib/getUser'
 
 export const dynamic = 'force-dynamic'
 
-const ROLES = ['operator', 'superintendent', 'director']
+const ROLES = ['operator', 'assistant', 'superintendent', 'director']
+// Roles that can manage the app and its logins (everyone but plain operators).
+const MANAGE_ROLES = ['assistant', 'superintendent', 'director']
 
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -22,11 +24,12 @@ function admin() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
 }
 
-// Only a signed-in Director may manage users. Returns { me, db } or an error.
+// A signed-in manager (assistant/superintendent/director) may manage users.
+// Returns { me, db } or an error.
 async function gate() {
   const me = await getUser()
   if (!me) return { error: 'Please sign in.', status: 401 }
-  if (me.role !== 'director') return { error: 'Only a Director can manage users.', status: 403 }
+  if (!MANAGE_ROLES.includes(me.role)) return { error: 'You need a management role to manage users.', status: 403 }
   const db = admin()
   if (!db) return { error: 'User management is not set up (missing SUPABASE_SERVICE_ROLE_KEY).', status: 503 }
   return { me, db }
@@ -36,9 +39,9 @@ function randomPassword() {
   return 'Grounds-' + Math.random().toString(36).slice(2, 8) + Math.floor(10 + Math.random() * 90)
 }
 
-// How many directors exist — so we never strand the club with none.
-async function directorCount(db) {
-  const { count } = await db.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'director')
+// How many users can still manage logins — so we never lock everyone out.
+async function managerCount(db) {
+  const { count } = await db.from('profiles').select('id', { count: 'exact', head: true }).in('role', MANAGE_ROLES)
   return count || 0
 }
 
@@ -111,12 +114,12 @@ export async function PATCH(request) {
 
   if (body.role !== undefined) {
     if (!ROLES.includes(body.role)) return Response.json({ error: 'Unknown role.' }, { status: 400 })
-    // Don't let the last director (or yourself) drop out of the director role
-    // and strand the club with nobody who can approve.
-    if (body.role !== 'director') {
+    // Don't let the last manager drop to operator and strand the club with
+    // nobody who can manage logins. (Switching between manager roles is fine.)
+    if (!MANAGE_ROLES.includes(body.role)) {
       const { data: cur } = await db.from('profiles').select('role').eq('id', id).maybeSingle()
-      if (cur?.role === 'director' && (await directorCount(db)) <= 1) {
-        return Response.json({ error: 'Add another Director before removing the last one.' }, { status: 400 })
+      if (MANAGE_ROLES.includes(cur?.role) && (await managerCount(db)) <= 1) {
+        return Response.json({ error: 'Make someone else a manager before removing the last one.' }, { status: 400 })
       }
     }
     const { error } = await db.from('profiles').update({ role: body.role }).eq('id', id)
@@ -141,8 +144,8 @@ export async function DELETE(request) {
   if (!id) return Response.json({ error: 'Missing user.' }, { status: 400 })
   if (id === me.id) return Response.json({ error: "You can't remove your own account." }, { status: 400 })
   const { data: cur } = await db.from('profiles').select('role').eq('id', id).maybeSingle()
-  if (cur?.role === 'director' && (await directorCount(db)) <= 1) {
-    return Response.json({ error: 'Add another Director before removing the last one.' }, { status: 400 })
+  if (MANAGE_ROLES.includes(cur?.role) && (await managerCount(db)) <= 1) {
+    return Response.json({ error: 'Make someone else a manager before removing the last one.' }, { status: 400 })
   }
   const { error } = await db.auth.admin.deleteUser(id) // profile cascades
   if (error) return Response.json({ error: 'Could not remove the user.' }, { status: 502 })

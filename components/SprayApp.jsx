@@ -120,8 +120,13 @@ const CREAM = '#F7F5EF'
 const GOLD_SOFT = '#B9982F' // toned-down gold for decorative hairlines
 
 // ── ROLE HELPERS ────────────────────────────────────────────────────────────
-const canManage = (role) => role === 'superintendent' || role === 'director'
+// Roles, low → high: operator (read-only) · assistant (Assistant Superintendent)
+// · superintendent · director. The three upper roles can manage the app and the
+// logins; only a director gives final approval.
+const canManage = (role) => role === 'assistant' || role === 'superintendent' || role === 'director'
 const canApprove = (role) => role === 'director'
+// Who can open Settings → Users & Logins and create/change accounts.
+const canManageUsers = (role) => canManage(role)
 
 // Standard PPE options and common field instructions (quick-insert on a sheet).
 const PPE_OPTIONS = ['Gloves', 'Long Sleeves', 'Eye Protection', 'Respirator', 'Coveralls', 'Chemical Boots']
@@ -520,7 +525,10 @@ function initials(name) {
 }
 
 function roleLabel(role) {
-  return role === 'director' ? 'Director of Grounds' : role === 'superintendent' ? 'Superintendent' : 'Operator'
+  return role === 'director' ? 'Director of Grounds'
+    : role === 'superintendent' ? 'Superintendent'
+    : role === 'assistant' ? 'Assistant Superintendent'
+    : 'Operator'
 }
 
 // ── IRRIGATION MODULE ─────────────────────────────────────────────────────
@@ -1135,7 +1143,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
           <SettingsPage
             areas={areas} operators={operators} directors={directors} targets={targets}
             sheetTypes={sheetTypes} courseInfo={courseInfo} location={location} grassTypes={grassTypes} soilTypes={soilTypes}
-            applicatorLicenses={applicatorLicenses} directorPins={directorPins} isDirector={canApprove(user.role)}
+            applicatorLicenses={applicatorLicenses} directorPins={directorPins} canUsers={canManageUsers(user.role)}
             onSave={async (patch) => { await saveSettings(patch); showToast('Settings updated') }}
           />
         )}
@@ -7208,7 +7216,7 @@ function OnboardingWizard({ courseInfo = {}, grassTypes = [], areas = {}, soilTy
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────
-function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, soilTypes, applicatorLicenses, directorPins, isDirector = false, onSave }) {
+function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, soilTypes, applicatorLicenses, directorPins, canUsers = false, onSave }) {
   const [section, setSection] = useState('course')
   // Grasses actually on site (from onboarding) drive the area/turf pickers; the
   // full library is still edited in Lists and offered when nothing's selected.
@@ -7220,7 +7228,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       <SectionHeader title="Settings" subtitle="Manage people, areas, and club details — changes apply everywhere instantly" />
 
       <div className="flex gap-2 mt-4 mb-5 overflow-x-auto pb-1">
-        {[['property', 'Property Setup'], ['course', 'Course Info'], ['location', 'Location'], ['people', 'People'], ...(isDirector ? [['users', 'Users & Logins']] : []), ['areas', 'Sprayer Areas'], ['sprayers', 'Sprayers'], ['lists', 'Lists'], ['backup', 'Backup']].map(([k, l]) => (
+        {[['property', 'Property Setup'], ['course', 'Course Info'], ['location', 'Location'], ['people', 'People'], ...(canUsers ? [['users', 'Users & Logins']] : []), ['areas', 'Sprayer Areas'], ['sprayers', 'Sprayers'], ['lists', 'Lists'], ['backup', 'Backup']].map(([k, l]) => (
           <button key={k} onClick={() => setSection(k)} className="font-body text-xs font-semibold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={section === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
@@ -7231,7 +7239,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} grassTypes={grassTypes} onSave={onSave} />}
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
       {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} onSave={onSave} />}
-      {section === 'users' && isDirector && <UsersSettings />}
+      {section === 'users' && canUsers && <UsersSettings />}
       {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassChoices} soilTypes={soilTypes} courses={courseInfo?.courses || []} onSave={onSave} />}
       {section === 'sprayers' && <SprayersSettings courseInfo={courseInfo} onSave={onSave} />}
       {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} soilTypes={soilTypes} courseInfo={courseInfo} onSave={onSave} />}
@@ -7244,10 +7252,11 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
 // Create logins, set roles, reset passwords and remove users without leaving
 // the app. All the real work happens server-side in /api/users with the
 // service-role key; this screen only calls it.
-const ROLE_LABEL = { operator: 'Operator', superintendent: 'Superintendent', director: 'Director' }
+const ROLE_LABEL = { operator: 'Operator', assistant: 'Assistant Supt.', superintendent: 'Superintendent', director: 'Director' }
 const ROLE_STYLE = {
   director: { backgroundColor: '#FBF4DF', color: '#886717', border: '1px solid #E7D9A8' },
   superintendent: { backgroundColor: '#EAF2EC', color: '#2F5A3D', border: '1px solid #D5E5DA' },
+  assistant: { backgroundColor: '#EAF2EC', color: '#2F5A3D', border: '1px solid #D5E5DA' },
   operator: { backgroundColor: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0' },
 }
 function UsersSettings() {
@@ -7314,6 +7323,7 @@ function UsersSettings() {
               <FieldLabel>Role</FieldLabel>
               <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className={inputCls}>
                 <option value="operator">Operator — crew (read-only + spray/sign)</option>
+                <option value="assistant">Assistant Superintendent — manage the plan</option>
                 <option value="superintendent">Superintendent — manage the plan</option>
                 <option value="director">Director — manage + approve</option>
               </select>
@@ -7343,6 +7353,7 @@ function UsersSettings() {
               <div className="flex items-center gap-2 flex-wrap">
                 <select value={u.role} disabled={busy} onChange={(e) => setRole(u.id, e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 text-[12px] font-body bg-white">
                   <option value="operator">Operator</option>
+                  <option value="assistant">Assistant Superintendent</option>
                   <option value="superintendent">Superintendent</option>
                   <option value="director">Director</option>
                 </select>

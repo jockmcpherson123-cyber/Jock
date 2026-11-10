@@ -16,12 +16,15 @@ Every login has one **role**. It decides what that person sees and can change.
 
 | Role | Who it's for | Can do | Cannot do |
 |---|---|---|---|
-| **Operator** | Crew / sprayers | See today's jobs, open assigned spray sheets, tick off tanks, sign "sprayed by", do inventory counts, read labels & SDS, use the Job Board | Create/edit the program, edit the Chemical Library, change Settings, **approve** sheets |
-| **Superintendent** | Assistants / spray techs who build the plan | Everything an Operator can, **plus** build the Annual Program, create & edit spray and fert sheets, edit the Chemical Library, run Early Order and Reports, change Settings | **Approve** (final sign-off) sheets |
-| **Director** | Jock (Director of Grounds) | **Everything**, including **approving** spray sheets so they become the official record | — |
+| **Operator** | Crew / sprayers | See today's jobs, open assigned spray sheets, tick off tanks, sign "sprayed by", do inventory counts, read labels & SDS, use the Job Board | Create/edit the program, edit the Chemical Library, change Settings, manage logins, **approve** sheets |
+| **Assistant Superintendent** | Assistants who build the plan | Everything an Operator can, **plus** build the Annual Program, create & edit spray and fert sheets, edit the Chemical Library, run Early Order and Reports, change Settings, and **manage logins** | **Approve** (final sign-off) sheets |
+| **Superintendent** | Superintendents | Same as Assistant Superintendent | **Approve** sheets |
+| **Director** | Director of Grounds | **Everything**, including **approving** spray sheets so they become the official record | — |
 
-Rule of thumb: **crew = Operator**, **assistants = Superintendent**, **you = Director**.
-You can have more than one of each, but keep Directors few — they hold the approval pen.
+Rule of thumb: **crew = Operator**, **assistants/supers = Assistant Superintendent / Superintendent**, and a **Director** holds the approval pen.
+The three upper roles (Assistant, Superintendent, Director) can all manage the app
+**and the logins**, so you can change your own position freely — you're never
+locked into one. The app keeps at least one manager so no one is ever locked out.
 
 What a role changes on screen:
 - **Operators** see a short "crew" sidebar: *To Spray, Records, Fert Sheets,
@@ -37,28 +40,30 @@ What a role changes on screen:
 Logins are **email + password**. There is **no public sign-up**, which keeps the
 app locked to your team.
 
-### The easy way — inside the app (Directors only)
-Once you (a Director) are signed in:
+### The easy way — inside the app (managers)
+Once you're signed in as a manager (Assistant Superintendent, Superintendent, or
+Director):
 1. **Settings → Users & Logins** → **Add user**.
 2. Enter their **name**, **email**, and **role** → **Create login**.
 3. The app shows a **temporary password** — hand it to them with the site link.
    They sign in and can change it later.
-4. From the same screen you can **change a role**, **reset a password**, or
-   **remove** a user at any time.
+4. From the same screen you can **change a role** (including your own),
+   **reset a password**, or **remove** a user at any time.
 
 That's it — no Supabase, no SQL. Creating a user here also adds their name to the
-pickers automatically. (The app won't let you remove or demote the **last**
-Director, so the approval pen is never lost.)
+pickers automatically. (The app keeps at least one manager so nobody is ever
+locked out.)
 
-### First-time bootstrap — the very first Director (one time, in Supabase)
-The in-app screen is Director-only, so the **first** Director has to be made in
+### First-time bootstrap — the very first manager (one time, in Supabase)
+The in-app screen needs a manager, so the **first** account has to be made in
 Supabase once:
 1. [supabase.com](https://supabase.com) → **Grounds** project → **Authentication
    → Users → Add user** → enter your email + a password, tick **Auto Confirm**.
-2. **SQL Editor → New query**, paste, change the email, **Run**:
+2. **SQL Editor → New query**, paste, change the email and role, **Run**:
    ```sql
    update public.profiles
-   set role = 'director', full_name = 'Jock McPherson'
+   set role = 'assistant',   -- or 'superintendent' / 'director'
+       full_name = 'Jock McPherson'
    where id = (select id from auth.users where email = 'jmcpherson@ccclub.org');
    ```
 After that, create everyone else from **Settings → Users & Logins**.
@@ -176,7 +181,7 @@ After that, create everyone else from **Settings → Users & Logins**.
 | Problem | What's going on / the fix |
 |---|---|
 | **Can't log in** | Wrong email/password. A Director can reset it in **Settings → Users & Logins → Reset password**, which gives a new temporary one to hand over. |
-| **I don't see Settings / Annual Program** | You're an **Operator**. Ask the admin to set your role to `superintendent` or `director`. |
+| **I don't see Settings / Annual Program** | You're an **Operator**. Ask the admin to set your role to `assistant`, `superintendent` or `director`. |
 | **No Approve button** | Only **Directors** can approve. |
 | **An area (Rough, Natives, Driving Range) isn't showing** | Its **Course** isn't set. Settings → Sprayer Areas → set Blue / Gold / **Both**. "Both" shows under each course. |
 | **Page won't load / looks old after an update** | The app caches hard. Close the tab and reopen, or hard-refresh (desktop). It self-heals on the next load. |
@@ -195,7 +200,7 @@ Admin/Supabase questions → whoever holds the Supabase login (see SETUP.md).
 ## 8. Admin checklist before testing (for the person setting it up)
 
 - [ ] Database migrations applied, including **`supabase/phase31.sql`** (inventory counts).
-- [ ] The first **Director** is bootstrapped in Supabase; everyone else is added in **Settings → Users & Logins**.
+- [ ] The first **manager** is bootstrapped in Supabase; everyone else is added in **Settings → Users & Logins**.
 - [ ] Each tester is in **Settings → People** with their **license #** and expiry.
 - [ ] **Sprayer Areas** have **Area per tank**, **Default Tanks**, and **Course** set.
 - [ ] **Chemical Library** products have rates, oz/case, cost, company, and N-P-K.
