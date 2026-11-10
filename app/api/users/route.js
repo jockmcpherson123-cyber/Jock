@@ -10,6 +10,14 @@
 // ════════════════════════════════════════════════════════════════════════
 import { createClient } from '@supabase/supabase-js'
 import { getUser } from '@/lib/getUser'
+import { sendEmail, emailConfigured } from '@/lib/email'
+
+// Best-effort login URL for the invite email.
+function siteUrl(request) {
+  const env = process.env.NEXT_PUBLIC_SITE_URL || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : '')
+  if (env) return env.replace(/\/$/, '')
+  try { return new URL(request.url).origin } catch { return '' }
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -100,7 +108,22 @@ export async function POST(request) {
   // The signup trigger makes the profile row; set the chosen role + name.
   if (id) await db.from('profiles').update({ role, full_name: fullName || email }).eq('id', id)
   await addToPeople(db, fullName, role)
-  return Response.json({ ok: true, id, email, tempPassword: password })
+
+  // Optionally email the new person their login (temp password + site link).
+  let emailed = false, emailError = null
+  const wantEmail = body.notify !== false
+  if (wantEmail && emailConfigured()) {
+    const link = siteUrl(request)
+    const who = fullName || 'there'
+    const text = `Hi ${who},\n\nAn account was created for you on the Congressional Grounds Ops app.\n\n` +
+      `Sign in at: ${link || '(ask your supervisor for the link)'}\n` +
+      `Email: ${email}\nTemporary password: ${password}\n\n` +
+      `Please sign in and change your password. If you weren't expecting this, let your supervisor know.`
+    const r = await sendEmail({ to: email, subject: 'Your Congressional Grounds Ops login', text, fromName: 'Congressional Grounds Ops' })
+    emailed = !!r.ok
+    if (!r.ok) emailError = r.error
+  }
+  return Response.json({ ok: true, id, email, tempPassword: password, emailed, emailError, emailConfigured: emailConfigured() })
 }
 
 export async function PATCH(request) {
@@ -129,7 +152,19 @@ export async function PATCH(request) {
     const pw = String(body.password || '').trim() || randomPassword()
     const { error } = await db.auth.admin.updateUserById(id, { password: pw })
     if (error) return Response.json({ error: 'Could not reset the password.' }, { status: 502 })
-    return Response.json({ ok: true, tempPassword: pw })
+    let emailed = false
+    if (body.notify !== false && emailConfigured()) {
+      const { data: u } = await db.auth.admin.getUserById(id)
+      const addr = u?.user?.email
+      if (addr) {
+        const link = siteUrl(request)
+        const text = `Your password for the Congressional Grounds Ops app was reset.\n\n` +
+          `Sign in at: ${link || '(ask your supervisor for the link)'}\nEmail: ${addr}\nNew temporary password: ${pw}\n\nPlease sign in and change it.`
+        const r = await sendEmail({ to: addr, subject: 'Your Grounds Ops password was reset', text, fromName: 'Congressional Grounds Ops' })
+        emailed = !!r.ok
+      }
+    }
+    return Response.json({ ok: true, tempPassword: pw, emailed })
   }
   return Response.json({ ok: true })
 }

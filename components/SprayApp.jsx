@@ -7265,7 +7265,7 @@ function UsersSettings() {
   const [err, setErr] = useState(null)
   const [notice, setNotice] = useState(null)
   const [adding, setAdding] = useState(false)
-  const [form, setForm] = useState({ fullName: '', email: '', role: 'operator' })
+  const [form, setForm] = useState({ fullName: '', email: '', role: 'operator', notify: true })
   const [busy, setBusy] = useState(false)
 
   const load = async () => {
@@ -7290,14 +7290,15 @@ function UsersSettings() {
     setBusy(true); setErr(null); setNotice(null)
     try {
       const d = await call('POST', form)
-      setNotice(`Created ${form.email}. Temporary password: ${d.tempPassword} — give it to them and have them change it after they sign in.`)
-      setForm({ fullName: '', email: '', role: 'operator' }); setAdding(false)
+      const tail = d.emailed ? ' ✓ Emailed to them.' : d.emailConfigured ? " Couldn't email it — share it manually." : " Share it with them (email isn't set up)."
+      setNotice(`Created ${form.email}. Temporary password: ${d.tempPassword}.${tail}`)
+      setForm({ fullName: '', email: '', role: 'operator', notify: true }); setAdding(false)
       await load()
     } catch (e) { setErr(e.message) }
     setBusy(false)
   }
   const setRole = async (id, role) => { setBusy(true); setErr(null); try { await call('PATCH', { id, role }); await load() } catch (e) { setErr(e.message) } setBusy(false) }
-  const resetPw = async (u) => { setBusy(true); setErr(null); setNotice(null); try { const d = await call('PATCH', { id: u.id, password: '' }); setNotice(`New temporary password for ${u.email}: ${d.tempPassword}`) } catch (e) { setErr(e.message) } setBusy(false) }
+  const resetPw = async (u) => { setBusy(true); setErr(null); setNotice(null); try { const d = await call('PATCH', { id: u.id, password: '' }); setNotice(`New temporary password for ${u.email}: ${d.tempPassword}.${d.emailed ? ' ✓ Emailed to them.' : ' Share it manually.'}`) } catch (e) { setErr(e.message) } setBusy(false) }
   const remove = async (u) => { if (!window.confirm(`Remove ${u.fullName} (${u.email})? They lose access immediately.`)) return; setBusy(true); setErr(null); try { await call('DELETE', { id: u.id }); await load() } catch (e) { setErr(e.message) } setBusy(false) }
 
   const inputCls = 'w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white'
@@ -7329,7 +7330,11 @@ function UsersSettings() {
               </select>
             </div>
           </div>
-          <p className="font-body text-[11px] text-slate-400 mt-2">A temporary password is generated — you'll get it after creating, to hand over. They can change it later.</p>
+          <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
+            <input type="checkbox" checked={form.notify} onChange={(e) => setForm({ ...form, notify: e.target.checked })} className="w-4 h-4 rounded" style={{ accentColor: FERN }} />
+            <span className="font-body text-xs text-slate-600">Email their login + temporary password to them</span>
+          </label>
+          <p className="font-body text-[11px] text-slate-400 mt-1">You'll also see the temporary password here, as a backup. They can change it after signing in.</p>
           <div className="flex gap-2 mt-3">
             <button onClick={() => setAdding(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
             <button onClick={create} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>{busy ? <Loader2 size={15} className="animate-spin" /> : null} Create login</button>
