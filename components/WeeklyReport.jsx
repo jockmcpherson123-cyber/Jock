@@ -8,6 +8,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import * as db from '@/lib/db'
 import { Printer, Download, Mail, Loader2, Calendar, Thermometer, Scissors, Gauge, Sprout } from 'lucide-react'
 import { fmtStimp } from '@/lib/greenspeed'
+import { areaInCourse } from '@/lib/calc'
 
 import { FOREST, FERN, GOLD } from '@/lib/theme'
 const TYPE_COLOR = { Fungicide: '#3A6B4A', Herbicide: '#D97706', Insecticide: '#DC2626', 'Growth Reg': '#7C3AED', Fertilizer: '#2563EB', Biological: '#0D9488', 'Wetting Agent': '#64748B' }
@@ -169,10 +170,11 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   // course as their first word ("Blue Greens"), so we match by prefix.
   const courseNames = (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)
   const hasCourses = courseNames.length >= 2
-  // Match by the course's first word ("Blue Course" → "Blue") so it lines up
-  // with area names like "Blue Greens". No course set → show everything.
-  const courseTok = String(course || '').trim().split(/\s+/)[0].toLowerCase()
-  const inCourse = (area) => !courseTok || String(area || '').toLowerCase().startsWith(courseTok)
+  // Honor each area's Course tag ('both' shows everywhere), falling back to a
+  // first-word name match for untagged areas — the same rule the rest of the app
+  // uses, so tagged areas like "Driving Range" place on the right course. No
+  // course set → show everything.
+  const inCourse = (area) => areaInCourse(areas, area, course)
   // "Blue" → "Blue Course", but "Blue Course" stays "Blue Course" (no double word).
   const courseLabel = (c) => (/course/i.test(String(c)) ? String(c) : `${c} Course`)
 
@@ -230,7 +232,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const hocShown = hocRows.filter((r) => !r.surface || inCourse(r.surface))
   const MOWED_SURFACE = /green|collar|tee|approach|fairway|surround|rough/i
   const surfRank = (n) => { const i = ['green', 'collar', 'tee', 'approach', 'fairway', 'surround', 'rough'].findIndex((x) => String(n).toLowerCase().includes(x)); return i < 0 ? 99 : i }
-  const allMowed = Object.keys(areas || {}).filter((a) => MOWED_SURFACE.test(a)).sort((a, b) => surfRank(a) - surfRank(b) || a.localeCompare(b))
+  const allMowed = Object.keys(areas || {}).filter((a) => MOWED_SURFACE.test(a) && inCourse(a)).sort((a, b) => surfRank(a) - surfRank(b) || a.localeCompare(b))
   const mowRe = /mow|height|hoc|cut/i
   const hocByArea = useMemo(() => {
     const m = {}

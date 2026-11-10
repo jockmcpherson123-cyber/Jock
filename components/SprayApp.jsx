@@ -60,7 +60,7 @@ import {
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, sheetBreakdown, lineAmounts, sheetLineAmts, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
-  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productStockValue, areaRate, sprayRateGalAc, productRateForN, eiqLoad, measureOut,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productStockValue, areaRate, sprayRateGalAc, productRateForN, eiqLoad, measureOut, areaInCourse,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -948,14 +948,9 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   // course and is counted once); otherwise fall back to a first-word match so
   // untagged areas still place. Matches on the first word so "Blue Course" and
   // "Blue" line up.
-  const areaCourseMatch = (tag, name) => {
-    if (!course) return true
-    if (tag === 'both') return true
-    if (tag) return cTok(tag) === cTok(course)
-    return cTok(name) === cTok(course)
-  }
-  const inCourse = (area) => areaCourseMatch(areas?.[area]?.course, area)
-  const scopeAreas = (a) => (!course ? a : Object.fromEntries(Object.entries(a || {}).filter(([n, av]) => areaCourseMatch(av?.course, n))))
+  const areaCourseMatch = (tag, name) => areaInCourse(areas, name, course)
+  const inCourse = (area) => areaInCourse(areas, area, course)
+  const scopeAreas = (a) => (!course ? a : Object.fromEntries(Object.entries(a || {}).filter(([n]) => areaInCourse(a, n, course))))
   const visibleSheets = course ? sheets.filter((s) => inCourse(s.area)) : sheets
   const pending = visibleSheets.filter((s) => s.status === 'pending')
   const approved = visibleSheets.filter((s) => s.status === 'approved')
@@ -1031,7 +1026,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
       <div className={`${route === 'program' || route === 'chemicals' || route === 'edit' ? 'max-w-[1800px]' : 'max-w-7xl'} mx-auto px-4 sm:px-6 pb-24`}>
         {route === 'dashboard' && (
           <Dashboard
-            sheets={visibleSheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={areas}
+            sheets={visibleSheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={scopeAreas(areas)}
             manage={manage} programApps={course ? programApps.filter((a) => inCourse(a.area)) : programApps} location={location} courseInfo={courseInfo}
             applicatorLicenses={applicatorLicenses} onGoSettings={() => setRoute('settings')}
             homeMode={homeMode}
@@ -6119,13 +6114,22 @@ function Inventory({ products, deliveries, onAddDelivery }) {
 function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], programApps = [], onSaveSettings, applicatorLicenses = {}, location = {} }) {
   const [view, setView] = useState('byArea')
   const [report, setReport] = useState('npk') // 'npk' | 'rotation'
-  const npkData = aggregateNPK(sheets, products, areas, fertSheets)
 
-  // Season Report: years that actually have sprays, newest first (default to this
-  // year if it has any, else the most recent year with data).
-  const years = [...new Set((sheets || []).map((s) => String(s.date || '').slice(0, 4)).filter((y) => y.length === 4))].sort().reverse()
+  // Season filter: years that actually have sprays or granular fert, newest first
+  // (default to this year if it has any, else the most recent year with data).
+  const years = [...new Set([
+    ...(sheets || []).map((s) => String(s.date || '').slice(0, 4)),
+    ...(fertSheets || []).map((f) => String(f.date || '').slice(0, 4)),
+  ].filter((y) => y.length === 4))].sort().reverse()
   const thisYear = String(new Date().getFullYear())
   const [reportYear, setReportYear] = useState(years.includes(thisYear) ? thisYear : (years[0] || thisYear))
+
+  // Every on-screen report is scoped to the selected season, so numbers never
+  // leak across years. The PDF builders filter by reportYear on their own.
+  const inYear = (d) => String(d || '').slice(0, 4) === reportYear
+  const seasonSheets = (sheets || []).filter((s) => inYear(s.date))
+  const seasonFert = (fertSheets || []).filter((f) => inYear(f.date))
+  const npkData = aggregateNPK(seasonSheets, products, areas, seasonFert)
   const [pdfBusy, setPdfBusy] = useState(false)
   const makeSeasonReport = async () => {
     setPdfBusy(true)
@@ -6160,7 +6164,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
   const totalP = Math.round(npkData.reduce((s, r) => s + r.p, 0) * 100) / 100
   const totalK = Math.round(npkData.reduce((s, r) => s + r.k, 0) * 100) / 100
 
-  const diag = npkDiagnostics(sheets, products, areas)
+  const diag = npkDiagnostics(seasonSheets, products, areas)
   const diagItems = [
     diag.missingAnalysis.length && { title: 'Missing N-P-K analysis', fix: 'Open Chemical Library → edit each product → fill in the N %, P %, K % from the bag (e.g. 21-0-0 = N 21). Until then it counts as zero.', items: diag.missingAnalysis },
     diag.notCountedSheets.length && { title: 'Sheets not counted yet', fix: 'Reports only count sprays that have actually gone out — the sheet must be submitted, the applicator signed, and every product checked into the tank. Finish those steps for their fertilizer to show.', items: diag.notCountedSheets },
@@ -6221,6 +6225,20 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
         ))}
       </div>
 
+      {report !== 'since' && (
+        <div className="flex items-center gap-2 mt-2 mb-1 flex-wrap">
+          <span className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide">Season</span>
+          {years.length > 0 ? (
+            <div style={{ width: 110 }}>
+              <SearchSelect value={reportYear} options={years} onPick={setReportYear} sort={false} placeholder="Year…" />
+            </div>
+          ) : (
+            <span className="font-body text-xs text-slate-500">{reportYear}</span>
+          )}
+          <span className="font-body text-[11px] text-slate-400">— every report below shows only sprays marked as sprayed in {reportYear}.</span>
+        </div>
+      )}
+
       <div className="rounded-2xl border p-3.5 mt-4 mb-1 flex items-center justify-between gap-3 flex-wrap" style={{ backgroundColor: '#F5FAF6', borderColor: '#D8E6DC' }}>
         <div className="min-w-0">
           <p className="font-body text-sm font-bold text-slate-800">Season Report</p>
@@ -6251,13 +6269,13 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
         </button>
       </div>
 
-      {report === 'nitrogen' && <NitrogenReport sheets={sheets} products={products} areas={areas} fertSheets={fertSheets} />}
-      {report === 'reorder' && <ReorderReport sheets={sheets} products={products} areas={areas} />}
-      {report === 'cost' && <CostReport sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} programApps={programApps} onSaveSettings={onSaveSettings} />}
-      {report === 'impact' && <ImpactReport sheets={sheets} products={products} areas={areas} />}
-      {report === 'rotation' && <RotationReport sheets={sheets} products={products} />}
-      {report === 'usage' && <ProductUsageReport sheets={sheets} products={products} areas={areas} />}
-      {report === 'history' && <SprayHistoryReport sheets={sheets} />}
+      {report === 'nitrogen' && <NitrogenReport sheets={seasonSheets} products={products} areas={areas} fertSheets={seasonFert} />}
+      {report === 'reorder' && <ReorderReport sheets={seasonSheets} products={products} areas={areas} />}
+      {report === 'cost' && <CostReport sheets={seasonSheets} products={products} areas={areas} courseInfo={courseInfo} programApps={programApps} onSaveSettings={onSaveSettings} />}
+      {report === 'impact' && <ImpactReport sheets={seasonSheets} products={products} areas={areas} />}
+      {report === 'rotation' && <RotationReport sheets={seasonSheets} products={products} />}
+      {report === 'usage' && <ProductUsageReport sheets={seasonSheets} products={products} areas={areas} />}
+      {report === 'history' && <SprayHistoryReport sheets={seasonSheets} />}
       {report === 'since' && <DaysSinceReport sheets={sheets} />}
 
       {report === 'npk' && (<>
@@ -6299,7 +6317,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
 
       {npkData.length === 0 ? (
         <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
-          No fertilizer applications recorded yet. Approve a spray sheet with a fertilizer product, or complete a granular fert sheet, to see totals here.
+          No fertilizer applications marked as sprayed in {reportYear}. Mark a spray sheet with a fertilizer product as sprayed, or complete a granular fert sheet, to see totals here.
         </div>
       ) : view === 'byArea' ? (
         <div className="space-y-2">
@@ -6359,7 +6377,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
 // feeding gauge: how much of the year's nitrogen budget you've put down, and how
 // much is left.
 function NitrogenReport({ sheets, products, areas, fertSheets = [] }) {
-  const npkData = aggregateNPK(sheets, products, areas)
+  const npkData = aggregateNPK(sheets, products, areas, fertSheets)
   // Spray-derived N per 1,000 sq ft, per area.
   const sprayByArea = {}
   npkData.forEach((r) => {
@@ -9470,10 +9488,10 @@ function FieldDataHub({ clippings, speeds, firmness = [], practices = [], scouti
 function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
   const [route, setRoute] = useState(nav?.route || 'dashboard')
   useEffect(() => { if (nav?.route) setRoute(nav.route) }, [nav])
-  // Scope the areas passed to each tab to the selected course (by first-word
-  // match), so the course bar filters what the agronomy screens show and enter.
-  const cTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
-  const scopeAreas = (areas) => (!course ? areas : Object.fromEntries(Object.entries(areas || {}).filter(([n]) => cTok(n) === cTok(course))))
+  // Scope the areas passed to each tab to the selected course, so the course bar
+  // filters what the agronomy screens show and enter. Honors each area's Course
+  // tag ('both' shows everywhere), same rule the rest of the app uses.
+  const scopeAreas = (areas) => (!course ? areas : Object.fromEntries(Object.entries(areas || {}).filter(([n]) => areaInCourse(areas, n, course))))
   const [turf, setTurf] = useState({ location: null, sheets: [], products: [], areas: {} })
   const [daily, setDaily] = useState([])
   const [clippings, setClippings] = useState([])
@@ -9568,7 +9586,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-24 pt-6">
         {route === 'dashboard' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={turf.areas} clippings={clippings} soilTests={soilTests} practices={practices} speeds={speeds} soilSeries={soilSeries} hasLocation={turf.location?.lat != null} onGo={setRoute} />
+          : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={scopeAreas(turf.areas)} clippings={clippings} soilTests={soilTests} practices={practices} speeds={speeds} soilSeries={soilSeries} hasLocation={turf.location?.lat != null} onGo={setRoute} />
         )}
         {route === 'knowledge' && <KnowledgeTab courseInfo={turf.courseInfo} products={turf.products} />}
         {route === 'brief' && (
@@ -9626,7 +9644,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         {route === 'soil' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <SoilLabScreen course={course}
-              soilTab={<SoilTestsTab soilTests={soilTests} areas={scopeAreas(turf.areas)} grassTypes={turf.grassTypes || []} soilTypes={turf.soilTypes || []} courseInfo={turf.courseInfo}
+              soilTab={<SoilTestsTab soilTests={soilTests} areas={scopeAreas(turf.areas)} grassTypes={turf.grassTypes || []} soilTypes={turf.soilTypes || []} courseInfo={turf.courseInfo} courseFilter={course}
                 onAdd={async (t) => { await db.addSoilTest(t); await reloadSoilTests() }}
                 onUpdate={async (t) => { await db.updateSoilTest(t); await reloadSoilTests() }}
                 onDelete={async (id) => { await db.deleteSoilTest(id); await reloadSoilTests() }} />}
@@ -12014,7 +12032,7 @@ function SoilNum({ label, ph, value, onChange, tip }) {
   )
 }
 
-function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], courseInfo, onAdd, onUpdate, onDelete }) {
+function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], courseInfo, courseFilter = '', onAdd, onUpdate, onDelete }) {
   const greenOptions = greenOptionsFor(courseInfo)
   const areaNames = Object.keys(areas || {})
   // The location can be a settings area (Blue Greens) OR an individual green /
@@ -12024,7 +12042,13 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
   // first word), so Blue and Gold tests never average together.
   const courseNames = (Array.isArray(courseInfo?.courses) ? courseInfo.courses : []).filter((c) => c && c.name && Number(c.holes) > 0).map((c) => c.name)
   const hasCourses = courseNames.length >= 2
-  const [courseTab, setCourseTab] = useState(courseNames[0] || 'all')
+  // The course picked on the global course bar drives which course's tests show,
+  // so Soil Tests follows the same filter as every other screen. Match by first
+  // word so "Blue" lines up with a course named "Blue Course".
+  const cTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+  const filterCourse = courseFilter ? (courseNames.find((n) => cTok(n) === cTok(courseFilter)) || courseNames[0] || 'all') : null
+  const [courseTab, setCourseTab] = useState(filterCourse || courseNames[0] || 'all')
+  useEffect(() => { if (filterCourse) setCourseTab(filterCourse) }, [filterCourse])
   // Which course an area belongs to (legacy fallback). Greens from the picker are
   // prefixed with the course name; settings areas / generic names fall back to a
   // first-word match. Anything unmatched (practice greens, pre-multi-course
