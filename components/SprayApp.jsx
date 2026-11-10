@@ -804,6 +804,11 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   // Apply a list of {name, total, unit} deductions to inventory. A negative total
   // puts stock back (used when a partial fill is reduced or removed). Converts the
   // sprayed amount into each product's own stock unit first.
+  //
+  // Stock is allowed to go negative on purpose: a club that hasn't entered a
+  // starting count would otherwise see every spray clamp back to 0, so usage
+  // looked like it was "never recorded." A negative number is an honest signal —
+  // you've sprayed more than the app knows you had, so recount or log a delivery.
   async function deductStock(deductions) {
     if (!deductions || deductions.length === 0) return
     let nextProducts = [...products]
@@ -811,7 +816,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
       const prod = nextProducts.find((pr) => pr.name === ded.name)
       if (!prod) continue
       const used = convertUnits(ded.total, ded.unit, prod.unit)
-      const newStock = Math.max(0, Math.round(((prod.stock || 0) - used) * 100) / 100)
+      const newStock = Math.round(((prod.stock || 0) - used) * 100) / 100
       const updatedProd = { ...prod, stock: newStock }
       nextProducts = nextProducts.map((pr) => (pr.name === ded.name ? updatedProd : pr))
       try {
@@ -1716,7 +1721,9 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   // Home is a read-only overview — the create-a-spray-sheet affordances live on
   // the Annual Program and Spray Sheets screens, not here.
   const create = manage && !homeMode
-  const lowStock = (products || []).filter((p) => p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold)
+  // Low on stock, or over-used into the negative (which always needs attention,
+  // threshold or not — it means more went out than the app knew you had).
+  const lowStock = (products || []).filter((p) => (Number(p.stock) || 0) < 0 || (p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold))
   const today = localDateISO()
 
   // ── Live weather for the spray-window strip + season GDD for PGR timing.
@@ -1993,7 +2000,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
               {lowStock.map((p) => (
                 <div key={p.name} className="flex items-center justify-between px-4 py-2.5" style={{ borderTop: `1px solid ${HAIR}` }}>
                   <span className="font-body text-sm truncate mr-2" style={{ color: INK_2 }}>{p.name}</span>
-                  <span className="font-body text-xs font-bold tnum shrink-0" style={{ color: '#C0392B' }}>{p.stock} {p.unit} left</span>
+                  <span className="font-body text-xs font-bold tnum shrink-0" style={{ color: '#C0392B' }}>{(Number(p.stock) || 0) < 0 ? `short ${Math.abs(p.stock)} ${p.unit} — recount` : `${p.stock} ${p.unit} left`}</span>
                 </div>
               ))}
             </div>
