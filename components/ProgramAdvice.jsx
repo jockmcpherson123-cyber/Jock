@@ -29,6 +29,11 @@ export default function ProgramAdvice({ getContext, courseInfo = {}, onSaveCours
   }
 
   const when = at ? new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
+  // This read is built on the last 3 weeks of data + the forecast, both of which
+  // move daily — so an old read can quietly be out of date. Flag it once it's
+  // more than a week old so nobody treats a stale take as current.
+  const ageDays = at ? Math.floor((Date.now() - new Date(at).getTime()) / 86400000) : null
+  const stale = ageDays != null && ageDays >= 7
 
   return (
     <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4">
@@ -37,7 +42,7 @@ export default function ProgramAdvice({ getContext, courseInfo = {}, onSaveCours
           <span style={{ width: 26, height: 26, borderRadius: 8, background: FOREST, color: GOLD, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Sparkles size={14} /></span>
           <div>
             <p className="font-display text-base font-semibold" style={{ color: INK }}>Program read <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ color: GOLD, border: `1px solid ${GOLD}` }}>AI</span></p>
-            <p className="font-body text-[11px]" style={{ color: INK_3 }}>{advice ? `Updated ${when}` : 'A read on your program from the last 3 weeks of data + the forecast'}</p>
+            <p className="font-body text-[11px]" style={{ color: stale ? RED : INK_3 }}>{advice ? (stale ? `From ${when} · ${ageDays} days old — refresh for current conditions` : `Updated ${when}`) : 'A read on your program from the last 3 weeks of data + the forecast'}</p>
           </div>
         </div>
         <button onClick={run} disabled={busy} className="inline-flex items-center gap-1.5 font-body text-[12px] font-bold text-white rounded-lg px-3 py-2 shrink-0" style={{ background: FOREST, opacity: busy ? 0.6 : 1 }}>
@@ -49,6 +54,11 @@ export default function ProgramAdvice({ getContext, courseInfo = {}, onSaveCours
 
       {advice ? (
         <div className="mt-3">
+          {stale && (
+            <div className="font-body text-[11.5px] rounded-lg px-2.5 py-2 mb-2.5" style={{ background: '#FDECEA', color: '#9B2C1E', border: '1px solid #F3C9C2' }}>
+              This read is {ageDays} days old and may not match today's growth or weather — tap <b>Refresh</b> before acting on it.
+            </div>
+          )}
           <p className="font-display text-[17px] font-semibold leading-snug" style={{ color: FOREST }}>{advice.headline}</p>
           {advice.read && <p className="font-body text-[13.5px] leading-relaxed mt-1.5" style={{ color: '#2a302c' }}>{advice.read}</p>}
           {Array.isArray(advice.actions) && advice.actions.length > 0 && (

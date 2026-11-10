@@ -507,9 +507,16 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         {/* AI program read — echoed here when enabled in GDD & Growth */}
         {courseInfo?.adviceInReport && courseInfo?.programAdvice?.advice && (() => {
           const a = courseInfo.programAdvice.advice
+          const genAt = courseInfo.programAdvice.generatedAt
+          const asOf = genAt ? new Date(genAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
+          const ageDays = genAt ? Math.floor((Date.now() - new Date(genAt).getTime()) / 86400000) : null
+          const stale = ageDays != null && ageDays >= 7
           return (
             <div className="mt-2.5 rounded-lg px-3 py-2.5 avoid-break" style={{ backgroundColor: '#F8FAF8', border: '1px solid #D8E4DA' }}>
-              <p className="font-body text-[9px] font-bold uppercase tracking-wide mb-0.5" style={{ color: FERN }}>Program read · AI</p>
+              <p className="font-body text-[9px] font-bold uppercase tracking-wide mb-0.5 flex items-center justify-between gap-2" style={{ color: FERN }}>
+                <span>Program read · AI{asOf ? ` · as of ${asOf}` : ''}</span>
+                {stale && <span className="no-print" style={{ color: '#9B2C1E', textTransform: 'none', letterSpacing: 0 }}>Refresh — {ageDays} days old</span>}
+              </p>
               <p className="font-display text-[14px] font-semibold" style={{ color: FOREST }}>{a.headline}</p>
               {a.read && <p className="font-body text-[12px] text-slate-700 leading-snug mt-1">{a.read}</p>}
               {Array.isArray(a.actions) && a.actions.length > 0 && (
