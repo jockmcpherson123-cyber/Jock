@@ -95,35 +95,35 @@ export async function POST(request) {
   const fullName = String(body.fullName || '').trim()
   const role = ROLES.includes(body.role) ? body.role : 'operator'
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return Response.json({ error: 'Enter a valid email.' }, { status: 400 })
-  const password = String(body.password || '').trim() || randomPassword()
-
-  const { data: created, error } = await db.auth.admin.createUser({
-    email, password, email_confirm: true, user_metadata: { full_name: fullName || email },
+  // Create the account and a one-time link the person uses to set their OWN
+  // password — no password is ever created or emailed in the clear.
+  const { data: gen, error } = await db.auth.admin.generateLink({
+    type: 'invite', email, options: { data: { full_name: fullName || email } },
   })
   if (error) {
-    const msg = /already/i.test(error.message || '') ? 'A user with that email already exists.' : 'Could not create the user.'
+    const msg = /already|registered|exists/i.test(error.message || '') ? 'A user with that email already exists.' : 'Could not create the user.'
     return Response.json({ error: msg }, { status: 400 })
   }
-  const id = created?.user?.id
-  // The signup trigger makes the profile row; set the chosen role + name.
+  const id = gen?.user?.id
+  const hash = gen?.properties?.hashed_token
   if (id) await db.from('profiles').update({ role, full_name: fullName || email }).eq('id', id)
   await addToPeople(db, fullName, role)
 
-  // Optionally email the new person their login (temp password + site link).
+  const base = siteUrl(request)
+  const inviteLink = hash && base ? `${base}/auth/confirm?token_hash=${encodeURIComponent(hash)}&type=invite&next=/set-password` : null
+
+  // Email the link through the club's own email (Gmail/Resend), if configured.
   let emailed = false, emailError = null
-  const wantEmail = body.notify !== false
-  if (wantEmail && emailConfigured()) {
-    const link = siteUrl(request)
+  if (body.notify !== false && emailConfigured() && inviteLink) {
     const who = fullName || 'there'
-    const text = `Hi ${who},\n\nAn account was created for you on the Congressional Grounds Ops app.\n\n` +
-      `Sign in at: ${link || '(ask your supervisor for the link)'}\n` +
-      `Email: ${email}\nTemporary password: ${password}\n\n` +
-      `Please sign in and change your password. If you weren't expecting this, let your supervisor know.`
-    const r = await sendEmail({ to: email, subject: 'Your Congressional Grounds Ops login', text, fromName: 'Congressional Grounds Ops' })
+    const text = `Hi ${who},\n\nYou've been given access to the Congressional Grounds Ops app.\n\n` +
+      `Click this link to set your password and sign in:\n${inviteLink}\n\n` +
+      `The link is one-time and expires. If you weren't expecting this, let your supervisor know.`
+    const r = await sendEmail({ to: email, subject: 'Set up your Congressional Grounds Ops login', text, fromName: 'Congressional Grounds Ops' })
     emailed = !!r.ok
     if (!r.ok) emailError = r.error
   }
-  return Response.json({ ok: true, id, email, tempPassword: password, emailed, emailError, emailConfigured: emailConfigured() })
+  return Response.json({ ok: true, id, email, emailed, emailError, emailConfigured: emailConfigured(), inviteLink })
 }
 
 export async function PATCH(request) {

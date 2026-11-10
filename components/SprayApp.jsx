@@ -7290,8 +7290,14 @@ function UsersSettings() {
     setBusy(true); setErr(null); setNotice(null)
     try {
       const d = await call('POST', form)
-      const tail = d.emailed ? ' ✓ Emailed to them.' : d.emailConfigured ? " Couldn't email it — share it manually." : " Share it with them (email isn't set up)."
-      setNotice(`Created ${form.email}. Temporary password: ${d.tempPassword}.${tail}`)
+      if (d.emailed) {
+        setNotice(`Invited ${form.email}. ✓ We emailed them a link to set their own password and sign in.`)
+      } else if (d.inviteLink) {
+        const why = d.emailConfigured ? "Couldn't email it" : "Email isn't set up"
+        setNotice(`Invited ${form.email}. ${why}, so send them this link to set their password:\n${d.inviteLink}`)
+      } else {
+        setNotice(`Invited ${form.email}. Ask them to use "Forgot password" on the sign-in page to set a password.`)
+      }
       setForm({ fullName: '', email: '', role: 'operator', notify: true }); setAdding(false)
       await load()
     } catch (e) { setErr(e.message) }
@@ -7305,13 +7311,13 @@ function UsersSettings() {
   return (
     <div>
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-        <p className="font-body text-xs text-slate-500 max-w-md">Create logins, set roles and reset passwords — no Supabase needed. Only Directors see this.</p>
+        <p className="font-body text-xs text-slate-500 max-w-md">Create logins, set roles and reset passwords — no Supabase needed. Managers only.</p>
         <button onClick={() => { setAdding((v) => !v); setErr(null); setNotice(null) }} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
           <Plus size={14} /> Add user
         </button>
       </div>
 
-      {notice && <div className="rounded-xl p-3 mb-3 font-body text-[13px]" style={{ backgroundColor: '#EAF2EC', color: '#2F5A3D', border: '1px solid #D5E5DA' }}>{notice}</div>}
+      {notice && <div className="rounded-xl p-3 mb-3 font-body text-[13px] whitespace-pre-line break-words" style={{ backgroundColor: '#EAF2EC', color: '#2F5A3D', border: '1px solid #D5E5DA' }}>{notice}</div>}
       {err && <div className="rounded-xl p-3 mb-3 font-body text-[13px]" style={{ backgroundColor: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA' }}>{err}</div>}
 
       {adding && (
@@ -7332,9 +7338,9 @@ function UsersSettings() {
           </div>
           <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
             <input type="checkbox" checked={form.notify} onChange={(e) => setForm({ ...form, notify: e.target.checked })} className="w-4 h-4 rounded" style={{ accentColor: FERN }} />
-            <span className="font-body text-xs text-slate-600">Email their login + temporary password to them</span>
+            <span className="font-body text-xs text-slate-600">Email them a link to set their own password</span>
           </label>
-          <p className="font-body text-[11px] text-slate-400 mt-1">You'll also see the temporary password here, as a backup. They can change it after signing in.</p>
+          <p className="font-body text-[11px] text-slate-400 mt-1">They get a one-time link — they click it, choose their own password, and they're in. No password is ever emailed in the clear. If email isn't set up, you'll see the link here to pass along.</p>
           <div className="flex gap-2 mt-3">
             <button onClick={() => setAdding(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
             <button onClick={create} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>{busy ? <Loader2 size={15} className="animate-spin" /> : null} Create login</button>
