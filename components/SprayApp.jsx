@@ -1135,7 +1135,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
           <SettingsPage
             areas={areas} operators={operators} directors={directors} targets={targets}
             sheetTypes={sheetTypes} courseInfo={courseInfo} location={location} grassTypes={grassTypes} soilTypes={soilTypes}
-            applicatorLicenses={applicatorLicenses} directorPins={directorPins}
+            applicatorLicenses={applicatorLicenses} directorPins={directorPins} isDirector={canApprove(user.role)}
             onSave={async (patch) => { await saveSettings(patch); showToast('Settings updated') }}
           />
         )}
@@ -7208,7 +7208,7 @@ function OnboardingWizard({ courseInfo = {}, grassTypes = [], areas = {}, soilTy
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────
-function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, soilTypes, applicatorLicenses, directorPins, onSave }) {
+function SettingsPage({ areas, operators, directors, targets, sheetTypes, courseInfo, location, grassTypes, soilTypes, applicatorLicenses, directorPins, isDirector = false, onSave }) {
   const [section, setSection] = useState('course')
   // Grasses actually on site (from onboarding) drive the area/turf pickers; the
   // full library is still edited in Lists and offered when nothing's selected.
@@ -7220,7 +7220,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       <SectionHeader title="Settings" subtitle="Manage people, areas, and club details — changes apply everywhere instantly" />
 
       <div className="flex gap-2 mt-4 mb-5 overflow-x-auto pb-1">
-        {[['property', 'Property Setup'], ['course', 'Course Info'], ['location', 'Location'], ['people', 'People'], ['areas', 'Sprayer Areas'], ['sprayers', 'Sprayers'], ['lists', 'Lists'], ['backup', 'Backup']].map(([k, l]) => (
+        {[['property', 'Property Setup'], ['course', 'Course Info'], ['location', 'Location'], ['people', 'People'], ...(isDirector ? [['users', 'Users & Logins']] : []), ['areas', 'Sprayer Areas'], ['sprayers', 'Sprayers'], ['lists', 'Lists'], ['backup', 'Backup']].map(([k, l]) => (
           <button key={k} onClick={() => setSection(k)} className="font-body text-xs font-semibold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={section === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
@@ -7231,10 +7231,129 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} grassTypes={grassTypes} onSave={onSave} />}
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
       {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} onSave={onSave} />}
+      {section === 'users' && isDirector && <UsersSettings />}
       {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassChoices} soilTypes={soilTypes} courses={courseInfo?.courses || []} onSave={onSave} />}
       {section === 'sprayers' && <SprayersSettings courseInfo={courseInfo} onSave={onSave} />}
       {section === 'lists' && <ListsSettings targets={targets} sheetTypes={sheetTypes} grassTypes={grassTypes} soilTypes={soilTypes} courseInfo={courseInfo} onSave={onSave} />}
       {section === 'backup' && <BackupSettings courseInfo={courseInfo} />}
+    </div>
+  )
+}
+
+// ── USERS & LOGINS (Directors only) ─────────────────────────────────────────
+// Create logins, set roles, reset passwords and remove users without leaving
+// the app. All the real work happens server-side in /api/users with the
+// service-role key; this screen only calls it.
+const ROLE_LABEL = { operator: 'Operator', superintendent: 'Superintendent', director: 'Director' }
+const ROLE_STYLE = {
+  director: { backgroundColor: '#FBF4DF', color: '#886717', border: '1px solid #E7D9A8' },
+  superintendent: { backgroundColor: '#EAF2EC', color: '#2F5A3D', border: '1px solid #D5E5DA' },
+  operator: { backgroundColor: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0' },
+}
+function UsersSettings() {
+  const [users, setUsers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState(null)
+  const [notice, setNotice] = useState(null)
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ fullName: '', email: '', role: 'operator' })
+  const [busy, setBusy] = useState(false)
+
+  const load = async () => {
+    setLoading(true); setErr(null)
+    try {
+      const r = await fetch('/api/users'); const d = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(d.error || 'Could not load users')
+      setUsers(d.users || [])
+    } catch (e) { setErr(e.message) }
+    setLoading(false)
+  }
+  useEffect(() => { load() }, [])
+
+  const call = async (method, body) => {
+    const r = await fetch('/api/users', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(d.error || 'Something went wrong')
+    return d
+  }
+  const create = async () => {
+    if (!form.email.trim()) { setErr('Enter an email.'); return }
+    setBusy(true); setErr(null); setNotice(null)
+    try {
+      const d = await call('POST', form)
+      setNotice(`Created ${form.email}. Temporary password: ${d.tempPassword} — give it to them and have them change it after they sign in.`)
+      setForm({ fullName: '', email: '', role: 'operator' }); setAdding(false)
+      await load()
+    } catch (e) { setErr(e.message) }
+    setBusy(false)
+  }
+  const setRole = async (id, role) => { setBusy(true); setErr(null); try { await call('PATCH', { id, role }); await load() } catch (e) { setErr(e.message) } setBusy(false) }
+  const resetPw = async (u) => { setBusy(true); setErr(null); setNotice(null); try { const d = await call('PATCH', { id: u.id, password: '' }); setNotice(`New temporary password for ${u.email}: ${d.tempPassword}`) } catch (e) { setErr(e.message) } setBusy(false) }
+  const remove = async (u) => { if (!window.confirm(`Remove ${u.fullName} (${u.email})? They lose access immediately.`)) return; setBusy(true); setErr(null); try { await call('DELETE', { id: u.id }); await load() } catch (e) { setErr(e.message) } setBusy(false) }
+
+  const inputCls = 'w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white'
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <p className="font-body text-xs text-slate-500 max-w-md">Create logins, set roles and reset passwords — no Supabase needed. Only Directors see this.</p>
+        <button onClick={() => { setAdding((v) => !v); setErr(null); setNotice(null) }} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
+          <Plus size={14} /> Add user
+        </button>
+      </div>
+
+      {notice && <div className="rounded-xl p-3 mb-3 font-body text-[13px]" style={{ backgroundColor: '#EAF2EC', color: '#2F5A3D', border: '1px solid #D5E5DA' }}>{notice}</div>}
+      {err && <div className="rounded-xl p-3 mb-3 font-body text-[13px]" style={{ backgroundColor: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA' }}>{err}</div>}
+
+      {adding && (
+        <Card>
+          <p className="font-display text-base font-semibold text-slate-900 mb-3">Add a user</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><FieldLabel>Full name</FieldLabel><input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} className={inputCls} placeholder="First Last" /></div>
+            <div><FieldLabel>Email (their login)</FieldLabel><input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputCls} placeholder="person@ccclub.org" inputMode="email" /></div>
+            <div>
+              <FieldLabel>Role</FieldLabel>
+              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className={inputCls}>
+                <option value="operator">Operator — crew (read-only + spray/sign)</option>
+                <option value="superintendent">Superintendent — manage the plan</option>
+                <option value="director">Director — manage + approve</option>
+              </select>
+            </div>
+          </div>
+          <p className="font-body text-[11px] text-slate-400 mt-2">A temporary password is generated — you'll get it after creating, to hand over. They can change it later.</p>
+          <div className="flex gap-2 mt-3">
+            <button onClick={() => setAdding(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+            <button onClick={create} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ backgroundColor: FOREST }}>{busy ? <Loader2 size={15} className="animate-spin" /> : null} Create login</button>
+          </div>
+        </Card>
+      )}
+
+      {loading ? (
+        <div className="text-center py-10 font-body text-sm text-slate-400"><Loader2 size={16} className="animate-spin inline mr-2" /> Loading users…</div>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 mt-3 items-start">
+          {users.map((u) => (
+            <div key={u.id} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-sm font-bold text-slate-900 truncate">{u.fullName}</p>
+                  <p className="font-body text-[11px] text-slate-400 truncate">{u.email}{u.lastSignIn ? ` · last in ${fmtDate(u.lastSignIn)}` : ' · never signed in'}</p>
+                </div>
+                <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={ROLE_STYLE[u.role]}>{ROLE_LABEL[u.role] || u.role}</span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <select value={u.role} disabled={busy} onChange={(e) => setRole(u.id, e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 text-[12px] font-body bg-white">
+                  <option value="operator">Operator</option>
+                  <option value="superintendent">Superintendent</option>
+                  <option value="director">Director</option>
+                </select>
+                <button onClick={() => resetPw(u)} disabled={busy} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-full border border-slate-200 text-slate-600 disabled:opacity-50">Reset password</button>
+                <button onClick={() => remove(u)} disabled={busy} className="text-red-400 p-1.5 ml-auto disabled:opacity-50" title="Remove user"><Trash2 size={15} /></button>
+              </div>
+            </div>
+          ))}
+          {users.length === 0 && <p className="font-body text-sm text-slate-400 col-span-full text-center py-6">No users yet — add your first login above.</p>}
+        </div>
+      )}
     </div>
   )
 }
