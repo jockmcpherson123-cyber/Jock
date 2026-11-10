@@ -34,39 +34,38 @@ What a role changes on screen:
 
 ## 2. Creating a login (step by step)
 
-Logins are **email + password**, created by an admin — there is **no public
-sign-up**, which keeps the app locked to your team. You create each account once
-in Supabase; the app picks it up automatically.
+Logins are **email + password**. There is **no public sign-up**, which keeps the
+app locked to your team.
 
-**A. Add the person in Supabase**
-1. Go to [supabase.com](https://supabase.com) → open the **Grounds** project.
-2. Left sidebar → **Authentication** → **Users** → **Add user** → **Create new user**.
-3. Enter their **email** and a **temporary password**. (Tick "Auto Confirm User"
-   so they can log in right away.)
-4. Click **Create user**. A matching profile is created automatically, starting
-   as an **Operator**.
+### The easy way — inside the app (Directors only)
+Once you (a Director) are signed in:
+1. **Settings → Users & Logins** → **Add user**.
+2. Enter their **name**, **email**, and **role** → **Create login**.
+3. The app shows a **temporary password** — hand it to them with the site link.
+   They sign in and can change it later.
+4. From the same screen you can **change a role**, **reset a password**, or
+   **remove** a user at any time.
 
-**B. Set their role (only if they're not an Operator)**
-1. Left sidebar → **SQL Editor** → **New query**.
-2. Paste this, change the email and role, and **Run**:
+That's it — no Supabase, no SQL. Creating a user here also adds their name to the
+pickers automatically. (The app won't let you remove or demote the **last**
+Director, so the approval pen is never lost.)
+
+### First-time bootstrap — the very first Director (one time, in Supabase)
+The in-app screen is Director-only, so the **first** Director has to be made in
+Supabase once:
+1. [supabase.com](https://supabase.com) → **Grounds** project → **Authentication
+   → Users → Add user** → enter your email + a password, tick **Auto Confirm**.
+2. **SQL Editor → New query**, paste, change the email, **Run**:
    ```sql
    update public.profiles
-   set role = 'superintendent',        -- or 'director'
-       full_name = 'First Last'
-   where id = (select id from auth.users where email = 'person@ccclub.org');
+   set role = 'director', full_name = 'Jock McPherson'
+   where id = (select id from auth.users where email = 'jmcpherson@ccclub.org');
    ```
-   Roles are exactly `operator`, `superintendent`, or `director`.
+After that, create everyone else from **Settings → Users & Logins**.
 
-**C. Give them their login**
-- Send them their email + temporary password and the site link. They can change
-  their display name in the app; have them change the password in a new session
-  (or you reset it in Supabase → Authentication → Users → ⋯ → Reset password).
-
-> **Also add them in the app:** Settings → **People** lists operators and
-> directors for the sheet pickers ("Operator", "Sprayed by", "Approved by") and
-> holds their **applicator license #** and expiry. The Supabase account is the
-> *login*; the People entry is the *name + license* that prints on records.
-> Add them in **both** places, spelled the same way.
+> **License numbers:** Settings → **People** holds each person's **applicator
+> license #** and expiry, which print on the Maryland record. Adding a user fills
+> in their name there; open **People** to add the license details.
 
 ### Account roster — fill this in before rollout
 
@@ -176,7 +175,7 @@ in Supabase; the app picks it up automatically.
 
 | Problem | What's going on / the fix |
 |---|---|
-| **Can't log in** | Wrong email/password. Reset it in Supabase → Authentication → Users → ⋯ → Reset password. Confirm the user is "confirmed". |
+| **Can't log in** | Wrong email/password. A Director can reset it in **Settings → Users & Logins → Reset password**, which gives a new temporary one to hand over. |
 | **I don't see Settings / Annual Program** | You're an **Operator**. Ask the admin to set your role to `superintendent` or `director`. |
 | **No Approve button** | Only **Directors** can approve. |
 | **An area (Rough, Natives, Driving Range) isn't showing** | Its **Course** isn't set. Settings → Sprayer Areas → set Blue / Gold / **Both**. "Both" shows under each course. |
@@ -196,7 +195,7 @@ Admin/Supabase questions → whoever holds the Supabase login (see SETUP.md).
 ## 8. Admin checklist before testing (for the person setting it up)
 
 - [ ] Database migrations applied, including **`supabase/phase31.sql`** (inventory counts).
-- [ ] Each tester has a **Supabase login** and the right **role**.
+- [ ] The first **Director** is bootstrapped in Supabase; everyone else is added in **Settings → Users & Logins**.
 - [ ] Each tester is in **Settings → People** with their **license #** and expiry.
 - [ ] **Sprayer Areas** have **Area per tank**, **Default Tanks**, and **Course** set.
 - [ ] **Chemical Library** products have rates, oz/case, cost, company, and N-P-K.
