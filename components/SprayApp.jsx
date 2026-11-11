@@ -636,10 +636,14 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
       setSoilTypes(settings.soilTypes || [])
       setApplicatorLicenses(settings.applicatorLicenses || {})
       setDirectorPins(settings.directorPins || {})
-      // Load the newest program's applications so the dashboard can surface
-      // what's planned for the days ahead.
+      // Load the CURRENT YEAR's program so the dashboard calendar and the
+      // "next 7 days" list show what's planned for the season you're in. Without
+      // this, a rolled-forward future program (newest by year) would hijack Home
+      // and the calendar would read empty for the real current year.
       if (progs.length > 0) {
-        setProgramApps(await db.fetchApplications(progs[0].id))
+        const thisYearNum = new Date().getFullYear()
+        const prog = progs.find((p) => Number(p.year) === thisYearNum) || progs[0]
+        setProgramApps(await db.fetchApplications(prog.id))
       } else {
         setProgramApps([])
       }
@@ -6124,9 +6128,12 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
 
   // Season filter: years that actually have sprays or granular fert, newest first
   // (default to this year if it has any, else the most recent year with data).
+  // Granular fert sheets carry their application date in `appDate`, spray sheets
+  // in `date` — use the right field for each or a whole season of fert reads as 0.
+  const fertYear = (f) => String(f.appDate || f.date || '').slice(0, 4)
   const years = [...new Set([
     ...(sheets || []).map((s) => String(s.date || '').slice(0, 4)),
-    ...(fertSheets || []).map((f) => String(f.date || '').slice(0, 4)),
+    ...(fertSheets || []).map(fertYear),
   ].filter((y) => y.length === 4))].sort().reverse()
   const thisYear = String(new Date().getFullYear())
   const [reportYear, setReportYear] = useState(years.includes(thisYear) ? thisYear : (years[0] || thisYear))
@@ -6135,7 +6142,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
   // leak across years. The PDF builders filter by reportYear on their own.
   const inYear = (d) => String(d || '').slice(0, 4) === reportYear
   const seasonSheets = (sheets || []).filter((s) => inYear(s.date))
-  const seasonFert = (fertSheets || []).filter((f) => inYear(f.date))
+  const seasonFert = (fertSheets || []).filter((f) => inYear(f.appDate || f.date))
   const npkData = aggregateNPK(seasonSheets, products, areas, seasonFert)
   const [pdfBusy, setPdfBusy] = useState(false)
   const makeSeasonReport = async () => {
@@ -12125,7 +12132,11 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
 
   // Settings areas + greens available for the form's currently-selected course.
   // Picking a course here is what files the test — the area is just the spot.
-  const belongsToForm = (name, course) => (course ? courseOf(name) === course : !courseOf(name))
+  // Honor each area's Course tag (so Natives, Rough, Driving Range show under the
+  // course they're tagged to), not just a first-word name match. "Other" = areas
+  // that belong to no course at all.
+  const matchesAnyCourse = (name) => courseNames.some((c) => areaInCourse(areas, name, c))
+  const belongsToForm = (name, course) => (course ? areaInCourse(areas, name, course) : !matchesAnyCourse(name))
   const formAreaNames = !hasCourses ? areaNames : areaNames.filter((a) => belongsToForm(a, form.course))
   const formGreens = !hasCourses ? greenOptions
     : form.course ? greenOptions.filter((g) => g.startsWith(form.course))
