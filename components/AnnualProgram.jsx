@@ -259,13 +259,17 @@ function computeEarlyOrder(apps, products, areas) {
     const totalInUnits = ozPerUnit ? r.totalOz / ozPerUnit : null
     const costPerCase = Number(p.costPerCase) || 0
     const estCost = casesToOrder != null && costPerCase ? Math.round(casesToOrder * costPerCase * 100) / 100 : null
-    return { ...r, company: (p.company || p.manufacturer || '').trim(), ozPerCase, unit, caseSize: p.caseSize || '', onHandOz, netOz, casesExact, casesToOrder, totalInUnits, costPerCase, estCost, missingCase: !ozPerCase }
+    // A product that's in the order but has no case price is hiding real spend
+    // from the total — flag it so the order can be trusted against the spreadsheet.
+    const missingPrice = r.totalOz > 0 && !costPerCase
+    return { ...r, company: (p.company || p.manufacturer || '').trim(), ozPerCase, unit, caseSize: p.caseSize || '', onHandOz, netOz, casesExact, casesToOrder, totalInUnits, costPerCase, estCost, missingCase: !ozPerCase, missingPrice, costPerOz: ozPerCase && costPerCase ? Math.round((costPerCase / ozPerCase) * 1000) / 1000 : null }
   }).sort((a, b) => b.totalOz - a.totalOz)
 
   const areaList = [...areaSet].sort()
   const casesTotal = rows.reduce((s, r) => s + (r.casesToOrder || 0), 0)
   const estTotalCost = Math.round(rows.reduce((s, r) => s + (r.estCost || 0), 0) * 100) / 100
   const missingCaseCount = rows.filter((r) => r.missingCase).length
+  const missingPriceRows = rows.filter((r) => r.missingPrice).map((r) => r.name)
 
   // Group by company (brand) so the Early Order can total spend per company —
   // the basis for manufacturer rebate programs. Unassigned products fall last.
@@ -290,7 +294,7 @@ function computeEarlyOrder(apps, products, areas) {
   })
   const byTypeCost = Object.entries(typeCost).filter(([, v]) => v > 0).map(([type, cost]) => ({ type, cost })).sort((a, b) => b.cost - a.cost)
   const byAreaCost = Object.entries(areaCost).filter(([, v]) => v > 0).map(([area, cost]) => ({ area, cost: Math.round(cost) })).sort((a, b) => b.cost - a.cost)
-  return { rows, companies, hasCompanies, byTypeCost, byAreaCost, areaList, casesTotal, estTotalCost, missingCaseCount, missingSqft }
+  return { rows, companies, hasCompanies, byTypeCost, byAreaCost, areaList, casesTotal, estTotalCost, missingCaseCount, missingPriceRows, missingSqft }
 }
 
 // Convert a stock amount into ounces so it can be netted against a season total.
@@ -2140,10 +2144,11 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                 </button>
               </div>
 
-              {(earlyOrder.missingCaseCount > 0 || earlyOrder.missingSqft) && (
+              {(earlyOrder.missingCaseCount > 0 || earlyOrder.missingSqft || (earlyOrder.missingPriceRows || []).length > 0) && (
                 <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 p-3 mb-3">
                   <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
                   <p className="font-body text-[11px] text-amber-700">
+                    {(earlyOrder.missingPriceRows || []).length > 0 && <><b>No case price — hiding spend from the total:</b> {earlyOrder.missingPriceRows.join(', ')}. Add the case price in the Chemical Library (Ordering) so the order matches the spreadsheet. </>}
                     {earlyOrder.missingCaseCount > 0 && <>{earlyOrder.missingCaseCount} product{earlyOrder.missingCaseCount !== 1 ? 's' : ''} missing “Oz/case” — add it in the Chemical Library (Ordering section) to get its cases-needed. </>}
                     {earlyOrder.missingSqft && <>Some areas have no square footage set (Settings → Sprayer Areas), so their totals can't be calculated.</>}
                   </p>
