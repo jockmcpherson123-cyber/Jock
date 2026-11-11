@@ -369,6 +369,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   const [buildPrev, setBuildPrev] = useState(null) // Build From Last Year preview
   const [editProgForm, setEditProgForm] = useState(null) // rename/edit-season form
   const [orderEdit, setOrderEdit] = useState(null) // { name, caseSize, ozPerCase } for early-order inline edit
+  const [orderAllCourses, setOrderAllCourses] = useState(false) // Early Order scope: all courses vs this course
   const [viewMode, setViewMode] = useState('sheet') // 'sheet' | 'performance' | 'coverage' | 'order'
   const [covFilter, setCovFilter] = useState('all') // coverage grid: 'all' | product type
   const [covSel, setCovSel] = useState(null) // selected coverage cell: { area, start, end, state }
@@ -944,8 +945,8 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   //    area like Rough is ordered once and its cases round once per product (not
   //    once per course, which made Rough cost differ between Blue and Gold).
   // With no course selected the view is already all-courses, so there's nothing
-  // to toggle.
-  const [orderAllCourses, setOrderAllCourses] = useState(false)
+  // to toggle. (The toggle's own useState is declared with the other hooks at the
+  // top of the component — never after the `if (loading) return` early return.)
   const orderIsAll = !courseFilter || orderAllCourses
   const earlyOrder = computeEarlyOrder(orderIsAll ? allApps : visibleApps, products, orderIsAll ? fullAreas : areas)
   // An area that belongs to every course (tag "both", e.g. Rough) is "shared":
