@@ -1862,7 +1862,12 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
   return (
     <div className="pt-6 space-y-6">
       {manage && (
-        <div className="flex justify-end -mb-2">
+        <div className="flex justify-between items-center gap-2 -mb-2">
+          {onNew ? (
+            <button onClick={onNew} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 text-white" style={{ backgroundColor: FOREST }}>
+              <Plus size={14} /> New spray sheet
+            </button>
+          ) : <span />}
           <a href="/command" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: '#E2E8F0', backgroundColor: 'white' }} title="Open the wide Command Center on a monitor or shop TV">
             <BarChart3 size={13} /> Command Center ↗
           </a>
@@ -2378,14 +2383,21 @@ function SheetList({ sheets, allSheets, products, onOpen, onNew, onDelete, onImp
     <div className="pt-6">
       <div className="flex items-start justify-between gap-2">
         <SectionHeader title={cfg.title} subtitle={cfg.sub} noMargin />
-        {onImportHistory && active === 'completed' && (
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={downloadHistTemplate} className="font-body text-[11px] font-bold px-3 py-2 rounded-full border" style={{ color: FERN, borderColor: '#E2E8F0', backgroundColor: 'white' }}>Template</button>
-            <button onClick={() => histFileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
-              <CloudUpload size={14} /> Import Records
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          {onImportHistory && active === 'completed' && (
+            <>
+              <button onClick={downloadHistTemplate} className="font-body text-[11px] font-bold px-3 py-2 rounded-full border" style={{ color: FERN, borderColor: '#E2E8F0', backgroundColor: 'white' }}>Template</button>
+              <button onClick={() => histFileRef.current?.click()} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: FOREST, backgroundColor: 'white' }}>
+                <CloudUpload size={14} /> Import Records
+              </button>
+            </>
+          )}
+          {manage && onNew && (
+            <button onClick={onNew} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 text-white" style={{ backgroundColor: FOREST }}>
+              <Plus size={14} /> New spray sheet
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       <input ref={histFileRef} type="file" accept=".xlsx,.xls" onChange={onHistFile} className="hidden" />
 
@@ -6410,7 +6422,10 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
 // feeding gauge: how much of the year's nitrogen budget you've put down, and how
 // much is left.
 function NitrogenReport({ sheets, products, areas, fertSheets = [] }) {
-  const npkData = aggregateNPK(sheets, products, areas, fertSheets)
+  // Spray N only here — granular fert is added separately below as fertM, so we
+  // must NOT also fold fertSheets into aggregateNPK or the granular N is counted
+  // twice (the Round 4 regression that made this read 0.81 instead of 0.41).
+  const npkData = aggregateNPK(sheets, products, areas)
   // Spray-derived N per 1,000 sq ft, per area.
   const sprayByArea = {}
   npkData.forEach((r) => {

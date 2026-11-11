@@ -187,7 +187,7 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
               return (
                 <button key={s.id} onClick={() => onOpenSheet?.(s)} className="w-full text-left paper-card p-4">
                   <div className="flex items-center justify-between gap-2 mb-2">
-                    <p className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{s.sheetType} · {s.area}</p>
+                    <p className="font-body text-sm font-semibold truncate" style={{ color: FOREST }}>{s.sheetType && s.sheetType !== s.area ? `${s.sheetType} · ${s.area}` : s.area}</p>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {warns.size > 0 && (
                         <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wide flex items-center gap-1" style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}>
