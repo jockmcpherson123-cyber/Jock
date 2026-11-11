@@ -722,6 +722,12 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
 
   // Actually remove the row from the database (called after the undo window).
   function commitDelete(sheet) {
+    // If this sheet had pulled stock (it was marked sprayed), give it back so
+    // deleting a sprayed sheet doesn't silently lose inventory.
+    if (sheet.stockDeducted) {
+      const area = withSheetSetup(resolveArea(areas, sheet.area) || {}, sheet)
+      deductStock(sheetDeductions(sheet, area).map((d) => ({ ...d, total: -d.total }))).catch(() => {})
+    }
     db.deleteSheet(sheet.id).catch((e) => {
       console.error(e)
       showToast('Could not delete — check your connection')
@@ -836,12 +842,26 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
     const updated = { ...activeSheet, status: 'approved', directorSig: sig, directorSignature: signature || activeSheet.directorSignature || '', directorDate: new Date().toISOString() }
     const saved = await saveSheet(updated)
     if (!saved) return
-
-    // Auto-deduct stock for the main tanks + any partial fill on this sheet.
-    const area = withSheetSetup(resolveArea(areas, saved.area) || {}, saved)
-    await deductStock(sheetDeductions(saved, area))
+    // Stock is NOT deducted here. Approval only makes the sheet live on the
+    // crew's iPads; stock comes off when the spray is actually marked sprayed
+    // (see onLogSpray), so a future-dated or deleted sheet never eats inventory.
     setActiveSheet(saved)
-    showToast('Approved — stock deducted, now live on all iPads')
+    showToast('Approved — now live on all iPads')
+  }
+
+  // Pull (or, with sign flipped, return) a sheet's main-tank stock exactly once,
+  // tracked by the sheet's `stockDeducted` flag. Returns the sheet with the flag
+  // updated (persisted), or the same sheet when nothing changed.
+  async function settleStockForSheet(sheet, { deduct }) {
+    if (deduct && sheet.stockDeducted) return sheet
+    if (!deduct && !sheet.stockDeducted) return sheet
+    const area = withSheetSetup(resolveArea(areas, sheet.area) || {}, sheet)
+    const deds = sheetDeductions(sheet, area)
+    await deductStock(deduct ? deds : deds.map((d) => ({ ...d, total: -d.total })))
+    try {
+      const flagged = await db.updateSheet({ ...sheet, stockDeducted: deduct })
+      return flagged
+    } catch { return { ...sheet, stockDeducted: deduct } }
   }
 
   function newSheet(presetArea) {
@@ -1107,10 +1127,18 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
             }}
             onLogSpray={async (updated, opts = {}) => {
               try {
-                const saved = await db.updateSheet(updated)
+                let saved = await db.updateSheet(updated)
+                // Deduct stock the moment a sheet becomes "sprayed" (the same
+                // rule the reports use), and put it back if a sprayed sheet is
+                // reopened. Never at approval and never for a future/pending sheet.
+                if (sheetApplied(saved) && !saved.stockDeducted) {
+                  saved = await settleStockForSheet(saved, { deduct: true })
+                } else if (!sheetApplied(saved) && saved.stockDeducted) {
+                  saved = await settleStockForSheet(saved, { deduct: false })
+                }
                 setActiveSheet(saved)
                 setSheets((prev) => prev.map((s) => (s.id === saved.id ? saved : s)))
-                if (!opts.quiet) showToast(updated.completed ? 'Filed in Records' : 'Spray details saved')
+                if (!opts.quiet) showToast(sheetApplied(saved) ? 'Filed in Records — stock updated' : 'Spray details saved')
               } catch (e) {
                 console.error(e)
                 showToast('Could not save — check your connection')
@@ -3882,6 +3910,9 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
       tankChecks,
       completed: complete ? true : sheet.completed,
       completedBy: complete ? (sprayedBy || sheet.operator || '') : sheet.completedBy,
+      // Write the operator column on sign-off too, so the record (and its header)
+      // shows who sprayed it, and "Sprayed by" / operator stay one value.
+      operator: complete ? (sprayedBy || sheet.operator || '') : sheet.operator,
       completedAt: complete ? new Date().toISOString() : sheet.completedAt,
       // Snapshot the signature + license numbers onto the record at sign-off.
       applicatorSignature: applicatorSig || sheet.applicatorSignature || '',
@@ -5702,8 +5733,13 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
             </div>
             {draft.type === 'Fertilizer' && (
               <div className="rounded-xl p-3" style={{ backgroundColor: '#FFFBF0' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: '#92660D' }}>N-P-K Analysis</p>
+                <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <p className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: '#92660D' }}>N-P-K Analysis</p>
+                    {parseAnalysis(draft.name) && (
+                      <button type="button" onClick={() => { const a = parseAnalysis(draft.name); if (a) setDraft((d) => ({ ...d, n: a.n, p: a.p, k: a.k })) }} className="font-body text-[10px] font-bold underline" style={{ color: '#92660D' }} title={`Fill ${parseAnalysis(draft.name).n}-${parseAnalysis(draft.name).p}-${parseAnalysis(draft.name).k} from the name`}>Fill from name</button>
+                    )}
+                  </div>
                   <div className="flex rounded-full overflow-hidden border border-amber-200">
                     <button onClick={() => setDraft({ ...draft, fertForm: 'granular' })} className="font-body text-[10px] font-bold px-2.5 py-1 transition" style={draft.fertForm !== 'liquid' ? { backgroundColor: '#92660D', color: 'white' } : { backgroundColor: 'white', color: '#92660D' }}>
                       Granular
@@ -5716,6 +5752,14 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
 
                 {draft.fertForm === 'liquid' ? (
                   <>
+                    {/* Density is required for every liquid fert: it turns the gallons
+                        applied into pounds of nutrient. Always reachable, in both the
+                        calculator and direct-entry modes. */}
+                    <div className="mb-2">
+                      <FieldLabel>Density (lb/gal) — required for liquids</FieldLabel>
+                      <input type="number" step="any" value={draft.density ?? ''} onChange={(e) => setDraft({ ...draft, density: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 11 — from the label / SDS" />
+                      <p className="font-body text-[10px] text-amber-600 mt-1">With the density set, N lb = (gallons applied) × density × N%. Without it, the app can't count this liquid's nutrients.</p>
+                    </div>
                     <div className="flex items-center justify-between mb-2">
                       <p className="font-body text-[10px] font-semibold text-amber-700">
                         {draft.useCalculator ? 'Calculate from density + %' : 'Enter lbs/gal directly'}
@@ -6212,6 +6256,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
   const diag = npkDiagnostics(seasonSheets, products, areas)
   const diagItems = [
     diag.missingAnalysis.length && { title: 'Missing N-P-K analysis', fix: 'Open Chemical Library → edit each product → fill in the N %, P %, K % from the bag (e.g. 21-0-0 = N 21). Until then it counts as zero.', items: diag.missingAnalysis },
+    (diag.missingDensity || []).length && { title: 'Add density (lb/gal) for these liquids', fix: 'These liquid fertilizers have their N-P-K %, but a liquid needs its density (lb per gallon, on the label/SDS) to turn gallons into pounds. Open Chemical Library → edit each one → set Density. Then its nitrogen counts.', items: diag.missingDensity },
     diag.notCountedSheets.length && { title: 'Sheets not counted yet', fix: 'Reports only count sprays that have actually gone out — the sheet must be submitted, the applicator signed, and every product checked into the tank. Finish those steps for their fertilizer to show.', items: diag.notCountedSheets },
     diag.missingSqft.length && { title: 'Areas missing square footage', fix: 'Set the area size in Settings → Areas. Without it, the app can\'t work out pounds applied.', items: diag.missingSqft },
     diag.basisIssue.length && { title: 'Check the rate basis', fix: 'These fertilizers use a rate basis that doesn\'t match their form — granular needs lbs/M or lbs/A; liquid needs gal/M or gal/A. Fix the basis on the sheet or in the library.', items: diag.basisIssue },
@@ -6693,7 +6738,7 @@ function CostReport({ sheets, products, areas, courseInfo = {}, programApps = []
     <div className="mt-4">
       <div className="rounded-2xl p-4 text-white shadow-sm mb-4 flex items-end justify-between" style={{ backgroundColor: FOREST }}>
         <div>
-          <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Total Spent (approved &amp; completed)</p>
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Total Spent (sprayed)</p>
           <p className="font-display text-3xl font-bold mt-0.5">{money(data.totalCost)}</p>
         </div>
         {hasData && (
