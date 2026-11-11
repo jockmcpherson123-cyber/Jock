@@ -4022,8 +4022,8 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
               <Row label="PSI" value={area.psi || '—'} />
               <Row label="Gal / Tank" value={area.galTank ?? '—'} />
               <Row label="Spray Rate" value={sprayRateGalAc(area) != null ? `${sprayRateGalAc(area)} gal/ac` : '—'} />
-              <Row label="Sq Ft" value={area.sqft ? area.sqft.toLocaleString() : '—'} />
-              <Row label="Acres" value={area.sqft ? (area.sqft / 43560).toFixed(2) : '—'} />
+              <Row label="Area / tank" value={area.sqft ? `${area.sqft.toLocaleString()} sq ft` : '—'} />
+              <Row label="Total area" value={area.sqft ? `${Math.round(area.sqft * tankCount).toLocaleString()} sq ft · ${((area.sqft * tankCount) / 43560).toFixed(1)} ac (× ${tankCount} tank${tankCount !== 1 ? 's' : ''})` : '—'} />
             </div>
           </Card>
 
@@ -7716,6 +7716,11 @@ function CourseAreaRows({ courses, aMap, setAMap, grassTypes = [], soilTypes = [
                         </select>
                       </div>
                     </div>
+                    {a.sqft > 0 && (
+                      <p className="font-body text-[10.5px] mt-1.5" style={{ color: INK_3 }}>
+                        {(a.sqft / 43560).toFixed(1)} ac per tank × {a.tanks || 1} tank{(a.tanks || 1) !== 1 ? 's' : ''} = <b style={{ color: INK_2 }}>{((a.sqft * (a.tanks || 1)) / 43560).toFixed(1)} ac total</b> ({Math.round(a.sqft * (a.tanks || 1)).toLocaleString()} sq ft)
+                      </p>
+                    )}
                   </div>
                 )
               })}

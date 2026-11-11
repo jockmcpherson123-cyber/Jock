@@ -88,8 +88,8 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
           </div>
           <div className="flex items-center gap-1">
             <button onClick={goToday} className="font-body text-[11px] font-semibold px-2.5 py-1 rounded-md mr-1" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>Today</button>
-            <button onClick={() => step(-1)} className="p-1.5 rounded-md"><ChevronLeft size={16} style={{ color: INK_2 }} /></button>
-            <button onClick={() => step(1)} className="p-1.5 rounded-md"><ChevronRight size={16} style={{ color: INK_2 }} /></button>
+            <button onClick={() => step(-1)} aria-label="Previous month" title="Previous month" className="p-1.5 rounded-md"><ChevronLeft size={16} style={{ color: INK_2 }} /></button>
+            <button onClick={() => step(1)} aria-label="Next month" title="Next month" className="p-1.5 rounded-md"><ChevronRight size={16} style={{ color: INK_2 }} /></button>
           </div>
         </div>
 
