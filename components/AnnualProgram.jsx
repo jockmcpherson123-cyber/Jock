@@ -315,7 +315,10 @@ function typeColor(type) {
   }[type] || '#94A3B8'
 }
 
-export default function AnnualProgram({ areas, products = [], sheets = [], location, courseInfo = {}, onProductsChanged, onCreateSheet, courseFilter = '' }) {
+export default function AnnualProgram({ areas, allAreas, products = [], sheets = [], location, courseInfo = {}, onProductsChanged, onCreateSheet, courseFilter = '' }) {
+  // Full, unscoped areas (every course) — used by the Early Order "All courses"
+  // view so each area is counted once and cases round once per product.
+  const fullAreas = allAreas || areas
   const apTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
   const [programs, setPrograms] = useState([])
   const [toolsOpen, setToolsOpen] = useState(false)   // import/build menu
@@ -935,8 +938,19 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
   const thisWeekEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate >= todayIso && a.plannedDate <= in7Iso)).filter((ev) => !isEventComplete(ev))
   const offYearCount = activeProgram ? apps.filter((a) => a.plannedDate && a.plannedDate.slice(0, 4) !== String(activeProgram.year)).length : 0
 
-  // Early-order totals for the whole season (respects the area filter).
-  const earlyOrder = computeEarlyOrder(visibleApps, products, areas)
+  // Early-order totals. Two scopes:
+  //  • "This course" — the apps/areas currently in view (respects the area filter).
+  //  • "All courses" — every area counted once across the whole year, so a shared
+  //    area like Rough is ordered once and its cases round once per product (not
+  //    once per course, which made Rough cost differ between Blue and Gold).
+  // With no course selected the view is already all-courses, so there's nothing
+  // to toggle.
+  const [orderAllCourses, setOrderAllCourses] = useState(false)
+  const orderIsAll = !courseFilter || orderAllCourses
+  const earlyOrder = computeEarlyOrder(orderIsAll ? allApps : visibleApps, products, orderIsAll ? fullAreas : areas)
+  // An area that belongs to every course (tag "both", e.g. Rough) is "shared":
+  // in a per-course view its cost is a partial allocation, so flag it.
+  const sharedArea = (name) => !orderIsAll && (fullAreas?.[name] ?? fullAreas?.[String(name ?? '').trim()])?.course === 'both'
   // One Early-Order product card, reused whether the list is flat or grouped by company.
   const renderOrderRow = (r) => {
     const areasUsed = Object.entries(r.byArea).sort((a, b) => b[1] - a[1])
@@ -982,7 +996,7 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
         {!editing && areasUsed.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-2 pl-5">
             {areasUsed.map(([area, oz]) => (
-              <span key={area} className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{area}: {Math.round(oz).toLocaleString()} oz</span>
+              <span key={area} className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F0F6F2', color: FERN }}>{area}: {Math.round(oz).toLocaleString()} oz{sharedArea(area) ? ' · shared' : ''}</span>
             ))}
           </div>
         )}
@@ -2094,6 +2108,20 @@ export default function AnnualProgram({ areas, products = [], sheets = [], locat
           ) : (
             /* Early Order — how much to buy for the season (quantities + cases) */
             <div>
+              {courseFilter && (
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Order scope</span>
+                  <div className="inline-flex rounded-full border border-slate-200 p-0.5 bg-white">
+                    {[['course', `${courseFilter} only`], ['all', 'All courses']].map(([k, label]) => {
+                      const on = (k === 'all') === orderAllCourses
+                      return (
+                        <button key={k} onClick={() => setOrderAllCourses(k === 'all')} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full transition" style={on ? { backgroundColor: FOREST, color: 'white' } : { color: '#64748B' }}>{label}</button>
+                      )
+                    })}
+                  </div>
+                  <span className="font-body text-[10px] text-slate-400">{orderAllCourses ? 'Whole year, each area counted once — order from this.' : 'Shared areas (Rough) are a partial allocation here.'}</span>
+                </div>
+              )}
               <div className="grid grid-cols-3 gap-2 mb-3">
                 <div className="bg-white rounded-xl border border-black/5 px-3 py-2.5 shadow-sm">
                   <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Cases to order</p>

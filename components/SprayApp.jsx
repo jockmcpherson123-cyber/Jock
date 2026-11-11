@@ -1139,7 +1139,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
           <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? saveProduct : undefined} />
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} products={products} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
-        {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} courseFilter={course} />}
+        {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} allAreas={areas} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} courseFilter={course} />}
         {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} programApps={programApps} onSaveSettings={saveSettings} applicatorLicenses={applicatorLicenses} location={location} />}
         {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} courseFilter={course} />}
         {route === 'training' && manage && <TrainingTab sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
@@ -4923,6 +4923,10 @@ const convMeasure = (u) => (u in CONV_VOLUME ? 'vol' : 'weight')
 const convUnits = ['oz', 'lb', 'fl oz', 'gal', 'qt', 'pt', 'g', 'kg', 'L', 'mL']
 const round3 = (n) => (!isFinite(n) ? null : Math.round(n * 1000) / 1000)
 const normAi = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '')
+// Liquid formulations are dosed by VOLUME (fl oz, lb a.i./gal); everything else
+// by WEIGHT. Lets the converter open liquids on the right path instead of % oz.
+const LIQUID_FORMS = new Set(['flowable', 'soluble', 'ec', 'fertilizer', 'adjuvant', 'conditioner'])
+const isLiquidProd = (p) => !!p && (p.fertForm === 'liquid' || LIQUID_FORMS.has(effectiveFormulation(p)) || (p.unit in CONV_VOLUME))
 
 function ActiveConverter({ products = [], onClose }) {
   const list = [...products].sort((a, b) => String(a.name).localeCompare(String(b.name)))
@@ -4940,8 +4944,17 @@ function ActiveConverter({ products = [], onClose }) {
   const toProd = list.find((p) => p.name === toName)
   const pick = (which, name) => {
     const p = list.find((x) => x.name === name)
-    if (which === 'from') { setFromName(name); if (p?.unit) setFromUnit(p.unit); setFromPct(p?.activePct ?? ''); setFromLbGal('') }
-    else { setToName(name); if (p?.unit) setToUnit(p.unit); setToPct(p?.activePct ?? ''); setToLbGal('') }
+    const liquid = isLiquidProd(p)
+    // Liquids default to fl oz + lb a.i./gal (prefilled from the library); dry
+    // products keep their weight unit + % active.
+    const unit = liquid ? 'fl oz' : (p?.unit && convMeasure(p.unit) === 'weight' ? p.unit : 'oz')
+    if (which === 'from') {
+      setFromName(name); setFromUnit(unit)
+      setFromPct(liquid ? '' : (p?.activePct ?? '')); setFromLbGal(liquid ? (p?.aiLbGal ?? '') : '')
+    } else {
+      setToName(name); setToUnit(unit)
+      setToPct(liquid ? '' : (p?.activePct ?? '')); setToLbGal(liquid ? (p?.aiLbGal ?? '') : '')
+    }
   }
 
   const fromMeas = convMeasure(fromUnit)
@@ -5366,6 +5379,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       nPerGal: draft.nPerGal === '' || draft.nPerGal == null ? 0 : parseFloat(draft.nPerGal),
       pPerGal: draft.pPerGal === '' || draft.pPerGal == null ? 0 : parseFloat(draft.pPerGal),
       kPerGal: draft.kPerGal === '' || draft.kPerGal == null ? 0 : parseFloat(draft.kPerGal),
+      aiLbGal: draft.aiLbGal === '' || draft.aiLbGal == null ? null : parseFloat(draft.aiLbGal),
       eiq: draft.eiq === '' || draft.eiq == null ? null : parseFloat(draft.eiq),
       ozPerCase: draft.ozPerCase === '' || draft.ozPerCase == null ? null : parseFloat(draft.ozPerCase),
       costPerCase: draft.costPerCase === '' || draft.costPerCase == null ? null : parseFloat(draft.costPerCase),
@@ -5813,6 +5827,11 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                     ))}
                   </div>
                   <button type="button" onClick={addActive} className="mt-1.5 font-body text-[11px] font-bold flex items-center gap-1" style={{ color: FERN }}><Plus size={12} /> Add another active</button>
+                </div>
+                <div>
+                  <FieldLabel>lb active / gallon (liquids)</FieldLabel>
+                  <input type="number" step="any" value={draft.aiLbGal ?? ''} onChange={(e) => setDraft({ ...draft, aiLbGal: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="from the label, e.g. 2" />
+                  <p className="font-body text-[10px] text-slate-500 mt-1">For liquid products, the pounds of active ingredient per gallon (on the label/SDS). The Active-Ingredient Converter prefills this so liquids match by volume, not weight.</p>
                 </div>
                 <div>
                   <FieldLabel>EIQ value (environmental impact)</FieldLabel>
