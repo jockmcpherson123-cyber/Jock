@@ -4938,7 +4938,7 @@ const normAi = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '')
 // Liquid formulations are dosed by VOLUME (fl oz, lb a.i./gal); everything else
 // by WEIGHT. Lets the converter open liquids on the right path instead of % oz.
 const LIQUID_FORMS = new Set(['flowable', 'soluble', 'ec', 'fertilizer', 'adjuvant', 'conditioner'])
-const isLiquidProd = (p) => !!p && (p.fertForm === 'liquid' || LIQUID_FORMS.has(effectiveFormulation(p)) || (p.unit in CONV_VOLUME))
+const isLiquidProd = (p) => !!p && (p.fertForm === 'liquid' || Number(p.aiLbGal) > 0 || LIQUID_FORMS.has(effectiveFormulation(p)) || (p.unit in CONV_VOLUME))
 
 function ActiveConverter({ products = [], onClose }) {
   const list = [...products].sort((a, b) => String(a.name).localeCompare(String(b.name)))
