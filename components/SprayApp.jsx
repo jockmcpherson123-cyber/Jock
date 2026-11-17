@@ -2638,9 +2638,23 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
   // Pre-fill a product row's rate from its per-area rate (oz/M) for this sheet's
   // area, falling back to the product's default rate + basis. Still editable.
   const rowRateFill = (prod) => {
-    const ar = areaRate(prod, s.area)
-    if (ar != null) return { basis: 'oz / M', rate: String(ar), defaultRate: prod?.rate ?? null }
-    return { basis: prod?.basis || '', rate: (prod?.rate != null && prod?.rate !== '') ? String(prod.rate) : '', defaultRate: prod?.rate ?? null }
+    // Herbicides & insecticides go out over big areas, so a per-ACRE rate reads
+    // far better than a tiny per-1,000 figure (32 oz/A vs 0.75 oz/M). Default
+    // those two types to oz/A; everything else stays per-M. 1 acre = 43.56 "M".
+    const acrePref = !!prod && (prod.type === 'Herbicide' || prod.type === 'Insecticide')
+    const r1 = (n) => Math.round(n * 10) / 10
+    const ar = areaRate(prod, s.area) // the product's per-M rate for this area
+    if (ar != null) {
+      return acrePref
+        ? { basis: 'oz / A', rate: String(r1(ar * 43.56)), defaultRate: prod?.rate ?? null }
+        : { basis: 'oz / M', rate: String(ar), defaultRate: prod?.rate ?? null }
+    }
+    const dRate = (prod?.rate != null && prod?.rate !== '') ? Number(prod.rate) : null
+    const dBasis = prod?.basis || ''
+    if (acrePref && dRate != null && /M\s*$/.test(dBasis)) {
+      return { basis: dBasis.replace(/M(\s*)$/, 'A$1'), rate: String(r1(dRate * 43.56)), defaultRate: prod?.rate ?? null }
+    }
+    return { basis: dBasis, rate: dRate != null ? String(dRate) : '', defaultRate: prod?.rate ?? null }
   }
   const handleProductSelect = (id, name) => {
     const prod = products.find((p) => p.name === name)
