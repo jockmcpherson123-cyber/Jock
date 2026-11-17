@@ -12879,9 +12879,26 @@ function TimingTab({ soilSeries, hasLocation, products = [] }) {
                   let tone, title, line
                   if (proj.crossed) {
                     const rising = t.direction !== 'falling'
-                    tone = { bg: '#FDECEA', fg: '#B23A2E', dot: '#B23A2E' }
-                    title = rising ? 'Germination underway' : 'Flush underway'
-                    line = `Soil is already ${rising ? 'at/above' : 'at/below'} ~${t.threshold}°F. A pre-emergent now only catches seed that hasn’t germinated — treat young plants with a post-emergent.`
+                    // The "too late — use a post-emergent" message only makes sense
+                    // for PRE-EMERGENT HERBICIDES. For disease preventives (snow
+                    // mold, take-all), PGR/seedhead, seeding and fertilization
+                    // windows, crossing the threshold means the apply window is
+                    // OPEN, not missed — and a risk "watch" means pressure is on.
+                    const isPreEm = w.type === 'preEmRising' || w.id === 'fallpreem'
+                    const isWatch = w.type === 'watchWarm'
+                    if (isPreEm) {
+                      tone = { bg: '#FDECEA', fg: '#B23A2E', dot: '#B23A2E' }
+                      title = rising ? 'Germination underway' : 'Flush underway'
+                      line = `Soil is already ${rising ? 'at/above' : 'at/below'} ~${t.threshold}°F. A pre-emergent now only catches seed that hasn’t germinated — treat young plants with a post-emergent.`
+                    } else if (isWatch) {
+                      tone = { bg: '#FEF3DD', fg: '#92660D', dot: '#B7791F' }
+                      title = 'Pressure building'
+                      line = `Soil is ${rising ? 'at/above' : 'at/below'} ~${t.threshold}°F — conditions favor it now.${t.note ? ` ${t.note}` : ''}`
+                    } else {
+                      tone = { bg: '#E8F3EC', fg: '#2C5238', dot: '#3A6B4A' }
+                      title = 'In the window — apply now'
+                      line = `Soil is ${rising ? 'at/above' : 'at/below'} ~${t.threshold}°F — you’re in the window.${t.note ? ` ${t.note}` : ''}`
+                    }
                   } else if (proj.stalled) {
                     return null // soil isn't moving toward the threshold — nothing to project
                   } else if (proj.overdue) {
