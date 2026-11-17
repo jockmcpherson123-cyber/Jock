@@ -2857,11 +2857,17 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                               <div className="text-right leading-tight shrink-0">
                                 {amt !== null ? (
                                   <>
-                                    <span className="block font-body text-[16px] font-extrabold tabular-nums" style={{ color: outOfRange ? RED : FOREST }}>{amt} {['oz', 'gal'].includes(amtUnit)
-                                      ? <button type="button" onClick={(e) => { e.stopPropagation(); updateProduct(p.id, { forceGal: !p.forceGal }) }} className="font-body text-[12px] font-bold underline decoration-dotted underline-offset-2" style={{ color: FERN }} title={`Switch to ${p.forceGal ? 'ounces' : 'gallons'}`}>{amtUnit}</button>
-                                      : amtUnit}</span>
+                                    <span className="block font-body text-[16px] font-extrabold tabular-nums" style={{ color: outOfRange ? RED : FOREST }}>{amt} {amtUnit}</span>
                                     <span className="block font-body text-[9px] font-semibold text-slate-400 uppercase tracking-wide -mt-0.5">per tank</span>
                                     <span className="block font-body text-[11px] text-slate-500 tabular-nums">{total} {amtUnit} total</span>
+                                    {['oz', 'gal'].includes(amtUnit) && (
+                                      <div className="inline-flex rounded-md overflow-hidden border mt-1" style={{ borderColor: '#D5E5DA' }} onClick={(e) => e.stopPropagation()}>
+                                        {['oz', 'gal'].map((u) => {
+                                          const on = (u === 'gal') === !!p.forceGal
+                                          return <button key={u} type="button" onClick={() => updateProduct(p.id, { forceGal: u === 'gal' })} className="font-body text-[10px] font-bold px-2 py-0.5 leading-none transition" style={on ? { backgroundColor: FERN, color: '#fff' } : { backgroundColor: '#fff', color: '#94A3B8' }}>{u}</button>
+                                        })}
+                                      </div>
+                                    )}
                                     <span className="block font-body text-[9px] font-bold" style={{ color: overLimit ? RED : underLimit ? AMBER : FERN }}>{overLimit ? '⚠ over max' : underLimit ? '↓ under min' : (labelMin || labelMax) ? '✓ in label' : ''}</span>
                                   </>
                                 ) : <span className="text-slate-300">—</span>}
@@ -2894,9 +2900,15 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                             <div className="text-right leading-tight">
                               {amt !== null ? (
                                 <>
-                                  <span className="block font-body text-[15px] font-extrabold tabular-nums" style={{ color: outOfRange ? RED : FOREST }}>{amt} {['oz', 'gal'].includes(amtUnit)
-                                    ? <button type="button" onClick={(e) => { e.stopPropagation(); updateProduct(p.id, { forceGal: !p.forceGal }) }} className="font-body text-[12px] font-bold underline decoration-dotted underline-offset-2" style={{ color: FERN }} title={`Switch to ${p.forceGal ? 'ounces' : 'gallons'}`}>{amtUnit}</button>
-                                    : amtUnit}</span>
+                                  <span className="block font-body text-[15px] font-extrabold tabular-nums" style={{ color: outOfRange ? RED : FOREST }}>{amt} {amtUnit}</span>
+                                  {['oz', 'gal'].includes(amtUnit) && (
+                                    <div className="inline-flex rounded-md overflow-hidden border mt-0.5" style={{ borderColor: '#D5E5DA' }} onClick={(e) => e.stopPropagation()}>
+                                      {['oz', 'gal'].map((u) => {
+                                        const on = (u === 'gal') === !!p.forceGal
+                                        return <button key={u} type="button" onClick={() => updateProduct(p.id, { forceGal: u === 'gal' })} className="font-body text-[9px] font-bold px-1.5 py-0.5 leading-none transition" style={on ? { backgroundColor: FERN, color: '#fff' } : { backgroundColor: '#fff', color: '#94A3B8' }}>{u}</button>
+                                      })}
+                                    </div>
+                                  )}
                                   <span className="block font-body text-[9px] font-bold" style={{ color: overLimit ? RED : underLimit ? AMBER : FERN }}>
                                     {overLimit ? '⚠ over max' : underLimit ? '↓ under min' : (labelMin || labelMax) ? '✓ in label' : ''}
                                   </span>
@@ -2947,10 +2959,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                               )}
 
                               <div className="md:col-span-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-                                <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Show the final amount in gallons instead of ounces">
-                                  <input type="checkbox" checked={p.forceGal} onChange={(e) => updateProduct(p.id, { forceGal: e.target.checked })} className="w-3.5 h-3.5 rounded" style={{ accentColor: FERN }} />
-                                  <span className="font-body text-xs text-slate-500">Show amount in gallons</span>
-                                </label>
+                                {/* oz/gal now switches with the toggle on the row itself — no hidden checkbox. */}
                                 {(labelMin || labelMax) && (
                                   <span className="font-body text-[11px] text-slate-400">Label range: {labelMin ?? '—'}–{labelMax ?? '—'} {p.basis}</span>
                                 )}
