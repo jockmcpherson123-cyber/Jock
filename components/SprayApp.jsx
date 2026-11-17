@@ -2857,7 +2857,9 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                               <div className="text-right leading-tight shrink-0">
                                 {amt !== null ? (
                                   <>
-                                    <span className="block font-body text-[16px] font-extrabold tabular-nums" style={{ color: outOfRange ? RED : FOREST }}>{amt} {amtUnit}</span>
+                                    <span className="block font-body text-[16px] font-extrabold tabular-nums" style={{ color: outOfRange ? RED : FOREST }}>{amt} {['oz', 'gal'].includes(amtUnit)
+                                      ? <button type="button" onClick={(e) => { e.stopPropagation(); updateProduct(p.id, { forceGal: !p.forceGal }) }} className="font-body text-[12px] font-bold underline decoration-dotted underline-offset-2" style={{ color: FERN }} title={`Switch to ${p.forceGal ? 'ounces' : 'gallons'}`}>{amtUnit}</button>
+                                      : amtUnit}</span>
                                     <span className="block font-body text-[9px] font-semibold text-slate-400 uppercase tracking-wide -mt-0.5">per tank</span>
                                     <span className="block font-body text-[11px] text-slate-500 tabular-nums">{total} {amtUnit} total</span>
                                     <span className="block font-body text-[9px] font-bold" style={{ color: overLimit ? RED : underLimit ? AMBER : FERN }}>{overLimit ? '⚠ over max' : underLimit ? '↓ under min' : (labelMin || labelMax) ? '✓ in label' : ''}</span>
@@ -2892,7 +2894,9 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                             <div className="text-right leading-tight">
                               {amt !== null ? (
                                 <>
-                                  <span className="block font-body text-[15px] font-extrabold tabular-nums" style={{ color: outOfRange ? RED : FOREST }}>{amt} {amtUnit}</span>
+                                  <span className="block font-body text-[15px] font-extrabold tabular-nums" style={{ color: outOfRange ? RED : FOREST }}>{amt} {['oz', 'gal'].includes(amtUnit)
+                                    ? <button type="button" onClick={(e) => { e.stopPropagation(); updateProduct(p.id, { forceGal: !p.forceGal }) }} className="font-body text-[12px] font-bold underline decoration-dotted underline-offset-2" style={{ color: FERN }} title={`Switch to ${p.forceGal ? 'ounces' : 'gallons'}`}>{amtUnit}</button>
+                                    : amtUnit}</span>
                                   <span className="block font-body text-[9px] font-bold" style={{ color: overLimit ? RED : underLimit ? AMBER : FERN }}>
                                     {overLimit ? '⚠ over max' : underLimit ? '↓ under min' : (labelMin || labelMax) ? '✓ in label' : ''}
                                   </span>
