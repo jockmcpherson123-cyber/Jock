@@ -297,7 +297,10 @@ const NAV_MANAGER = [
     { id: 'tournament', label: 'Tournament', m: 'tournament', r: null },
   ] },
   { title: 'Reports', items: [
-    { id: 'aibrief', label: 'Weekly AI Reports', m: 'turf', r: 'brief', follow: true },
+    // Parked for now — "Weekly AI Reports" (the Grounds Dispatch) is hidden from
+    // the menu. The TurfBrief component, the 'brief' route and /api/turf-brief
+    // all remain, so restoring it is just uncommenting this line.
+    // { id: 'aibrief', label: 'Weekly AI Reports', m: 'turf', r: 'brief', follow: true },
     { id: 'weekly', label: 'Weekly Report', m: 'turf', r: 'report', follow: true },
     { id: 'season', label: 'Season Reports', m: 'spray', r: 'reports' },
     { id: 'weather', label: 'Weather', m: 'spray', r: 'weather' },
