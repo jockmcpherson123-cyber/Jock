@@ -504,8 +504,9 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
           )}
         </div>
 
-        {/* AI program read — echoed here when enabled in GDD & Growth */}
-        {courseInfo?.adviceInReport && courseInfo?.programAdvice?.advice && (() => {
+        {/* AI program read — echoed here when enabled in GDD & Growth.
+            Parked for now (the AI reads are hidden); remove the `false &&` to restore. */}
+        {false && courseInfo?.adviceInReport && courseInfo?.programAdvice?.advice && (() => {
           const a = courseInfo.programAdvice.advice
           const genAt = courseInfo.programAdvice.generatedAt
           const asOf = genAt ? new Date(genAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''

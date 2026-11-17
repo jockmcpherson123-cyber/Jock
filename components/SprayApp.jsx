@@ -10376,7 +10376,10 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
         <p className="font-body text-[11px] opacity-70 mt-0.5">Accumulated since Jan 1 · {daily.length} days of weather</p>
       </div>
 
-      <ProgramAdvice getContext={adviceContext} courseInfo={courseInfo} onSaveCourse={onSaveCourse} />
+      {/* Parked for now — the "Program read · AI" card is hidden. The
+          ProgramAdvice component and /api/turf-advice remain; restore by
+          uncommenting this line (and the Weekly Report echo in WeeklyReport.jsx). */}
+      {/* <ProgramAdvice getContext={adviceContext} courseInfo={courseInfo} onSaveCourse={onSaveCourse} /> */}
 
       {/* Running total — season heat accumulating over the year */}
       {gddSeries.length >= 2 && (
