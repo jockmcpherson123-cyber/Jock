@@ -137,6 +137,24 @@ const QUICK_INSTRUCTIONS = ['Water in 0.1"', 'Do not mow for 24h', 'Avoid overla
 // Total product to pull from inventory when a sheet is approved — the whole-job
 // total (full tanks + the partial, honoring a hand-set tank count), the same
 // figure shown on the sheet so stock, the sheet and the records all reconcile.
+// The label min/max rate for a product line's basis. If the range was entered
+// in only one unit, convert from the other (1 acre = 43.56 "M") so the in-label
+// check works no matter which unit the rate or the label range is in.
+const ACRE_PER_M = 43.56
+function labelRange(prod, basis) {
+  if (!prod) return { min: null, max: null }
+  const perM = /\/\s*M/.test(String(basis || ''))
+  const val = (v) => (v != null && v !== '' && isFinite(Number(v)) ? Number(v) : null)
+  const pick = (direct, other) => {
+    const d = val(direct); if (d != null) return d
+    const o = val(other); if (o == null) return null
+    return perM ? Math.round((o / ACRE_PER_M) * 1000) / 1000 : Math.round(o * ACRE_PER_M * 10) / 10
+  }
+  return perM
+    ? { min: pick(prod.labelMinM, prod.labelMinA), max: pick(prod.labelMaxM, prod.labelMaxA) }
+    : { min: pick(prod.labelMinA, prod.labelMinM), max: pick(prod.labelMaxA, prod.labelMaxM) }
+}
+
 function sheetDeductions(sheet, area) {
   const map = {}
   const bd = sheetBreakdown(sheet, area)
@@ -2854,8 +2872,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                     {builtRows.map((p, mixIdx) => {
                       const { amt, unit: amtUnit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bd, perTankSqft, p.forceGal)
                       const prodInfo = products.find((pr) => pr.name === p.product)
-                      const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
-                      const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
+                      const { min: labelMin, max: labelMax } = labelRange(prodInfo, p.basis)
                       const rateNum = parseFloat(p.rate)
                       const overLimit = labelMax && rateNum && rateNum > labelMax
                       const underLimit = !overLimit && labelMin && rateNum > 0 && rateNum < labelMin
@@ -4203,8 +4220,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
               {sortByMixOrder(sheet.products.filter((p) => p.product), (p) => products?.find((pr) => pr.name === p.product), courseInfo?.mixOrder).map((p) => {
                 const { amt, unit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bd, curPerTankSqft, p.forceGal)
                 const prodInfo = products?.find((pr) => pr.name === p.product)
-                const labelMax = p.basis?.includes('/ M') ? prodInfo?.labelMaxM : prodInfo?.labelMaxA
-                const labelMin = p.basis?.includes('/ M') ? prodInfo?.labelMinM : prodInfo?.labelMinA
+                const { min: labelMin, max: labelMax } = labelRange(prodInfo, p.basis)
                 const rateNum = parseFloat(p.rate)
                 const overLimit = labelMax && rateNum && rateNum > labelMax
                 // Only flag going OVER the label rate — under-rate is intentional often.
@@ -5278,6 +5294,18 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   // touched it, so it counts as verified.
   const dropVerify = (av, field) => { if (!av || !av[field]) return av; const n = { ...av }; delete n[field]; return n }
   const setField = (field, value) => setDraft((d) => ({ ...d, [field]: value, aiVerify: dropVerify(d.aiVerify, field) }))
+  // Label rate range auto-converts: enter it in /M or /A and the other fills in
+  // (1 acre = 43.56 "M"). Enter in whichever unit is easier to read.
+  const setLabelRate = (field, value) => setDraft((d) => {
+    const next = { ...d, [field]: value, aiVerify: dropVerify(d.aiVerify, field) }
+    const twin = { labelMinM: 'labelMinA', labelMinA: 'labelMinM', labelMaxM: 'labelMaxA', labelMaxA: 'labelMaxM' }[field]
+    if (twin) {
+      const n = value === '' ? null : Number(value)
+      next[twin] = (n == null || !isFinite(n)) ? '' : (field.endsWith('M') ? Math.round(n * 43.56 * 10) / 10 : Math.round((n / 43.56) * 1000) / 1000)
+      next.aiVerify = dropVerify(next.aiVerify, twin)
+    }
+    return next
+  })
   const markChecked = (field) => setDraft((d) => ({ ...d, aiVerify: dropVerify(d.aiVerify, field) }))
   // The little amber "AI — verify vs. label" pill shown beside a tagged field.
   const verifyTag = (field) => (draft?.aiVerify?.[field] ? (
@@ -5758,10 +5786,10 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
             <div className="rounded-xl p-2.5" style={{ backgroundColor: '#FEF2F2' }}>
               <p className="font-body text-[11px] font-bold text-red-500 uppercase tracking-wide mb-1.5">Label Rate Range <span className="font-normal normal-case text-red-300">· outside = red warning on sheets</span></p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-2 gap-y-1">
-                <div><FieldLabel>Min / M {verifyTag('labelMinM')}</FieldLabel><input type="number" step="any" value={draft.labelMinM ?? ''} onChange={(e) => setField('labelMinM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
-                <div><FieldLabel>Max / M {verifyTag('labelMaxM')}</FieldLabel><input type="number" step="any" value={draft.labelMaxM ?? ''} onChange={(e) => setField('labelMaxM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
-                <div><FieldLabel>Min / A {verifyTag('labelMinA')}</FieldLabel><input type="number" step="any" value={draft.labelMinA ?? ''} onChange={(e) => setField('labelMinA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
-                <div><FieldLabel>Max / A {verifyTag('labelMaxA')}</FieldLabel><input type="number" step="any" value={draft.labelMaxA ?? ''} onChange={(e) => setField('labelMaxA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
+                <div><FieldLabel>Min / M {verifyTag('labelMinM')}</FieldLabel><input type="number" step="any" value={draft.labelMinM ?? ''} onChange={(e) => setLabelRate('labelMinM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
+                <div><FieldLabel>Max / M {verifyTag('labelMaxM')}</FieldLabel><input type="number" step="any" value={draft.labelMaxM ?? ''} onChange={(e) => setLabelRate('labelMaxM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
+                <div><FieldLabel>Min / A {verifyTag('labelMinA')}</FieldLabel><input type="number" step="any" value={draft.labelMinA ?? ''} onChange={(e) => setLabelRate('labelMinA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
+                <div><FieldLabel>Max / A {verifyTag('labelMaxA')}</FieldLabel><input type="number" step="any" value={draft.labelMaxA ?? ''} onChange={(e) => setLabelRate('labelMaxA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
               </div>
             </div>
             {/* Container / jug size — drives the "measure out" note on spray sheets. */}
