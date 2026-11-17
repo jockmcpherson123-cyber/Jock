@@ -951,15 +951,26 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
       tanksManual: plannedTanks != null,
       ...(lead.sqftPerTankOverride ? { sqft: lead.sqftPerTankOverride } : {}),
       weather: { temp: '', wind: '', humidity: '', windDir: '' },
-      products: planned.map((a) => ({
-        id: uid(),
-        product: a.product,
-        rate: a.rateOzM != null ? String(a.rateOzM) : '',
-        basis: a.basis || 'oz / M',
-        forceGal: false,
-        target: a.target || '', // carry the plan's target onto the product line
-        ...(a.notes ? { note: a.notes } : {}),
-      })),
+      products: planned.map((a) => {
+        const line = {
+          id: uid(),
+          product: a.product,
+          rate: a.rateOzM != null ? String(a.rateOzM) : '',
+          basis: a.basis || 'oz / M',
+          forceGal: false,
+          target: a.target || '', // carry the plan's target onto the product line
+          ...(a.notes ? { note: a.notes } : {}),
+        }
+        // Herbicides & insecticides read better per-ACRE — convert the plan's
+        // per-M rate (×43.56) the same way a manually-added line does.
+        const prod = products.find((p) => p.name === a.product)
+        if (prod && (prod.type === 'Herbicide' || prod.type === 'Insecticide')) {
+          const perM = a.rateOzM != null && a.rateOzM !== '' ? Number(a.rateOzM)
+            : (a.rateOzA != null && a.rateOzA !== '' ? Number(a.rateOzA) / 43.56 : null)
+          if (perM != null) { line.rate = String(Math.round(perM * 43.56 * 10) / 10); line.basis = 'oz / A' }
+        }
+        return line
+      }),
       targets: [...new Set(planned.map((a) => a.target).filter(Boolean))],
       instructions: '',
       ppe: [],
