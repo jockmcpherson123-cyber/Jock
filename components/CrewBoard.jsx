@@ -61,9 +61,15 @@ export default function CrewBoard({ pub = null }) {
   const [status, setStatus] = useState('loading') // loading | ok | error
   const [live, setLive] = useState(false)
   // Whole-board language toggle (independent of each person's own language).
-  const [lang, setLang] = useState('en')
-  // Board layout: grouped by job (default) or one card per person (Crew).
-  const [view, setView] = useState('jobs')
+  const [lang] = useState('en')
+  // Board layout: grouped by job (default) or one card per person (Crew). A TV
+  // can be pinned to the Crew layout with ?view=crew (or ?layout=crew) in its URL.
+  const [view] = useState(() => {
+    if (typeof window === 'undefined') return 'jobs'
+    const sp = new URLSearchParams(window.location.search)
+    const v = (sp.get('view') || sp.get('layout') || '').toLowerCase()
+    return v === 'crew' ? 'crew' : 'jobs'
+  })
   const T = (en) => (lang === 'es' ? (ES[en] || en) : en)
   // Dynamic text (job names, notes, message): prefer an AI translation if one is
   // cached, otherwise fall back to the built-in Spanish dictionary so it still
@@ -251,27 +257,6 @@ export default function CrewBoard({ pub = null }) {
                     border: on ? 'none' : '1px solid rgba(255,255,255,0.25)',
                     background: on ? GOLD : 'rgba(255,255,255,0.08)', color: on ? FOREST : '#E8EDE7', cursor: 'pointer',
                   }}>{c || 'All'}</button>
-                )
-              })}
-              {[['en', 'English'], ['es', 'Español']].map(([code, label]) => {
-                const on = lang === code
-                return (
-                  <button key={code} onClick={() => setLang(code)} style={{
-                    fontSize: 'clamp(12px,1.2vw,20px)', fontWeight: 700, padding: '0.35em 1.1em', borderRadius: 999,
-                    border: on ? 'none' : '1px solid rgba(255,255,255,0.25)',
-                    background: on ? '#E8EDE7' : 'rgba(255,255,255,0.08)', color: on ? FOREST : '#E8EDE7', cursor: 'pointer',
-                  }}>{label}</button>
-                )
-              })}
-              <span style={{ width: 1, alignSelf: 'stretch', background: 'rgba(255,255,255,0.18)', margin: '0 2px' }} />
-              {[['jobs', lang === 'es' ? 'Trabajos' : 'Jobs'], ['crew', lang === 'es' ? 'Equipo' : 'Crew']].map(([code, label]) => {
-                const on = view === code
-                return (
-                  <button key={code} onClick={() => setView(code)} style={{
-                    fontSize: 'clamp(12px,1.2vw,20px)', fontWeight: 700, padding: '0.35em 1.1em', borderRadius: 999,
-                    border: on ? 'none' : '1px solid rgba(255,255,255,0.25)',
-                    background: on ? GOLD : 'rgba(255,255,255,0.08)', color: on ? FOREST : '#E8EDE7', cursor: 'pointer',
-                  }}>{label}</button>
                 )
               })}
             </div>
