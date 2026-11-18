@@ -315,19 +315,23 @@ export default function CrewBoard({ pub = null }) {
                 {cbNames.map((name) => {
                   const list = cbByPerson[name]
                   const color = cbPersonColor(effCrew, name)
-                  const dispLang = lang === 'es' ? 'es' : crew[name]?.lang
+                  // Each person's card is in THEIR language automatically — the
+                  // global toggle only overrides when flipped to Spanish.
+                  const dispLang = lang === 'es' ? 'es' : (crew[name]?.lang || 'en')
+                  const loc = (x) => (x ? (txGet(tx, dispLang, x) || (dispLang === 'es' ? toEs(x) : x)) : '')
+                  const jobsWord = list.length !== 1 ? (dispLang === 'es' ? 'trabajos' : 'jobs') : (dispLang === 'es' ? 'trabajo' : 'job')
                   return (
                     <div key={name} style={{ background: '#FBFAF6', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.28)', borderLeft: `8px solid ${color}` }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '0.55vw 0.8vw', background: '#E6EDE4', borderBottom: '1px solid #D3DCD2' }}>
                         <span style={{ fontSize: 'clamp(16px,1.5vw,28px)', fontWeight: 800, color: '#1A2A1F' }}>{name}</span>
-                        <span style={{ fontSize: 'clamp(11px,1vw,17px)', fontWeight: 700, color: '#8A9A8E', marginLeft: 'auto' }}>{list.length} {list.length !== 1 ? T('jobs') : T('job')}</span>
+                        <span style={{ fontSize: 'clamp(11px,1vw,17px)', fontWeight: 700, color: '#8A9A8E', marginLeft: 'auto' }}>{list.length} {jobsWord}</span>
                       </div>
                       <div>
                         {list.map((t) => {
-                          const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => txGet(tx, dispLang, tool) || (lang === 'es' ? toEs(tool) : tool))
+                          const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => loc(tool))
                           const detail = tools.join(' · ')
-                          const noteText = t.notes ? (txGet(tx, dispLang, t.notes) || (lang === 'es' ? toEs(t.notes) : t.notes)) : ''
-                          const jobText = txGet(tx, dispLang, t.job) || (lang === 'es' ? toEs(t.job) : t.job)
+                          const noteText = loc(t.notes)
+                          const jobText = loc(t.job)
                           return (
                             <div key={t.id} style={{ padding: '0.4vw 0.7vw', borderBottom: '1px solid #EFEEE6' }}>
                               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -408,15 +412,21 @@ export default function CrewBoard({ pub = null }) {
                   })()}
                   <div>
                     {list.map((t) => {
-                      // The board toggle wins; otherwise fall back to the person's own language.
-                      const dispLang = lang === 'es' ? 'es' : crew[t.assignee]?.lang
-                      const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => txGet(tx, dispLang, tool) || (lang === 'es' ? toEs(tool) : tool))
+                      // Each person's line is in THEIR language automatically; the
+                      // global board toggle only overrides when flipped to Spanish.
+                      const dispLang = lang === 'es' ? 'es' : (crew[t.assignee]?.lang || 'en')
+                      const loc = (x) => (x ? (txGet(tx, dispLang, x) || (dispLang === 'es' ? toEs(x) : x)) : '')
+                      const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => loc(tool))
                       const detail = tools.join(' · ')
-                      const noteText = t.notes ? (txGet(tx, dispLang, t.notes) || (lang === 'es' ? toEs(t.notes) : t.notes)) : ''
+                      const noteText = loc(t.notes)
+                      // For a non-English person, show their job name right on their
+                      // line, so the whole row reads in their language.
+                      const jobLoc = dispLang !== 'en' ? loc(jk) : ''
                       return (
                         <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.4vw 0.7vw', borderLeft: `5px solid ${FERN}`, borderBottom: '1px solid #EFEEE6' }}>
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <span style={{ fontSize: 'clamp(13px,1.2vw,22px)', fontWeight: 600, color: '#23241E' }}>{t.assignee || T('Unassigned')}</span>
+                            {jobLoc && jobLoc !== jk && <span style={{ fontSize: 'clamp(12px,1.1vw,20px)', color: '#5E7A67', fontWeight: 700, fontStyle: 'italic' }}>{'  ·  ' + jobLoc}</span>}
                             {detail && <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#7C8A80' }}>{'  ·  ' + detail}</span>}
                             {noteText && <span style={{ fontSize: 'clamp(11px,1vw,18px)', color: FERN, fontWeight: 600 }}>{'  ·  ' + noteText}</span>}
                           </div>
