@@ -57,6 +57,12 @@ import {
   Printer,
   Bug,
   Pencil,
+  Users,
+  Copy,
+  Save,
+  LayoutGrid,
+  Upload,
+  Layers,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, sheetBreakdown, lineAmounts, sheetLineAmts, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -8713,6 +8719,43 @@ const CREW_LANGS = [['en', 'English'], ['es', 'Spanish'], ['pt', 'Portuguese'], 
 const SLOTS = [['1', '1st Jobs'], ['2', '2nd Jobs'], ['3', '3rd Jobs'], ['4', '4th Jobs']]
 const slotLabel = (s) => (SLOTS.find(([k]) => k === String(s)) || [])[1] || '1st Jobs'
 
+// Job/crew groups — used to colour and sort the day's work. Each has a default
+// colour; a person can override with their own hex. Non-breaking: everything
+// with no group/color falls back to a neutral slate, so old data still renders.
+const WB_GROUPS = [
+  ['Greens', '#2E7D4F'], ['Fairways', '#2F6FB0'], ['Tees', '#C27C0E'],
+  ['Rough', '#7A5C3E'], ['Bunkers', '#D9A441'], ['Details', '#8B5CF6'],
+  ['Equipment', '#0E7490'], ['Irrigation', '#2563EB'], ['Other', '#64748B'],
+]
+const WB_GROUP_ORDER = WB_GROUPS.map(([n]) => n)
+const groupColor = (g) => (WB_GROUPS.find(([n]) => n === g) || [])[1] || '#64748B'
+const isHex = (v) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(v || '').trim())
+// A person's board colour: their own hex if set, else their group's colour,
+// else a neutral slate (so names with no group still look intentional).
+const personColor = (crew, name) => {
+  const c = (crew && crew[name]) || {}
+  if (isHex(c.color)) return c.color
+  if (c.group) return groupColor(c.group)
+  return '#94A3B8'
+}
+// Parse a small pasted CSV into row objects in the given field order. A header
+// row (first cell equal to the first field name) is dropped. Quotes/whitespace
+// trimmed; extra columns ignored; blank first-field rows skipped.
+function parseCsv(text, fields) {
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  if (!lines.length) return []
+  const clean = (s) => String(s == null ? '' : s).trim().replace(/^"(.*)"$/, '$1').trim()
+  const first = lines[0].split(',').map(clean)
+  const hasHeader = first.length > 0 && first[0].toLowerCase() === String(fields[0]).toLowerCase()
+  const body = hasHeader ? lines.slice(1) : lines
+  return body.map((l) => {
+    const cells = l.split(',').map(clean)
+    const o = {}
+    fields.forEach((f, i) => { o[f] = cells[i] || '' })
+    return o
+  }).filter((o) => o[fields[0]])
+}
+
 // Shell for the Whiteboard: a side menu (persistent rail on wide screens, a
 // slide-out drawer on iPad/phone) that switches between the daily board, the
 // efficiency trends, and the two lists that feed the board (equipment, jobs).
@@ -8837,7 +8880,7 @@ function WhiteboardModule({ user, nav, hideChrome }) {
           <div className="bg-white rounded-2xl border border-black/5 p-2 shadow-sm sticky top-4"><Nav /></div>
         </aside>
         <div className="flex-1 min-w-0">
-          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} roster={roster} jobTypes={jobTypes} equipment={equipment} courses={courses} crew={crew} boardMessage={courseInfo.boardMessage || ''} onSaveMessage={(m) => saveCourse({ boardMessage: m })} />}
+          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} roster={roster} jobTypes={jobTypes} jobGroups={courseInfo.jobGroups || {}} equipment={equipment} courses={courses} crew={crew} boardMessage={courseInfo.boardMessage || ''} onSaveMessage={(m) => saveCourse({ boardMessage: m })} jobBoard={courseInfo.jobBoard || {}} onSaveCourse={saveCourse} />}
           {section === 'mowing' && (
             <div>
               <div className="flex gap-1.5 mb-4">
@@ -8856,22 +8899,24 @@ function WhiteboardModule({ user, nav, hideChrome }) {
             </div>
           )}
           {section === 'insights' && <WhiteboardInsights />}
-          {section === 'crew' && <WhiteboardCrew roster={roster} operators={operators} crewMembers={crewMembers} courses={courses} crew={crew} manage={manage} onSaveCrew={(next) => saveCourse({ crew: next })} onSaveMembers={(list) => saveCourse({ crewMembers: list })} />}
-          {section === 'equipment' && <WhiteboardListSection title="Equipment" hint="The mowers, rollers, blowers and carts your crew runs. These become quick-pick chips when you add a job." items={equipment} manage={manage} accent={FERN} onSave={(list) => saveCourse({ equipment: list })} />}
-          {section === 'jobtypes' && <WhiteboardListSection title="Job Types" hint="The everyday jobs that show as one-tap chips on the Workboard. Add the ones your crew runs each morning." items={jobTypes} manage={manage} accent={FOREST} onSave={(list) => saveCourse({ jobTypes: list })} />}
+          {section === 'crew' && <WhiteboardCrew roster={roster} operators={operators} crewMembers={crewMembers} courses={courses} crew={crew} manage={manage} onSaveCrew={(next) => saveCourse({ crew: next })} onSaveMembers={(list) => saveCourse({ crewMembers: list })} onImport={(crewPatch, newNames) => saveCourse({ crew: crewPatch, crewMembers: [...new Set([...crewMembers, ...newNames])] })} />}
+          {section === 'equipment' && <WhiteboardListSection title="Equipment" hint="The mowers, rollers, blowers and carts your crew runs. These become quick-pick chips when you add a job." items={equipment} manage={manage} accent={FERN} onSave={(list) => saveCourse({ equipment: list })} importFields={['name', 'type']} importHint="One piece of equipment per line. Optional second column for a type, e.g.  Toro 3550, Greens mower" onImport={(rows) => saveCourse({ equipment: [...new Set([...(equipment || []), ...rows.map((r) => r.name).filter(Boolean)])] })} />}
+          {section === 'jobtypes' && <WhiteboardListSection title="Job Types" hint="The everyday jobs that show as one-tap chips on the Workboard. Add the ones your crew runs each morning. A group colours and sorts the job on the board." items={jobTypes} manage={manage} accent={FOREST} onSave={(list) => saveCourse({ jobTypes: list })} groups={courseInfo.jobGroups || {}} onSetGroup={(job, g) => { const next = { ...(courseInfo.jobGroups || {}) }; if (g) next[job] = g; else delete next[job]; saveCourse({ jobGroups: next }) }} />}
         </div>
       </div>
-      {qrOpen && <CrewQRModal courseInfo={courseInfo} saveCourse={saveCourse} onClose={() => setQrOpen(false)} />}
+      {qrOpen && <CrewQRModal courseInfo={courseInfo} saveCourse={saveCourse} roster={roster} crew={crew} onClose={() => setQrOpen(false)} />}
     </div>
   )
 }
 
 // Print/scan QR codes that open the crew's phone views — the live job board and
 // the mowing routes — with no login (the club key rides in the QR link).
-function CrewQRModal({ courseInfo, saveCourse, onClose }) {
+function CrewQRModal({ courseInfo, saveCourse, roster = [], crew = {}, onClose }) {
   const [board, setBoard] = useState('')
   const [routes, setRoutes] = useState('')
+  const [people, setPeople] = useState([]) // [{ name, img }]
   const club = courseInfo?.clubName || 'Golf Course'
+  const sortedRoster = useMemo(() => [...roster].sort((a, b) => a.localeCompare(b)), [roster])
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -8886,10 +8931,30 @@ function CrewQRModal({ courseInfo, saveCourse, onClose }) {
         qrDataUrl(`${origin}/routes?k=${key}`, { width: 520 }),
       ])
       if (!cancelled) { setBoard(b); setRoutes(r) }
+      // Per-person "My Jobs" codes — one each, generated lazily.
+      const ppl = []
+      for (const name of sortedRoster) {
+        if (cancelled) return
+        try { const img = await qrDataUrl(`${origin}/me?k=${key}&p=${encodeURIComponent(name)}`, { width: 420 }); ppl.push({ name, img }) } catch (e) { /* skip */ }
+      }
+      if (!cancelled) setPeople(ppl)
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const printPeople = () => {
+    if (!people.length) return
+    const iframe = document.createElement('iframe')
+    Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
+    document.body.appendChild(iframe)
+    const doc = iframe.contentWindow.document
+    const cards = people.map(({ name, img }) => `<div class="card"><div class="nm">${String(name).replace(/[&<>"]/g, '')}</div><img src="${img}"><div class="ft">Scan to see your jobs</div></div>`).join('')
+    doc.open()
+    doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>@page{margin:0.4in}body{margin:0;font-family:Arial}h1{font-family:Georgia,serif;color:#16291F;text-align:center;font-size:20px;margin:0 0 10px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.card{border:1px solid #DDD;border-radius:12px;padding:12px;text-align:center;break-inside:avoid}.nm{font-weight:700;color:#16291F;font-size:16px;margin-bottom:6px}img{width:2.1in;height:2.1in}.ft{color:#888;font-size:11px;margin-top:6px}</style></head><body><h1>${club.replace(/[&<>"]/g, '')} — Crew Job Cards</h1><div class="grid">${cards}</div></body></html>`)
+    doc.close()
+    setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }, 400)
+  }
 
   const printOne = (title, img) => {
     if (!img) return
@@ -8925,6 +8990,31 @@ function CrewQRModal({ courseInfo, saveCourse, onClose }) {
             <Card title="Job Board" blurb="Today's live crew board" img={board} />
             <Card title="Mowing Routes" blurb="Locked greens routes per mower" img={routes} />
           </div>
+
+          {sortedRoster.length > 0 && (
+            <div className="mt-5">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div>
+                  <p className="font-body text-sm font-bold" style={{ color: FOREST }}>Each person’s own jobs</p>
+                  <p className="font-body text-[11px] text-slate-400">One code per person — opens just their jobs for today, in their language, with a Done tick.</p>
+                </div>
+                <button onClick={printPeople} disabled={!people.length} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 shrink-0 disabled:opacity-40" style={{ color: FOREST, border: '1px solid #CBD5E1' }}><Printer size={13} /> Print all</button>
+              </div>
+              {people.length === 0 ? (
+                <div className="py-6 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={20} /></div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {people.map(({ name, img }) => (
+                    <div key={name} className="rounded-xl border border-slate-100 p-2 text-center flex flex-col items-center">
+                      <p className="font-body text-[12px] font-bold truncate w-full" style={{ color: FOREST }}>{name}</p>
+                      {crew[name]?.lang && crew[name].lang !== 'en' && <p className="font-body text-[9px] text-slate-400">{(CREW_LANGS.find(([c]) => c === crew[name].lang) || [])[1] || crew[name].lang}</p>}
+                      {img ? <img src={img} alt="" className="w-24 h-24 mt-1" /> : <div className="w-24 h-24" />}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -8986,7 +9076,7 @@ function DataQRModal({ courseInfo, saveCourse, onClose }) {
 }
 
 // The daily job board — who's doing what today. Fetches its own tasks by date.
-function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, courses = [], crew = {}, boardMessage = '', onSaveMessage }) {
+function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}, equipment, courses = [], crew = {}, boardMessage = '', onSaveMessage, jobBoard = {}, onSaveCourse }) {
   const [date, setDate] = useState(localDateISO())
   const [msgDraft, setMsgDraft] = useState(boardMessage)
   useEffect(() => { setMsgDraft(boardMessage) }, [boardMessage])
@@ -8994,7 +9084,12 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState(null)
   const [course, setCourse] = useState('')
-  const [groupBy, setGroupBy] = useState('job') // 'job' | 'person'
+  const [groupBy, setGroupBy] = useState('job') // 'job' (Jobs view) | 'person' (Crew view)
+  const [picked, setPicked] = useState(null) // an unassigned task id tapped, waiting for a person to drop it on
+  const [idleOpen, setIdleOpen] = useState(false) // "Not assigned yet" collapsed list
+  const [busy, setBusy] = useState(false)
+  const [confirmCopy, setConfirmCopy] = useState(null) // { date, rows } for "Copy yesterday"
+  const [tplOpen, setTplOpen] = useState(false) // templates modal
   const [openJobs, setOpenJobs] = useState({}) // jobKey -> open? accordion — only one job box open at a time
   const [jobEquipDraft, setJobEquipDraft] = useState({}) // gk -> in-progress "add a tool" text
   const [confirmAssign, setConfirmAssign] = useState(null) // { name, jk, s, others } when adding someone already on a job
@@ -9021,6 +9116,64 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   }, [date])
 
   const reload = async () => { try { setTasks(await db.fetchCrewTasks(date, date)) } catch (e) { console.error(e) } }
+
+  // Assign (or move) one task row onto a person — used by the Crew view's
+  // Unassigned pool (tap a job, then tap a person; or drag it onto a card).
+  const assignTaskTo = async (taskId, name) => {
+    const t = tasks.find((x) => x.id === taskId)
+    if (!t || t.assignee === name) { setPicked(null); return }
+    setPicked(null)
+    setTasks((prev) => prev.map((x) => (x.id === taskId ? { ...x, assignee: name } : x)))
+    try {
+      await db.updateCrewTask({ ...t, assignee: name })
+      if (isGreensMow(t.job)) await assignGreens(t.job, t.slot || '1')
+      await reload()
+    } catch (e) { console.error(e); reload() }
+  }
+
+  // Copy yesterday — pull the most recent earlier day that has jobs and offer to
+  // recreate it on the selected date (statuses reset to "todo").
+  const findYesterday = async () => {
+    try {
+      setBusy(true)
+      const prev = await db.fetchCrewTasks(shiftDate(date, -60), shiftDate(date, -1))
+      if (!prev.length) { setMsg({ type: 'err', text: 'No earlier board found to copy from.' }); setBusy(false); return }
+      const lastDate = prev.reduce((m, t) => (t.date > m ? t.date : m), prev[0].date)
+      const rows = prev.filter((t) => t.date === lastDate)
+      setConfirmCopy({ date: lastDate, rows })
+    } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
+    finally { setBusy(false) }
+  }
+  const rowsToDate = (rows) => rows.map((t) => ({ date, job: t.job, area: t.area || '', assignee: t.assignee || '', equipment: t.equipment || '', course: t.course || '', status: 'todo', sort: t.sort ?? 0, notes: t.notes || '', groupNote: t.groupNote || '', slot: t.slot || '1' }))
+  const doCopy = async (rows) => {
+    setConfirmCopy(null); setBusy(true)
+    try { await db.addCrewTasks(rowsToDate(rows)); await reload(); setMsg({ type: 'ok', text: `Copied ${rows.length} job${rows.length !== 1 ? 's' : ''}.` }) }
+    catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
+    finally { setBusy(false) }
+  }
+
+  // Templates — save the current day's board as a named template, load one onto
+  // the selected date. Stored in course_info.jobBoard.templates.
+  const templates = Array.isArray(jobBoard.templates) ? jobBoard.templates : []
+  const saveTemplate = async (name) => {
+    const nm = (name || '').trim()
+    if (!nm || !onSaveCourse) return
+    const rows = view.map((t) => ({ job: t.job, area: t.area || '', assignee: t.assignee || '', equipment: t.equipment || '', course: t.course || '', sort: t.sort ?? 0, notes: t.notes || '', groupNote: t.groupNote || '', slot: t.slot || '1' }))
+    const tpl = { id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now())), name: nm, rows, createdAt: new Date().toISOString() }
+    try { await onSaveCourse({ jobBoard: { ...jobBoard, templates: [...templates, tpl] } }); setMsg({ type: 'ok', text: `Saved template “${nm}”.` }) }
+    catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
+  }
+  const loadTemplate = async (tpl) => {
+    setTplOpen(false); setBusy(true)
+    try { await db.addCrewTasks(rowsToDate(tpl.rows || [])); await reload(); setMsg({ type: 'ok', text: `Loaded “${tpl.name}”.` }) }
+    catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
+    finally { setBusy(false) }
+  }
+  const deleteTemplate = async (id) => {
+    if (!onSaveCourse) return
+    try { await onSaveCourse({ jobBoard: { ...jobBoard, templates: templates.filter((t) => t.id !== id) } }) }
+    catch (e) { console.error(e) }
+  }
 
   // Translate each person's jobs into their native language (AI, cached).
   const crewSig = JSON.stringify(crew || {})
@@ -9156,6 +9309,32 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
   // so you can see who's spoken for (they're still selectable).
   const assignedToday = [...new Set(view.filter((t) => t.assignee).map((t) => t.assignee))]
 
+  // ── Crew view (one card per person) ──────────────────────────────────────
+  // Amber "⚠ also on <name>" when the same tool is on two people in the same
+  // round on the same day.
+  const conflictFor = (t) => {
+    if (!t.assignee) return []
+    const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
+    if (!tools.length) return []
+    const others = new Set()
+    view.forEach((o) => {
+      if (o.id === t.id || !o.assignee || o.assignee === t.assignee) return
+      if ((o.slot || '1') !== (t.slot || '1')) return
+      const ot = (o.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
+      if (tools.some((x) => ot.includes(x))) others.add(o.assignee)
+    })
+    return [...others]
+  }
+  const slotRank = (s) => SLOTS.findIndex(([k]) => k === String(s || '1'))
+  const byPerson = {}
+  view.forEach((t) => { if (t.assignee) (byPerson[t.assignee] = byPerson[t.assignee] || []).push(t) })
+  Object.values(byPerson).forEach((list) => list.sort((a, b) => slotRank(a.slot) - slotRank(b.slot) || (a.sort || 0) - (b.sort || 0)))
+  const workingNames = Object.keys(byPerson).sort((a, b) => a.localeCompare(b))
+  const unassigned = view.filter((t) => !t.assignee).sort((a, b) => slotRank(a.slot) - slotRank(b.slot) || (a.sort || 0) - (b.sort || 0))
+  // People on the roster with nothing today — scoped to the selected course's
+  // home crew when a course is active, so the list stays relevant.
+  const idleNames = roster.filter((n) => !byPerson[n] && (!activeCourse || !crew[n]?.course || crew[n].course === activeCourse)).sort((a, b) => a.localeCompare(b))
+
   return (
     <div>
       <div className="bg-white rounded-2xl border border-black/5 p-2.5 shadow-sm mb-4 flex items-center gap-2">
@@ -9187,11 +9366,20 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
 
       {msg && <div className="rounded-xl px-3 py-2 mb-3 font-body text-[12px] font-semibold" style={msg.type === 'ok' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}>{msg.text}</div>}
 
-      {!loading && view.length > 0 && (
-        <div className="flex gap-1.5 mb-3">
-          {[['job', 'By job'], ['person', 'By person']].map(([k, l]) => (
-            <button key={k} onClick={() => setGroupBy(k)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full transition" style={groupBy === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{l}</button>
-          ))}
+      {!loading && (view.length > 0 || manage) && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-3">
+          <div className="inline-flex rounded-full p-0.5" style={{ backgroundColor: '#EEF2F0' }}>
+            {[['job', 'Jobs', LayoutGrid], ['person', 'Crew', Users]].map(([k, l, Icon]) => (
+              <button key={k} onClick={() => { setGroupBy(k); setPicked(null) }} className="font-body text-[12px] font-bold px-3.5 py-1.5 rounded-full transition flex items-center gap-1.5" style={groupBy === k ? { backgroundColor: FOREST, color: 'white' } : { color: '#64748B' }}><Icon size={13} /> {l}</button>
+            ))}
+          </div>
+          {manage && (
+            <div className="flex flex-wrap items-center gap-1.5 ml-auto">
+              <button onClick={findYesterday} disabled={busy} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Recreate the most recent earlier day's board on this date"><Copy size={12} /> Copy yesterday</button>
+              <button onClick={() => { const n = typeof window !== 'undefined' ? window.prompt('Name this template (e.g. “Tournament week AM”)') : ''; if (n) saveTemplate(n) }} disabled={busy || view.length === 0} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Save the current board as a reusable template"><Save size={12} /> Save template</button>
+              <button onClick={() => setTplOpen(true)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Load a saved template onto this day"><Layers size={12} /> Templates{templates.length ? ` · ${templates.length}` : ''}</button>
+            </div>
+          )}
         </div>
       )}
 
@@ -9201,43 +9389,109 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
         <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
           No jobs posted for this day yet.
         </div>
-      ) : (groupBy === 'person' && view.length > 0) ? (
+      ) : (groupBy === 'person') ? (
         <div className="space-y-3">
-          {groupKeys.map((k) => (
-            <div key={k} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+          {/* Unassigned pool — jobs with no one on them yet. Tap one, then tap a
+              person (or drag it onto their card) to put them on it. */}
+          {unassigned.length > 0 && (
+            <div className="rounded-2xl border p-3" style={{ borderColor: '#FBE6C6', backgroundColor: '#FFFBF2' }}>
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: k === '__none' ? '#EEF2F0' : '#E8F3EC' }}>
-                  <User size={14} style={{ color: k === '__none' ? '#94A3B8' : FERN }} />
-                </div>
-                <p className="font-body font-semibold text-sm text-slate-900">{k === '__none' ? 'Unassigned' : k}</p>
-                {hasCourses && crew[k]?.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{crew[k].course}</span>}
-                {crew[k]?.lang && crew[k].lang !== 'en' && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{(CREW_LANGS.find(([c]) => c === crew[k].lang) || [])[1] || crew[k].lang}</span>}
-                <span className="font-body text-[10px] text-slate-400 ml-auto">{groups[k].length} job{groups[k].length !== 1 ? 's' : ''}</span>
+                <AlertTriangle size={14} style={{ color: '#B07A16' }} />
+                <p className="font-body text-[12px] font-bold" style={{ color: '#8A5A12' }}>Unassigned · {unassigned.length}</p>
+                {picked && <span className="font-body text-[10px] font-semibold ml-auto" style={{ color: '#8A5A12' }}>Tap a person to put them on it</span>}
               </div>
-              <div className="space-y-1.5">
-                {groups[k].map((t) => {
+              <div className="flex flex-wrap gap-1.5">
+                {unassigned.map((t) => {
+                  const on = picked === t.id
                   const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
-                  const lang = crew[k]?.lang
-                  const jobText = txGet(tx, lang, t.job) || t.job
                   return (
-                    <div key={t.id} className="flex items-start gap-2 rounded-xl border px-2.5 py-2" style={{ borderColor: '#EEF2F0', backgroundColor: 'white' }}>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-body text-[13px] font-semibold text-slate-800 truncate">{jobText}</p>
-                        {jobText !== t.job && <p className="font-body text-[10px] text-slate-400 italic truncate">{t.job}</p>}
-                        {t.notes && <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>}
-                        {tools.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {tools.map((tool, i) => <span key={i} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}
-                          </div>
-                        )}
-                      </div>
-                      {manage && <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0 mt-0.5" aria-label="Remove"><Trash2 size={14} /></button>}
-                    </div>
+                    <button key={t.id} draggable={manage} onDragStart={(e) => { e.dataTransfer.setData('text/plain', t.id); setPicked(t.id) }} onDragEnd={() => setPicked(null)}
+                      onClick={() => manage && setPicked(on ? null : t.id)} disabled={!manage}
+                      className="text-left rounded-xl px-2.5 py-1.5 font-body transition" style={on ? { backgroundColor: FOREST, color: 'white', boxShadow: '0 0 0 2px rgba(22,41,31,0.25)' } : { backgroundColor: 'white', color: '#334155', border: '1px solid #EADFC6' }}>
+                      <span className="text-[12px] font-bold">{slotLabel(t.slot || '1').replace(' Jobs', '')} · {t.job}</span>
+                      {tools.length > 0 && <span className="text-[10px] opacity-70"> · {tools.join(', ')}</span>}
+                    </button>
                   )
                 })}
               </div>
             </div>
-          ))}
+          )}
+
+          {workingNames.length === 0 && unassigned.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
+              No one on the board for this day yet.{manage ? ' Add jobs in the Jobs view, or Copy yesterday.' : ''}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {workingNames.map((name) => {
+                const list = byPerson[name]
+                const color = personColor(crew, name)
+                const lang = crew[name]?.lang
+                const isDrop = manage && !!picked
+                return (
+                  <div key={name} onDragOver={(e) => { if (manage) e.preventDefault() }} onDrop={(e) => { if (!manage) return; e.preventDefault(); const id = e.dataTransfer.getData('text/plain') || picked; if (id) assignTaskTo(id, name) }}
+                    onClick={() => { if (manage && picked) assignTaskTo(picked, name) }}
+                    className="bg-white rounded-2xl border shadow-sm overflow-hidden transition" style={{ borderColor: isDrop ? FOREST : 'rgba(0,0,0,0.06)', borderLeft: `5px solid ${color}`, cursor: isDrop ? 'pointer' : 'default', boxShadow: isDrop ? '0 0 0 2px rgba(22,41,31,0.12)' : undefined }}>
+                    <div className="flex items-center gap-2 px-3 py-2.5" style={{ borderBottom: '1px solid #F1F4F2' }}>
+                      <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-white font-body text-[12px] font-bold" style={{ backgroundColor: color }}>{(name || '?').trim().charAt(0).toUpperCase()}</span>
+                      <p className="font-body font-bold text-sm text-slate-900 truncate">{name}</p>
+                      {hasCourses && crew[name]?.course && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{crew[name].course}</span>}
+                      {lang && lang !== 'en' && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{(CREW_LANGS.find(([c]) => c === lang) || [])[1] || lang}</span>}
+                      <span className="font-body text-[11px] font-semibold text-slate-400 ml-auto shrink-0">· {list.length} job{list.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div>
+                      {list.map((t, i) => {
+                        const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean)
+                        const jobText = txGet(tx, lang, t.job) || t.job
+                        const clash = conflictFor(t)
+                        return (
+                          <div key={t.id} className="flex items-start gap-2 px-3 py-2" style={{ borderTop: i > 0 ? '1px solid #F4F6F4' : 'none' }}>
+                            <span className="font-body text-[9px] font-extrabold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5" style={{ backgroundColor: '#EEF2F0', color: '#64748B' }}>{slotLabel(t.slot || '1').replace(' Jobs', '')}</span>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-body text-[13px] font-semibold text-slate-800">{jobText}</p>
+                              {jobText !== t.job && <p className="font-body text-[10px] text-slate-400 italic">{t.job}</p>}
+                              {t.notes && <p className="font-body text-[12px] font-semibold mt-0.5" style={{ color: FERN }}>{t.notes}</p>}
+                              {tools.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {tools.map((tool, j) => <span key={j} className="font-body text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{txGet(tx, lang, tool) || tool}</span>)}
+                                </div>
+                              )}
+                              {clash.length > 0 && <p className="font-body text-[10px] font-bold mt-1" style={{ color: '#B45309' }}>⚠ also on {clash.join(', ')}</p>}
+                            </div>
+                            {manage && <button onClick={(e) => { e.stopPropagation(); remove(t.id) }} className="text-slate-300 hover:text-red-500 transition shrink-0 mt-0.5" aria-label="Remove"><Trash2 size={14} /></button>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Not assigned yet — roster people with nothing today */}
+          {idleNames.length > 0 && (
+            <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+              <button onClick={() => setIdleOpen((o) => !o)} className="w-full flex items-center gap-2 px-3 py-2.5 text-left">
+                <User size={14} className="text-slate-400" />
+                <span className="font-body text-[12px] font-bold text-slate-500">Not assigned yet · {idleNames.length}</span>
+                <ChevronRight size={16} className="text-slate-400 ml-auto transition-transform" style={{ transform: idleOpen ? 'rotate(90deg)' : 'none' }} />
+              </button>
+              {idleOpen && (
+                <div className="px-3 pb-3 flex flex-wrap gap-1.5">
+                  {idleNames.map((n) => {
+                    const isDrop = manage && !!picked
+                    return (
+                      <button key={n} onDragOver={(e) => { if (manage) e.preventDefault() }} onDrop={(e) => { if (!manage) return; e.preventDefault(); const id = e.dataTransfer.getData('text/plain') || picked; if (id) assignTaskTo(id, n) }} onClick={() => { if (manage && picked) assignTaskTo(picked, n) }}
+                        disabled={!isDrop} className="font-body text-[12px] font-semibold px-2.5 py-1.5 rounded-full transition" style={isDrop ? { backgroundColor: '#EAF2EC', color: FOREST, border: `1px dashed ${FERN}`, cursor: 'pointer' } : { backgroundColor: '#F6F7F6', color: '#64748B' }}>
+                        <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: personColor(crew, n) }} />{n}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ) : (() => {
         // Which rounds to show: managers always get 1st (with an inline add
@@ -9431,6 +9685,49 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
           </div>
         </div>
       )}
+
+      {confirmCopy && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ backgroundColor: 'rgba(15,23,42,0.45)' }} onClick={() => setConfirmCopy(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5" onClick={(e) => e.stopPropagation()}>
+            <p className="font-body text-sm text-slate-700 text-center leading-relaxed">Copy <b>{confirmCopy.rows.length} job{confirmCopy.rows.length !== 1 ? 's' : ''}</b> from <b>{prettyDay(confirmCopy.date)}</b> onto {prettyDay(date)}?</p>
+            <p className="font-body text-[11px] text-slate-400 text-center mt-1">Same jobs, people, notes and equipment. Statuses reset to “to do”.</p>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setConfirmCopy(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Cancel</button>
+              <button type="button" onClick={() => doCopy(confirmCopy.rows)} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: FOREST }}>Copy jobs</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tplOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-6" style={{ backgroundColor: 'rgba(15,23,42,0.45)' }} onClick={() => setTplOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-white" style={{ borderBottom: '1px solid #EEF0EC' }}>
+              <p className="font-display text-base font-bold" style={{ color: FOREST }}>Board templates</p>
+              <button onClick={() => setTplOpen(false)} className="text-slate-400"><X size={18} /></button>
+            </div>
+            <div className="p-4">
+              <p className="font-body text-[12px] text-slate-500 mb-3">Load a saved board onto <b>{prettyDay(date)}</b>. It adds the template’s jobs (statuses reset) — it won’t clear what’s already there.</p>
+              {templates.length === 0 ? (
+                <p className="font-body text-sm text-slate-400 text-center py-6">No templates yet. Set up a board, then “Save template”.</p>
+              ) : (
+                <div className="space-y-2">
+                  {templates.map((t) => (
+                    <div key={t.id} className="flex items-center gap-2 rounded-xl border border-slate-100 p-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-body text-sm font-semibold text-slate-800 truncate">{t.name}</p>
+                        <p className="font-body text-[11px] text-slate-400">{(t.rows || []).length} job{(t.rows || []).length !== 1 ? 's' : ''}</p>
+                      </div>
+                      <button onClick={() => loadTemplate(t)} disabled={busy} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FOREST }}>Load</button>
+                      <button onClick={() => deleteTemplate(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete template"><Trash2 size={15} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -9438,52 +9735,114 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, equipment, cou
 // Crew section — the board's own roster. Add anyone on the grounds crew here
 // (Spray Ops names come in automatically), and give each a home course (so they
 // sort first on that course's board) and their native language (for translation).
-function WhiteboardCrew({ roster = [], operators = [], crewMembers = [], courses = [], crew = {}, manage, onSaveCrew, onSaveMembers }) {
+function WhiteboardCrew({ roster = [], operators = [], crewMembers = [], courses = [], crew = {}, manage, onSaveCrew, onSaveMembers, onImport }) {
   const [name, setName] = useState('')
+  const [importOpen, setImportOpen] = useState(false)
+  const [csv, setCsv] = useState('')
   const courseNames = courses.map((c) => c.name)
   const langLabel = (code) => (CREW_LANGS.find(([c]) => c === code) || [])[1] || ''
   const setField = (person, key, value) => onSaveCrew({ ...crew, [person]: { ...(crew[person] || {}), [key]: value } })
   const addMember = () => { const v = name.trim(); if (!v) { return } if (!roster.includes(v)) onSaveMembers([...crewMembers, v]); setName('') }
   const removeMember = (v) => onSaveMembers(crewMembers.filter((x) => x !== v))
 
+  // Resolve a CSV "language" cell (code OR label) to a code; a "group" cell to a
+  // canonical group name. Unknown values fall back sensibly.
+  const toLangCode = (v) => { const s = String(v || '').trim().toLowerCase(); if (!s) return ''; const hit = CREW_LANGS.find(([c, l]) => c === s || l.toLowerCase() === s); return hit ? hit[0] : '' }
+  const toGroup = (v) => { const s = String(v || '').trim().toLowerCase(); return WB_GROUP_ORDER.find((g) => g.toLowerCase() === s) || '' }
+  const toCourse = (v) => { const s = String(v || '').trim().toLowerCase(); return courseNames.find((c) => c.toLowerCase() === s || c.toLowerCase().startsWith(s)) || '' }
+  const runImport = () => {
+    const rows = parseCsv(csv, ['name', 'course', 'language', 'group'])
+    if (!rows.length || !onImport) { setImportOpen(false); return }
+    const nextCrew = { ...crew }
+    const newNames = []
+    rows.forEach((r) => {
+      const nm = r.name.trim()
+      if (!nm) return
+      const cur = nextCrew[nm] || {}
+      const patch = { ...cur }
+      const course = toCourse(r.course); if (course) patch.course = course
+      const lang = toLangCode(r.language); if (lang) patch.lang = lang
+      const group = toGroup(r.group); if (group) patch.group = group
+      nextCrew[nm] = patch
+      if (!roster.includes(nm) && !newNames.includes(nm)) newNames.push(nm)
+    })
+    onImport(nextCrew, newNames)
+    setCsv(''); setImportOpen(false)
+  }
+
   return (
     <div className="space-y-2">
-      <p className="font-body text-[12px] text-slate-500 mb-1">Your grounds crew. Spray Ops people are pulled in automatically; add everyone else here. Set each person's home course (they sort first on it) and native language.</p>
+      <p className="font-body text-[12px] text-slate-500 mb-1">Your grounds crew. Spray Ops people are pulled in automatically; add everyone else here. Set each person's home course, native language, crew group and board colour.</p>
       {manage && (
-        <div className="flex gap-2 mb-2">
-          <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addMember() } }} placeholder="Add a crew member…" className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-          <button type="button" onClick={addMember} disabled={!name.trim()} className="font-body text-xs font-bold px-4 rounded-xl text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FOREST }}>Add</button>
-        </div>
+        <>
+          <div className="flex gap-2 mb-2">
+            <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addMember() } }} placeholder="Add a crew member…" className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+            <button type="button" onClick={addMember} disabled={!name.trim()} className="font-body text-xs font-bold px-4 rounded-xl text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FOREST }}>Add</button>
+            <button type="button" onClick={() => setImportOpen(true)} className="font-body text-xs font-bold px-3 rounded-xl flex items-center gap-1.5 shrink-0" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Import crew from a CSV"><Upload size={13} /> <span className="hidden sm:inline">Import CSV</span></button>
+          </div>
+        </>
       )}
       {roster.length === 0 ? (
         <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No crew yet. Add your first crew member above.</div>
       ) : roster.map((person) => {
         const isOwn = !operators.includes(person) // added here, not from Spray Ops
+        const c = crew[person] || {}
+        const swatch = personColor(crew, person)
         return (
-          <div key={person} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8F3EC' }}><User size={15} style={{ color: FERN }} /></div>
-            <p className="font-body text-sm font-semibold text-slate-800 flex-1 min-w-0 truncate">{person}</p>
-            {manage ? (
-              <div className="flex items-center gap-2 shrink-0">
+          <div key={person} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-white font-body text-[13px] font-bold" style={{ backgroundColor: swatch }}>{(person || '?').trim().charAt(0).toUpperCase()}</span>
+              <p className="font-body text-sm font-semibold text-slate-800 flex-1 min-w-0 truncate">{person}</p>
+              {!manage && (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {c.course && <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{c.course}</span>}
+                  {c.group && <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: groupColor(c.group) }}>{c.group}</span>}
+                  <span className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{langLabel(c.lang || 'en')}</span>
+                </div>
+              )}
+              {manage && isOwn && <button type="button" onClick={() => removeMember(person)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={15} /></button>}
+            </div>
+            {manage && (
+              <div className="flex flex-wrap items-center gap-2 mt-2.5 pl-11">
                 {courseNames.length >= 2 && (
-                  <div className="shrink-0" style={{ width: 140 }}>
-                    <SearchSelect value={crew[person]?.course || ''} options={[{ value: '', label: 'No home course' }, ...courseNames]} onPick={(v) => setField(person, 'course', v)} sort={false} />
+                  <div className="shrink-0" style={{ width: 150 }}>
+                    <SearchSelect value={c.course || ''} options={[{ value: '', label: 'No home course' }, ...courseNames]} onPick={(v) => setField(person, 'course', v)} sort={false} />
                   </div>
                 )}
-                <div className="shrink-0" style={{ width: 130 }}>
-                  <SearchSelect value={crew[person]?.lang || 'en'} options={CREW_LANGS.map(([code, label]) => ({ value: code, label }))} onPick={(v) => setField(person, 'lang', v)} sort={false} />
+                <div className="shrink-0" style={{ width: 140 }}>
+                  <SearchSelect value={c.lang || 'en'} options={CREW_LANGS.map(([code, label]) => ({ value: code, label }))} onPick={(v) => setField(person, 'lang', v)} sort={false} />
                 </div>
-                {isOwn && <button type="button" onClick={() => removeMember(person)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={15} /></button>}
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 shrink-0">
-                {crew[person]?.course && <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EEF4FF', color: '#3B5BA5' }}>{crew[person].course}</span>}
-                <span className="font-body text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{langLabel(crew[person]?.lang || 'en')}</span>
+                <div className="shrink-0" style={{ width: 140 }}>
+                  <SearchSelect value={c.group || ''} options={[{ value: '', label: 'No group' }, ...WB_GROUP_ORDER.map((g) => ({ value: g, label: g }))]} onPick={(v) => setField(person, 'group', v)} sort={false} />
+                </div>
+                <label className="shrink-0 inline-flex items-center gap-1.5 cursor-pointer" title="Board colour (left border on their card). Defaults to the group colour.">
+                  <input type="color" value={isHex(swatch) ? swatch : '#94A3B8'} onChange={(e) => setField(person, 'color', e.target.value)} className="w-7 h-7 rounded-lg border border-slate-200 p-0 bg-white cursor-pointer" aria-label={`Board colour for ${person}`} />
+                  {isHex(c.color) && <button type="button" onClick={() => setField(person, 'color', '')} className="font-body text-[10px] font-semibold text-slate-400 hover:text-slate-600">reset</button>}
+                </label>
               </div>
             )}
           </div>
         )
       })}
+
+      {importOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-6" style={{ backgroundColor: 'rgba(15,23,42,0.45)' }} onClick={() => setImportOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #EEF0EC' }}>
+              <p className="font-display text-base font-bold" style={{ color: FOREST }}>Import crew (CSV)</p>
+              <button onClick={() => setImportOpen(false)} className="text-slate-400"><X size={18} /></button>
+            </div>
+            <div className="p-4">
+              <p className="font-body text-[12px] text-slate-500 mb-2">One person per line: <code className="font-mono text-[11px]">name, course, language, group</code>. A header row is fine. Existing names are updated, not duplicated. Course, language and group are optional.</p>
+              <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={7} placeholder={'name, course, language, group\nNelson, Blue, Spanish, Bunkers\nGerber, Gold, English, Greens'} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-[13px] font-mono" />
+              <div className="flex gap-2 mt-3">
+                <button type="button" onClick={() => setImportOpen(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Cancel</button>
+                <button type="button" onClick={runImport} disabled={!csv.trim()} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Import</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -9585,10 +9944,22 @@ function WhiteboardInsights() {
 }
 
 // A managed list (equipment, job types) that feeds the Workboard's quick-picks.
-function WhiteboardListSection({ title, hint, items, manage, accent, onSave }) {
+// Optional: `onImport` adds a CSV import, and `groups`/`onSetGroup` add a
+// per-item group picker (used by Job Types to colour/sort the board).
+function WhiteboardListSection({ title, hint, items, manage, accent, onSave, importFields, importHint, onImport, groups, onSetGroup }) {
+  const [importOpen, setImportOpen] = useState(false)
+  const [csv, setCsv] = useState('')
+  const runImport = () => {
+    const rows = parseCsv(csv, importFields || ['name'])
+    if (rows.length && onImport) onImport(rows)
+    setCsv(''); setImportOpen(false)
+  }
   return (
     <div className="space-y-2">
-      <p className="font-body text-[12px] text-slate-500">{hint}</p>
+      <div className="flex items-start gap-2">
+        <p className="font-body text-[12px] text-slate-500 flex-1">{hint}</p>
+        {manage && onImport && <button type="button" onClick={() => setImportOpen(true)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }}><Upload size={12} /> Import CSV</button>}
+      </div>
       {manage ? (
         <NameListEditor title={title} items={items} accent={accent} onSave={onSave} />
       ) : (
@@ -9596,6 +9967,45 @@ function WhiteboardListSection({ title, hint, items, manage, accent, onSave }) {
           <p className="font-display text-base font-semibold text-slate-900 mb-2">{title}</p>
           <div className="flex flex-wrap gap-2">
             {items.length ? items.map((i) => <span key={i} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full" style={{ backgroundColor: `${accent}15`, color: accent }}>{i}</span>) : <p className="font-body text-sm text-slate-400">Nothing set yet.</p>}
+          </div>
+        </div>
+      )}
+
+      {manage && onSetGroup && items.length > 0 && (
+        <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Groups <span className="font-normal normal-case tracking-normal">· colour &amp; sort each job on the board (optional)</span></p>
+          <div className="space-y-1.5">
+            {items.map((job) => {
+              const g = (groups || {})[job] || ''
+              return (
+                <div key={job} className="flex items-center gap-2">
+                  {g && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: groupColor(g) }} />}
+                  <span className="font-body text-[13px] font-semibold text-slate-700 flex-1 min-w-0 truncate">{job}</span>
+                  <div className="shrink-0" style={{ width: 150 }}>
+                    <SearchSelect value={g} options={[{ value: '', label: 'No group' }, ...WB_GROUP_ORDER.map((x) => ({ value: x, label: x }))]} onPick={(v) => onSetGroup(job, v)} sort={false} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {importOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-6" style={{ backgroundColor: 'rgba(15,23,42,0.45)' }} onClick={() => setImportOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #EEF0EC' }}>
+              <p className="font-display text-base font-bold" style={{ color: FOREST }}>Import {title} (CSV)</p>
+              <button onClick={() => setImportOpen(false)} className="text-slate-400"><X size={18} /></button>
+            </div>
+            <div className="p-4">
+              <p className="font-body text-[12px] text-slate-500 mb-2">{importHint || 'One per line. A header row is fine.'}</p>
+              <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={7} placeholder={'Toro 3550\nToro 5800 sprayer'} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-[13px] font-mono" />
+              <div className="flex gap-2 mt-3">
+                <button type="button" onClick={() => setImportOpen(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Cancel</button>
+                <button type="button" onClick={runImport} disabled={!csv.trim()} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Import</button>
+              </div>
+            </div>
           </div>
         </div>
       )}

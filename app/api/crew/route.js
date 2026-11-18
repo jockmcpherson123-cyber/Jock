@@ -199,6 +199,16 @@ export async function POST(request) {
       if (error) throw error
       return Response.json({ ok: true })
     }
+    if (action === 'setstatus') {
+      // The per-person Crew QR page ticks a job done (or back). Status only —
+      // never any time/minutes. The club key already gates this.
+      const id = body.taskId
+      const status = ['todo', 'doing', 'done'].includes(body.status) ? body.status : 'done'
+      if (!id) return Response.json({ error: 'no_task' }, { status: 400 })
+      const { error } = await supabase.from('crew_tasks').update({ status }).eq('id', id)
+      if (error) throw error
+      return Response.json({ ok: true })
+    }
     if (action === 'moisture') {
       const greenId = body.greenId
       const values = (body.values || []).map(Number).filter(Number.isFinite)

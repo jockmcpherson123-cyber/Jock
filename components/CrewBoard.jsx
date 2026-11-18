@@ -34,6 +34,13 @@ const ES = {
   "Today's Cut": 'Corte de hoy',
 }
 const SLOT_ES = { '1': 'Trabajos 1', '2': 'Trabajos 2', '3': 'Trabajos 3', '4': 'Trabajos 4' }
+const SLOT_SHORT = { '1': '1st', '2': '2nd', '3': '3rd', '4': '4th' }
+
+// A person's board colour (matches the Workboard's Crew view): own hex, else
+// their group's colour, else a neutral.
+const CB_GROUP_COLORS = { Greens: '#2E7D4F', Fairways: '#2F6FB0', Tees: '#C27C0E', Rough: '#7A5C3E', Bunkers: '#D9A441', Details: '#8B5CF6', Equipment: '#0E7490', Irrigation: '#2563EB', Other: '#64748B' }
+const cbHex = (v) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(v || '').trim())
+const cbPersonColor = (crew, name) => { const c = (crew && crew[name]) || {}; if (cbHex(c.color)) return c.color; if (c.group && CB_GROUP_COLORS[c.group]) return CB_GROUP_COLORS[c.group]; return '#8AA394' }
 
 // `pub` (a club key) turns this into the no-login phone view: it reads today's
 // board from the public /api/crew endpoint and polls instead of using Realtime.
@@ -55,6 +62,8 @@ export default function CrewBoard({ pub = null }) {
   const [live, setLive] = useState(false)
   // Whole-board language toggle (independent of each person's own language).
   const [lang, setLang] = useState('en')
+  // Board layout: grouped by job (default) or one card per person (Crew).
+  const [view, setView] = useState('jobs')
   const T = (en) => (lang === 'es' ? (ES[en] || en) : en)
   // Dynamic text (job names, notes, message): prefer an AI translation if one is
   // cached, otherwise fall back to the built-in Spanish dictionary so it still
@@ -217,6 +226,13 @@ export default function CrewBoard({ pub = null }) {
   const SLOT_LABELS = { '1': '1st Jobs', '2': '2nd Jobs', '3': '3rd Jobs', '4': '4th Jobs' }
   const slotsPresent = ['1', '2', '3', '4'].filter((k) => bySlot[k] && Object.keys(bySlot[k]).length)
 
+  // Crew layout — one card per person, jobs in slot order.
+  const slotRank = (s) => ['1', '2', '3', '4'].indexOf(String(s || '1'))
+  const cbByPerson = {}
+  shown.forEach((t) => { if (t.assignee) (cbByPerson[t.assignee] = cbByPerson[t.assignee] || []).push(t) })
+  Object.values(cbByPerson).forEach((l) => l.sort((a, b) => slotRank(a.slot) - slotRank(b.slot) || (a.sort || 0) - (b.sort || 0)))
+  const cbNames = Object.keys(cbByPerson).sort((a, b) => a.localeCompare(b))
+
   return (
     <div style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: `radial-gradient(1200px 600px at 50% -10%, #1d3527 0%, ${FOREST} 60%)`, color: '#F3F0E6', fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' }}>
       <div style={{ maxWidth: 'none', margin: '0 auto', padding: '2vw 2.4vw', width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -244,6 +260,17 @@ export default function CrewBoard({ pub = null }) {
                     fontSize: 'clamp(12px,1.2vw,20px)', fontWeight: 700, padding: '0.35em 1.1em', borderRadius: 999,
                     border: on ? 'none' : '1px solid rgba(255,255,255,0.25)',
                     background: on ? '#E8EDE7' : 'rgba(255,255,255,0.08)', color: on ? FOREST : '#E8EDE7', cursor: 'pointer',
+                  }}>{label}</button>
+                )
+              })}
+              <span style={{ width: 1, alignSelf: 'stretch', background: 'rgba(255,255,255,0.18)', margin: '0 2px' }} />
+              {[['jobs', lang === 'es' ? 'Trabajos' : 'Jobs'], ['crew', lang === 'es' ? 'Equipo' : 'Crew']].map(([code, label]) => {
+                const on = view === code
+                return (
+                  <button key={code} onClick={() => setView(code)} style={{
+                    fontSize: 'clamp(12px,1.2vw,20px)', fontWeight: 700, padding: '0.35em 1.1em', borderRadius: 999,
+                    border: on ? 'none' : '1px solid rgba(255,255,255,0.25)',
+                    background: on ? GOLD : 'rgba(255,255,255,0.08)', color: on ? FOREST : '#E8EDE7', cursor: 'pointer',
                   }}>{label}</button>
                 )
               })}
@@ -281,7 +308,47 @@ export default function CrewBoard({ pub = null }) {
           <div ref={fitWrapRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
           <div ref={fitContentRef} style={{ transformOrigin: 'top left' }}>
           <div style={{ display: 'flex', gap: '1.4vw', alignItems: 'flex-start' }}>
+            {/* Crew layout — one card per person */}
+            {view === 'crew' && (
+            <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.1vw', alignItems: 'start' }}>
+                {cbNames.map((name) => {
+                  const list = cbByPerson[name]
+                  const color = cbPersonColor(effCrew, name)
+                  const dispLang = lang === 'es' ? 'es' : crew[name]?.lang
+                  return (
+                    <div key={name} style={{ background: '#FBFAF6', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.28)', borderLeft: `8px solid ${color}` }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '0.55vw 0.8vw', background: '#E6EDE4', borderBottom: '1px solid #D3DCD2' }}>
+                        <span style={{ fontSize: 'clamp(16px,1.5vw,28px)', fontWeight: 800, color: '#1A2A1F' }}>{name}</span>
+                        <span style={{ fontSize: 'clamp(11px,1vw,17px)', fontWeight: 700, color: '#8A9A8E', marginLeft: 'auto' }}>{list.length} {list.length !== 1 ? T('jobs') : T('job')}</span>
+                      </div>
+                      <div>
+                        {list.map((t) => {
+                          const tools = (t.equipment || '').split(',').map((s) => s.trim()).filter(Boolean).map((tool) => txGet(tx, dispLang, tool) || (lang === 'es' ? toEs(tool) : tool))
+                          const detail = tools.join(' · ')
+                          const noteText = t.notes ? (txGet(tx, dispLang, t.notes) || (lang === 'es' ? toEs(t.notes) : t.notes)) : ''
+                          const jobText = txGet(tx, dispLang, t.job) || (lang === 'es' ? toEs(t.job) : t.job)
+                          return (
+                            <div key={t.id} style={{ padding: '0.4vw 0.7vw', borderBottom: '1px solid #EFEEE6' }}>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                                {slotsPresent.length > 1 && <span style={{ fontSize: 'clamp(9px,0.8vw,14px)', fontWeight: 800, textTransform: 'uppercase', color: GOLD, background: 'rgba(201,168,76,0.14)', padding: '1px 6px', borderRadius: 6, whiteSpace: 'nowrap' }}>{SLOT_SHORT[t.slot || '1']}</span>}
+                                <span style={{ fontSize: 'clamp(14px,1.3vw,24px)', fontWeight: 700, color: '#23241E' }}>{jobText}</span>
+                                {!course && t.course && <span style={{ fontSize: 'clamp(9px,0.8vw,14px)', fontWeight: 700, color: '#3B5BA5', background: '#E7ECF8', padding: '1px 7px', borderRadius: 999, whiteSpace: 'nowrap', marginLeft: 'auto' }}>{t.course}</span>}
+                              </div>
+                              {noteText && <div style={{ fontSize: 'clamp(11px,1vw,18px)', color: FERN, fontWeight: 600 }}>{noteText}</div>}
+                              {detail && <div style={{ fontSize: 'clamp(11px,1vw,18px)', color: '#7C8A80' }}>{detail}</div>}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            )}
             {/* Jobs — grouped into rounds, in readable columns */}
+            {view === 'jobs' && (
             <div style={{ flex: '1 1 auto', minWidth: 0 }}>
               {slotsPresent.map((slotKey) => {
               const sGroups = bySlot[slotKey]
@@ -366,6 +433,7 @@ export default function CrewBoard({ pub = null }) {
               )
               })}
             </div>
+            )}
             {/* Vertical hole — a tight column running up the right side */}
             <div style={{ flex: '0 0 clamp(130px, 11vw, 190px)', alignSelf: 'flex-start' }}>
               <div style={{ fontSize: 'clamp(11px,1vw,18px)', letterSpacing: '0.2em', textTransform: 'uppercase', color: GOLD, fontWeight: 700, marginBottom: 8, textAlign: 'center' }}>{T("Today's Cut")}</div>
