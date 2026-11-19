@@ -53,7 +53,7 @@ export function SearchSelect({ value, options = [], onPick, placeholder = 'Searc
 // several at once without re-opening.
 // `dimmed` names render greyed with a small tag (e.g. "on a job") — a hint that
 // they're already spoken for elsewhere, while still being selectable.
-export function MultiSelect({ selected = [], options = [], onToggle, placeholder = 'Search…', accent = FERN, hideChips = false, dimmed = [], dimmedLabel = 'busy', autoOpen = false, compact = false }) {
+export function MultiSelect({ selected = [], options = [], onToggle, placeholder = 'Search…', accent = FERN, hideChips = false, dimmed = [], dimmedLabel = 'busy', autoOpen = false, compact = false, meta = {} }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const wrapRef = useRef(null)
@@ -90,6 +90,7 @@ export function MultiSelect({ selected = [], options = [], onToggle, placeholder
               <button key={o} type="button" onMouseDown={(e) => { e.preventDefault(); onToggle(o) }} className={`w-full text-left font-body hover:bg-slate-50 flex items-center gap-2.5 ${compact ? 'px-3 py-2 text-sm' : 'px-3 py-3 text-base'}`} style={busy ? { backgroundColor: '#F8FAFB' } : {}}>
                 <span className="inline-flex items-center justify-center rounded shrink-0" style={{ width: 20, height: 20, border: `1.5px solid ${on ? accent : '#CBD5E1'}`, backgroundColor: on ? accent : 'white' }}>{on && <Check size={13} color="white" />}</span>
                 <span className="flex-1" style={busy ? { color: '#94A3B8' } : {}}>{o}</span>
+                {!busy && meta[o] && <span className="font-body text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#FBF1D3', color: '#92660D' }} title="Last did this job">{meta[o]}</span>}
                 {busy && <span className="font-body text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#EEF1F4', color: '#94A3B8' }}>{dimmedLabel}</span>}
               </button>
             )

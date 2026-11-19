@@ -8708,7 +8708,7 @@ function AddJobRow({ options = [], onAdd, placeholder = 'Add a job…', max = 10
 const WB_SECTIONS = [
   { key: 'workboard', label: 'Workboard', icon: ClipboardList },
   { key: 'mowing', label: 'Mowing', icon: Scissors },
-  { key: 'insights', label: 'Time & Efficiency', icon: BarChart3 },
+  { key: 'insights', label: 'Job History', icon: BarChart3 },
   { key: 'crew', label: 'Crew', icon: User },
   { key: 'equipment', label: 'Equipment', icon: Truck },
   { key: 'jobtypes', label: 'Job Types', icon: Check },
@@ -8898,7 +8898,7 @@ function WhiteboardModule({ user, nav, hideChrome }) {
               )}
             </div>
           )}
-          {section === 'insights' && <WhiteboardInsights />}
+          {section === 'insights' && <WhiteboardInsights courses={courses} jobGroups={courseInfo.jobGroups || {}} />}
           {section === 'crew' && <WhiteboardCrew roster={roster} operators={operators} crewMembers={crewMembers} courses={courses} crew={crew} manage={manage} onSaveCrew={(next) => saveCourse({ crew: next })} onSaveMembers={(list) => saveCourse({ crewMembers: list })} onImport={(crewPatch, newNames) => saveCourse({ crew: crewPatch, crewMembers: [...new Set([...crewMembers, ...newNames])] })} />}
           {section === 'equipment' && <WhiteboardListSection title="Equipment" hint="The mowers, rollers, blowers and carts your crew runs. These become quick-pick chips when you add a job." items={equipment} manage={manage} accent={FERN} onSave={(list) => saveCourse({ equipment: list })} importFields={['name', 'type']} importHint="One piece of equipment per line. Optional second column for a type, e.g.  Toro 3550, Greens mower" onImport={(rows) => saveCourse({ equipment: [...new Set([...(equipment || []), ...rows.map((r) => r.name).filter(Boolean)])] })} />}
           {section === 'jobtypes' && <WhiteboardListSection title="Job Types" hint="The everyday jobs that show as one-tap chips on the Workboard. Add the ones your crew runs each morning. A group colours and sorts the job on the board." items={jobTypes} manage={manage} accent={FOREST} onSave={(list) => saveCourse({ jobTypes: list })} groups={courseInfo.jobGroups || {}} onSetGroup={(job, g) => { const next = { ...(courseInfo.jobGroups || {}) }; if (g) next[job] = g; else delete next[job]; saveCourse({ jobGroups: next }) }} />}
@@ -9117,6 +9117,34 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
 
   const reload = async () => { try { setTasks(await db.fetchCrewTasks(date, date)) } catch (e) { console.error(e) } }
 
+  // Rotation history — the last ~60 days of jobs, so we can show "last did this:
+  // 3 days ago" next to each name when assigning (spreads the work around).
+  const [history, setHistory] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => { try { const h = await db.fetchCrewTasks(shiftDate(date, -60), shiftDate(date, -1)); if (!cancelled) setHistory(h) } catch (e) { console.error(e) } })()
+    return () => { cancelled = true }
+  }, [date])
+  const lastDidByJob = useMemo(() => {
+    const m = {}
+    history.forEach((t) => { if (!t.assignee || !t.job) return; const j = (m[t.job] ||= {}); if (!j[t.assignee] || t.date > j[t.assignee]) j[t.assignee] = t.date })
+    return m
+  }, [history])
+  const daysAgoLabel = (fromISO, toISO) => {
+    const d = Math.round((new Date(`${toISO}T00:00:00`) - new Date(`${fromISO}T00:00:00`)) / 86400000)
+    if (d <= 0) return ''
+    if (d === 1) return '1d'
+    if (d < 14) return `${d}d`
+    return `${Math.round(d / 7)}w`
+  }
+  // { name: "3d" } for a job — how long since each person last did it.
+  const rotMeta = (job) => {
+    const src = lastDidByJob[job] || {}
+    const out = {}
+    Object.keys(src).forEach((name) => { const lbl = daysAgoLabel(src[name], date); if (lbl) out[name] = lbl })
+    return out
+  }
+
   // Assign (or move) one task row onto a person — used by the Crew view's
   // Unassigned pool (tap a job, then tap a person; or drag it onto a card).
   const assignTaskTo = async (taskId, name) => {
@@ -9144,12 +9172,46 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
     finally { setBusy(false) }
   }
-  const rowsToDate = (rows) => rows.map((t) => ({ date, job: t.job, area: t.area || '', assignee: t.assignee || '', equipment: t.equipment || '', course: t.course || '', status: 'todo', sort: t.sort ?? 0, notes: t.notes || '', groupNote: t.groupNote || '', slot: t.slot || '1' }))
+  const rowsToDate = (rows, target = date) => rows.map((t) => ({ date: target, job: t.job, area: t.area || '', assignee: t.assignee || '', equipment: t.equipment || '', course: t.course || '', status: 'todo', sort: t.sort ?? 0, notes: t.notes || '', groupNote: t.groupNote || '', slot: t.slot || '1' }))
+  // Board history: copy the day you're viewing onto today.
+  const copyToToday = async () => {
+    const today = localDateISO()
+    if (date === today || !view.length) return
+    setBusy(true)
+    try { await db.addCrewTasks(rowsToDate(view, today)); setMsg({ type: 'ok', text: `Copied ${view.length} job${view.length !== 1 ? 's' : ''} to today.` }) }
+    catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
+    finally { setBusy(false) }
+  }
   const doCopy = async (rows) => {
     setConfirmCopy(null); setBusy(true)
     try { await db.addCrewTasks(rowsToDate(rows)); await reload(); setMsg({ type: 'ok', text: `Copied ${rows.length} job${rows.length !== 1 ? 's' : ''}.` }) }
     catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
     finally { setBusy(false) }
+  }
+
+  // Printable daily board (PDF via the browser's print dialog) — one block per
+  // person with their jobs by slot, matching the Crew view. No times, ever.
+  const printBoard = () => {
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+    const club = settings.courseInfo?.clubName || 'Grounds Operations'
+    const jobLine = (t, withName) => {
+      const tools = (t.equipment || '').split(',').map((x) => x.trim()).filter(Boolean).join(', ')
+      return `<div class="job"><span class="slot">${esc(slotLabel(t.slot || '1').replace(' Jobs', ''))}</span> <b>${esc(t.job)}</b>${withName && t.assignee ? ` — ${esc(t.assignee)}` : ''}${t.notes ? ` — <span class="note">${esc(t.notes)}</span>` : ''}${tools ? ` <span class="eq">[${esc(tools)}]</span>` : ''}</div>`
+    }
+    const people = workingNames.map((name) => {
+      const list = byPerson[name]
+      return `<div class="person"><div class="pname" style="border-left:6px solid ${personColor(crew, name)}">${esc(name)} <span class="ct">· ${list.length} job${list.length !== 1 ? 's' : ''}</span></div>${list.map((t) => jobLine(t, false)).join('')}</div>`
+    }).join('')
+    const un = unassigned.length ? `<div class="person"><div class="pname" style="border-left:6px solid #94A3B8">Unassigned <span class="ct">· ${unassigned.length}</span></div>${unassigned.map((t) => jobLine(t, false)).join('')}</div>` : ''
+    if (!people && !un) { setMsg({ type: 'err', text: 'Nothing on the board to print.' }); return }
+    const iframe = document.createElement('iframe')
+    Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
+    document.body.appendChild(iframe)
+    const doc = iframe.contentWindow.document
+    doc.open()
+    doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>Job Board</title><style>@page{margin:0.5in}body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#1A2A1F}h1{font-family:Georgia,serif;font-size:22px;margin:0 0 2px}.sub{color:#3A6B4A;font-weight:700;font-size:13px;margin-bottom:14px;text-transform:capitalize}.grid{column-count:2;column-gap:18px}.person{break-inside:avoid;margin-bottom:12px;border:1px solid #E4EBE6;border-radius:8px;overflow:hidden}.pname{font-weight:800;font-size:14px;padding:5px 8px;background:#EAF2EC}.ct{color:#8A9A8E;font-weight:600;font-size:12px}.job{font-size:12.5px;padding:4px 8px;border-top:1px solid #EFEEE6}.slot{display:inline-block;font-size:9px;font-weight:800;text-transform:uppercase;color:#64748B;background:#EEF2F0;border-radius:4px;padding:1px 5px;margin-right:4px}.note{color:#2E7D4F;font-weight:600}.eq{color:#57756A}</style></head><body><h1>${esc(club)} — Job Board</h1><div class="sub">${esc(prettyDay(date))}${activeCourse ? ` · ${esc(activeCourse)}` : ''}</div><div class="grid">${people}${un}</div></body></html>`)
+    doc.close()
+    setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }, 350)
   }
 
   // Templates — save the current day's board as a named template, load one onto
@@ -9339,11 +9401,13 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
     <div>
       <div className="bg-white rounded-2xl border border-black/5 p-2.5 shadow-sm mb-4 flex items-center gap-2">
         <button onClick={() => setDate(shiftDate(date, -1))} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Previous day"><ChevronRight size={16} className="text-slate-500" style={{ transform: 'rotate(180deg)' }} /></button>
-        <div className="flex-1 text-center">
+        <label className="flex-1 text-center relative cursor-pointer" title="Tap to jump to any date">
+          <input type="date" value={date} onChange={(e) => { if (e.target.value) setDate(e.target.value) }} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" aria-label="Jump to a date" />
           <p className="font-body text-sm font-bold text-slate-800">{prettyDay(date)}</p>
-          <p className="font-body text-[10px] text-slate-400">{view.length} job{view.length !== 1 ? 's' : ''}</p>
-        </div>
+          <p className="font-body text-[10px] text-slate-400">{view.length} job{view.length !== 1 ? 's' : ''}{!isToday ? ' · history' : ''}</p>
+        </label>
         <button onClick={() => setDate(shiftDate(date, 1))} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Next day"><ChevronRight size={16} className="text-slate-500" /></button>
+        {!isToday && manage && view.length > 0 && <button onClick={copyToToday} disabled={busy} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-full disabled:opacity-40" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Copy this day's board onto today">Copy to today</button>}
         {!isToday && <button onClick={() => setDate(localDateISO())} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FERN }}>Today</button>}
       </div>
 
@@ -9378,6 +9442,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
               <button onClick={findYesterday} disabled={busy} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Recreate the most recent earlier day's board on this date"><Copy size={12} /> Copy yesterday</button>
               <button onClick={() => { const n = typeof window !== 'undefined' ? window.prompt('Name this template (e.g. “Tournament week AM”)') : ''; if (n) saveTemplate(n) }} disabled={busy || view.length === 0} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Save the current board as a reusable template"><Save size={12} /> Save template</button>
               <button onClick={() => setTplOpen(true)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Load a saved template onto this day"><Layers size={12} /> Templates{templates.length ? ` · ${templates.length}` : ''}</button>
+              <button onClick={printBoard} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Print the day's board (one block per person) — or save as PDF"><Printer size={12} /> PDF</button>
             </div>
           )}
         </div>
@@ -9556,7 +9621,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
                       const others = [...new Set(view.filter((t) => t.assignee === name).map((t) => t.job).filter(Boolean))]
                       if (others.length) { setConfirmAssign({ name, jk, s, others }); return }
                       addPersonToJob(jk, name, s)
-                    }} hideChips autoOpen={crewAddJob === gk} dimmed={assignedToday} dimmedLabel="on a job" placeholder="Add crew — tap to check people on…" />
+                    }} hideChips autoOpen={crewAddJob === gk} dimmed={assignedToday} dimmedLabel="on a job" meta={rotMeta(jk)} placeholder="Add crew — tap to check people on…" />
                     <div className="mt-1.5">
                       {list.filter((t) => t.assignee).map((t, pi) => (
                         <div key={t.id} className="flex items-center gap-2.5 py-1.5" style={{ borderTop: pi > 0 ? '1px solid #F1F4F2' : 'none' }}>
@@ -9847,12 +9912,16 @@ function WhiteboardCrew({ roster = [], operators = [], crewMembers = [], courses
   )
 }
 
-// Time & Efficiency — the trends the Workboard feeds: how many jobs, hours
-// logged, average time per job type, and workload per person over a window.
-function WhiteboardInsights() {
+// Job History — how many times each job ran in a window, broken down by person,
+// plus workload per person. Counts jobs, never hours (no time data anywhere).
+function WhiteboardInsights({ courses = [], jobGroups = {} }) {
   const [range, setRange] = useState('30')
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
+  const [course, setCourse] = useState('')
+  const [filter, setFilter] = useState('')
+  const courseNames = courses.map((c) => c.name)
+  const hasCourses = courseNames.length >= 2
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -9865,17 +9934,25 @@ function WhiteboardInsights() {
     return () => { cancelled = true }
   }, [range])
 
-  const done = rows.filter((t) => t.status === 'done').length
-  const totalMin = rows.reduce((s, t) => s + (Number(t.minutes) || 0), 0)
-  const hours = Math.round((totalMin / 60) * 10) / 10
+  const scoped = (course ? rows.filter((t) => t.course === course || !t.course) : rows).filter((t) => t.assignee || t.job)
+  const q = filter.trim().toLowerCase()
+  const done = scoped.filter((t) => t.status === 'done').length
+  const people = new Set(scoped.filter((t) => t.assignee).map((t) => t.assignee)).size
 
+  // Per job: total count + a per-person tally (the headline breakdown).
   const byJob = {}
-  rows.forEach((t) => { const k = t.job || '—'; const g = (byJob[k] ||= { job: k, count: 0, min: 0, minCount: 0 }); g.count++; if (Number(t.minutes) > 0) { g.min += Number(t.minutes); g.minCount++ } })
-  const jobRows = Object.values(byJob).map((g) => ({ ...g, avg: g.minCount ? Math.round(g.min / g.minCount) : null })).sort((a, b) => b.count - a.count)
+  scoped.forEach((t) => { const k = t.job || '—'; const g = (byJob[k] ||= { job: k, count: 0, people: {} }); g.count++; if (t.assignee) g.people[t.assignee] = (g.people[t.assignee] || 0) + 1 })
+  let jobRows = Object.values(byJob).map((g) => ({ ...g, breakdown: Object.entries(g.people).sort((a, b) => b[1] - a[1]) })).sort((a, b) => b.count - a.count)
+  if (q) jobRows = jobRows.filter((r) => r.job.toLowerCase().includes(q))
   const jobMax = Math.max(1, ...jobRows.map((r) => r.count))
 
+  // Per group (from Job Types groups) — the "by group" roll-up.
+  const byGroup = {}
+  scoped.forEach((t) => { const g = jobGroups[t.job] || 'Ungrouped'; byGroup[g] = (byGroup[g] || 0) + 1 })
+  const groupRows = Object.entries(byGroup).sort((a, b) => b[1] - a[1])
+
   const byPerson = {}
-  rows.forEach((t) => { const k = t.assignee || 'Unassigned'; const g = (byPerson[k] ||= { name: k, count: 0, done: 0, min: 0 }); g.count++; if (t.status === 'done') g.done++; g.min += Number(t.minutes) || 0 })
+  scoped.forEach((t) => { if (!t.assignee) return; const g = (byPerson[t.assignee] ||= { name: t.assignee, count: 0, done: 0 }); g.count++; if (t.status === 'done') g.done++ })
   const personRows = Object.values(byPerson).sort((a, b) => b.count - a.count)
 
   const tile = (label, value) => (
@@ -9887,54 +9964,84 @@ function WhiteboardInsights() {
 
   return (
     <div>
-      <div className="flex gap-2 mb-4">
+      <div className="flex flex-wrap gap-2 mb-3">
         {[['30', '30 days'], ['90', '90 days'], ['365', 'Season']].map(([k, l]) => (
           <button key={k} onClick={() => setRange(k)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition" style={range === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{l}</button>
+        ))}
+        {hasCourses && <span className="w-px self-stretch bg-slate-200 mx-0.5" />}
+        {hasCourses && ['', ...courseNames].map((c) => (
+          <button key={c || 'all'} onClick={() => setCourse(c)} className="font-body text-xs font-semibold px-3 py-1.5 rounded-full transition" style={course === c ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>{c || 'All'}</button>
         ))}
       </div>
 
       {loading ? (
         <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-      ) : rows.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">No jobs logged in this window yet. As the crew works the board, trends build here.</div>
+      ) : scoped.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">No jobs in this window yet. As the crew works the board, history builds here.</div>
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-2">
-            {tile('Jobs', rows.length)}
+            {tile('Jobs', scoped.length)}
             {tile('Completed', done)}
-            {tile('Hours logged', hours)}
+            {tile('People', people)}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
-            <p className="font-body font-semibold text-sm text-slate-900 mb-1">Time by job</p>
-            <p className="font-body text-[10px] text-slate-400 mb-3">How often each job runs, and its average time when minutes are logged.</p>
-            <div className="space-y-2">
-              {jobRows.map((r) => (
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <p className="font-body font-semibold text-sm text-slate-900">By job</p>
+              <span className="font-body text-[10px] text-slate-400">{range === '365' ? 'this season' : `last ${range} days`}</span>
+            </div>
+            <p className="font-body text-[10px] text-slate-400 mb-2">How many times each job ran, and who did it. Filter to answer “who’s been on bunkers?”</p>
+            <div className="relative mb-3">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter jobs…" className="w-full border border-slate-200 rounded-lg pl-8 pr-2.5 py-2 text-sm font-body" />
+            </div>
+            <div className="space-y-2.5">
+              {jobRows.length === 0 ? <p className="font-body text-[12px] text-slate-400">No jobs match “{filter}”.</p> : jobRows.map((r) => (
                 <div key={r.job}>
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <p className="font-body text-[12px] font-semibold text-slate-700 truncate">{r.job}</p>
-                    <p className="font-body text-[11px] text-slate-500 shrink-0 tabular-nums">{r.count}× {r.avg != null ? `· ${r.avg} min avg` : ''}</p>
+                    <p className="font-body text-[11px] font-bold text-slate-600 shrink-0 tabular-nums">{r.count}×</p>
                   </div>
-                  <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${Math.max(3, Math.round((r.count / jobMax) * 100))}%`, backgroundColor: FERN }} /></div>
+                  <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden mb-1"><div className="h-full rounded-full" style={{ width: `${Math.max(3, Math.round((r.count / jobMax) * 100))}%`, backgroundColor: FERN }} /></div>
+                  {r.breakdown.length > 0 && <p className="font-body text-[11px] text-slate-500">{r.breakdown.map(([n, c]) => `${n} ${c}`).join(', ')}</p>}
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
-            <p className="font-body font-semibold text-sm text-slate-900 mb-3">Workload by person</p>
-            <div className="space-y-2">
-              {personRows.map((p) => (
-                <div key={p.name} className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8F3EC' }}><User size={12} style={{ color: FERN }} /></div>
-                    <p className="font-body text-[13px] font-semibold text-slate-700 truncate">{p.name}</p>
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+              <p className="font-body font-semibold text-sm text-slate-900 mb-3">By person</p>
+              <div className="space-y-2">
+                {personRows.map((p) => (
+                  <div key={p.name} className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#E8F3EC' }}><User size={12} style={{ color: FERN }} /></div>
+                      <p className="font-body text-[13px] font-semibold text-slate-700 truncate">{p.name}</p>
+                    </div>
+                    <p className="font-body text-[11px] text-slate-500 shrink-0 tabular-nums">{p.count} job{p.count !== 1 ? 's' : ''} · {p.done} done</p>
                   </div>
-                  <p className="font-body text-[11px] text-slate-500 shrink-0 tabular-nums">{p.count} job{p.count !== 1 ? 's' : ''} · {p.done} done{p.min > 0 ? ` · ${Math.round((p.min / 60) * 10) / 10}h` : ''}</p>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
+            {groupRows.length > 0 && (
+              <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+                <p className="font-body font-semibold text-sm text-slate-900 mb-3">By group</p>
+                <div className="space-y-1.5">
+                  {groupRows.map(([g, c]) => (
+                    <div key={g} className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: g === 'Ungrouped' ? '#CBD5E1' : groupColor(g) }} />
+                        <p className="font-body text-[13px] font-semibold text-slate-700 truncate">{g}</p>
+                      </div>
+                      <p className="font-body text-[11px] text-slate-500 shrink-0 tabular-nums">{c}×</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           </div>
         </div>
