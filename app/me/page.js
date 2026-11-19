@@ -24,6 +24,7 @@ function Me() {
   const [tasks, setTasks] = useState([])
   const [crew, setCrew] = useState({})
   const [club, setClub] = useState('')
+  const [jobPpe, setJobPpe] = useState({})
   const [tx, setTx] = useState({})
   const [state, setState] = useState('loading') // loading | ok | denied | error
   const [lang, setLang] = useState('en')
@@ -43,6 +44,7 @@ function Me() {
       setTasks((j.tasks || []).filter((t) => t.assignee === person))
       setCrew(j.crew || {})
       setClub(j.club || '')
+      setJobPpe((j.courseInfo && j.courseInfo.jobPpe) || {})
       setState('ok')
     } catch { setState('error') }
   }, [k, person, date])
@@ -115,6 +117,7 @@ function Me() {
                     const tools = (t.equipment || '').split(',').map((x) => x.trim()).filter(Boolean).map((tool) => D(tool))
                     const note = t.notes ? D(t.notes) : ''
                     const groupNote = t.groupNote ? D(t.groupNote) : ''
+                    const ppe = jobPpe[t.job] || []
                     return (
                       <div key={t.id} className="bg-white rounded-2xl border shadow-sm overflow-hidden" style={{ borderColor: done ? '#CDE7D4' : 'rgba(0,0,0,0.06)', opacity: done ? 0.7 : 1 }}>
                         <div className="flex items-start gap-3 p-3">
@@ -127,6 +130,12 @@ function Me() {
                             {tools.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1.5">
                                 {tools.map((tool, i) => <span key={i} className="font-body text-[11px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#F1F5F3', color: '#57756A' }}>{tool}</span>)}
+                              </div>
+                            )}
+                            {ppe.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                                <span className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: '#B45309' }}>{T('PPE', 'EPP')}:</span>
+                                {ppe.map((p, i) => <span key={i} className="font-body text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#FEF3C7', color: '#92660D' }}>{D(p)}</span>)}
                               </div>
                             )}
                           </div>

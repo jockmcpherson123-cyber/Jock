@@ -8708,8 +8708,10 @@ function AddJobRow({ options = [], onAdd, placeholder = 'Add a job…', max = 10
 const WB_SECTIONS = [
   { key: 'workboard', label: 'Workboard', icon: ClipboardList },
   { key: 'mowing', label: 'Mowing', icon: Scissors },
+  { key: 'calendar', label: 'Time Off', icon: Calendar, manage: true },
   { key: 'insights', label: 'Job History', icon: BarChart3 },
   { key: 'crew', label: 'Crew', icon: User },
+  { key: 'training', label: 'Training', icon: ShieldCheck, manage: true },
   { key: 'equipment', label: 'Equipment', icon: Truck },
   { key: 'jobtypes', label: 'Job Types', icon: Check },
 ]
@@ -8738,6 +8740,22 @@ const personColor = (crew, name) => {
   if (c.group) return groupColor(c.group)
   return '#94A3B8'
 }
+// Safety / training cards the crew carries (seeded from the club's list). Stored
+// per person in course_info.training; a card is "current" unless its expiry has
+// passed. These drive the warn-only check when assigning jobs that require them.
+const TRAINING_CARDS = [
+  'Blood Pathogen', 'Chain Saw / Wood Chipper', 'General safety rules', 'Heat stress',
+  'Lift Safety', 'Portable ladders', 'Push-mow/fly-mow', 'SDS', 'Smoking and fire safety',
+  'Turf equipment and Tractors', 'Utility Vehicle', 'Weedwhackers', 'Working near golfers',
+]
+// Time off is stored in course_info.timeoff as inclusive [start,end] per person
+// (a single day = start===end). Someone off a date can't be picked for the board.
+const isOffOn = (timeoff, person, dateISO) => (Array.isArray(timeoff) ? timeoff : []).some((e) => e && e.person === person && e.start && e.end && e.start <= dateISO && dateISO <= e.end)
+// Training: course_info.training[person] = [{ card, trainedOn, expiresOn }].
+// A blank expiry never expires; otherwise it's current while expiry >= today.
+const hasCurrentCard = (training, person, card, todayISO) => (((training && training[person]) || []).some((c) => c && c.card === card && (!c.expiresOn || c.expiresOn >= todayISO)))
+const missingCardsFor = (training, jobCards, person, job, todayISO) => (((jobCards && jobCards[job]) || []).filter((c) => !hasCurrentCard(training, person, c, todayISO)))
+
 // Parse a small pasted CSV into row objects in the given field order. A header
 // row (first cell equal to the first field name) is dropped. Quotes/whitespace
 // trimmed; extra columns ignored; blank first-field rows skipped.
@@ -8790,7 +8808,7 @@ function WhiteboardModule({ user, nav, hideChrome }) {
 
   const Nav = ({ onPick }) => (
     <nav className="space-y-1">
-      {WB_SECTIONS.map((s) => {
+      {WB_SECTIONS.filter((s) => !s.manage || manage).map((s) => {
         const on = s.key === section
         const Icon = s.icon
         return (
@@ -8880,7 +8898,7 @@ function WhiteboardModule({ user, nav, hideChrome }) {
           <div className="bg-white rounded-2xl border border-black/5 p-2 shadow-sm sticky top-4"><Nav /></div>
         </aside>
         <div className="flex-1 min-w-0">
-          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} roster={roster} jobTypes={jobTypes} jobGroups={courseInfo.jobGroups || {}} equipment={equipment} courses={courses} crew={crew} boardMessage={courseInfo.boardMessage || ''} onSaveMessage={(m) => saveCourse({ boardMessage: m })} jobBoard={courseInfo.jobBoard || {}} onSaveCourse={saveCourse} />}
+          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} roster={roster} jobTypes={jobTypes} jobGroups={courseInfo.jobGroups || {}} equipment={equipment} courses={courses} crew={crew} boardMessage={courseInfo.boardMessage || ''} onSaveMessage={(m) => saveCourse({ boardMessage: m })} jobBoard={courseInfo.jobBoard || {}} onSaveCourse={saveCourse} timeoff={courseInfo.timeoff || []} training={courseInfo.training || {}} jobCards={courseInfo.jobCards || {}} />}
           {section === 'mowing' && (
             <div>
               <div className="flex gap-1.5 mb-4">
@@ -8898,10 +8916,12 @@ function WhiteboardModule({ user, nav, hideChrome }) {
               )}
             </div>
           )}
+          {section === 'calendar' && manage && <WhiteboardCalendar roster={roster} crew={crew} courses={courses} timeoff={courseInfo.timeoff || []} onSave={(list) => saveCourse({ timeoff: list })} />}
+          {section === 'training' && manage && <WhiteboardTraining roster={roster} crew={crew} training={courseInfo.training || {}} jobCards={courseInfo.jobCards || {}} jobTypes={jobTypes} onSave={(next) => saveCourse({ training: next })} />}
           {section === 'insights' && <WhiteboardInsights courses={courses} jobGroups={courseInfo.jobGroups || {}} />}
           {section === 'crew' && <WhiteboardCrew roster={roster} operators={operators} crewMembers={crewMembers} courses={courses} crew={crew} manage={manage} onSaveCrew={(next) => saveCourse({ crew: next })} onSaveMembers={(list) => saveCourse({ crewMembers: list })} onImport={(crewPatch, newNames) => saveCourse({ crew: crewPatch, crewMembers: [...new Set([...crewMembers, ...newNames])] })} />}
           {section === 'equipment' && <WhiteboardListSection title="Equipment" hint="The mowers, rollers, blowers and carts your crew runs. These become quick-pick chips when you add a job." items={equipment} manage={manage} accent={FERN} onSave={(list) => saveCourse({ equipment: list })} importFields={['name', 'type']} importHint="One piece of equipment per line. Optional second column for a type, e.g.  Toro 3550, Greens mower" onImport={(rows) => saveCourse({ equipment: [...new Set([...(equipment || []), ...rows.map((r) => r.name).filter(Boolean)])] })} />}
-          {section === 'jobtypes' && <WhiteboardListSection title="Job Types" hint="The everyday jobs that show as one-tap chips on the Workboard. Add the ones your crew runs each morning. A group colours and sorts the job on the board." items={jobTypes} manage={manage} accent={FOREST} onSave={(list) => saveCourse({ jobTypes: list })} groups={courseInfo.jobGroups || {}} onSetGroup={(job, g) => { const next = { ...(courseInfo.jobGroups || {}) }; if (g) next[job] = g; else delete next[job]; saveCourse({ jobGroups: next }) }} />}
+          {section === 'jobtypes' && <WhiteboardListSection title="Job Types" hint="The everyday jobs that show as one-tap chips on the Workboard. Add the ones your crew runs each morning. A group colours and sorts the job; cards and PPE flag safety needs." items={jobTypes} manage={manage} accent={FOREST} onSave={(list) => saveCourse({ jobTypes: list })} groups={courseInfo.jobGroups || {}} onSetGroup={(job, g) => { const next = { ...(courseInfo.jobGroups || {}) }; if (g) next[job] = g; else delete next[job]; saveCourse({ jobGroups: next }) }} jobCards={courseInfo.jobCards || {}} onSetCards={(job, list) => { const next = { ...(courseInfo.jobCards || {}) }; if (list.length) next[job] = list; else delete next[job]; saveCourse({ jobCards: next }) }} jobPpe={courseInfo.jobPpe || {}} onSetPpe={(job, list) => { const next = { ...(courseInfo.jobPpe || {}) }; if (list.length) next[job] = list; else delete next[job]; saveCourse({ jobPpe: next }) }} />}
         </div>
       </div>
       {qrOpen && <CrewQRModal courseInfo={courseInfo} saveCourse={saveCourse} roster={roster} crew={crew} onClose={() => setQrOpen(false)} />}
@@ -9076,7 +9096,7 @@ function DataQRModal({ courseInfo, saveCourse, onClose }) {
 }
 
 // The daily job board — who's doing what today. Fetches its own tasks by date.
-function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}, equipment, courses = [], crew = {}, boardMessage = '', onSaveMessage, jobBoard = {}, onSaveCourse }) {
+function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}, equipment, courses = [], crew = {}, boardMessage = '', onSaveMessage, jobBoard = {}, onSaveCourse, timeoff = [], training = {}, jobCards = {} }) {
   const [date, setDate] = useState(localDateISO())
   const [msgDraft, setMsgDraft] = useState(boardMessage)
   useEffect(() => { setMsgDraft(boardMessage) }, [boardMessage])
@@ -9155,6 +9175,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
     try {
       await db.updateCrewTask({ ...t, assignee: name })
       if (isGreensMow(t.job)) await assignGreens(t.job, t.slot || '1')
+      warnCardsFor(name, t.job)
       await reload()
     } catch (e) { console.error(e); reload() }
   }
@@ -9285,6 +9306,12 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
       await reload()
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
   }
+  // Warn (don't block) when someone's put on a job that needs a safety card they
+  // don't currently hold — the superintendent stays in control.
+  const warnCardsFor = (name, job) => {
+    const missing = missingCardsFor(training, jobCards, name, job, date)
+    if (missing.length) setMsg({ type: 'warn', text: `⚠ ${name} has no current ${missing.join(', ')} card${missing.length > 1 ? 's' : ''}.` })
+  }
   // Add one more person onto a job. If the job is still an empty placeholder
   // (one row, nobody on it), fill that row instead of adding a second.
   const addPersonToJob = async (jk, name, s = '1') => {
@@ -9299,6 +9326,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
       }
       // Greens mow: re-split the route across everyone now on the job.
       if (isGreensMow(jk)) await assignGreens(jk, s)
+      warnCardsFor(name, jk)
       await reload()
     } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
   }
@@ -9351,13 +9379,23 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
   // Course-scoped view: a course tab shows that course's jobs plus property-wide
   // (no-course) jobs; "All" shows everything.
   const view = activeCourse ? tasks.filter((t) => t.course === activeCourse || !t.course) : tasks
-  const operators = roster
+  // Anyone with time off on this date can't be picked for the board.
+  const offSet = new Set(roster.filter((n) => isOffOn(timeoff, n, date)))
+  const operators = roster.filter((n) => !offSet.has(n))
   // Staff for the assignee picker: everyone's available on both courses, but the
-  // selected course's home crew is listed first.
+  // selected course's home crew is listed first. (People off today are left out.)
   const orderedOps = activeCourse
     ? [...operators].sort((a, b) => (((crew[a]?.course === activeCourse) ? 0 : 1) - ((crew[b]?.course === activeCourse) ? 0 : 1)) || operators.indexOf(a) - operators.indexOf(b))
     : operators
   const isToday = date === localDateISO()
+  // { name: "⚠" } for people missing a required card for a job (picker hint).
+  const cardMeta = (job) => {
+    const req = (jobCards && jobCards[job]) || []
+    if (!req.length) return {}
+    const out = {}
+    operators.forEach((n) => { if (missingCardsFor(training, jobCards, n, job, date).length) out[n] = '⚠' })
+    return out
+  }
 
   const groups = {}
   view.forEach((t) => { const k = t.assignee || '__none'; (groups[k] = groups[k] || []).push(t) })
@@ -9398,8 +9436,10 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
   const workingNames = Object.keys(byPerson).sort((a, b) => a.localeCompare(b))
   const unassigned = view.filter((t) => !t.assignee).sort((a, b) => slotRank(a.slot) - slotRank(b.slot) || (a.sort || 0) - (b.sort || 0))
   // People on the roster with nothing today — scoped to the selected course's
-  // home crew when a course is active, so the list stays relevant.
-  const idleNames = roster.filter((n) => !byPerson[n] && (!activeCourse || !crew[n]?.course || crew[n].course === activeCourse)).sort((a, b) => a.localeCompare(b))
+  // home crew when a course is active, so the list stays relevant. People with
+  // time off are kept out of this list and shown separately as "Off today".
+  const idleNames = roster.filter((n) => !byPerson[n] && !offSet.has(n) && (!activeCourse || !crew[n]?.course || crew[n].course === activeCourse)).sort((a, b) => a.localeCompare(b))
+  const offNames = roster.filter((n) => offSet.has(n) && !byPerson[n]).sort((a, b) => a.localeCompare(b))
 
   return (
     <div>
@@ -9432,7 +9472,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
         </div>
       )}
 
-      {msg && <div className="rounded-xl px-3 py-2 mb-3 font-body text-[12px] font-semibold" style={msg.type === 'ok' ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}>{msg.text}</div>}
+      {msg && <div className="rounded-xl px-3 py-2 mb-3 font-body text-[12px] font-semibold flex items-center gap-2" style={msg.type === 'ok' ? { backgroundColor: '#E8F3EC', color: FERN } : msg.type === 'warn' ? { backgroundColor: '#FEF3C7', color: '#92660D' } : { backgroundColor: '#FEE2E2', color: '#B91C1C' }}><span className="flex-1">{msg.text}</span><button onClick={() => setMsg(null)} className="opacity-60 hover:opacity-100 shrink-0" aria-label="Dismiss"><X size={13} /></button></div>}
 
       {!loading && (view.length > 0 || manage) && (
         <div className="flex flex-wrap items-center gap-1.5 mb-3">
@@ -9561,6 +9601,21 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
               )}
             </div>
           )}
+
+          {/* Off today — roster people with time off; not selectable */}
+          {offNames.length > 0 && (
+            <div className="rounded-2xl border shadow-sm overflow-hidden" style={{ borderColor: '#E5E7EB', backgroundColor: '#FAFAFA' }}>
+              <div className="flex items-center gap-2 px-3 py-2.5">
+                <Calendar size={14} className="text-slate-400" />
+                <span className="font-body text-[12px] font-bold text-slate-400">Off today · {offNames.length}</span>
+              </div>
+              <div className="px-3 pb-3 flex flex-wrap gap-1.5">
+                {offNames.map((n) => (
+                  <span key={n} className="font-body text-[12px] font-semibold px-2.5 py-1.5 rounded-full text-slate-400 line-through" style={{ backgroundColor: '#F1F2F4' }}>{n}</span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : (() => {
         // Which rounds to show: managers always get 1st (with an inline add
@@ -9627,7 +9682,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
                       const others = [...new Set(view.filter((t) => t.assignee === name && (t.slot || '1') === s).map((t) => t.job).filter(Boolean))]
                       if (others.length) { setConfirmAssign({ name, jk, s, others }); return }
                       addPersonToJob(jk, name, s)
-                    }} hideChips autoOpen={crewAddJob === gk} dimmed={assignedInSlot(s)} dimmedLabel={`on ${slotLabel(s).replace(' Jobs', '').toLowerCase()}`} meta={rotMeta(jk)} placeholder="Add crew — tap to check people on…" />
+                    }} hideChips autoOpen={crewAddJob === gk} dimmed={assignedInSlot(s)} dimmedLabel={`on ${slotLabel(s).replace(' Jobs', '').toLowerCase()}`} meta={{ ...rotMeta(jk), ...cardMeta(jk) }} placeholder="Add crew — tap to check people on…" />
                     <div className="mt-1.5">
                       {list.filter((t) => t.assignee).map((t, pi) => (
                         <div key={t.id} className="flex items-center gap-2.5 py-1.5" style={{ borderTop: pi > 0 ? '1px solid #F1F4F2' : 'none' }}>
@@ -9918,6 +9973,188 @@ function WhiteboardCrew({ roster = [], operators = [], crewMembers = [], courses
   )
 }
 
+// Time Off — a manager-only crew calendar. Anyone with time off on a date can't
+// be picked for that day's board (they drop into "Off today" on the Workboard).
+const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+function WhiteboardCalendar({ roster = [], crew = {}, timeoff = [], onSave }) {
+  const today = localDateISO()
+  const [ym, setYm] = useState(() => today.slice(0, 7)) // "YYYY-MM"
+  const [person, setPerson] = useState('')
+  const [start, setStart] = useState(today)
+  const [end, setEnd] = useState(today)
+  const [reason, setReason] = useState('')
+  const [y, m] = ym.split('-').map(Number)
+  const daysInMonth = new Date(y, m, 0).getDate()
+  const lead = new Date(y, m - 1, 1).getDay()
+  const cells = [...Array(lead).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)]
+  const iso = (d) => `${ym}-${String(d).padStart(2, '0')}`
+  const offOn = (dateISO) => (timeoff || []).filter((e) => e && e.person && e.start <= dateISO && dateISO <= e.end)
+  const shiftMonth = (delta) => { const dt = new Date(y, m - 1 + delta, 1); setYm(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`) }
+  const monthLabel = new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  const sortedRoster = [...roster].sort((a, b) => a.localeCompare(b))
+  const add = () => {
+    const p = (person || '').trim()
+    if (!p || !start || !end) return
+    const s = start <= end ? start : end
+    const e = start <= end ? end : start
+    const id = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()))
+    onSave([...(timeoff || []), { id, person: p, start: s, end: e, reason: (reason || '').trim() }])
+    setReason('')
+  }
+  const del = (id) => onSave((timeoff || []).filter((e) => e.id !== id))
+  const offToday = (timeoff || []).filter((e) => e.start <= today && today <= e.end)
+  const upcoming = [...(timeoff || [])].filter((e) => e.end >= today).sort((a, b) => (a.start || '').localeCompare(b.start || ''))
+  const pretty = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
+  return (
+    <div className="space-y-3">
+      <p className="font-body text-[12px] text-slate-500">Put in days off and anyone off that day can’t be picked for the board — they show as “Off today” on the Workboard. Only managers see this.</p>
+
+      <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: offToday.length ? '#B45309' : '#94A3B8' }}>Off today</span>
+          {offToday.length === 0 ? <span className="font-body text-[12px] text-slate-400">Everyone’s available.</span> : (
+            <div className="flex flex-wrap gap-1.5">{offToday.map((e) => <span key={e.id} className="font-body text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#FEF3C7', color: '#92660D' }}>{e.person}{e.reason ? ` · ${e.reason}` : ''}</span>)}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Month calendar */}
+      <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+        <div className="flex items-center justify-between mb-2">
+          <button onClick={() => shiftMonth(-1)} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Previous month"><ChevronRight size={16} className="text-slate-500" style={{ transform: 'rotate(180deg)' }} /></button>
+          <p className="font-body text-sm font-bold text-slate-800">{monthLabel}</p>
+          <button onClick={() => shiftMonth(1)} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100" aria-label="Next month"><ChevronRight size={16} className="text-slate-500" /></button>
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {DOW.map((d, i) => <div key={i} className="text-center font-body text-[10px] font-bold text-slate-400 py-1">{d}</div>)}
+          {cells.map((d, i) => {
+            if (!d) return <div key={`b${i}`} />
+            const list = offOn(iso(d))
+            const isToday = iso(d) === today
+            return (
+              <button key={d} onClick={() => { setStart(iso(d)); setEnd(iso(d)) }} className="rounded-lg border p-1 text-left min-h-[48px] transition" style={{ borderColor: isToday ? FERN : '#EEF2F0', backgroundColor: start <= iso(d) && iso(d) <= end ? '#EAF2EC' : 'white' }} title="Tap to set the time-off start/end to this day">
+                <span className="font-body text-[11px] font-bold" style={{ color: isToday ? FERN : '#64748B' }}>{d}</span>
+                <div className="flex flex-wrap gap-0.5 mt-0.5">
+                  {list.slice(0, 4).map((e) => <span key={e.id} className="w-2 h-2 rounded-full" style={{ backgroundColor: personColor(crew, e.person) }} title={e.person} />)}
+                  {list.length > 4 && <span className="font-body text-[8px] text-slate-400">+{list.length - 4}</span>}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Add time off */}
+      <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+        <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Add time off</p>
+        <div className="flex flex-wrap items-end gap-2">
+          <div style={{ width: 160 }}>
+            <p className="font-body text-[10px] text-slate-400 mb-0.5">Person</p>
+            <SearchSelect value={person} options={[{ value: '', label: 'Pick a person…' }, ...sortedRoster]} onPick={setPerson} sort={false} />
+          </div>
+          <div>
+            <p className="font-body text-[10px] text-slate-400 mb-0.5">From</p>
+            <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body" />
+          </div>
+          <div>
+            <p className="font-body text-[10px] text-slate-400 mb-0.5">To</p>
+            <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body" />
+          </div>
+          <div className="flex-1 min-w-[120px]">
+            <p className="font-body text-[10px] text-slate-400 mb-0.5">Reason (optional)</p>
+            <input value={reason} onChange={(e) => setReason(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add() }} placeholder="Vacation, sick…" className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body" />
+          </div>
+          <button onClick={add} disabled={!person} className="font-body text-xs font-bold px-4 py-2 rounded-xl text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Add</button>
+        </div>
+      </div>
+
+      {/* Upcoming list */}
+      <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+        <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Scheduled time off</p>
+        {upcoming.length === 0 ? <p className="font-body text-sm text-slate-400">Nothing scheduled.</p> : (
+          <div className="space-y-1.5">
+            {upcoming.map((e) => (
+              <div key={e.id} className="flex items-center gap-2.5 py-1" style={{ borderTop: '1px solid #F4F6F4' }}>
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: personColor(crew, e.person) }} />
+                <span className="font-body text-[13px] font-semibold text-slate-700 shrink-0" style={{ minWidth: 90 }}>{e.person}</span>
+                <span className="font-body text-[12px] text-slate-500 flex-1 min-w-0 truncate">{pretty(e.start)}{e.end !== e.start ? ` – ${pretty(e.end)}` : ''}{e.reason ? ` · ${e.reason}` : ''}</span>
+                <button onClick={() => del(e.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Remove"><Trash2 size={15} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Training — each person's safety cards and expiries. Job Types say which cards a
+// job needs; assigning someone without a current one warns (never blocks).
+function WhiteboardTraining({ roster = [], crew = {}, training = {}, jobCards = {}, onSave }) {
+  const today = localDateISO()
+  const [open, setOpen] = useState(null)
+  const requiredCards = new Set(Object.values(jobCards || {}).flat())
+  const cardsFor = (p) => (training[p] || [])
+  const statusOf = (c) => (!c ? 'none' : (!c.expiresOn || c.expiresOn >= today ? 'current' : 'expired'))
+  const toggle = (p, card) => {
+    const list = cardsFor(p)
+    const has = list.find((c) => c.card === card)
+    const next = has ? list.filter((c) => c.card !== card) : [...list, { card, trainedOn: today, expiresOn: '' }]
+    onSave({ ...training, [p]: next })
+  }
+  const setExpiry = (p, card, val) => onSave({ ...training, [p]: cardsFor(p).map((c) => (c.card === card ? { ...c, expiresOn: val } : c)) })
+  const sortedRoster = [...roster].sort((a, b) => a.localeCompare(b))
+  // Sort cards: ones required by a job first, then the rest.
+  const orderedCards = [...TRAINING_CARDS].sort((a, b) => (requiredCards.has(b) - requiredCards.has(a)) || a.localeCompare(b))
+
+  return (
+    <div className="space-y-2">
+      <p className="font-body text-[12px] text-slate-500">Each person’s safety cards. Set an expiry if the card renews; blank means it doesn’t. Cards a job needs are set in Job Types, and come first here (★).</p>
+      {sortedRoster.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No crew yet. Add people in the Crew tab.</div>
+      ) : sortedRoster.map((person) => {
+        const list = cardsFor(person)
+        const held = list.length
+        const expired = list.filter((c) => statusOf(c) === 'expired').length
+        const isOpen = open === person
+        return (
+          <div key={person} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+            <button onClick={() => setOpen(isOpen ? null : person)} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left">
+              <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-white font-body text-[12px] font-bold" style={{ backgroundColor: personColor(crew, person) }}>{(person || '?').trim().charAt(0).toUpperCase()}</span>
+              <span className="font-body text-sm font-semibold text-slate-800 flex-1 min-w-0 truncate">{person}</span>
+              {expired > 0 && <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}>{expired} expired</span>}
+              <span className="font-body text-[11px] font-semibold text-slate-400 shrink-0">{held} card{held !== 1 ? 's' : ''}</span>
+              <ChevronRight size={16} className="text-slate-400 shrink-0 transition-transform" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} />
+            </button>
+            {isOpen && (
+              <div className="px-3 pb-3 space-y-1">
+                {orderedCards.map((card) => {
+                  const c = list.find((x) => x.card === card)
+                  const st = statusOf(c)
+                  const req = requiredCards.has(card)
+                  return (
+                    <div key={card} className="flex items-center gap-2 py-1" style={{ borderTop: '1px solid #F4F6F4' }}>
+                      <button onClick={() => toggle(person, card)} className="w-5 h-5 rounded shrink-0 flex items-center justify-center" style={{ border: `1.5px solid ${c ? FERN : '#CBD5E1'}`, backgroundColor: c ? FERN : 'white' }} aria-label={c ? 'Remove card' : 'Add card'}>{c && <Check size={12} color="white" />}</button>
+                      <span className="font-body text-[13px] flex-1 min-w-0 truncate" style={{ color: c ? '#334155' : '#94A3B8', fontWeight: req ? 700 : 500 }}>{req && <span style={{ color: GOLD }}>★ </span>}{card}</span>
+                      {c && (
+                        <>
+                          {st === 'expired' && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}>Expired</span>}
+                          <input type="date" value={c.expiresOn || ''} onChange={(e) => setExpiry(person, card, e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1 text-[12px] font-body shrink-0" title="Expiry (blank = never)" style={{ width: 140 }} />
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // Job History — how many times each job ran in a window, broken down by person,
 // plus workload per person. Counts jobs, never hours (no time data anywhere).
 function WhiteboardInsights({ courses = [], jobGroups = {} }) {
@@ -10059,9 +10296,10 @@ function WhiteboardInsights({ courses = [], jobGroups = {} }) {
 // A managed list (equipment, job types) that feeds the Workboard's quick-picks.
 // Optional: `onImport` adds a CSV import, and `groups`/`onSetGroup` add a
 // per-item group picker (used by Job Types to colour/sort the board).
-function WhiteboardListSection({ title, hint, items, manage, accent, onSave, importFields, importHint, onImport, groups, onSetGroup }) {
+function WhiteboardListSection({ title, hint, items, manage, accent, onSave, importFields, importHint, onImport, groups, onSetGroup, jobCards, onSetCards, jobPpe, onSetPpe }) {
   const [importOpen, setImportOpen] = useState(false)
   const [csv, setCsv] = useState('')
+  const [openRules, setOpenRules] = useState(null) // which job's cards/PPE are expanded
   const runImport = () => {
     const rows = parseCsv(csv, importFields || ['name'])
     if (rows.length && onImport) onImport(rows)
@@ -10086,17 +10324,40 @@ function WhiteboardListSection({ title, hint, items, manage, accent, onSave, imp
 
       {manage && onSetGroup && items.length > 0 && (
         <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
-          <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Groups <span className="font-normal normal-case tracking-normal">· colour &amp; sort each job on the board (optional)</span></p>
-          <div className="space-y-1.5">
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Job rules <span className="font-normal normal-case tracking-normal">· group colours &amp; sorts; cards &amp; PPE flag safety (all optional)</span></p>
+          <div className="space-y-1">
             {items.map((job) => {
               const g = (groups || {})[job] || ''
+              const cards = (jobCards || {})[job] || []
+              const ppe = (jobPpe || {})[job] || []
+              const rulesOpen = openRules === job
+              const hasRules = !!onSetCards || !!onSetPpe
               return (
-                <div key={job} className="flex items-center gap-2">
-                  {g && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: groupColor(g) }} />}
-                  <span className="font-body text-[13px] font-semibold text-slate-700 flex-1 min-w-0 truncate">{job}</span>
-                  <div className="shrink-0" style={{ width: 150 }}>
-                    <SearchSelect value={g} options={[{ value: '', label: 'No group' }, ...WB_GROUP_ORDER.map((x) => ({ value: x, label: x }))]} onPick={(v) => onSetGroup(job, v)} sort={false} />
+                <div key={job} style={{ borderTop: '1px solid #F4F6F4' }} className="pt-1.5">
+                  <div className="flex items-center gap-2">
+                    {g && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: groupColor(g) }} />}
+                    <span className="font-body text-[13px] font-semibold text-slate-700 flex-1 min-w-0 truncate">{job}</span>
+                    <div className="shrink-0" style={{ width: 150 }}>
+                      <SearchSelect value={g} options={[{ value: '', label: 'No group' }, ...WB_GROUP_ORDER.map((x) => ({ value: x, label: x }))]} onPick={(v) => onSetGroup(job, v)} sort={false} />
+                    </div>
+                    {hasRules && <button type="button" onClick={() => setOpenRules(rulesOpen ? null : job)} className="shrink-0 font-body text-[10px] font-bold px-2 py-1.5 rounded-full flex items-center gap-1" style={rulesOpen ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: '#F1F5F3', color: '#57756A' }} title="Required cards & PPE for this job"><ShieldCheck size={12} />{(cards.length + ppe.length) > 0 ? cards.length + ppe.length : ''}</button>}
                   </div>
+                  {hasRules && rulesOpen && (
+                    <div className="mt-2 mb-1 ml-1 pl-3 space-y-2" style={{ borderLeft: `2px solid ${HAIR}` }}>
+                      {onSetCards && (
+                        <div>
+                          <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Requires card</p>
+                          <MultiSelect selected={cards} options={TRAINING_CARDS} onToggle={(c) => onSetCards(job, cards.includes(c) ? cards.filter((x) => x !== c) : [...cards, c])} accent={FOREST} compact placeholder="Add a required card…" />
+                        </div>
+                      )}
+                      {onSetPpe && (
+                        <div>
+                          <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">PPE</p>
+                          <MultiSelect selected={ppe} options={PPE_OPTIONS} onToggle={(p) => onSetPpe(job, ppe.includes(p) ? ppe.filter((x) => x !== p) : [...ppe, p])} accent={FERN} compact placeholder="Add PPE…" />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )
             })}
