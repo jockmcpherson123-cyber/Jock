@@ -9310,7 +9310,9 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
   // Move a person to this job — take them off every other job first, then add.
   const movePersonToJob = async (name, jk, s = '1') => {
     try {
-      const others = view.filter((t) => t.assignee === name && !((t.job || '—') === jk && (t.slot || '1') === s))
+      // Only move them off their OTHER job in the SAME round — their jobs in
+      // other rounds (e.g. a 1st job when this is a 2nd job) stay put.
+      const others = view.filter((t) => t.assignee === name && (t.slot || '1') === s && (t.job || '—') !== jk)
       for (const t of others) {
         await db.deleteCrewTask(t.id)
         if (isGreensMow(t.job)) await assignGreens(t.job, t.slot || '1') // re-split the job they left
@@ -9369,7 +9371,9 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
   const slotsPresent = SLOTS.map(([k]) => k).filter((k) => bySlot[k] && Object.keys(bySlot[k]).length)
   // Everyone already on any job today — used to grey them in the crew checklist
   // so you can see who's spoken for (they're still selectable).
-  const assignedToday = [...new Set(view.filter((t) => t.assignee).map((t) => t.assignee))]
+  // Who's already on a job in a given round — 2nd/3rd jobs release people from
+  // their earlier rounds, so only the same round counts as "busy" here.
+  const assignedInSlot = (s) => [...new Set(view.filter((t) => t.assignee && (t.slot || '1') === s).map((t) => t.assignee))]
 
   // ── Crew view (one card per person) ──────────────────────────────────────
   // Amber "⚠ also on <name>" when the same tool is on two people in the same
@@ -9618,10 +9622,12 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
                     <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">Crew</p>
                     <MultiSelect selected={alreadyOn} options={orderedOps} onToggle={(name) => {
                       if (alreadyOn.includes(name)) { removePersonFromJob(jk, name, s); return }
-                      const others = [...new Set(view.filter((t) => t.assignee === name).map((t) => t.job).filter(Boolean))]
+                      // Only their other job in THIS round counts as a clash — a 1st
+                      // job doesn't block picking them up for a 2nd job.
+                      const others = [...new Set(view.filter((t) => t.assignee === name && (t.slot || '1') === s).map((t) => t.job).filter(Boolean))]
                       if (others.length) { setConfirmAssign({ name, jk, s, others }); return }
                       addPersonToJob(jk, name, s)
-                    }} hideChips autoOpen={crewAddJob === gk} dimmed={assignedToday} dimmedLabel="on a job" meta={rotMeta(jk)} placeholder="Add crew — tap to check people on…" />
+                    }} hideChips autoOpen={crewAddJob === gk} dimmed={assignedInSlot(s)} dimmedLabel={`on ${slotLabel(s).replace(' Jobs', '').toLowerCase()}`} meta={rotMeta(jk)} placeholder="Add crew — tap to check people on…" />
                     <div className="mt-1.5">
                       {list.filter((t) => t.assignee).map((t, pi) => (
                         <div key={t.id} className="flex items-center gap-2.5 py-1.5" style={{ borderTop: pi > 0 ? '1px solid #F1F4F2' : 'none' }}>
