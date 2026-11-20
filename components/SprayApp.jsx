@@ -58,11 +58,8 @@ import {
   Bug,
   Pencil,
   Users,
-  Copy,
-  Save,
   LayoutGrid,
   Upload,
-  Layers,
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, sheetBreakdown, lineAmounts, sheetLineAmts, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
@@ -8898,7 +8895,7 @@ function WhiteboardModule({ user, nav, hideChrome }) {
           <div className="bg-white rounded-2xl border border-black/5 p-2 shadow-sm sticky top-4"><Nav /></div>
         </aside>
         <div className="flex-1 min-w-0">
-          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} roster={roster} jobTypes={jobTypes} jobGroups={courseInfo.jobGroups || {}} equipment={equipment} courses={courses} crew={crew} boardMessage={courseInfo.boardMessage || ''} onSaveMessage={(m) => saveCourse({ boardMessage: m })} jobBoard={courseInfo.jobBoard || {}} onSaveCourse={saveCourse} timeoff={courseInfo.timeoff || []} training={courseInfo.training || {}} jobCards={courseInfo.jobCards || {}} />}
+          {section === 'workboard' && <WorkboardView manage={manage} settings={settings} roster={roster} jobTypes={jobTypes} jobGroups={courseInfo.jobGroups || {}} equipment={equipment} courses={courses} crew={crew} boardMessage={courseInfo.boardMessage || ''} onSaveMessage={(m) => saveCourse({ boardMessage: m })} timeoff={courseInfo.timeoff || []} training={courseInfo.training || {}} jobCards={courseInfo.jobCards || {}} />}
           {section === 'mowing' && (
             <div>
               <div className="flex gap-1.5 mb-4">
@@ -9096,7 +9093,7 @@ function DataQRModal({ courseInfo, saveCourse, onClose }) {
 }
 
 // The daily job board — who's doing what today. Fetches its own tasks by date.
-function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}, equipment, courses = [], crew = {}, boardMessage = '', onSaveMessage, jobBoard = {}, onSaveCourse, timeoff = [], training = {}, jobCards = {} }) {
+function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}, equipment, courses = [], crew = {}, boardMessage = '', onSaveMessage, timeoff = [], training = {}, jobCards = {} }) {
   const [date, setDate] = useState(localDateISO())
   const [msgDraft, setMsgDraft] = useState(boardMessage)
   useEffect(() => { setMsgDraft(boardMessage) }, [boardMessage])
@@ -9108,8 +9105,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
   const [picked, setPicked] = useState(null) // an unassigned task id tapped, waiting for a person to drop it on
   const [idleOpen, setIdleOpen] = useState(false) // "Not assigned yet" collapsed list
   const [busy, setBusy] = useState(false)
-  const [confirmCopy, setConfirmCopy] = useState(null) // { date, rows } for "Copy yesterday"
-  const [tplOpen, setTplOpen] = useState(false) // templates modal
   const [openJobs, setOpenJobs] = useState({}) // jobKey -> open? accordion — only one job box open at a time
   const [jobEquipDraft, setJobEquipDraft] = useState({}) // gk -> in-progress "add a tool" text
   const [confirmAssign, setConfirmAssign] = useState(null) // { name, jk, s, others } when adding someone already on a job
@@ -9180,19 +9175,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
     } catch (e) { console.error(e); reload() }
   }
 
-  // Copy yesterday — pull the most recent earlier day that has jobs and offer to
-  // recreate it on the selected date (statuses reset to "todo").
-  const findYesterday = async () => {
-    try {
-      setBusy(true)
-      const prev = await db.fetchCrewTasks(shiftDate(date, -60), shiftDate(date, -1))
-      if (!prev.length) { setMsg({ type: 'err', text: 'No earlier board found to copy from.' }); setBusy(false); return }
-      const lastDate = prev.reduce((m, t) => (t.date > m ? t.date : m), prev[0].date)
-      const rows = prev.filter((t) => t.date === lastDate)
-      setConfirmCopy({ date: lastDate, rows })
-    } catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
-    finally { setBusy(false) }
-  }
   const rowsToDate = (rows, target = date) => rows.map((t) => ({ date: target, job: t.job, area: t.area || '', assignee: t.assignee || '', equipment: t.equipment || '', course: t.course || '', status: 'todo', sort: t.sort ?? 0, notes: t.notes || '', groupNote: t.groupNote || '', slot: t.slot || '1' }))
   // Board history: copy the day you're viewing onto today.
   const copyToToday = async () => {
@@ -9200,12 +9182,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
     if (date === today || !view.length) return
     setBusy(true)
     try { await db.addCrewTasks(rowsToDate(view, today)); setMsg({ type: 'ok', text: `Copied ${view.length} job${view.length !== 1 ? 's' : ''} to today.` }) }
-    catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
-    finally { setBusy(false) }
-  }
-  const doCopy = async (rows) => {
-    setConfirmCopy(null); setBusy(true)
-    try { await db.addCrewTasks(rowsToDate(rows)); await reload(); setMsg({ type: 'ok', text: `Copied ${rows.length} job${rows.length !== 1 ? 's' : ''}.` }) }
     catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
     finally { setBusy(false) }
   }
@@ -9235,28 +9211,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
     setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } finally { setTimeout(() => iframe.remove(), 1000) } }, 350)
   }
 
-  // Templates — save the current day's board as a named template, load one onto
-  // the selected date. Stored in course_info.jobBoard.templates.
-  const templates = Array.isArray(jobBoard.templates) ? jobBoard.templates : []
-  const saveTemplate = async (name) => {
-    const nm = (name || '').trim()
-    if (!nm || !onSaveCourse) return
-    const rows = view.map((t) => ({ job: t.job, area: t.area || '', assignee: t.assignee || '', equipment: t.equipment || '', course: t.course || '', sort: t.sort ?? 0, notes: t.notes || '', groupNote: t.groupNote || '', slot: t.slot || '1' }))
-    const tpl = { id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now())), name: nm, rows, createdAt: new Date().toISOString() }
-    try { await onSaveCourse({ jobBoard: { ...jobBoard, templates: [...templates, tpl] } }); setMsg({ type: 'ok', text: `Saved template “${nm}”.` }) }
-    catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
-  }
-  const loadTemplate = async (tpl) => {
-    setTplOpen(false); setBusy(true)
-    try { await db.addCrewTasks(rowsToDate(tpl.rows || [])); await reload(); setMsg({ type: 'ok', text: `Loaded “${tpl.name}”.` }) }
-    catch (e) { console.error(e); setMsg({ type: 'err', text: taskErrorText(e) }) }
-    finally { setBusy(false) }
-  }
-  const deleteTemplate = async (id) => {
-    if (!onSaveCourse) return
-    try { await onSaveCourse({ jobBoard: { ...jobBoard, templates: templates.filter((t) => t.id !== id) } }) }
-    catch (e) { console.error(e) }
-  }
 
   // Translate each person's jobs into their native language (AI, cached).
   const crewSig = JSON.stringify(crew || {})
@@ -9483,9 +9437,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
           </div>
           {manage && (
             <div className="flex flex-wrap items-center gap-1.5 ml-auto">
-              <button onClick={findYesterday} disabled={busy} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Recreate the most recent earlier day's board on this date"><Copy size={12} /> Copy yesterday</button>
-              <button onClick={() => { const n = typeof window !== 'undefined' ? window.prompt('Name this template (e.g. “Tournament week AM”)') : ''; if (n) saveTemplate(n) }} disabled={busy || view.length === 0} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 disabled:opacity-40" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Save the current board as a reusable template"><Save size={12} /> Save template</button>
-              <button onClick={() => setTplOpen(true)} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Load a saved template onto this day"><Layers size={12} /> Templates{templates.length ? ` · ${templates.length}` : ''}</button>
               <button onClick={printBoard} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'white', color: FOREST, border: `1px solid ${HAIR}` }} title="Print the day's board (one block per person) — or save as PDF"><Printer size={12} /> PDF</button>
             </div>
           )}
@@ -9528,7 +9479,7 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
 
           {workingNames.length === 0 && unassigned.length === 0 ? (
             <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
-              No one on the board for this day yet.{manage ? ' Add jobs in the Jobs view, or Copy yesterday.' : ''}
+              No one on the board for this day yet.{manage ? ' Add jobs in the Jobs view.' : ''}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -9812,48 +9763,6 @@ function WorkboardView({ manage, settings, roster = [], jobTypes, jobGroups = {}
         </div>
       )}
 
-      {confirmCopy && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ backgroundColor: 'rgba(15,23,42,0.45)' }} onClick={() => setConfirmCopy(null)}>
-          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5" onClick={(e) => e.stopPropagation()}>
-            <p className="font-body text-sm text-slate-700 text-center leading-relaxed">Copy <b>{confirmCopy.rows.length} job{confirmCopy.rows.length !== 1 ? 's' : ''}</b> from <b>{prettyDay(confirmCopy.date)}</b> onto {prettyDay(date)}?</p>
-            <p className="font-body text-[11px] text-slate-400 text-center mt-1">Same jobs, people, notes and equipment. Statuses reset to “to do”.</p>
-            <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => setConfirmCopy(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Cancel</button>
-              <button type="button" onClick={() => doCopy(confirmCopy.rows)} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: FOREST }}>Copy jobs</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {tplOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-6" style={{ backgroundColor: 'rgba(15,23,42,0.45)' }} onClick={() => setTplOpen(false)}>
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 sticky top-0 bg-white" style={{ borderBottom: '1px solid #EEF0EC' }}>
-              <p className="font-display text-base font-bold" style={{ color: FOREST }}>Board templates</p>
-              <button onClick={() => setTplOpen(false)} className="text-slate-400"><X size={18} /></button>
-            </div>
-            <div className="p-4">
-              <p className="font-body text-[12px] text-slate-500 mb-3">Load a saved board onto <b>{prettyDay(date)}</b>. It adds the template’s jobs (statuses reset) — it won’t clear what’s already there.</p>
-              {templates.length === 0 ? (
-                <p className="font-body text-sm text-slate-400 text-center py-6">No templates yet. Set up a board, then “Save template”.</p>
-              ) : (
-                <div className="space-y-2">
-                  {templates.map((t) => (
-                    <div key={t.id} className="flex items-center gap-2 rounded-xl border border-slate-100 p-2.5">
-                      <div className="min-w-0 flex-1">
-                        <p className="font-body text-sm font-semibold text-slate-800 truncate">{t.name}</p>
-                        <p className="font-body text-[11px] text-slate-400">{(t.rows || []).length} job{(t.rows || []).length !== 1 ? 's' : ''}</p>
-                      </div>
-                      <button onClick={() => loadTemplate(t)} disabled={busy} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white disabled:opacity-40 shrink-0" style={{ backgroundColor: FOREST }}>Load</button>
-                      <button onClick={() => deleteTemplate(t.id)} className="text-slate-300 hover:text-red-500 transition shrink-0" aria-label="Delete template"><Trash2 size={15} /></button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
