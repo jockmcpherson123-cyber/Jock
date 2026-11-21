@@ -209,7 +209,7 @@ export default function PlaybookModule({ user, manage, hideChrome }) {
               const count = items.filter((i) => inTab(i, t.key)).length
               return (
                 <button key={t.key} onClick={() => setTab(t.key)}
-                  className="font-body text-xs font-bold px-3.5 py-2 rounded-lg transition flex items-center gap-1.5"
+                  className="font-body text-xs font-bold px-3.5 py-2 rounded-full transition flex items-center gap-1.5"
                   style={on ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: PAPER, color: INK_2, border: `1px solid ${HAIR}` }}>
                   <Icon size={13} style={t.key === 'emergency' && !on ? { color: RED } : undefined} /> {t.label}
                   {count > 0 && <span className="tnum" style={{ opacity: on ? 0.7 : 0.5 }}>{count}</span>}

@@ -1675,7 +1675,7 @@ function InventoryAudit({ products = [], onSaveProduct, userName = '' }) {
           const has = raw !== '' && raw != null && Number.isFinite(Number(raw))
           const v = has ? Math.round((Number(raw) - prev) * 100) / 100 : null
           return (
-            <div key={p.name} className="bg-white rounded-xl border border-black/5 p-3 flex items-center gap-3">
+            <div key={p.name} className="bg-white rounded-2xl border border-black/5 p-3 flex items-center gap-3">
               <div className="min-w-0 flex-1">
                 <p className="font-body text-[13.5px] font-bold truncate" style={{ color: FOREST }}>{p.name}</p>
                 <p className="font-body text-[11px]" style={{ color: prev < 0 ? RED : INK_3 }}>On hand: {prev < 0 ? `${formatNumber(prev)}${p.unit ? ` ${p.unit}` : ''} (count needed)` : `${prev}${p.unit ? ` ${p.unit}` : ''}`}</p>
