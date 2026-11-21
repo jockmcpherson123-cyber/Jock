@@ -326,14 +326,24 @@ function typeColor(type) {
 // tied to an already-sprayed sheet are locked.
 function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCommit, onCommitProduct, requestConfirm, saved = {} }) {
   const [draft, setDraft] = useState({})
+  const touchedRef = useRef(new Set()) // cell groups the user actually typed in
+  const skipRef = useRef(new Set())    // cells whose next blur must NOT commit (Esc)
   const prodByName = {}
   products.forEach((p) => { prodByName[p.name] = p })
   const K = (id, f) => `${id}:${f}`
   const g = (a, f, fb) => { const k = K(a.id, f); return k in draft ? draft[k] : fb }
   const setD = (a, f, v) => setDraft((d) => ({ ...d, [K(a.id, f)]: v }))
-  const clr = (a, f) => setDraft((d) => { const n = { ...d }; delete n[K(a.id, f)]; return n })
+  const clr = (a, ...fs) => setDraft((d) => { const n = { ...d }; fs.forEach((f) => delete n[K(a.id, f)]); return n })
   const isDry = (p) => { if (p?.unit === 'lbs') return true; const ju = String(p?.jugUnit || '').toLowerCase(); if (ju === 'lb' || ju === 'lbs') return true; return /\b(WDG|WG|WP|WSP|SG|SP|DF|DG|GR|GRANULAR)\b/.test(String(p?.formulation || p?.form || '').toUpperCase()) }
   const num = (v) => (v === '' || v == null || !isFinite(Number(v)) ? null : Number(v))
+  const r3 = (v) => (v == null || !isFinite(Number(v)) ? null : Math.round(Number(v) * 1000) / 1000)
+  const ozA = (m) => (m == null || !isFinite(Number(m)) ? '' : Math.round(Number(m) * 43.56 * 10) / 10) // oz/A shown to 1 decimal
+  // Enter / Shift+Enter move to the same column one row down / up; Esc cancels.
+  const focusCell = (col, row) => { if (typeof document === 'undefined') return; const el = document.querySelector(`[data-gcol="${col}"][data-grow="${row}"]`); if (el) { el.focus(); if (el.select) try { el.select() } catch { /* noop */ } } }
+  const handleKey = (e, a, col, row) => {
+    if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); focusCell(col, e.shiftKey ? row - 1 : row + 1); return }
+    if (e.key === 'Escape') { e.preventDefault(); const isRate = col === 'rateOzM' || col === 'rateOzA'; skipRef.current.add(K(a.id, isRate ? 'rate' : col)); if (isRate) clr(a, 'rateOzM', 'rateOzA'); else clr(a, col); e.target.blur() }
+  }
 
   const calc = (a) => {
     const prod = prodByName[a.product] || {}
@@ -360,34 +370,49 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
   const td = 'px-1.5 py-1 text-[11px] text-slate-600 tabular-nums whitespace-nowrap'
   const stick = (left) => ({ position: 'sticky', left, zIndex: 2, background: 'white' })
 
-  // Commit an editable application field on blur (confirm for rate; direct else).
+  // Rate (oz/M and oz/A are one cell group). Only the field the user TYPED in is
+  // saved; the other is a live mirror. Always stores rate_oz_m (3 dec), oz/A null.
+  const commitRate = (a) => {
+    const tk = K(a.id, 'rate')
+    if (skipRef.current.has(tk)) { skipRef.current.delete(tk); touchedRef.current.delete(tk); clr(a, 'rateOzM', 'rateOzA'); return }
+    if (!touchedRef.current.has(tk)) { clr(a, 'rateOzM', 'rateOzA'); return } // focused but never typed
+    if (a.linkedSheetId && doneSheetIds?.has(a.linkedSheetId)) { touchedRef.current.delete(tk); clr(a, 'rateOzM', 'rateOzA'); return }
+    touchedRef.current.delete(tk)
+    const rawM = draft[K(a.id, 'rateOzM')]
+    const newM = rawM === '' || rawM == null ? null : r3(rawM)
+    const origM = a.rateOzM == null ? null : r3(a.rateOzM)
+    if (newM === origM) { clr(a, 'rateOzM', 'rateOzA'); return } // unchanged at 3 dp — no dialog
+    requestConfirm({
+      product: a.product, area: (a.area || '').trim(), origRate: origM, newRate: newM, dec3: true,
+      run: () => { onCommit(a, { ...a, rateOzM: newM, rateOzA: null }, { syncRate: true }); clr(a, 'rateOzM', 'rateOzA') },
+      onCancel: () => clr(a, 'rateOzM', 'rateOzA'),
+    })
+  }
+  // Direct-commit application fields (tanks / target / notes) — only when changed.
   const commitField = (a, field, raw) => {
-    const locked = a.linkedSheetId && doneSheetIds?.has(a.linkedSheetId)
-    if (locked) { clr(a, field); return }
-    if (field === 'rateOzM') {
-      const nr = num(raw)
-      if (nr === (a.rateOzM ?? null)) { clr(a, field); return }
-      requestConfirm({ product: a.product, area: (a.area || '').trim(), origRate: a.rateOzM ?? null, newRate: nr, run: () => { onCommit(a, { ...a, rateOzM: nr, rateOzA: null }, { syncRate: true }); clr(a, field) } })
-    } else if (field === 'rateOzA') {
-      const na = num(raw)
-      const nr = na == null ? null : Math.round((na / 43.56) * 1000) / 1000
-      if (nr === (a.rateOzM ?? null)) { clr(a, field); return }
-      requestConfirm({ product: a.product, area: (a.area || '').trim(), origRate: a.rateOzM ?? null, newRate: nr, run: () => { onCommit(a, { ...a, rateOzM: nr, rateOzA: null }, { syncRate: true }); clr(a, field) } })
-    } else if (field === 'tanks') {
+    const sk = K(a.id, field)
+    if (skipRef.current.has(sk)) { skipRef.current.delete(sk); clr(a, field); return }
+    if (a.linkedSheetId && doneSheetIds?.has(a.linkedSheetId)) { clr(a, field); return }
+    if (field === 'tanks') {
       const nt = raw === '' ? null : Number(raw)
+      if (nt === (a.tanks ?? null)) { clr(a, field); return }
       onCommit(a, { ...a, tanks: nt, tanksManual: nt != null }); clr(a, field)
-    } else if (field === 'plannedDate') {
-      onCommit(a, { ...a, plannedDate: raw || null }); clr(a, field)
     } else { // target, notes
+      if ((raw || '') === (a[field] || '')) { clr(a, field); return }
       onCommit(a, { ...a, [field]: raw }); clr(a, field)
     }
   }
   const commitLib = (a, field, raw, label) => {
+    const sk = K(a.id, field)
+    if (skipRef.current.has(sk)) { skipRef.current.delete(sk); clr(a, field); return }
     const prod = prodByName[a.product]
     if (!prod) { clr(a, field); return }
     const val = field === 'caseSize' ? raw : num(raw)
+    const cur = field === 'caseSize' ? (prod.caseSize || '') : (prod[field] ?? null)
+    const changed = field === 'caseSize' ? ((val || '') !== (cur || '')) : (val !== cur)
+    if (!changed) { clr(a, field); return }
     if (field === 'costPerCase') {
-      requestConfirm({ product: a.product, area: '(all areas)', origRate: prod.costPerCase ?? null, newRate: val, costLabel: true, run: () => { onCommitProduct(prod, { costPerCase: val }, 'cost/case'); clr(a, field) } })
+      requestConfirm({ product: a.product, area: '(all areas)', origRate: prod.costPerCase ?? null, newRate: val, costLabel: true, run: () => { onCommitProduct(prod, { costPerCase: val }, 'cost/case'); clr(a, field) }, onCancel: () => clr(a, field) })
     } else { onCommitProduct(prod, { [field]: val }, label); clr(a, field) }
   }
 
@@ -411,6 +436,7 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
 
   if (apps.length === 0) return <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No planned sprays to show.</div>
 
+  let rowIdx = 0 // running index across product rows (for Enter/↑↓ navigation)
   return (
     <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-x-auto">
       <table className="w-full border-collapse" style={{ minWidth: 1040 }}>
@@ -447,24 +473,28 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
               const c = calc(a)
               const locked = a.linkedSheetId && doneSheetIds?.has(a.linkedSheetId)
               const rowBg = locked ? '#F6F7F6' : 'white'
+              const row = rowIdx++
+              const skipped = (a.tanks === 0 || a.tanks === '0')
+              const libCell = cell + ' text-right'
+              const libStyle = { background: '#FBF7EA' }
               return (
                 <tr key={a.id} style={{ borderTop: '1px solid #EEF1EE', opacity: locked ? 0.75 : 1 }}>
                   <td className={td} style={{ ...stick(0), background: rowBg, minWidth: 160 }}>
-                    <span className="font-semibold text-slate-800 flex items-center gap-1 truncate" title={a.product}>{locked && <span title="Linked to a sprayed sheet — locked">🔒</span>}{a.product}{saved[a.id] && <span className="font-body text-[9px] font-bold" style={{ color: FERN }}>Saved ✓</span>}</span>
+                    <span className="font-semibold text-slate-800 flex items-center gap-1 truncate" title={a.product}>{locked && <span title="Linked to a sprayed sheet — locked">🔒</span>}{a.product}{skipped && <span className="font-body text-[8px] font-bold px-1 py-0.5 rounded" style={{ backgroundColor: '#EEF1F4', color: '#94A3B8' }}>SKIPPED</span>}{saved[a.id] && <span className="font-body text-[9px] font-bold" style={{ color: FERN }}>Saved ✓</span>}</span>
                   </td>
-                  <td className={td}><input disabled={locked} value={g(a, 'target', a.target || '')} onChange={(e) => setD(a, 'target', e.target.value)} onBlur={(e) => commitField(a, 'target', e.target.value)} className={cell + ' text-left'} style={{ width: 90 }} placeholder="—" /></td>
-                  <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'rateOzM', c.rateM != null ? c.rateM : '')} onChange={(e) => setD(a, 'rateOzM', e.target.value)} onBlur={(e) => commitField(a, 'rateOzM', e.target.value)} className={cell} style={{ width: 56, borderColor: GOLD }} /></td>
-                  <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'rateOzA', c.rateM != null ? Math.round(c.rateM * 43.56 * 10) / 10 : '')} onChange={(e) => setD(a, 'rateOzA', e.target.value)} onBlur={(e) => commitField(a, 'rateOzA', e.target.value)} className={cell} style={{ width: 56 }} /></td>
+                  <td className={td}><input disabled={locked} data-gcol="target" data-grow={row} value={g(a, 'target', a.target || '')} onChange={(e) => setD(a, 'target', e.target.value)} onBlur={(e) => commitField(a, 'target', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'target', row)} className={cell + ' text-left'} style={{ width: 90 }} placeholder="—" /></td>
+                  <td className={td}><input disabled={locked} inputMode="decimal" data-gcol="rateOzM" data-grow={row} value={g(a, 'rateOzM', c.rateM != null ? r3(c.rateM) : '')} onChange={(e) => { const v = e.target.value; setDraft((d) => ({ ...d, [K(a.id, 'rateOzM')]: v, [K(a.id, 'rateOzA')]: v === '' ? '' : String(ozA(v)) })); touchedRef.current.add(K(a.id, 'rate')) }} onBlur={() => commitRate(a)} onKeyDown={(e) => handleKey(e, a, 'rateOzM', row)} className={cell} style={{ width: 56, borderColor: GOLD }} /></td>
+                  <td className={td}><input disabled={locked} inputMode="decimal" data-gcol="rateOzA" data-grow={row} value={g(a, 'rateOzA', c.rateM != null ? ozA(c.rateM) : '')} onChange={(e) => { const v = e.target.value; setDraft((d) => ({ ...d, [K(a.id, 'rateOzA')]: v, [K(a.id, 'rateOzM')]: v === '' ? '' : String(r3(Number(v) / 43.56)) })); touchedRef.current.add(K(a.id, 'rate')) }} onBlur={() => commitRate(a)} onKeyDown={(e) => handleKey(e, a, 'rateOzA', row)} className={cell} style={{ width: 56 }} /></td>
                   <td className={td}>{c.label ? <span className="font-bold text-[9px]" style={{ color: c.label === 'over' ? '#B91C1C' : '#B07A16' }}>{c.label === 'over' ? 'OVER' : 'UNDER'}</span> : <span className="text-slate-300">—</span>}</td>
-                  <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'tanks', a.tanks ?? c.tanks)} onChange={(e) => setD(a, 'tanks', e.target.value)} onBlur={(e) => commitField(a, 'tanks', e.target.value)} className={cell} style={{ width: 44 }} /></td>
-                  <td className={td}>{c.ozPerTank != null ? round1(c.ozPerTank) : '—'}</td>
+                  <td className={td}><input disabled={locked} inputMode="decimal" data-gcol="tanks" data-grow={row} value={g(a, 'tanks', a.tanks ?? c.tanks)} onChange={(e) => setD(a, 'tanks', e.target.value)} onBlur={(e) => commitField(a, 'tanks', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'tanks', row)} className={cell} style={{ width: 44 }} /></td>
+                  <td className={td}>{c.ozPerTank != null ? round1(c.ozPerTank).toLocaleString() : '—'}</td>
                   <td className={td}>{c.totalOz != null ? Math.round(c.totalOz).toLocaleString() : '—'}</td>
-                  <td className={td}>{c.cases != null ? Math.round(c.cases * 100) / 100 : '—'}</td>
-                  <td className={td}><input disabled={locked} value={g(a, 'caseSize', c.prod.caseSize || '')} onChange={(e) => setD(a, 'caseSize', e.target.value)} onBlur={(e) => commitLib(a, 'caseSize', e.target.value, 'case size')} className={cell + ' text-left'} style={{ width: 72 }} placeholder="—" /></td>
-                  <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'ozPerCase', c.ozPerCase ?? '')} onChange={(e) => setD(a, 'ozPerCase', e.target.value)} onBlur={(e) => commitLib(a, 'ozPerCase', e.target.value, 'oz/case')} className={cell} style={{ width: 54 }} placeholder="—" /></td>
-                  <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'costPerCase', c.costPerCase ?? '')} onChange={(e) => setD(a, 'costPerCase', e.target.value)} onBlur={(e) => commitLib(a, 'costPerCase', e.target.value)} className={cell} style={{ width: 64 }} placeholder="—" /></td>
+                  <td className={td}>{c.cases != null ? (Math.round(c.cases * 100) / 100).toLocaleString() : '—'}</td>
+                  <td className={td} style={libStyle}><input disabled={locked} title="Changes this product everywhere" data-gcol="caseSize" data-grow={row} value={g(a, 'caseSize', c.prod.caseSize || '')} onChange={(e) => setD(a, 'caseSize', e.target.value)} onBlur={(e) => commitLib(a, 'caseSize', e.target.value, 'case size')} onKeyDown={(e) => handleKey(e, a, 'caseSize', row)} className={libCell + ' text-left'} style={{ width: 72 }} placeholder="—" /></td>
+                  <td className={td} style={libStyle}><input disabled={locked} inputMode="decimal" title="Changes this product everywhere" data-gcol="ozPerCase" data-grow={row} value={g(a, 'ozPerCase', c.ozPerCase ?? '')} onChange={(e) => setD(a, 'ozPerCase', e.target.value)} onBlur={(e) => commitLib(a, 'ozPerCase', e.target.value, 'oz/case')} onKeyDown={(e) => handleKey(e, a, 'ozPerCase', row)} className={libCell} style={{ width: 54 }} placeholder="—" /></td>
+                  <td className={td} style={libStyle}><input disabled={locked} inputMode="decimal" title="Changes this product everywhere" data-gcol="costPerCase" data-grow={row} value={g(a, 'costPerCase', c.costPerCase ?? '')} onChange={(e) => setD(a, 'costPerCase', e.target.value)} onBlur={(e) => commitLib(a, 'costPerCase', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'costPerCase', row)} className={libCell} style={{ width: 64 }} placeholder="—" /></td>
                   <td className={td}>{c.totalCost != null ? `$${c.totalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
-                  <td className={td}><input disabled={locked} value={g(a, 'notes', a.notes || '')} onChange={(e) => setD(a, 'notes', e.target.value)} onBlur={(e) => commitField(a, 'notes', e.target.value)} className={cell + ' text-left'} style={{ width: 150 }} placeholder="—" /></td>
+                  <td className={td}><input disabled={locked} data-gcol="notes" data-grow={row} value={g(a, 'notes', a.notes || '')} onChange={(e) => setD(a, 'notes', e.target.value)} onBlur={(e) => commitField(a, 'notes', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'notes', row)} className={cell + ' text-left'} style={{ width: 150 }} placeholder="—" /></td>
                 </tr>
               )
             }),
@@ -905,15 +935,20 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   // prior state, saves, reloads and ticks "Saved". syncRate also writes the
   // library areaRate for this product + area.
   const gridCommit = async (before, next, opts = {}) => {
-    pushUndo(async () => { await db.upsertApplication({ ...before, programId: activeProgram.id }); setAllApps(await db.fetchApplications(activeProgram.id)) })
+    // Capture the product's prior state so undo restores BOTH the row and the
+    // library areaRate in a single step (1c).
+    const prod = opts.syncRate && next.rateOzM != null ? products.find((p) => p.name === next.product) : null
+    const prodBefore = prod ? { ...prod, areaRates: { ...(prod.areaRates || {}) } } : null
+    pushUndo(async () => {
+      await db.upsertApplication({ ...before, programId: activeProgram.id })
+      if (prodBefore) { await db.upsertProduct(prodBefore); await onProductsChanged?.() }
+      setAllApps(await db.fetchApplications(activeProgram.id))
+    })
     try {
       await db.upsertApplication({ ...next, programId: activeProgram.id })
-      if (opts.syncRate && next.rateOzM != null) {
-        const prod = products.find((p) => p.name === next.product)
-        if (prod) {
-          const nextRates = { ...(prod.areaRates || {}), [(next.area || '').trim()]: Math.round(Number(next.rateOzM) * 1000) / 1000 }
-          await db.upsertProduct({ ...prod, areaRates: nextRates })
-        }
+      if (prod) {
+        const nextRates = { ...(prod.areaRates || {}), [(next.area || '').trim()]: Math.round(Number(next.rateOzM) * 1000) / 1000 }
+        await db.upsertProduct({ ...prod, areaRates: nextRates })
       }
       setAllApps(await db.fetchApplications(activeProgram.id))
       if (opts.syncRate) await onProductsChanged?.()
@@ -1513,7 +1548,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
 
       {/* Planned-spray editor — opens as a centered popup so you edit in place */}
       {confirmRate && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-5" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={() => setConfirmRate(null)}>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-5" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={() => { const r = confirmRate; setConfirmRate(null); if (r && r.onCancel) r.onCancel() }}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-5 border-2" style={{ borderColor: GOLD }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 mb-2">
               <AlertTriangle size={18} style={{ color: '#B07A16' }} />
@@ -1526,11 +1561,11 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
             {confirmRate.costLabel ? (
               <p className="font-body text-[13px] text-slate-700 mt-1">Cost/case <b>{confirmRate.origRate == null ? '—' : `$${Number(confirmRate.origRate).toLocaleString('en-US', { maximumFractionDigits: 2 })}`}</b> → <b style={{ color: FOREST }}>{confirmRate.newRate == null ? '—' : `$${Number(confirmRate.newRate).toLocaleString('en-US', { maximumFractionDigits: 2 })}`}</b></p>
             ) : (
-              <p className="font-body text-[13px] text-slate-700 mt-1">Rate <b>{confirmRate.origRate == null ? '—' : round1(confirmRate.origRate)}</b> → <b style={{ color: FOREST }}>{confirmRate.newRate == null ? '—' : round1(confirmRate.newRate)} oz/M</b></p>
+              <p className="font-body text-[13px] text-slate-700 mt-1">Rate <b>{confirmRate.origRate == null ? '—' : Number(confirmRate.origRate).toFixed(3)}</b> → <b style={{ color: FOREST }}>{confirmRate.newRate == null ? '—' : `${Number(confirmRate.newRate).toFixed(3)} oz/M`}</b></p>
             )}
             <p className="font-body text-[11px] text-slate-400 mt-1.5">{confirmRate.costLabel ? 'This changes the cost for every spray of this product across the whole program.' : 'This updates the plan and the Chemical Library rate for this area. Other sprays aren’t touched unless you choose to after.'}</p>
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => setConfirmRate(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Cancel</button>
+              <button type="button" onClick={() => { const r = confirmRate; setConfirmRate(null); if (r && r.onCancel) r.onCancel() }} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Cancel</button>
               <button type="button" onClick={() => { const r = confirmRate; setConfirmRate(null); if (r.run) r.run(); else doSaveInline(r.snap) }} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: FOREST }}>Confirm change</button>
             </div>
           </div>
