@@ -672,6 +672,16 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
       } else {
         setProgramApps([])
       }
+      // One-time, idempotent cleanup of the product library (trim stray spaces
+      // in names, normalize areaRates keys, drop rates for retired areas). Safe
+      // to run on every manager load — after the first pass it finds nothing to
+      // change and writes nothing. Fire-and-forget; refresh only if it changed.
+      if (typeof window !== 'undefined' && !window.__grdHealed) {
+        window.__grdHealed = true
+        db.healProductData(Object.keys(settings.areas || {}))
+          .then((res) => { if (res && (res.renamed || res.cleaned)) db.fetchProducts().then(setProducts).catch(() => {}) })
+          .catch(() => {})
+      }
     } catch (e) {
       console.error('Failed to load data', e)
       showToast('Could not load data — check your connection')
