@@ -31,7 +31,7 @@ export default function HocEditor({ courseInfo = {}, areas = {}, practices = [],
   const seed = () => { const next = allMowed.map((a, i) => ({ id: `h${Date.now()}_${i}`, surface: a, height: hocByArea[a] || '' })); setRows(next); persist(next) }
 
   return (
-    <div className={`rounded-xl border border-slate-200 p-3 ${className}`}>
+    <div className={`rounded-2xl border border-slate-200 p-3 ${className}`}>
       <div className="flex items-center justify-between mb-1.5">
         <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">{title}</label>
         <div className="flex gap-2">
