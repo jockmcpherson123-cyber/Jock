@@ -2538,7 +2538,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                 <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 p-3 mb-3">
                   <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
                   <p className="font-body text-[11px] text-amber-700">
-                    {(earlyOrder.missingPriceRows || []).length > 0 && <><b>No case price — hiding spend from the total:</b> {earlyOrder.missingPriceRows.join(', ')}. Add the case price in the Chemical Library (Ordering) so the order matches the spreadsheet. </>}
+                    {(earlyOrder.missingPriceRows || []).length > 0 && <><b>{earlyOrder.missingPriceRows.length} product{earlyOrder.missingPriceRows.length !== 1 ? 's have' : ' has'} no case price yet, so {earlyOrder.missingPriceRows.length !== 1 ? "they're" : "it's"} not in the $ total:</b> {earlyOrder.missingPriceRows.join(', ')}. Add the case price in the Chemical Library (Ordering). </>}
                     {earlyOrder.missingCaseCount > 0 && <>{earlyOrder.missingCaseCount} product{earlyOrder.missingCaseCount !== 1 ? 's' : ''} missing “Oz/case” — add it in the Chemical Library (Ordering section) to get its cases-needed. </>}
                     {earlyOrder.missingSqft && <>Some areas have no square footage set (Settings → Sprayer Areas), so their totals can't be calculated.</>}
                   </p>
