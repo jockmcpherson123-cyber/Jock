@@ -36,8 +36,8 @@ const ES = {
 const SLOT_ES = { '1': 'Trabajos 1', '2': 'Trabajos 2', '3': 'Trabajos 3', '4': 'Trabajos 4' }
 const SLOT_SHORT = { '1': '1st', '2': '2nd', '3': '3rd', '4': '4th' }
 
-// A person's board colour (matches the Workboard's Crew view): own hex, else
-// their group's colour, else a neutral.
+// A person's board color (matches the Workboard's Crew view): own hex, else
+// their group's color, else a neutral.
 const CB_GROUP_COLORS = { Greens: '#2E7D4F', Fairways: '#2F6FB0', Tees: '#C27C0E', Rough: '#7A5C3E', Bunkers: '#D9A441', Details: '#8B5CF6', Equipment: '#0E7490', Irrigation: '#2563EB', Other: '#64748B' }
 const cbHex = (v) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(v || '').trim())
 const cbPersonColor = (crew, name) => { const c = (crew && crew[name]) || {}; if (cbHex(c.color)) return c.color; if (c.group && CB_GROUP_COLORS[c.group]) return CB_GROUP_COLORS[c.group]; return '#8AA394' }

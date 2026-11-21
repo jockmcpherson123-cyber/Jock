@@ -108,7 +108,7 @@ export default function IrrigationParts({ manage = false }) {
     <div className={`${PAGE} py-6`}>
       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
         <div>
-          <h2 className="font-display text-lg font-semibold text-slate-900">Irrigation Parts</h2>
+          <h2 className="font-display text-lg font-semibold text-slate-900">Parts</h2>
           <p className="font-body text-sm text-slate-400">Your parts stockroom — what's on hand and what's running low</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">

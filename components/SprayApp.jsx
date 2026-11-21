@@ -367,7 +367,7 @@ export default function SprayApp({ user }) {
   const [drawer, setDrawer] = useState(false)
   const [focus, setFocus] = useState(null)      // deep-link target for a searched item
   const [searchOpen, setSearchOpen] = useState(false)
-  // The property's courses (name + colour) and club name, for the course bar and
+  // The property's courses (name + color) and club name, for the course bar and
   // the sidebar brand. Fetched once here so the bar is one global control.
   const [courses, setCourses] = useState([])
   const [clubName, setClubName] = useState('')
@@ -440,7 +440,7 @@ export default function SprayApp({ user }) {
           </div>
           {manage && searchOpen && <GlobalSearch onGo={gotoFocus} onClose={() => setSearchOpen(false)} />}
 
-          {/* Course bar — the one global All / Blue / Gold selector. Colours come
+          {/* Course bar — the one global All / Blue / Gold selector. Colors come
               from Property Setup. Shows only on course-aware screens; ignores the
               rest. Defaults to All so nothing is hidden until you pick a course. */}
           {showCourseBar && (
@@ -467,7 +467,7 @@ export default function SprayApp({ user }) {
   )
 }
 
-// One tab in the colour course bar. Active tab carries the course's own colour
+// One tab in the color course bar. Active tab carries the course's own color
 // as an underline + dot, so you can always see which course you're in.
 function CourseTab({ label, color, on, onClick }) {
   const accent = color || FERN
@@ -1262,7 +1262,7 @@ function FertSheets({ manage, courseInfo, courseFilter = '' }) {
     <div className="py-6">
       {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[1000] px-4 py-2 rounded-full text-white font-body text-sm shadow-lg" style={{ backgroundColor: FOREST }}>{toast}</div>}
       <div className="flex items-center justify-between mb-4">
-        <SectionHeader title="Fertilizer Sheets" subtitle="Granular fert applications by area — lbs, bags and cost worked out per section" noMargin />
+        <SectionHeader title="Fert Sheets" subtitle="Granular fert applications by area — lbs, bags and cost worked out per section" noMargin />
         {manage && <button onClick={() => setActive(blank())} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={14} /> New fert sheet</button>}
       </div>
       {(courseFilter ? sheets.filter((s) => fcTok(s.area) === fcTok(courseFilter)) : sheets).length === 0 ? (
@@ -2416,7 +2416,7 @@ function SheetList({ sheets, allSheets, products, onOpen, onNew, onDelete, onImp
     XLSX.writeFile(wb, 'spray-history-template.xlsx')
   }
   const CONFIG = {
-    manage: { title: 'All Spray Sheets', sub: null, keys: ['tospray', 'pending', 'completed', 'all'], initial: 'tospray' },
+    manage: { title: 'Spray Sheets', sub: null, keys: ['tospray', 'pending', 'completed', 'all'], initial: 'tospray' },
     tospray: { title: 'To Spray', sub: 'Approved and outstanding — mark them done as you go', keys: [], initial: 'tospray' },
     records: { title: 'Records', sub: 'Completed sprays — open to print or review', keys: [], initial: 'completed' },
   }
@@ -3294,9 +3294,9 @@ function recordGaps(sheet, area = {}, products = [], sheetTargets = []) {
   })
   if (missingEpa.length) gaps.push(`EPA Reg. No. for: ${missingEpa.map((p) => p.product).join(', ')}`)
 
-  // Applicator certification number — pesticide licence when any pesticide is applied.
+  // Applicator certification number — pesticide license when any pesticide is applied.
   if (hasPesticide && !String(sheet.applicatorPesticideLicense || '').trim()) {
-    gaps.push('Applicator pesticide licence #')
+    gaps.push('Applicator pesticide license #')
   }
   if (!sheet.applicatorSignature) gaps.push('Applicator signature')
 
@@ -3385,7 +3385,7 @@ function seasonReportHTML(allSheets, products, areas, courseInfo = {}, year) {
 // Maryland record-book export — the inspector-ready application log. One row
 // per product applied, with every field the MDA expects: date, site + size,
 // product + EPA reg #, rate + total, target, and the certified applicator with
-// their licence number. Returns HTML for the shared print/PDF pipeline.
+// their license number. Returns HTML for the shared print/PDF pipeline.
 function mdaRecordBookHTML(allSheets, products, areas, courseInfo = {}, location = {}, applicatorLicenses = {}, year) {
   const sheets = (allSheets || [])
     .filter((s) => sheetApplied(s) && String(s.date || '').slice(0, 4) === String(year))
@@ -4064,7 +4064,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
           <ul className="font-body text-[12.5px] leading-relaxed" style={{ color: '#7A5A12' }}>
             {gaps.map((g) => <li key={g} className="flex items-start gap-1.5"><span className="mt-[7px] w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: '#B08A2A' }} />{g}</li>)}
           </ul>
-          <p className="font-body text-[11px] mt-2" style={{ color: '#92660D' }}>You can still print — this is a reminder, not a block. Add the EPA Reg. No. in the Chemical Library and licence #s in Settings → People.</p>
+          <p className="font-body text-[11px] mt-2" style={{ color: '#92660D' }}>You can still print — this is a reminder, not a block. Add the EPA Reg. No. in the Chemical Library and license #s in Settings → People.</p>
         </div>
       )}
       {rigPick && (
@@ -6372,7 +6372,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
   return (
     <div className="pt-6 pb-10">
       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-        <SectionHeader title="Reports" subtitle="Nutrients and chemical rotation, pulled from your sprays" noMargin />
+        <SectionHeader title="Season Reports" subtitle="Nutrients and chemical rotation, pulled from your sprays" noMargin />
         {report === 'npk' && (
           <button onClick={exportCSV} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
             <Package size={14} /> Export Spreadsheet
@@ -7338,7 +7338,7 @@ function OnboardingWizard({ courseInfo = {}, grassTypes = [], areas = {}, soilTy
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 pl-1">
-                      <span className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: '#94A3B8' }}>Colour</span>
+                      <span className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: '#94A3B8' }}>Color</span>
                       {COURSE_COLORS.map((col) => (
                         <button key={col.hex} type="button" onClick={() => setCourse(i, { color: col.hex })} title={col.name} className="w-5 h-5 rounded-full" style={{ backgroundColor: col.hex, outline: c.color === col.hex ? `2px solid ${FOREST}` : 'none', outlineOffset: 2 }} />
                       ))}
@@ -7772,7 +7772,7 @@ function SprayersSettings({ courseInfo = {}, onSave }) {
   )
 }
 
-// Palette a course can be tagged with — drives the course bar + section colours.
+// Palette a course can be tagged with — drives the course bar + section colors.
 const COURSE_COLORS = [
   { hex: '#2563EB', name: 'Blue' }, { hex: '#C9A84C', name: 'Gold' }, { hex: '#3A6B4A', name: 'Green' },
   { hex: '#B23A2E', name: 'Red' }, { hex: '#7C3AED', name: 'Purple' }, { hex: '#0E7490', name: 'Teal' },
@@ -7893,7 +7893,7 @@ function CourseAreaRows({ courses, aMap, setAMap, grassTypes = [], soilTypes = [
 }
 
 // Settings → Property Setup: the editable home for the whole multi-course
-// backbone — courses (name, holes, colour) and each course's areas.
+// backbone — courses (name, holes, color) and each course's areas.
 function PropertySetup({ courseInfo, areas, grassTypes = [], soilTypes = [], onSave }) {
   const [courses, setCourses] = useState(() =>
     (Array.isArray(courseInfo.courses) && courseInfo.courses.length ? courseInfo.courses : [{ name: '', holes: 18 }])
@@ -7919,7 +7919,7 @@ function PropertySetup({ courseInfo, areas, grassTypes = [], soilTypes = [], onS
     <div className="space-y-6">
       <Card>
         <p className="font-display text-base font-semibold text-slate-900 mb-1">Courses</p>
-        <p className="font-body text-xs text-slate-500 mb-3">The courses on your property. The colour tags each one across the whole app.</p>
+        <p className="font-body text-xs text-slate-500 mb-3">The courses on your property. The color tags each one across the whole app.</p>
         <div className="space-y-2">
           {courses.map((c, i) => (
             <div key={i} className="flex items-center gap-2 flex-wrap">
@@ -8719,8 +8719,8 @@ const CREW_LANGS = [['en', 'English'], ['es', 'Spanish'], ['pt', 'Portuguese'], 
 const SLOTS = [['1', '1st Jobs'], ['2', '2nd Jobs'], ['3', '3rd Jobs'], ['4', '4th Jobs']]
 const slotLabel = (s) => (SLOTS.find(([k]) => k === String(s)) || [])[1] || '1st Jobs'
 
-// Job/crew groups — used to colour and sort the day's work. Each has a default
-// colour; a person can override with their own hex. Non-breaking: everything
+// Job/crew groups — used to color and sort the day's work. Each has a default
+// color; a person can override with their own hex. Non-breaking: everything
 // with no group/color falls back to a neutral slate, so old data still renders.
 const WB_GROUPS = [
   ['Greens', '#2E7D4F'], ['Fairways', '#2F6FB0'], ['Tees', '#C27C0E'],
@@ -8730,7 +8730,7 @@ const WB_GROUPS = [
 const WB_GROUP_ORDER = WB_GROUPS.map(([n]) => n)
 const groupColor = (g) => (WB_GROUPS.find(([n]) => n === g) || [])[1] || '#64748B'
 const isHex = (v) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(v || '').trim())
-// A person's board colour: their own hex if set, else their group's colour,
+// A person's board color: their own hex if set, else their group's color,
 // else a neutral slate (so names with no group still look intentional).
 const personColor = (crew, name) => {
   const c = (crew && crew[name]) || {}
@@ -8919,7 +8919,7 @@ function WhiteboardModule({ user, nav, hideChrome }) {
           {section === 'insights' && <WhiteboardInsights courses={courses} jobGroups={courseInfo.jobGroups || {}} />}
           {section === 'crew' && <WhiteboardCrew roster={roster} operators={operators} crewMembers={crewMembers} courses={courses} crew={crew} manage={manage} onSaveCrew={(next) => saveCourse({ crew: next })} onSaveMembers={(list) => saveCourse({ crewMembers: list })} onImport={(crewPatch, newNames) => saveCourse({ crew: crewPatch, crewMembers: [...new Set([...crewMembers, ...newNames])] })} />}
           {section === 'equipment' && <WhiteboardListSection title="Equipment" hint="The mowers, rollers, blowers and carts your crew runs. These become quick-pick chips when you add a job." items={equipment} manage={manage} accent={FERN} onSave={(list) => saveCourse({ equipment: list })} importFields={['name', 'type']} importHint="One piece of equipment per line. Optional second column for a type, e.g.  Toro 3550, Greens mower" onImport={(rows) => saveCourse({ equipment: [...new Set([...(equipment || []), ...rows.map((r) => r.name).filter(Boolean)])] })} />}
-          {section === 'jobtypes' && <WhiteboardListSection title="Job Types" hint="The everyday jobs that show as one-tap chips on the Workboard. Add the ones your crew runs each morning. A group colours and sorts the job; cards and PPE flag safety needs." items={jobTypes} manage={manage} accent={FOREST} onSave={(list) => saveCourse({ jobTypes: list })} groups={courseInfo.jobGroups || {}} onSetGroup={(job, g) => { const next = { ...(courseInfo.jobGroups || {}) }; if (g) next[job] = g; else delete next[job]; saveCourse({ jobGroups: next }) }} jobCards={courseInfo.jobCards || {}} onSetCards={(job, list) => { const next = { ...(courseInfo.jobCards || {}) }; if (list.length) next[job] = list; else delete next[job]; saveCourse({ jobCards: next }) }} jobPpe={courseInfo.jobPpe || {}} onSetPpe={(job, list) => { const next = { ...(courseInfo.jobPpe || {}) }; if (list.length) next[job] = list; else delete next[job]; saveCourse({ jobPpe: next }) }} />}
+          {section === 'jobtypes' && <WhiteboardListSection title="Job Types" hint="The everyday jobs that show as one-tap chips on the Workboard. Add the ones your crew runs each morning. A group colors and sorts the job; cards and PPE flag safety needs." items={jobTypes} manage={manage} accent={FOREST} onSave={(list) => saveCourse({ jobTypes: list })} groups={courseInfo.jobGroups || {}} onSetGroup={(job, g) => { const next = { ...(courseInfo.jobGroups || {}) }; if (g) next[job] = g; else delete next[job]; saveCourse({ jobGroups: next }) }} jobCards={courseInfo.jobCards || {}} onSetCards={(job, list) => { const next = { ...(courseInfo.jobCards || {}) }; if (list.length) next[job] = list; else delete next[job]; saveCourse({ jobCards: next }) }} jobPpe={courseInfo.jobPpe || {}} onSetPpe={(job, list) => { const next = { ...(courseInfo.jobPpe || {}) }; if (list.length) next[job] = list; else delete next[job]; saveCourse({ jobPpe: next }) }} />}
         </div>
       </div>
       {qrOpen && <CrewQRModal courseInfo={courseInfo} saveCourse={saveCourse} roster={roster} crew={crew} onClose={() => setQrOpen(false)} />}
@@ -9808,7 +9808,7 @@ function WhiteboardCrew({ roster = [], operators = [], crewMembers = [], courses
 
   return (
     <div className="space-y-2">
-      <p className="font-body text-[12px] text-slate-500 mb-1">Your grounds crew. Spray Ops people are pulled in automatically; add everyone else here. Set each person's home course, native language, crew group and board colour.</p>
+      <p className="font-body text-[12px] text-slate-500 mb-1">Your grounds crew. Spray Ops people are pulled in automatically; add everyone else here. Set each person's home course, native language, crew group and board color.</p>
       {manage && (
         <>
           <div className="flex gap-2 mb-2">
@@ -9851,8 +9851,8 @@ function WhiteboardCrew({ roster = [], operators = [], crewMembers = [], courses
                 <div className="shrink-0" style={{ width: 140 }}>
                   <SearchSelect value={c.group || ''} options={[{ value: '', label: 'No group' }, ...WB_GROUP_ORDER.map((g) => ({ value: g, label: g }))]} onPick={(v) => setField(person, 'group', v)} sort={false} />
                 </div>
-                <label className="shrink-0 inline-flex items-center gap-1.5 cursor-pointer" title="Board colour (left border on their card). Defaults to the group colour.">
-                  <input type="color" value={isHex(swatch) ? swatch : '#94A3B8'} onChange={(e) => setField(person, 'color', e.target.value)} className="w-7 h-7 rounded-lg border border-slate-200 p-0 bg-white cursor-pointer" aria-label={`Board colour for ${person}`} />
+                <label className="shrink-0 inline-flex items-center gap-1.5 cursor-pointer" title="Board color (left border on their card). Defaults to the group color.">
+                  <input type="color" value={isHex(swatch) ? swatch : '#94A3B8'} onChange={(e) => setField(person, 'color', e.target.value)} className="w-7 h-7 rounded-lg border border-slate-200 p-0 bg-white cursor-pointer" aria-label={`Board color for ${person}`} />
                   {isHex(c.color) && <button type="button" onClick={() => setField(person, 'color', '')} className="font-body text-[10px] font-semibold text-slate-400 hover:text-slate-600">reset</button>}
                 </label>
               </div>
@@ -10205,7 +10205,7 @@ function WhiteboardInsights({ courses = [], jobGroups = {} }) {
 
 // A managed list (equipment, job types) that feeds the Workboard's quick-picks.
 // Optional: `onImport` adds a CSV import, and `groups`/`onSetGroup` add a
-// per-item group picker (used by Job Types to colour/sort the board).
+// per-item group picker (used by Job Types to color/sort the board).
 function WhiteboardListSection({ title, hint, items, manage, accent, onSave, importFields, importHint, onImport, groups, onSetGroup, jobCards, onSetCards, jobPpe, onSetPpe }) {
   const [importOpen, setImportOpen] = useState(false)
   const [csv, setCsv] = useState('')
@@ -10234,7 +10234,7 @@ function WhiteboardListSection({ title, hint, items, manage, accent, onSave, imp
 
       {manage && onSetGroup && items.length > 0 && (
         <div className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
-          <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Job rules <span className="font-normal normal-case tracking-normal">· group colours &amp; sorts; cards &amp; PPE flag safety (all optional)</span></p>
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-2">Job rules <span className="font-normal normal-case tracking-normal">· group colors &amp; sorts; cards &amp; PPE flag safety (all optional)</span></p>
           <div className="space-y-1">
             {items.map((job) => {
               const g = (groups || {})[job] || ''
@@ -11319,7 +11319,7 @@ function SuppressionCurve({ model, gdd, surfaceKind }) {
 // an optional target line (refLine) OR shaded Min/Max band, and supports one or
 // many series (raw + 7/14/30-day trailing averages) with a legend.
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-// Fixed multi-series colour order (CVD-safe categorical slots).
+// Fixed multi-series color order (CVD-safe categorical slots).
 const SERIES_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#4a3aa7', '#e34948', '#e87ba4', '#008300']
 const chartMs = (d) => { if (typeof d === 'number') return d; const p = String(d || '').split('-').map(Number); return p.length === 3 ? new Date(p[0], (p[1] || 1) - 1, p[2] || 1).getTime() : NaN }
 const chartMmDd = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()}` }
@@ -11366,7 +11366,7 @@ function TrendChart({ points = null, series = null, color = FERN, height = 170, 
   const ref = refLine && refLine.value != null && !isNaN(Number(refLine.value)) ? Number(refLine.value) : null
   const bMin = band && band.min != null && band.min !== '' && !isNaN(Number(band.min)) ? Number(band.min) : null
   const bMax = band && band.max != null && band.max !== '' && !isNaN(Number(band.max)) ? Number(band.max) : null
-  // Guide lines: any number of labelled reference lines (label + value + colour).
+  // Guide lines: any number of labelled reference lines (label + value + color).
   const gs = (guides || []).map((g) => ({ value: Number(g.value), label: g.label, color: g.color || '#B7791F' })).filter((g) => !isNaN(g.value))
   const scaleVals = [...allV]
   if (ref != null) scaleVals.push(ref)
@@ -11756,7 +11756,7 @@ function GddForecastChart({ cycle = [], target = 0, reference = 0, height = 190 
 }
 
 // Guide lines the user places on a metric's charts (as many as they like), each
-// a label + value + colour. Stored in courseInfo.guides[metric] and passed to
+// a label + value + color. Stored in courseInfo.guides[metric] and passed to
 // TrendChart's `guides` prop.
 const GUIDE_COLORS = ['#B7791F', '#C0392B', '#3A6B4A', '#2a78d6', '#8A94A0']
 function guidesFor(courseInfo, metric) {
@@ -11789,7 +11789,7 @@ function GuidesEditor({ metric, courseInfo, onSaveCourse, unit = '', title = 'Gu
               </div>
               <div className="flex gap-1.5 mt-2">
                 {GUIDE_COLORS.map((c) => (
-                  <button key={c} onClick={() => upd(g.id, { color: c })} className="w-6 h-6 rounded-full" style={{ backgroundColor: c, outline: g.color === c ? `2px solid ${INK_2}` : '1px solid rgba(0,0,0,0.08)', outlineOffset: 1 }} aria-label={`colour ${c}`} />
+                  <button key={c} onClick={() => upd(g.id, { color: c })} className="w-6 h-6 rounded-full" style={{ backgroundColor: c, outline: g.color === c ? `2px solid ${INK_2}` : '1px solid rgba(0,0,0,0.08)', outlineOffset: 1 }} aria-label={`color ${c}`} />
                 ))}
               </div>
             </div>
@@ -11802,7 +11802,7 @@ function GuidesEditor({ metric, courseInfo, onSaveCourse, unit = '', title = 'Gu
 }
 
 // Season timeline (shape ③): the things you DID — sprays, topdressing, aeration
-// and scouting — as colour-coded markers on one dated timeline.
+// and scouting — as color-coded markers on one dated timeline.
 function SeasonTimeline({ sheets = [], practices = [], scouting = [], courseFilter = '' }) {
   const [wrapRef, W] = useMeasuredWidth(560)
   const cTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
@@ -12844,13 +12844,13 @@ const SOIL_GLOSSARY = {
   p: 'Phosphorus — root development and energy transfer.',
   k: 'Potassium — wear/heat/drought tolerance and water regulation.',
   ca: 'Calcium — cell-wall strength and root growth.',
-  mg: 'Magnesium — the core of chlorophyll (green colour).',
+  mg: 'Magnesium — the core of chlorophyll (green color).',
   s: 'Sulfur — proteins and chlorophyll; mildly acidifying.',
   ph: 'pH — acidity/alkalinity. Ideal ~6.0–6.5; drives how available other nutrients are.',
   cec: 'CEC / TEC — the soil’s nutrient-holding capacity. Low (≈ sand) means nutrients leach.',
   om: 'Organic Matter — decomposed material; helps hold moisture and nutrients.',
   na: 'Sodium — too much harms soil structure and roots; flush it on sand.',
-  fe: 'Iron — deep green colour without pushing extra growth.',
+  fe: 'Iron — deep green color without pushing extra growth.',
   mn: 'Manganese — enzyme and chlorophyll function.',
   cu: 'Copper — enzyme function; deficiency is rare.',
   zn: 'Zinc — growth hormones and enzymes.',

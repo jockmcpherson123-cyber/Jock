@@ -1766,12 +1766,24 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                   if (mn == null && mx == null) return '—'
                   return `${mn ?? ''}${mx != null ? `–${mx}` : ''} oz${per}`
                 })()
+                // Over / Under label check (A2) — compare the planned rate to the
+                // library's label range in oz/M (converting a /A-only label).
+                const labelMinM = prod.labelMinM != null ? Number(prod.labelMinM) : (prod.labelMinA != null ? Number(prod.labelMinA) / 43.56 : null)
+                const labelMaxM = prod.labelMaxM != null ? Number(prod.labelMaxM) : (prod.labelMaxA != null ? Number(prod.labelMaxA) / 43.56 : null)
+                let labelStatus = null
+                if (rateM != null) {
+                  if (labelMaxM != null && rateM > labelMaxM * 1.001) labelStatus = 'over'
+                  else if (labelMinM != null && rateM < labelMinM * 0.999) labelStatus = 'under'
+                }
+                const labelNode = (labelRate === '—' && !labelStatus) ? '—' : (
+                  <span>{labelRate}{labelStatus && <span style={{ display: 'block', fontSize: 7, fontWeight: 800, letterSpacing: '0.04em', color: labelStatus === 'over' ? '#B91C1C' : '#B07A16' }}>{labelStatus === 'over' ? 'OVER LABEL' : 'UNDER LABEL'}</span>}</span>
+                )
                 const pkg = prod.jugSize ? `${prod.jugSize} ${prod.jugUnit || 'gal'}` : (prod.caseSize || '—')
                 return [
                   ['For', a.target || '—'],
                   ['Rate oz/M', rateFmt(rateM)],
                   ['Rate oz/A', rateM != null ? rateFmt(rateM * 43.56) : '—'],
-                  ['Label rate', labelRate],
+                  ['Label rate', labelNode],
                   ['Area (sq ft)', sqft ? sqft.toLocaleString() : '—'],
                   ['# Tanks', tanks],
                   ['oz / Tank', ozPerTank != null ? round1(ozPerTank) : '—'],

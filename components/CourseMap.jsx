@@ -28,7 +28,7 @@ const FALLBACK = { lat: 38.9803, lng: -77.1636 }
 const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 const SAT_ATTR = 'Imagery © Esri, Maxar, Earthstar Geographics'
 
-// Editable irrigation objects — kinds + status colours (crisp vector markers).
+// Editable irrigation objects — kinds + status colors (crisp vector markers).
 const KINDS = [['head', 'Head'], ['valve', 'Valve'], ['quick_coupler', 'Quick coupler'], ['controller', 'Controller'], ['other', 'Other']]
 const KIND_LABEL = Object.fromEntries(KINDS)
 const STATUS = { ok: { label: 'Working', color: '#2563EB' }, repair: { label: 'Needs repair', color: '#DC2626' }, replaced: { label: 'Replaced', color: '#6B7280' } }
@@ -46,7 +46,7 @@ const KIND_STYLE = {
 function kindIconHtml(f, px, { selected } = {}) {
   const kind = f.kind || 'other'
   const base = KIND_STYLE[kind]?.color || '#9333EA'
-  // Status overrides the colour so a valve needing repair still reads red-hot.
+  // Status overrides the color so a valve needing repair still reads red-hot.
   const col = f.status === 'repair' ? '#DC2626' : f.status === 'replaced' ? '#6B7280' : base
   const s = px
   const ring = selected ? `<rect x="1" y="1" width="22" height="22" rx="6" fill="none" stroke="#C9A84C" stroke-width="2.5"/>` : ''
@@ -74,12 +74,12 @@ const PIPE_LEGEND = [
   ['1.5" poly', '#e83bd0'], ['2" HDPE', '#1e1e1e'], ['3" HDPE', '#12b2c6'], ['4" HDPE', '#57a0ea'],
   ['6" HDPE', '#2170e0'], ['8" HDPE', '#1a3fd0'], ['10"+ HDPE', '#0e2aa8'], ['14"+ HDPE', '#3d13a2'], ['16" HDPE', '#5a12c4'],
 ]
-// Control-wire loops — one colour per satellite/controller (from the blue as-built).
+// Control-wire loops — one color per satellite/controller (from the blue as-built).
 const WIRE_LEGEND = [
   ['#e11d1d', 'Wire loop A'], ['#1a8cff', 'Wire loop B'], ['#b0a800', 'Wire loop C'], ['#c824ff', 'Wire loop D'], ['#ff00bf', 'Wire loop E'],
 ]
 
-// Surface types you can draw (fill colour + stroke), like the as-built areas.
+// Surface types you can draw (fill color + stroke), like the as-built areas.
 const SURFACES = [
   ['green', 'Green', '#3f9b47', '#1f6a2a'],
   ['tee', 'Tee', '#57b356', '#2f7a34'],
@@ -92,7 +92,7 @@ const SURFACES = [
   ['nursery', 'Nursery / other', '#9fb98a', '#6e8a5a'],
 ]
 const SURF = Object.fromEntries(SURFACES.map(([k, l, f, s]) => [k, { label: l, fill: f, stroke: s }]))
-// Pipe sizes you can draw (reuse the legend colours).
+// Pipe sizes you can draw (reuse the legend colors).
 const DRAW_PIPES = PIPE_LEGEND // [[cls, color], …]
 
 // Compress a photo to a small data URL (same idea as the scouting log) so it
@@ -193,7 +193,7 @@ export default function CourseMap({ user, manage }) {
   // Vector pipe network (our own crisp overlay, pulled from the PDF)
   const [pipes, setPipes] = useState(null)
   const [showPipes, setShowPipes] = useState(true)
-  // Control-wire loops (dotted colour paths from the blue as-built)
+  // Control-wire loops (dotted color paths from the blue as-built)
   const [wires, setWires] = useState(null)
   const [showWires, setShowWires] = useState(false)
   // Drawn shapes (surfaces + pipe lines you add) + the edit tools
@@ -479,7 +479,7 @@ export default function CourseMap({ user, manage }) {
     return () => { map.off('click', handler) }
   }, [mapTick])
 
-  // Draw the vector pipe network — crisp at any zoom, coloured by pipe size,
+  // Draw the vector pipe network — crisp at any zoom, colored by pipe size,
   // placed with the same calibration transform as the raster overlay.
   useEffect(() => {
     const L = LRef.current, map = mainMap.current
@@ -516,8 +516,8 @@ export default function CourseMap({ user, manage }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipes, transform, mode, mapTick, showPipes, removedPipes])
 
-  // Draw the control-wire loops as small colour dots (reproduces the dotted
-  // wire paths), one colour per satellite/controller. Canvas keeps ~19k dots fast.
+  // Draw the control-wire loops as small color dots (reproduces the dotted
+  // wire paths), one color per satellite/controller. Canvas keeps ~19k dots fast.
   useEffect(() => {
     const L = LRef.current, map = mainMap.current
     if (!L || !map || mode !== 'map') return
@@ -618,7 +618,7 @@ export default function CourseMap({ user, manage }) {
           return
         }
         const fill = sym ? sym.fill : featureColor(f)
-        // Repair/replaced get a coloured ring so status still reads at a glance.
+        // Repair/replaced get a colored ring so status still reads at a glance.
         const statusRing = f.status === 'repair' ? '#DC2626' : f.status === 'replaced' ? '#6B7280' : null
         const cm = L.circleMarker([f.lat, f.lng], {
           radius: headR,
@@ -962,7 +962,7 @@ export default function CourseMap({ user, manage }) {
       <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
         <div className="flex items-center gap-2">
           <MapPin size={20} style={{ color: FERN }} />
-          <h1 className="font-display text-xl font-semibold" style={{ color: FOREST }}>Irrigation</h1>
+          <h2 className="font-display text-lg font-semibold" style={{ color: FOREST }}>Irrigation Map</h2>
           {!transform && <span className="font-body text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#FEF3DD', color: '#92660D' }}>Not calibrated yet</span>}
         </div>
         {manage && (
@@ -1415,7 +1415,7 @@ export default function CourseMap({ user, manage }) {
             </div>
             <div className="p-4">
               <p className="font-body text-[12px] text-slate-500 mb-3">{paletteMode === 'assign'
-                ? <>Pick what this object is — it&apos;ll take that icon&apos;s colour and label on the map.</>
+                ? <>Pick what this object is — it&apos;ll take that icon&apos;s color and label on the map.</>
                 : <>Tap a symbol, then tap the map to drop it. It keeps that symbol armed so you can place a whole run, then hit <b>Done</b>.</>}</p>
               {SYMBOL_GROUPS.map((g) => (
                 <div key={g.key} className="mb-4">
