@@ -4120,8 +4120,8 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
           <div className="space-y-4">
           <Card>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-3 gap-x-4 font-body text-sm">
-              <Row label="Date" value={sheet.date || '—'} />
-              <Row label="Applicator" value={sheet.operator || '—'} />
+              <Row label="Date" value={sheet.date ? new Date(sheet.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '—'} />
+              <Row label="Applicator" value={sheet.operator || <span className="text-slate-400">Not set — pick in “Sprayed by”</span>} />
               <Row label="Tanks" value={tanksLabel} />
               <Row label="Nozzle" value={area.nozzle || '—'} />
               <Row label="PSI" value={area.psi || '—'} />
@@ -4248,7 +4248,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
                         {overLimit && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">OVER</span>}
                       </p>
                       <p className={`${manage ? 'text-[11px]' : 'text-xs'} text-slate-400`}>
-                        {p.rate} {p.basis}{insufficient ? (Number(stock) < 0 ? ` · stock count needed` : ` · only ${stock} ${unit} in stock`) : ''}
+                        {p.rate} {String(p.basis || '').replace(/\s*\/\s*/, '/')}{insufficient ? (Number(stock) < 0 ? ` · stock count needed` : ` · only ${stock} ${unit} in stock`) : ''}
                       </p>
                       {p.target && String(p.target).trim() && (
                         <p className="text-[11px] mt-0.5 flex items-start gap-1" style={{ color: FERN }}>
@@ -4278,7 +4278,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
                       )}
                     </div>
                     <div className={`${manage ? 'w-16' : 'w-20'} text-center`}>
-                      <p className={`${manage ? 'text-sm' : 'text-lg'} font-bold leading-none`} style={{ color: outOfRange ? '#DC2626' : FERN }}>{total ?? '—'}</p>
+                      <p className={`${manage ? 'text-sm' : 'text-lg'} font-bold leading-none`} style={{ color: outOfRange ? '#DC2626' : FERN }}>{total != null && isFinite(Number(total)) ? Number(total).toLocaleString() : (total ?? '—')}</p>
                       <p className={`${manage ? 'text-[8px]' : 'text-[10px]'} text-slate-400 uppercase mt-0.5 font-semibold`}>{unit}</p>
                     </div>
                   </div>
@@ -4300,13 +4300,13 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
               <Card>
                 <div className="flex items-center justify-between mb-1">
                   <FieldLabel noMargin>Mix &amp; Fill Order</FieldLabel>
-                  <span className="font-body text-[11px] text-slate-400">{plan.totalSolutionGal} gal solution · {plan.fullTanks} tank{plan.fullTanks === 1 ? '' : 's'}{plan.partialGal > 0 ? ` + ${plan.partialGal} gal` : ''}</span>
+                  <span className="font-body text-[11px] text-slate-400">{Number(plan.totalSolutionGal).toLocaleString()} gal solution · {plan.fullTanks} tank{plan.fullTanks === 1 ? '' : 's'}{plan.partialGal > 0 ? ` + ${plan.partialGal} gal` : ''}</span>
                 </div>
                 <p className="font-body text-[11px] text-slate-400 mb-2.5">Fill the tank about half with water, add each product in this order agitating between each, then top off.</p>
                 {plan.stockIssues.length > 0 && (
                   <div className="rounded-lg px-3 py-2 mb-2.5 font-body text-[11px] flex items-start gap-1.5" style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}>
                     <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                    <span><b>Short on stock:</b> {plan.stockIssues.map((l) => `${l.name} (need ${l.need}, have ${Number(l.stock) < 0 ? '0 — count needed' : l.stock})`).join('; ')}. Order or reduce the job before spraying.</span>
+                    <span><b>Short on stock:</b> {plan.stockIssues.map((l) => `${l.name} (need ${Number(l.need).toLocaleString()}, have ${Number(l.stock) < 0 ? '0 — count needed' : Number(l.stock).toLocaleString()})`).join('; ')}. Order or reduce the job before spraying.</span>
                   </div>
                 )}
                 <ol className="space-y-1.5">
