@@ -381,6 +381,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   const [openTanks, setOpenTanks] = useState({}) // sheet view: event key -> true when the tank is expanded
   const [inlineEdit, setInlineEdit] = useState(null) // sheet view: quick inline edit of one product row
   const [rateSync, setRateSync] = useState(null) // { product, area, newRate, fromRate, ids } prompt to apply a rate to a product's other sprays on an area
+  const [confirmRate, setConfirmRate] = useState(null) // { snap, product, area, origRate, newRate, productChanged } — confirm before a rate change commits
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
   // ── Build From Models: pick a year + which surfaces, then auto-fill the
   // Annual Program tab with a per-surface, grass-matched, site-tuned program.
@@ -653,6 +654,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
     id: a.id, area: a.area, plannedDate: a.plannedDate || null, trigger: a.trigger || { mode: 'date' },
     product: a.product, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', basis: a.basis || 'oz / M', type: a.type || '', target: a.target || '',
     tanks: a.tanks ?? null, notes: a.notes || '', // carried through so a quick edit doesn't wipe them
+    origRateOzM: a.rateOzM ?? '', origProduct: a.product, // originals, to confirm a change before it commits
     focusNotes: !!opts.focusNotes,
   })
   // Swap the product mid-edit — re-fills rate + type + basis from the library live.
@@ -661,13 +663,29 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
     const prod = products.find((p) => p.name === name)
     return { ...prev, product: name, type: prod?.type || '', basis: prod?.basis || 'oz / M', rateOzM: prod?.rate != null ? prod.rate : '', rateOzA: '', target: '' }
   })
-  async function saveInline() {
+  // Gate: tapping Save never changes a rate (or product) silently. If the rate
+  // or product changed, pop a confirm banner first; only then does it commit.
+  function saveInline() {
     if (!inlineEdit?.product) { setInlineEdit(null); return }
-    setBusy(true)
-    const editId = inlineEdit.id
-    const prodName = inlineEdit.product
-    const areaKey = (inlineEdit.area || '').trim()
     const newRate = inlineEdit.rateOzM === '' ? null : Number(inlineEdit.rateOzM)
+    const origRate = (inlineEdit.origRateOzM === '' || inlineEdit.origRateOzM == null) ? null : Number(inlineEdit.origRateOzM)
+    const rateChanged = newRate !== origRate
+    const productChanged = inlineEdit.product !== inlineEdit.origProduct
+    const snap = { ...inlineEdit }
+    if (rateChanged || productChanged) {
+      setConfirmRate({ snap, product: snap.product, area: (snap.area || '').trim(), origRate, newRate, origProduct: snap.origProduct, productChanged })
+      return
+    }
+    doSaveInline(snap) // nothing material changed (e.g. just a note) — save straight away
+  }
+  async function doSaveInline(snap) {
+    if (!snap?.product) { setInlineEdit(null); return }
+    setBusy(true)
+    const editId = snap.id
+    const prodName = snap.product
+    const areaKey = (snap.area || '').trim()
+    const newRate = snap.rateOzM === '' ? null : Number(snap.rateOzM)
+    const inlineEdit = snap // the body below reads from the snapshot
     try {
       // Editing the rate stores oz/M and clears any stale oz/A (2.2 step 1).
       await db.upsertApplication({
@@ -1131,7 +1149,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {activeProgram && (
-            <button onClick={startAddApp} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
+            <button onClick={startAddApp} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: FOREST, color: 'white' }}>
               <Plus size={14} /> Add Application
             </button>
           )}
@@ -1289,6 +1307,27 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
       )}
 
       {/* Planned-spray editor — opens as a centered popup so you edit in place */}
+      {confirmRate && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-5" style={{ backgroundColor: 'rgba(26,26,22,0.5)' }} onClick={() => setConfirmRate(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-5 border-2" style={{ borderColor: GOLD }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle size={18} style={{ color: '#B07A16' }} />
+              <p className="font-display text-base font-bold" style={{ color: FOREST }}>Confirm rate change</p>
+            </div>
+            <p className="font-body text-[13px] text-slate-700 leading-relaxed">
+              <b>{confirmRate.product}</b> on <b>{confirmRate.area || '—'}</b>
+            </p>
+            {confirmRate.productChanged && <p className="font-body text-[12px] text-slate-500 mt-1">Product changing to <b>{confirmRate.product}</b> (was {confirmRate.origProduct}).</p>}
+            <p className="font-body text-[13px] text-slate-700 mt-1">Rate <b>{confirmRate.origRate == null ? '—' : round1(confirmRate.origRate)}</b> → <b style={{ color: FOREST }}>{confirmRate.newRate == null ? '—' : round1(confirmRate.newRate)} oz/M</b></p>
+            <p className="font-body text-[11px] text-slate-400 mt-1.5">This updates the plan and the Chemical Library rate for this area. Other sprays aren’t touched unless you choose to after.</p>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setConfirmRate(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-600 border border-slate-200">Cancel</button>
+              <button type="button" onClick={() => { const s = confirmRate.snap; setConfirmRate(null); doSaveInline(s) }} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: FOREST }}>Confirm change</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {rateSync && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] w-[min(92vw,540px)] rounded-2xl shadow-2xl border p-3.5 flex items-center gap-3" style={{ backgroundColor: 'white', borderColor: GOLD }}>
           <div className="min-w-0 flex-1">
@@ -1948,7 +1987,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                   })}
                   <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-black/5" style={{ backgroundColor: '#F8FAF8' }}>
                     <span className="font-body text-[11px] text-slate-400">{visibleApps.length} application{visibleApps.length !== 1 ? 's' : ''}{showArea ? '' : ` · ${areaFilter}`} · tap a day to collapse · tap a product to edit its rate · <Pencil size={10} className="inline align-[-1px]" /> for the full editor</span>
-                    <button onClick={startAddApp} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={12} /> Add</button>
+                    <button onClick={startAddApp} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ backgroundColor: FOREST, color: 'white' }}><Plus size={12} /> Add</button>
                   </div>
                 </div>
               )

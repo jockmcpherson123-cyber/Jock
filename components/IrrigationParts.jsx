@@ -128,7 +128,7 @@ export default function IrrigationParts({ manage = false }) {
             </button>
           )}
           {manage && (
-            <button onClick={() => setEditing({})} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
+            <button onClick={() => setEditing({})} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: FOREST, color: 'white' }}>
               <Plus size={14} /> Add part
             </button>
           )}

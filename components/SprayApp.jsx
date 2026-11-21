@@ -1263,7 +1263,7 @@ function FertSheets({ manage, courseInfo, courseFilter = '' }) {
       {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[1000] px-4 py-2 rounded-full text-white font-body text-sm shadow-lg" style={{ backgroundColor: FOREST }}>{toast}</div>}
       <div className="flex items-center justify-between mb-4">
         <SectionHeader title="Fert Sheets" subtitle="Granular fert applications by area — lbs, bags and cost worked out per section" noMargin />
-        {manage && <button onClick={() => setActive(blank())} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: GOLD, color: FOREST }}><Plus size={14} /> New fert sheet</button>}
+        {manage && <button onClick={() => setActive(blank())} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST, color: 'white' }}><Plus size={14} /> New fert sheet</button>}
       </div>
       {(courseFilter ? sheets.filter((s) => fcTok(s.area) === fcTok(courseFilter)) : sheets).length === 0 ? (
         <div className="paper-card p-10 text-center">
@@ -1436,7 +1436,7 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
             <h1 className="font-display text-2xl font-semibold mt-0.5">{courseInfo?.deptName || 'Grounds Operations'}</h1>
           </div>
           {manage && (
-            <button onClick={onNew} className="font-body text-xs font-semibold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: GOLD, color: FOREST }}>
+            <button onClick={onNew} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: FOREST, color: 'white' }}>
               <Plus size={14} /> New Sheet
             </button>
           )}
