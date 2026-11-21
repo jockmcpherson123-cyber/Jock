@@ -136,7 +136,7 @@ export default function Growth({ daily = [], clippings = [], sheets = [], produc
   const save = (patch) => onSaveCourse && onSaveCourse({ growth: { ...growth, [surf.key]: { ...(growth[surf.key] || {}), ...patch } } })
 
   return (
-    <div className="max-w-5xl">
+    <div>
       <h2 className="font-display text-lg font-semibold" style={{ color: INK }}>Growth Management{courseFilter ? ` — ${courseFilter}` : ''}</h2>
       <p className="font-body text-xs mb-3" style={{ color: INK_3 }}>Growth Potential is the backdrop; the PGR program is the read-out. Measured on greens, modeled on the big areas.</p>
 

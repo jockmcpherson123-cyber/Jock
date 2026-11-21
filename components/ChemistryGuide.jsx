@@ -335,7 +335,7 @@ export default function ChemistryGuide({ courseInfo = {}, products = [], grassTy
   }, [userCards])
 
   return (
-    <div className="max-w-5xl space-y-5 pb-8">
+    <div className="space-y-5 pb-8">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div>

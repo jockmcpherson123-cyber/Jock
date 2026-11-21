@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import * as db from '@/lib/db'
 
-import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, RED } from '@/lib/theme'
+import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, RED, PAGE } from '@/lib/theme'
 const CREAM = '#F1F0EC'
 
 const TABS = [
@@ -177,7 +177,7 @@ export default function PlaybookModule({ user, manage, hideChrome }) {
       {/* Header band — club identity + tabs */}
       {!hideChrome && (
         <div style={{ backgroundColor: FOREST, borderBottom: `2px solid ${GOLD}` }} className="text-white">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4">
+          <div className={`${PAGE} pt-5 pb-4`}>
             <div className="mb-4">
               <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: '#C9A84C' }}>{clubName || 'Golf Maintenance'}</p>
               <h1 className="font-display text-2xl font-semibold mt-0.5">Playbook</h1>
@@ -187,7 +187,7 @@ export default function PlaybookModule({ user, manage, hideChrome }) {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-16">
+      <div className={`${PAGE} pt-5 pb-16`}>
         {/* Search — spans all four sections */}
         <div className="relative mb-4">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: INK_3 }} />

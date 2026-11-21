@@ -115,7 +115,7 @@ import ChemistryGuide from '@/components/ChemistryGuide'
 const productJug = (prod) => (prod && prod.jugSize > 0 ? { size: Number(prod.jugSize), unit: prod.jugUnit || 'gal' } : null)
 
 // ── PALETTE ───────────────────────────────────────────────────────────────
-import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, AMBER, RED, BLUE } from '@/lib/theme'
+import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, AMBER, RED, BLUE, PAGE } from '@/lib/theme'
 const CREAM = '#F7F5EF'
 // Clubhouse × Instrument restyle: "soft stone" surfaces + warm-neutral inks
 // (warmth dialled out). Mirrors the CSS tokens in globals.css so inline styles
@@ -564,7 +564,7 @@ function IrrigationModule({ user, manage, nav, hideChrome }) {
     <div>
       {!hideChrome && (
         <div style={{ backgroundColor: '#F4F6F4', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex gap-2">
+          <div className={`${PAGE} py-2 flex gap-2`}>
             {[['map', 'Map', MapPin], ['parts', 'Parts', Package]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setView(k)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full flex items-center gap-1.5 transition" style={view === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
                 <Icon size={13} /> {label}
@@ -1063,7 +1063,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         if (alerts.length === 0) return null
         const anyExpired = alerts.some((a) => a.level === 'expired')
         return (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
+          <div className={`${PAGE} pt-4`}>
             <div className="rounded-2xl border-2 p-3" style={anyExpired ? { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' } : { backgroundColor: '#FEF3DD', borderColor: '#FDE9C8' }}>
               <div className="flex items-start gap-2">
                 <AlertTriangle size={18} className="shrink-0 mt-0.5" style={{ color: anyExpired ? '#B91C1C' : '#92660D' }} />
@@ -1087,7 +1087,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         )
       })()}
 
-      <div className={`${route === 'program' || route === 'chemicals' || route === 'edit' ? 'max-w-[1800px]' : 'max-w-7xl'} mx-auto px-4 sm:px-6 pb-24`}>
+      <div className={`${PAGE} pb-24`}>
         {route === 'dashboard' && (
           <Dashboard
             sheets={visibleSheets} pending={pending} approved={approved} todaySheets={todaySheets} products={products} areas={scopeAreas(areas)}
@@ -1253,12 +1253,12 @@ function FertSheets({ manage, courseInfo, courseFilter = '' }) {
     catch (e) { console.error(e); flash('Could not delete') }
   }
 
-  if (loading) return <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 text-center font-body text-sm text-slate-400"><Loader2 className="animate-spin inline mr-2" size={16} /> Loading fert sheets…</div>
+  if (loading) return <div className="py-10 text-center font-body text-sm text-slate-400"><Loader2 className="animate-spin inline mr-2" size={16} /> Loading fert sheets…</div>
 
   if (active) return <FertEditor sheet={active} manage={manage} courseInfo={courseInfo} onSave={save} onDelete={remove} onBack={() => setActive(null)} toast={toast} />
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <div className="py-6">
       {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[1000] px-4 py-2 rounded-full text-white font-body text-sm shadow-lg" style={{ backgroundColor: FOREST }}>{toast}</div>}
       <div className="flex items-center justify-between mb-4">
         <SectionHeader title="Fertilizer Sheets" subtitle="Granular fert applications by area — lbs, bags and cost worked out per section" noMargin />
@@ -1335,7 +1335,7 @@ function FertEditor({ sheet, manage, courseInfo, onSave, onDelete, onBack, toast
   const lbl = 'font-body text-[10px] font-bold uppercase tracking-wide text-slate-400'
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <div className="py-6">
       {toast && <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[1000] px-4 py-2 rounded-full text-white font-body text-sm shadow-lg" style={{ backgroundColor: FOREST }}>{toast}</div>}
       <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
         <button onClick={onBack} className="font-body text-xs font-semibold flex items-center gap-1" style={{ color: FERN }}>← All fert sheets</button>
@@ -1428,7 +1428,7 @@ function TopNav({ route, setRoute, onNew, courseInfo, manage }) {
 
   return (
     <div style={{ backgroundColor: FOREST }} className="text-white">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4">
+      <div className={`${PAGE} pt-5 pb-4`}>
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo?.clubName || 'Golf Club'}</p>
@@ -4019,7 +4019,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
   }
 
   return (
-    <div className="pt-6 pb-10 max-w-7xl mx-auto">
+    <div className="pt-6 pb-10">
       <div className="no-print flex items-center justify-between gap-2 mb-5">
         <button onClick={onBack} className="font-body text-sm font-medium text-slate-400 shrink-0">← Back</button>
         <div className="flex items-center gap-2 sm:gap-3">
@@ -8821,7 +8821,7 @@ function WhiteboardModule({ user, nav, hideChrome }) {
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
       {!hideChrome && (
         <div style={{ backgroundColor: FOREST }} className="text-white">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4 flex items-center gap-3">
+          <div className={`${PAGE} pt-5 pb-4 flex items-center gap-3`}>
             <button onClick={() => setDrawer(true)} className="md:hidden w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }} aria-label="Open menu"><Menu size={18} /></button>
             <div className="min-w-0">
               <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo.clubName || 'Golf Club'}</p>
@@ -8865,7 +8865,7 @@ function WhiteboardModule({ user, nav, hideChrome }) {
       )}
 
       {hideChrome && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 flex items-center gap-1.5">
+        <div className={`${PAGE} pt-4 flex items-center gap-1.5`}>
           <button onClick={() => setDrawer(true)} className="md:hidden font-body text-[11px] font-bold px-3 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: PAPER, color: FOREST, border: `1px solid ${HAIR}` }} aria-label="Sections"><Menu size={15} /> Sections</button>
           <div className="ml-auto flex items-center gap-1.5">
             {manage && (
@@ -8890,7 +8890,7 @@ function WhiteboardModule({ user, nav, hideChrome }) {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-24 pt-5 md:flex md:gap-6">
+      <div className={`${PAGE} pb-24 pt-5 md:flex md:gap-6`}>
         <aside className="hidden md:block w-52 shrink-0">
           <div className="bg-white rounded-2xl border border-black/5 p-2 shadow-sm sticky top-4"><Nav /></div>
         </aside>
@@ -10317,7 +10317,7 @@ function FieldDataHub({ clippings, speeds, firmness = [], practices = [], scouti
   const areas = !course ? turf.areas : Object.fromEntries(Object.entries(turf.areas || {}).filter(([name]) => cTok(name) === cTok(course)))
 
   return (
-    <div className="max-w-5xl">
+    <div>
       <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
         <div>
           <h2 className="font-display text-lg font-semibold" style={{ color: INK }}>Field Data{course ? ` — ${course}` : ''}</h2>
@@ -10427,7 +10427,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
       {!hideChrome && (
         <div style={{ backgroundColor: FOREST }} className="text-white">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-4">
+          <div className={`${PAGE} pt-5 pb-4`}>
             <div className="mb-4">
               <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{turf.courseInfo?.clubName || 'Golf Club'}</p>
               <h1 className="font-display text-2xl font-semibold mt-0.5">Turf Performance</h1>
@@ -10443,7 +10443,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-24 pt-6">
+      <div className={`${PAGE} pb-24 pt-6`}>
         {route === 'dashboard' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
           : <TurfDashboard daily={daily} sheets={turf.sheets} products={turf.products} areas={scopeAreas(turf.areas)} clippings={clippings} soilTests={soilTests} practices={practices} speeds={speeds} soilSeries={soilSeries} hasLocation={turf.location?.lat != null} onGo={setRoute} />
@@ -10533,7 +10533,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         )}
         {route === 'timeline' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <div className="max-w-4xl">
+          : <div>
               <h2 className="font-display text-lg font-semibold text-slate-900 mb-1">Season Timeline</h2>
               <p className="font-body text-xs text-slate-400 mb-3">Everything you did this season on one dated line — sprays, topdressing, aeration and scouting. Overlay the story behind the trends.</p>
               <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">

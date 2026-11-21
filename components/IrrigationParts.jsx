@@ -10,7 +10,7 @@ import * as db from '@/lib/db'
 import { SearchSelect } from '@/components/pickers'
 import { qrDataUrl } from '@/lib/tournament'
 
-import { FOREST, FERN, GOLD } from '@/lib/theme'
+import { FOREST, FERN, GOLD, PAGE } from '@/lib/theme'
 
 const CATEGORIES = ['Head', 'Nozzle', 'Valve', 'Fitting', 'Pipe/PVC', 'Swing Joint', 'Wire/Splice', 'Controller', 'Sensor', 'Tool', 'Other']
 const BRANDS = ['Toro', 'Rain Bird', 'Hunter', 'Nelson', 'Other']
@@ -105,7 +105,7 @@ export default function IrrigationParts({ manage = false }) {
   }, [parts, q, cat, lowOnly])
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <div className={`${PAGE} py-6`}>
       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
         <div>
           <h2 className="font-display text-lg font-semibold text-slate-900">Irrigation Parts</h2>

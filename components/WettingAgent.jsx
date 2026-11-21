@@ -179,7 +179,7 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
   }
 
   return (
-    <div className="max-w-5xl">
+    <div>
       <div className="flex items-start justify-between gap-3 flex-wrap mb-1">
         <div>
           <h2 className="font-display text-lg font-semibold" style={{ color: INK }}>Wetting Agent Timing</h2>
