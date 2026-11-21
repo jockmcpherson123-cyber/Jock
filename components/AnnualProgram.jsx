@@ -362,7 +362,18 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
     const maxM = prod.labelMaxM != null ? Number(prod.labelMaxM) : (prod.labelMaxA != null ? Number(prod.labelMaxA) / 43.56 : null)
     let label = null
     if (rateM != null) { if (maxM != null && rateM > maxM * 1.001) label = 'over'; else if (minM != null && rateM < minM * 0.999) label = 'under' }
-    return { prod, rateM, tanks, ozPerTank, totalOz, ozPerCase, cases, costPerCase, totalCost, label, dry: isDry(prod) }
+    const areaSqft = Number(area?.sqft) || 0
+    const effSqft = Number(a.sqftPerTankOverride) > 0 ? Number(a.sqftPerTankOverride) : areaSqft
+    return { prod, rateM, tanks, ozPerTank, totalOz, ozPerCase, cases, costPerCase, totalCost, label, dry: isDry(prod), areaSqft, effSqft, override: Number(a.sqftPerTankOverride) > 0 }
+  }
+  // Whole packages + leftover oz: "5 gal + 20 oz" (liquids) or "1 lb 3 oz" (dry).
+  const galOz = (oz, dry) => {
+    if (oz == null || !isFinite(oz)) return '—'
+    const per = dry ? 16 : 128, big = dry ? 'lb' : 'gal'
+    const whole = Math.floor(oz / per + 1e-9)
+    const rem = Math.round((oz - whole * per) * 10) / 10
+    if (whole <= 0) return `${Math.round(oz * 10) / 10} oz`
+    return `${whole} ${big}${rem > 0.049 ? ` + ${rem} oz` : ''}`
   }
 
   const cell = 'border border-slate-200 rounded px-1.5 py-1 text-[11px] font-body bg-white text-right tabular-nums'
@@ -397,6 +408,13 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
       const nt = raw === '' ? null : Number(raw)
       if (nt === (a.tanks ?? null)) { clr(a, field); return }
       onCommit(a, { ...a, tanks: nt, tanksManual: nt != null }); clr(a, field)
+    } else if (field === 'sqftPerTankOverride') {
+      const area = areaMatch(areas, a.area)
+      const def = Number(area?.sqft) || 0
+      const nv = raw === '' || !isFinite(Number(raw)) ? null : Number(raw)
+      const store = (nv == null || nv === def) ? null : nv // same as the area default → clear override
+      if (store === (a.sqftPerTankOverride ?? null)) { clr(a, field); return }
+      onCommit(a, { ...a, sqftPerTankOverride: store }); clr(a, field)
     } else { // target, notes
       if ((raw || '') === (a[field] || '')) { clr(a, field); return }
       onCommit(a, { ...a, [field]: raw }); clr(a, field)
@@ -439,7 +457,7 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
   let rowIdx = 0 // running index across product rows (for Enter/↑↓ navigation)
   return (
     <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-x-auto">
-      <table className="w-full border-collapse" style={{ minWidth: 1040 }}>
+      <table className="w-full border-collapse" style={{ minWidth: 1340 }}>
         <thead>
           <tr style={{ background: '#F4F7F4' }}>
             <th className={th} style={stick(0)}>Product</th>
@@ -447,9 +465,12 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
             <th className={th}>Rate oz/M</th>
             <th className={th}>Rate oz/A</th>
             <th className={th}>Label</th>
+            <th className={th}>Area/tank</th>
             <th className={th}>#Tanks</th>
             <th className={th}>oz/Tank</th>
+            <th className={th}>Amount/tank</th>
             <th className={th}>Total oz</th>
+            <th className={th}>Total product</th>
             <th className={th}>Cases</th>
             <th className={th}>Case size <span style={{ color: FERN }}>·Lib</span></th>
             <th className={th}>Oz/case <span style={{ color: FERN }}>·Lib</span></th>
@@ -461,7 +482,7 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
         <tbody>
           {groups.flatMap((grp) => [
             <tr key={grp.key + ':h'} style={{ background: '#EAF2EC' }}>
-              <td colSpan={14} className="px-2 py-1.5" style={{ borderTop: '2px solid #D3DCD2' }}>
+              <td colSpan={17} className="px-2 py-1.5" style={{ borderTop: '2px solid #D3DCD2' }}>
                 <div style={{ position: 'sticky', left: 8, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                   <input type="date" key={grp.key + ':' + (grp.date || '')} defaultValue={grp.date || ''} onBlur={(e) => commitGroupDate(grp.items, e.target.value)} className="border border-slate-200 rounded px-1.5 py-1 text-[11px] font-body bg-white" style={{ width: 132 }} title="Move this whole tank mix to a date" />
                   <span className="font-body text-[13px] font-extrabold" style={{ color: FOREST }}>{grp.area || '—'}</span>
@@ -486,9 +507,12 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
                   <td className={td}><input disabled={locked} inputMode="decimal" data-gcol="rateOzM" data-grow={row} value={g(a, 'rateOzM', c.rateM != null ? r3(c.rateM) : '')} onChange={(e) => { const v = e.target.value; setDraft((d) => ({ ...d, [K(a.id, 'rateOzM')]: v, [K(a.id, 'rateOzA')]: v === '' ? '' : String(ozA(v)) })); touchedRef.current.add(K(a.id, 'rate')) }} onBlur={() => commitRate(a)} onKeyDown={(e) => handleKey(e, a, 'rateOzM', row)} className={cell} style={{ width: 56, borderColor: GOLD }} /></td>
                   <td className={td}><input disabled={locked} inputMode="decimal" data-gcol="rateOzA" data-grow={row} value={g(a, 'rateOzA', c.rateM != null ? ozA(c.rateM) : '')} onChange={(e) => { const v = e.target.value; setDraft((d) => ({ ...d, [K(a.id, 'rateOzA')]: v, [K(a.id, 'rateOzM')]: v === '' ? '' : String(r3(Number(v) / 43.56)) })); touchedRef.current.add(K(a.id, 'rate')) }} onBlur={() => commitRate(a)} onKeyDown={(e) => handleKey(e, a, 'rateOzA', row)} className={cell} style={{ width: 56 }} /></td>
                   <td className={td}>{c.label ? <span className="font-bold text-[9px]" style={{ color: c.label === 'over' ? '#B91C1C' : '#B07A16' }}>{c.label === 'over' ? 'OVER' : 'UNDER'}</span> : <span className="text-slate-300">—</span>}</td>
+                  <td className={td}><input disabled={locked} inputMode="decimal" data-gcol="sqft" data-grow={row} value={g(a, 'sqftPerTankOverride', c.effSqft || '')} onChange={(e) => setD(a, 'sqftPerTankOverride', e.target.value)} onBlur={(e) => commitField(a, 'sqftPerTankOverride', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'sqft', row)} className={cell} style={{ width: 72, color: c.override ? FOREST : '#94A3B8' }} title={c.override ? 'Row override' : 'Area default — type to override'} /></td>
                   <td className={td}><input disabled={locked} inputMode="decimal" data-gcol="tanks" data-grow={row} value={g(a, 'tanks', a.tanks ?? c.tanks)} onChange={(e) => setD(a, 'tanks', e.target.value)} onBlur={(e) => commitField(a, 'tanks', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'tanks', row)} className={cell} style={{ width: 44 }} /></td>
                   <td className={td}>{c.ozPerTank != null ? round1(c.ozPerTank).toLocaleString() : '—'}</td>
+                  <td className={td} style={{ color: '#64748B' }}>{galOz(c.ozPerTank, c.dry)}</td>
                   <td className={td}>{c.totalOz != null ? Math.round(c.totalOz).toLocaleString() : '—'}</td>
+                  <td className={td} style={{ color: '#64748B' }}>{galOz(c.totalOz, c.dry)}</td>
                   <td className={td}>{c.cases != null ? (Math.round(c.cases * 100) / 100).toLocaleString() : '—'}</td>
                   <td className={td} style={libStyle}><input disabled={locked} title="Changes this product everywhere" data-gcol="caseSize" data-grow={row} value={g(a, 'caseSize', c.prod.caseSize || '')} onChange={(e) => setD(a, 'caseSize', e.target.value)} onBlur={(e) => commitLib(a, 'caseSize', e.target.value, 'case size')} onKeyDown={(e) => handleKey(e, a, 'caseSize', row)} className={libCell + ' text-left'} style={{ width: 72 }} placeholder="—" /></td>
                   <td className={td} style={libStyle}><input disabled={locked} inputMode="decimal" title="Changes this product everywhere" data-gcol="ozPerCase" data-grow={row} value={g(a, 'ozPerCase', c.ozPerCase ?? '')} onChange={(e) => setD(a, 'ozPerCase', e.target.value)} onBlur={(e) => commitLib(a, 'ozPerCase', e.target.value, 'oz/case')} onKeyDown={(e) => handleKey(e, a, 'ozPerCase', row)} className={libCell} style={{ width: 54 }} placeholder="—" /></td>
@@ -943,7 +967,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   }
 
   // ── Editable grid helpers ──────────────────────────────────────────────
-  const markSaved = (id) => { setGridSaved((m) => ({ ...m, [id]: Date.now() })); setTimeout(() => setGridSaved((m) => { const n = { ...m }; delete n[id]; return n }), 1500) }
+  const markSaved = (id) => { setGridSaved((m) => ({ ...m, [id]: Date.now() })); setTimeout(() => setGridSaved((m) => { const n = { ...m }; delete n[id]; return n }), 2000) }
   const pushUndo = (fn) => { undoRef.current.push(fn); if (undoRef.current.length > 20) undoRef.current.shift() }
   // Commit one application row (fields already merged). Records an undo of the
   // prior state, saves, reloads and ticks "Saved". syncRate also writes the
