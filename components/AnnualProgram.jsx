@@ -380,6 +380,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   const [collapsed, setCollapsed] = useState({}) // section key -> true when folded
   const [openTanks, setOpenTanks] = useState({}) // sheet view: event key -> true when the tank is expanded
   const [inlineEdit, setInlineEdit] = useState(null) // sheet view: quick inline edit of one product row
+  const [rateSync, setRateSync] = useState(null) // { product, area, newRate, fromRate, ids } prompt to apply a rate to a product's other sprays on an area
   const [flatPrev, setFlatPrev] = useState(null) // simple-list import preview
   // ── Build From Models: pick a year + which surfaces, then auto-fill the
   // Annual Program tab with a per-surface, grass-matched, site-tuned program.
@@ -663,24 +664,61 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   async function saveInline() {
     if (!inlineEdit?.product) { setInlineEdit(null); return }
     setBusy(true)
+    const editId = inlineEdit.id
+    const prodName = inlineEdit.product
+    const areaKey = (inlineEdit.area || '').trim()
+    const newRate = inlineEdit.rateOzM === '' ? null : Number(inlineEdit.rateOzM)
     try {
+      // Editing the rate stores oz/M and clears any stale oz/A (2.2 step 1).
       await db.upsertApplication({
-        id: inlineEdit.id, programId: activeProgram.id, area: inlineEdit.area,
-        plannedDate: inlineEdit.plannedDate || null, product: inlineEdit.product,
-        rateOzM: inlineEdit.rateOzM === '' ? null : Number(inlineEdit.rateOzM),
-        rateOzA: inlineEdit.rateOzA === '' ? null : Number(inlineEdit.rateOzA),
+        id: editId, programId: activeProgram.id, area: inlineEdit.area,
+        plannedDate: inlineEdit.plannedDate || null, product: prodName,
+        rateOzM: newRate,
+        rateOzA: null,
         basis: inlineEdit.basis || 'oz / M', type: inlineEdit.type || null,
         target: inlineEdit.target || null, trigger: inlineEdit.trigger || { mode: 'date' },
         tanks: inlineEdit.tanks, notes: inlineEdit.notes,
       })
-      setAllApps(await db.fetchApplications(activeProgram.id))
+      // Sync the plan rate → Chemical Library areaRates (2.2 step 2) so the
+      // library, plan, new sheets and Early Order all agree for that area.
+      if (newRate != null) {
+        const prod = products.find((p) => p.name === prodName)
+        if (prod) {
+          const nextRates = { ...(prod.areaRates || {}), [areaKey]: Math.round(newRate * 1000) / 1000 }
+          await db.upsertProduct({ ...prod, areaRates: nextRates })
+        }
+      }
+      const fresh = await db.fetchApplications(activeProgram.id)
+      setAllApps(fresh)
+      await onProductsChanged?.()
       setInlineEdit(null)
-      showToast('Spray updated')
+      showToast('Spray updated · library rate synced')
+      // Offer to apply the new rate to this product's OTHER planned sprays on
+      // the same area (2.2 step 3) — skipping any tied to a real spray sheet.
+      if (newRate != null) {
+        const others = fresh.filter((a) => a.product === prodName && (a.area || '').trim() === areaKey && a.id !== editId && !a.linkedSheetId && a.rateOzM != null && Math.abs(Number(a.rateOzM) - newRate) > 0.001)
+        if (others.length) setRateSync({ product: prodName, area: areaKey, newRate, fromRate: Number(others[0].rateOzM), ids: others.map((o) => o.id) })
+      }
     } catch (e) {
       console.error(e)
       showToast('Could not save — check your connection')
     }
     setBusy(false)
+  }
+  // "Change them all" — apply the new rate to the other planned sprays found above.
+  async function applyRateToOthers() {
+    if (!rateSync) return
+    setBusy(true)
+    try {
+      const apps = await db.fetchApplications(activeProgram.id)
+      for (const id of rateSync.ids) {
+        const a = apps.find((x) => x.id === id)
+        if (a) await db.upsertApplication({ ...a, programId: activeProgram.id, rateOzM: rateSync.newRate, rateOzA: null })
+      }
+      setAllApps(await db.fetchApplications(activeProgram.id))
+      showToast(`Updated ${rateSync.ids.length} more spray${rateSync.ids.length !== 1 ? 's' : ''}`)
+    } catch (e) { console.error(e); showToast('Could not update the others') }
+    setRateSync(null); setBusy(false)
   }
   // Add or remove a product from the tank mix — lets you tap several at once.
   const toggleProductRow = (name) => setEditApp((prev) => {
@@ -1251,6 +1289,17 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
       )}
 
       {/* Planned-spray editor — opens as a centered popup so you edit in place */}
+      {rateSync && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] w-[min(92vw,540px)] rounded-2xl shadow-2xl border p-3.5 flex items-center gap-3" style={{ backgroundColor: 'white', borderColor: GOLD }}>
+          <div className="min-w-0 flex-1">
+            <p className="font-body text-[13px] font-semibold text-slate-800">{rateSync.product} on {rateSync.area}</p>
+            <p className="font-body text-[12px] text-slate-500">{rateSync.ids.length} other spray{rateSync.ids.length !== 1 ? 's' : ''} use {round1(rateSync.fromRate)} oz/M.</p>
+          </div>
+          <button onClick={applyRateToOthers} disabled={busy} className="font-body text-[12px] font-bold text-white px-3 py-2 rounded-xl shrink-0 disabled:opacity-50" style={{ backgroundColor: FOREST }}>Change all to {round1(rateSync.newRate)}</button>
+          <button onClick={() => setRateSync(null)} className="font-body text-[12px] font-semibold text-slate-500 px-2.5 py-2 rounded-xl border border-slate-200 shrink-0">Only this one</button>
+        </div>
+      )}
+
       {editApp && (
         <div className="fixed inset-0 z-50 flex items-start justify-center p-3 overflow-y-auto overscroll-contain" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditApp(null)}>
         <div className="bg-white rounded-2xl border-2 p-4 shadow-2xl my-6 w-full max-w-4xl" style={{ borderColor: GOLD }} onClick={(e) => e.stopPropagation()}>
