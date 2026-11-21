@@ -391,16 +391,32 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
     } else { onCommitProduct(prod, { [field]: val }, label); clr(a, field) }
   }
 
+  // Group rows so one date + one area name head each tank mix (no repeated
+  // "May 4 2026 · Blue Fairways" on every product). Undated groups sort last.
+  const groups = []
+  const gi = {}
+  apps.forEach((a) => {
+    const k = `${a.plannedDate || 'none'}||${a.area}`
+    if (gi[k] == null) { gi[k] = groups.length; groups.push({ key: k, date: a.plannedDate || null, area: a.area, items: [] }) }
+    groups[gi[k]].items.push(a)
+  })
+  groups.sort((x, y) => (x.date || '9999').localeCompare(y.date || '9999') || String(x.area).localeCompare(String(y.area)))
+  const prettyD = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'No date')
+  // Changing the group's date moves the whole tank mix (every product on it).
+  const commitGroupDate = (items, val) => {
+    const cur = items[0]?.plannedDate || ''
+    if ((val || '') === (cur || '')) return
+    items.forEach((a) => { if (!(a.linkedSheetId && doneSheetIds?.has(a.linkedSheetId))) onCommit(a, { ...a, plannedDate: val || null }) })
+  }
+
   if (apps.length === 0) return <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No planned sprays to show.</div>
 
   return (
     <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-x-auto">
-      <table className="w-full border-collapse" style={{ minWidth: 1180 }}>
+      <table className="w-full border-collapse" style={{ minWidth: 1040 }}>
         <thead>
           <tr style={{ background: '#F4F7F4' }}>
-            <th className={th} style={stick(0)}>Date</th>
-            <th className={th} style={stick(88)}>Area</th>
-            <th className={th} style={stick(196)}>Product</th>
+            <th className={th} style={stick(0)}>Product</th>
             <th className={th}>For</th>
             <th className={th}>Rate oz/M</th>
             <th className={th}>Rate oz/A</th>
@@ -417,37 +433,42 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
           </tr>
         </thead>
         <tbody>
-          {apps.map((a) => {
-            const c = calc(a)
-            const locked = a.linkedSheetId && doneSheetIds?.has(a.linkedSheetId)
-            const rowBg = locked ? '#F6F7F6' : 'white'
-            return (
-              <tr key={a.id} style={{ borderTop: '1px solid #EEF1EE', opacity: locked ? 0.75 : 1 }}>
-                <td className={td} style={{ ...stick(0), background: rowBg }}>
-                  <input type="date" disabled={locked} value={g(a, 'plannedDate', a.plannedDate || '')} onChange={(e) => setD(a, 'plannedDate', e.target.value)} onBlur={(e) => commitField(a, 'plannedDate', e.target.value)} className="border border-slate-200 rounded px-1 py-1 text-[10px] font-body bg-white" style={{ width: 118 }} />
-                </td>
-                <td className={td} style={{ ...stick(88), background: rowBg, minWidth: 108 }}>
-                  <span className="font-semibold text-slate-700 truncate" title={a.area}>{a.area}</span>
-                </td>
-                <td className={td} style={{ ...stick(196), background: rowBg, minWidth: 150 }}>
-                  <span className="font-semibold text-slate-800 flex items-center gap-1 truncate" title={a.product}>{locked && <span title="Linked to a sprayed sheet — locked">🔒</span>}{a.product}{saved[a.id] && <span className="font-body text-[9px] font-bold" style={{ color: FERN }}>Saved ✓</span>}</span>
-                </td>
-                <td className={td}><input disabled={locked} value={g(a, 'target', a.target || '')} onChange={(e) => setD(a, 'target', e.target.value)} onBlur={(e) => commitField(a, 'target', e.target.value)} className={cell + ' text-left'} style={{ width: 90 }} /></td>
-                <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'rateOzM', c.rateM != null ? c.rateM : '')} onChange={(e) => setD(a, 'rateOzM', e.target.value)} onBlur={(e) => commitField(a, 'rateOzM', e.target.value)} className={cell} style={{ width: 56, borderColor: GOLD }} /></td>
-                <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'rateOzA', c.rateM != null ? Math.round(c.rateM * 43.56 * 10) / 10 : '')} onChange={(e) => setD(a, 'rateOzA', e.target.value)} onBlur={(e) => commitField(a, 'rateOzA', e.target.value)} className={cell} style={{ width: 56 }} /></td>
-                <td className={td}>{c.label ? <span className="font-bold text-[9px]" style={{ color: c.label === 'over' ? '#B91C1C' : '#B07A16' }}>{c.label === 'over' ? 'OVER' : 'UNDER'}</span> : <span className="text-slate-300">—</span>}</td>
-                <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'tanks', a.tanks ?? c.tanks)} onChange={(e) => setD(a, 'tanks', e.target.value)} onBlur={(e) => commitField(a, 'tanks', e.target.value)} className={cell} style={{ width: 44 }} /></td>
-                <td className={td}>{c.ozPerTank != null ? round1(c.ozPerTank) : '—'}</td>
-                <td className={td}>{c.totalOz != null ? Math.round(c.totalOz).toLocaleString() : '—'}</td>
-                <td className={td}>{c.cases != null ? Math.round(c.cases * 100) / 100 : '—'}</td>
-                <td className={td}><input disabled={locked} value={g(a, 'caseSize', c.prod.caseSize || '')} onChange={(e) => setD(a, 'caseSize', e.target.value)} onBlur={(e) => commitLib(a, 'caseSize', e.target.value, 'case size')} className={cell + ' text-left'} style={{ width: 72 }} placeholder="—" /></td>
-                <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'ozPerCase', c.ozPerCase ?? '')} onChange={(e) => setD(a, 'ozPerCase', e.target.value)} onBlur={(e) => commitLib(a, 'ozPerCase', e.target.value, 'oz/case')} className={cell} style={{ width: 54 }} placeholder="—" /></td>
-                <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'costPerCase', c.costPerCase ?? '')} onChange={(e) => setD(a, 'costPerCase', e.target.value)} onBlur={(e) => commitLib(a, 'costPerCase', e.target.value)} className={cell} style={{ width: 64 }} placeholder="—" /></td>
-                <td className={td}>{c.totalCost != null ? `$${c.totalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
-                <td className={td}><input disabled={locked} value={g(a, 'notes', a.notes || '')} onChange={(e) => setD(a, 'notes', e.target.value)} onBlur={(e) => commitField(a, 'notes', e.target.value)} className={cell + ' text-left'} style={{ width: 150 }} placeholder="—" /></td>
-              </tr>
-            )
-          })}
+          {groups.flatMap((grp) => [
+            <tr key={grp.key + ':h'} style={{ background: '#EAF2EC' }}>
+              <td colSpan={14} className="px-2 py-1.5" style={{ borderTop: '2px solid #D3DCD2' }}>
+                <div style={{ position: 'sticky', left: 8, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <input type="date" key={grp.key + ':' + (grp.date || '')} defaultValue={grp.date || ''} onBlur={(e) => commitGroupDate(grp.items, e.target.value)} className="border border-slate-200 rounded px-1.5 py-1 text-[11px] font-body bg-white" style={{ width: 132 }} title="Move this whole tank mix to a date" />
+                  <span className="font-body text-[13px] font-extrabold" style={{ color: FOREST }}>{grp.area || '—'}</span>
+                  <span className="font-body text-[10px] text-slate-400">· {prettyD(grp.date)} · {grp.items.length} product{grp.items.length !== 1 ? 's' : ''}</span>
+                </div>
+              </td>
+            </tr>,
+            ...grp.items.map((a) => {
+              const c = calc(a)
+              const locked = a.linkedSheetId && doneSheetIds?.has(a.linkedSheetId)
+              const rowBg = locked ? '#F6F7F6' : 'white'
+              return (
+                <tr key={a.id} style={{ borderTop: '1px solid #EEF1EE', opacity: locked ? 0.75 : 1 }}>
+                  <td className={td} style={{ ...stick(0), background: rowBg, minWidth: 160 }}>
+                    <span className="font-semibold text-slate-800 flex items-center gap-1 truncate" title={a.product}>{locked && <span title="Linked to a sprayed sheet — locked">🔒</span>}{a.product}{saved[a.id] && <span className="font-body text-[9px] font-bold" style={{ color: FERN }}>Saved ✓</span>}</span>
+                  </td>
+                  <td className={td}><input disabled={locked} value={g(a, 'target', a.target || '')} onChange={(e) => setD(a, 'target', e.target.value)} onBlur={(e) => commitField(a, 'target', e.target.value)} className={cell + ' text-left'} style={{ width: 90 }} placeholder="—" /></td>
+                  <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'rateOzM', c.rateM != null ? c.rateM : '')} onChange={(e) => setD(a, 'rateOzM', e.target.value)} onBlur={(e) => commitField(a, 'rateOzM', e.target.value)} className={cell} style={{ width: 56, borderColor: GOLD }} /></td>
+                  <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'rateOzA', c.rateM != null ? Math.round(c.rateM * 43.56 * 10) / 10 : '')} onChange={(e) => setD(a, 'rateOzA', e.target.value)} onBlur={(e) => commitField(a, 'rateOzA', e.target.value)} className={cell} style={{ width: 56 }} /></td>
+                  <td className={td}>{c.label ? <span className="font-bold text-[9px]" style={{ color: c.label === 'over' ? '#B91C1C' : '#B07A16' }}>{c.label === 'over' ? 'OVER' : 'UNDER'}</span> : <span className="text-slate-300">—</span>}</td>
+                  <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'tanks', a.tanks ?? c.tanks)} onChange={(e) => setD(a, 'tanks', e.target.value)} onBlur={(e) => commitField(a, 'tanks', e.target.value)} className={cell} style={{ width: 44 }} /></td>
+                  <td className={td}>{c.ozPerTank != null ? round1(c.ozPerTank) : '—'}</td>
+                  <td className={td}>{c.totalOz != null ? Math.round(c.totalOz).toLocaleString() : '—'}</td>
+                  <td className={td}>{c.cases != null ? Math.round(c.cases * 100) / 100 : '—'}</td>
+                  <td className={td}><input disabled={locked} value={g(a, 'caseSize', c.prod.caseSize || '')} onChange={(e) => setD(a, 'caseSize', e.target.value)} onBlur={(e) => commitLib(a, 'caseSize', e.target.value, 'case size')} className={cell + ' text-left'} style={{ width: 72 }} placeholder="—" /></td>
+                  <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'ozPerCase', c.ozPerCase ?? '')} onChange={(e) => setD(a, 'ozPerCase', e.target.value)} onBlur={(e) => commitLib(a, 'ozPerCase', e.target.value, 'oz/case')} className={cell} style={{ width: 54 }} placeholder="—" /></td>
+                  <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'costPerCase', c.costPerCase ?? '')} onChange={(e) => setD(a, 'costPerCase', e.target.value)} onBlur={(e) => commitLib(a, 'costPerCase', e.target.value)} className={cell} style={{ width: 64 }} placeholder="—" /></td>
+                  <td className={td}>{c.totalCost != null ? `$${c.totalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
+                  <td className={td}><input disabled={locked} value={g(a, 'notes', a.notes || '')} onChange={(e) => setD(a, 'notes', e.target.value)} onBlur={(e) => commitField(a, 'notes', e.target.value)} className={cell + ' text-left'} style={{ width: 150 }} placeholder="—" /></td>
+                </tr>
+              )
+            }),
+          ])}
         </tbody>
       </table>
     </div>
