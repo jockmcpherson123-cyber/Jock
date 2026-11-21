@@ -384,7 +384,7 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
     if (newM === origM) { clr(a, 'rateOzM', 'rateOzA'); return } // unchanged at 3 dp — no dialog
     requestConfirm({
       product: a.product, area: (a.area || '').trim(), origRate: origM, newRate: newM, dec3: true,
-      run: () => { onCommit(a, { ...a, rateOzM: newM, rateOzA: null }, { syncRate: true }); clr(a, 'rateOzM', 'rateOzA') },
+      run: () => { onCommit(a, { ...a, rateOzM: newM, rateOzA: null }, { syncRate: true, oldRate: origM }); clr(a, 'rateOzM', 'rateOzA') },
       onCancel: () => clr(a, 'rateOzM', 'rateOzA'),
     })
   }
@@ -901,29 +901,43 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
       setInlineEdit(null)
       showToast('Spray updated · library rate synced')
       // Offer to apply the new rate to this product's OTHER planned sprays on
-      // the same area (2.2 step 3) — skipping any tied to a real spray sheet.
-      if (newRate != null) {
-        const others = fresh.filter((a) => a.product === prodName && (a.area || '').trim() === areaKey && a.id !== editId && !a.linkedSheetId && a.rateOzM != null && Math.abs(Number(a.rateOzM) - newRate) > 0.001)
-        if (others.length) setRateSync({ product: prodName, area: areaKey, newRate, fromRate: Number(others[0].rateOzM), ids: others.map((o) => o.id) })
-      }
+      // the same area that used the OLD rate.
+      const oldRate = snap.origRateOzM === '' || snap.origRateOzM == null ? null : Number(snap.origRateOzM)
+      offerRateSync(fresh, { product: prodName, area: areaKey, newRate, oldRate, editId })
     } catch (e) {
       console.error(e)
       showToast('Could not save — check your connection')
     }
     setBusy(false)
   }
-  // "Change them all" — apply the new rate to the other planned sprays found above.
+  const r3n = (v) => (v == null || v === '' || !isFinite(Number(v)) ? null : Math.round(Number(v) * 1000) / 1000)
+  // After a rate change for product P on area A: find the other planned sprays
+  // of P on A that used the OLD rate (not the ones tied to a sprayed sheet) and
+  // offer to change them too. Rows on an approved-but-not-sprayed sheet are
+  // included, with a warning when applied.
+  const offerRateSync = (fresh, { product, area, newRate, oldRate, editId }) => {
+    if (oldRate == null || newRate == null) return
+    const a = (area || '').trim()
+    const others = (fresh || []).filter((x) => x.product === product && (x.area || '').trim() === a && x.id !== editId
+      && !(x.linkedSheetId && doneSheetIds.has(x.linkedSheetId))
+      && r3n(x.rateOzM) === r3n(oldRate))
+    if (!others.length) return
+    const approvedIds = others.filter((x) => x.linkedSheetId).map((x) => x.id)
+    setRateSync({ product, area: a, newRate: r3n(newRate), fromRate: r3n(oldRate), ids: others.map((x) => x.id), approvedIds })
+  }
+  // "Change all" — apply the new rate to the other sprays in ONE undo step.
   async function applyRateToOthers() {
     if (!rateSync) return
     setBusy(true)
     try {
       const apps = await db.fetchApplications(activeProgram.id)
-      for (const id of rateSync.ids) {
-        const a = apps.find((x) => x.id === id)
-        if (a) await db.upsertApplication({ ...a, programId: activeProgram.id, rateOzM: rateSync.newRate, rateOzA: null })
-      }
+      const rows = rateSync.ids.map((id) => apps.find((x) => x.id === id)).filter(Boolean)
+      const before = rows.map((r) => ({ ...r }))
+      pushUndo(async () => { for (const b of before) await db.upsertApplication({ ...b, programId: activeProgram.id }); setAllApps(await db.fetchApplications(activeProgram.id)) })
+      for (const r of rows) await db.upsertApplication({ ...r, programId: activeProgram.id, rateOzM: rateSync.newRate, rateOzA: null })
       setAllApps(await db.fetchApplications(activeProgram.id))
-      showToast(`Updated ${rateSync.ids.length} more spray${rateSync.ids.length !== 1 ? 's' : ''}`)
+      const warn = (rateSync.approvedIds || []).length
+      showToast(warn ? `Updated ${rows.length} sprays · ${warn} on an approved sheet (the sheet itself won't change)` : `Updated ${rows.length} spray${rows.length !== 1 ? 's' : ''}`)
     } catch (e) { console.error(e); showToast('Could not update the others') }
     setRateSync(null); setBusy(false)
   }
@@ -950,9 +964,11 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
         const nextRates = { ...(prod.areaRates || {}), [(next.area || '').trim()]: Math.round(Number(next.rateOzM) * 1000) / 1000 }
         await db.upsertProduct({ ...prod, areaRates: nextRates })
       }
-      setAllApps(await db.fetchApplications(activeProgram.id))
+      const fresh = await db.fetchApplications(activeProgram.id)
+      setAllApps(fresh)
       if (opts.syncRate) await onProductsChanged?.()
       markSaved(next.id)
+      if (opts.syncRate && opts.oldRate != null) offerRateSync(fresh, { product: next.product, area: next.area, newRate: next.rateOzM, oldRate: opts.oldRate, editId: next.id })
     } catch (e) { console.error(e); showToast('Could not save') }
   }
   // Edit a library cell (caseSize / ozPerCase / costPerCase) — changes the
@@ -1576,9 +1592,9 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] w-[min(92vw,540px)] rounded-2xl shadow-2xl border p-3.5 flex items-center gap-3" style={{ backgroundColor: 'white', borderColor: GOLD }}>
           <div className="min-w-0 flex-1">
             <p className="font-body text-[13px] font-semibold text-slate-800">{rateSync.product} on {rateSync.area}</p>
-            <p className="font-body text-[12px] text-slate-500">{rateSync.ids.length} other spray{rateSync.ids.length !== 1 ? 's' : ''} use {round1(rateSync.fromRate)} oz/M.</p>
+            <p className="font-body text-[12px] text-slate-500"><b>{rateSync.ids.length} other spray{rateSync.ids.length !== 1 ? 's' : ''}</b> use {String(rateSync.fromRate)} oz/M.{(rateSync.approvedIds || []).length ? ` (${rateSync.approvedIds.length} on an approved sheet)` : ''}</p>
           </div>
-          <button onClick={applyRateToOthers} disabled={busy} className="font-body text-[12px] font-bold text-white px-3 py-2 rounded-xl shrink-0 disabled:opacity-50" style={{ backgroundColor: FOREST }}>Change all to {round1(rateSync.newRate)}</button>
+          <button onClick={applyRateToOthers} disabled={busy} className="font-body text-[12px] font-bold text-white px-3 py-2 rounded-xl shrink-0 disabled:opacity-50" style={{ backgroundColor: FOREST }}>Change all to {String(rateSync.newRate)}</button>
           <button onClick={() => setRateSync(null)} className="font-body text-[12px] font-semibold text-slate-500 px-2.5 py-2 rounded-xl border border-slate-200 shrink-0">Only this one</button>
         </div>
       )}
