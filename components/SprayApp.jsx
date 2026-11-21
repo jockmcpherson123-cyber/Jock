@@ -11144,6 +11144,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
 
   return (
     <div className="space-y-4">
+      <SectionHeader title="GDD & Growth" subtitle="Season heat and growth-regulator timing — when to re-apply, by surface" />
       <div className="rounded-2xl p-4 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
         <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Season GDD (base 50°F)</p>
         <p className="font-display text-3xl font-bold mt-0.5">{Math.round(seasonGdd).toLocaleString()}</p>
