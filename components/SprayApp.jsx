@@ -6099,7 +6099,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 <span>{p.rate ?? '—'} {p.basis}</span>
                 {(p.labelMaxM || p.labelMaxA || p.labelMinM || p.labelMinA) && (
                   <span className="text-red-400 font-medium">
-                    Range: {(p.labelMinM || p.labelMaxM) ? `${p.labelMinM ?? '—'}–${p.labelMaxM ?? '—'} oz/M` : ''}
+                    Range: {(p.labelMinM != null && p.labelMaxM != null) ? `${p.labelMinM}–${p.labelMaxM} oz/M` : p.labelMinM != null ? `≥ ${p.labelMinM} oz/M` : p.labelMaxM != null ? `≤ ${p.labelMaxM} oz/M` : ''}
                     {(p.labelMinM || p.labelMaxM) && (p.labelMinA || p.labelMaxA) ? ' · ' : ''}
                     {(p.labelMinA || p.labelMaxA) ? `${p.labelMinA ?? '—'}–${p.labelMaxA ?? '—'} oz/A` : ''}
                   </span>
