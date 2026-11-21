@@ -324,7 +324,7 @@ function typeColor(type) {
 // accident); library cells (case size, oz/case, cost/case) edit the product for
 // every row; totals recompute live from the same calculator the plan uses. Rows
 // tied to an already-sprayed sheet are locked.
-function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCommit, onCommitProduct, requestConfirm }) {
+function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCommit, onCommitProduct, requestConfirm, saved = {} }) {
   const [draft, setDraft] = useState({})
   const prodByName = {}
   products.forEach((p) => { prodByName[p.name] = p })
@@ -430,7 +430,7 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
                   <span className="font-semibold text-slate-700 truncate" title={a.area}>{a.area}</span>
                 </td>
                 <td className={td} style={{ ...stick(196), background: rowBg, minWidth: 150 }}>
-                  <span className="font-semibold text-slate-800 flex items-center gap-1 truncate" title={a.product}>{locked && <span title="Linked to a sprayed sheet — locked">🔒</span>}{a.product}</span>
+                  <span className="font-semibold text-slate-800 flex items-center gap-1 truncate" title={a.product}>{locked && <span title="Linked to a sprayed sheet — locked">🔒</span>}{a.product}{saved[a.id] && <span className="font-body text-[9px] font-bold" style={{ color: FERN }}>Saved ✓</span>}</span>
                 </td>
                 <td className={td}><input disabled={locked} value={g(a, 'target', a.target || '')} onChange={(e) => setD(a, 'target', e.target.value)} onBlur={(e) => commitField(a, 'target', e.target.value)} className={cell + ' text-left'} style={{ width: 90 }} /></td>
                 <td className={td}><input disabled={locked} inputMode="decimal" value={g(a, 'rateOzM', c.rateM != null ? c.rateM : '')} onChange={(e) => setD(a, 'rateOzM', e.target.value)} onBlur={(e) => commitField(a, 'rateOzM', e.target.value)} className={cell} style={{ width: 56, borderColor: GOLD }} /></td>
@@ -1966,7 +1966,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
               {sheetLayout === 'grid' && <span className="font-body text-[10px] text-slate-400 ml-1">Edit any cell · ⌘/Ctrl-Z to undo · rate &amp; cost changes ask first</span>}
             </div>
             {sheetLayout === 'grid' ? (
-              <ProgramGrid apps={visibleApps} products={products} areas={areas} doneSheetIds={doneSheetIds} onCommit={gridCommit} onCommitProduct={gridCommitProduct} requestConfirm={(cfg) => setConfirmRate(cfg)} />
+              <ProgramGrid apps={visibleApps} products={products} areas={areas} doneSheetIds={doneSheetIds} onCommit={gridCommit} onCommitProduct={gridCommitProduct} requestConfirm={(cfg) => setConfirmRate(cfg)} saved={gridSaved} />
             ) : (() => {
               const showArea = areaFilter === 'all'
               // Undated sprays group first so they don't get lost at the bottom.
