@@ -158,12 +158,12 @@ function monthKey(d) {
   return d ? d.slice(0, 7) : 'none'
 }
 function fmtMonth(key) {
-  if (key === 'none') return 'No date set'
+  if (key === 'none') return 'Undated — tap a spray to set its date'
   const [y, m] = key.split('-')
   return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 }
 function fmtMonthShort(key) {
-  if (key === 'none') return 'No date'
+  if (key === 'none') return 'Undated'
   const [y, m] = key.split('-')
   return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-US', { month: 'short' })
 }
@@ -975,7 +975,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
               <>
                 <p className="font-display text-lg font-bold text-slate-900 leading-none">{r.casesToOrder}</p>
                 <p className="font-body text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">case{r.casesToOrder !== 1 ? 's' : ''} · need {round1(r.casesExact)}</p>
-                {r.estCost != null && <p className="font-body text-[11px] font-bold mt-0.5" style={{ color: FERN }}>${r.estCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>}
+                {r.estCost != null ? <p className="font-body text-[11px] font-bold mt-0.5" style={{ color: FERN }}>${r.estCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p> : <p className="font-body text-[10px] font-semibold text-amber-600 mt-0.5">— no price</p>}
               </>
             ) : (
               <p className="font-body text-[11px] font-semibold text-amber-600">add oz/case</p>
@@ -1684,7 +1684,8 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
           ) : viewMode === 'sheet' ? (
             (() => {
               const showArea = areaFilter === 'all'
-              const months = groupByMonth(visibleApps)
+              // Undated sprays group first so they don't get lost at the bottom.
+              const months = (() => { const g = groupByMonth(visibleApps); return [...g.filter((x) => x.key === 'none'), ...g.filter((x) => x.key !== 'none')] })()
               const rateOf = (a) => (a.rateOzM != null && a.rateOzM !== '' ? `${a.rateOzM} oz/M` : a.rateOzA != null && a.rateOzA !== '' ? `${a.rateOzA} oz/A` : a.model?.rate || '')
               const aiOf = (a) => (products.find((p) => p.name === a.product)?.activeIngredient || '')
               // The row-in-place editor: searchable product (auto-fills rate + type),
@@ -1702,12 +1703,31 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                   </div>
                 )
               }
+              // A product is dry when its unit is pounds, its package is sold by
+              // the pound, or its formulation is a dry one (WDG/WP/G/SG…). Dry
+              // products convert at 16 oz/lb and read in lb + oz, never gal.
+              const isDry = (prod) => {
+                if (prod?.unit === 'lbs') return true
+                const ju = String(prod?.jugUnit || '').toLowerCase()
+                if (ju === 'lb' || ju === 'lbs') return true
+                const f = String(prod?.formulation || prod?.form || '').toUpperCase()
+                return /\b(WDG|WG|WP|WSP|SG|SP|DF|DG|GR|GRANULAR)\b/.test(f)
+              }
+              // Rate display: keep 2–3 significant figures for small rates so a
+              // real value like 0.046 oz/M never rounds to a bare "0".
+              const rateFmt = (v) => {
+                if (v == null || !isFinite(v)) return '—'
+                const n = Number(v)
+                if (n === 0) return '0'
+                if (Math.abs(n) < 1) return String(Math.round(n * 1000) / 1000)
+                return round1(n)
+              }
               // Whole packages + leftover oz, e.g. 166.67 oz → "1 gal + 38.67 oz"
               // (128 oz/gal for liquids, 16 oz/lb for dry). Mirrors the plan sheet.
-              const galOz = (oz, unit) => {
+              const galOz = (oz, dry) => {
                 if (oz == null || !isFinite(oz)) return '—'
-                const per = unit === 'lbs' ? 16 : 128
-                const big = unit === 'lbs' ? 'lb' : 'gal'
+                const per = dry ? 16 : 128
+                const big = dry ? 'lb' : 'gal'
                 const whole = Math.floor(oz / per + 1e-9)
                 const rem = Math.round((oz - whole * per) * 10) / 10
                 if (whole <= 0) return `${round1(oz)} oz`
@@ -1732,8 +1752,8 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                 const amt = planAppOz(a, area, prod) // { oz(total), rateM, tanks, perTankOz }
                 const rateM = amt?.rateM ?? (a.rateOzM != null && a.rateOzM !== '' ? Number(a.rateOzM) : null)
                 const tanks = amt?.tanks ?? 1
-                const unit = prod.unit || 'oz'
-                const perM = unit === 'lbs' ? 16 : 128
+                const dry = isDry(prod)
+                const perM = dry ? 16 : 128
                 const ozPerTank = rateM != null && sqft ? rateM * (sqft / 1000) : null // one full pass
                 const totalOz = amt?.oz ?? (ozPerTank != null ? ozPerTank * tanks : null)
                 const ozPerCase = Number(prod.ozPerCase) || null
@@ -1749,19 +1769,19 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                 const pkg = prod.jugSize ? `${prod.jugSize} ${prod.jugUnit || 'gal'}` : (prod.caseSize || '—')
                 return [
                   ['For', a.target || '—'],
-                  ['Rate oz/M', rateM != null ? round1(rateM) : '—'],
-                  ['Rate oz/A', rateM != null ? round1(rateM * 43.56) : '—'],
+                  ['Rate oz/M', rateFmt(rateM)],
+                  ['Rate oz/A', rateM != null ? rateFmt(rateM * 43.56) : '—'],
                   ['Label rate', labelRate],
                   ['Area (sq ft)', sqft ? sqft.toLocaleString() : '—'],
                   ['# Tanks', tanks],
                   ['oz / Tank', ozPerTank != null ? round1(ozPerTank) : '—'],
-                  ['Amount / Tank', galOz(ozPerTank, unit)],
+                  ['Amount / Tank', galOz(ozPerTank, dry)],
                   ['Total (oz)', totalOz != null ? round1(totalOz).toLocaleString() : '—'],
-                  ['Total product', galOz(totalOz, unit)],
+                  ['Total product', galOz(totalOz, dry)],
                   ['Case size', prod.caseSize || '—'],
                   ['Package', pkg],
                   ['Oz / case', ozPerCase != null ? ozPerCase.toLocaleString() : '—'],
-                  ['Unit conv', `${perM} oz/${unit === 'lbs' ? 'lb' : 'gal'}`],
+                  ['Unit conv', `${perM} oz/${dry ? 'lb' : 'gal'}`],
                   ['Cases needed', casesExact != null ? Math.round(casesExact * 100) / 100 : '—'],
                   ['Cost / unit', money(costPerUnit)],
                   ['Total cost', money(totalCost)],
@@ -2136,7 +2156,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                 <div className="bg-white rounded-xl border border-black/5 px-3 py-2.5 shadow-sm">
                   <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Est. cost</p>
                   <p className="font-display font-bold text-slate-900" style={{ fontSize: 20, marginTop: 2 }}>{earlyOrder.estTotalCost > 0 ? `$${earlyOrder.estTotalCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—'}</p>
-                  <p className="font-body text-[9px] text-slate-400 leading-tight">priced products only</p>
+                  <p className="font-body text-[9px] text-slate-400 leading-tight">priced products only{(earlyOrder.missingPriceRows || []).length > 0 ? ` · ${earlyOrder.missingPriceRows.length} unpriced` : ''}</p>
                 </div>
                 <button onClick={exportEarlyOrder} className="rounded-xl text-white shadow-sm flex flex-col items-center justify-center gap-1" style={{ backgroundColor: FOREST }}>
                   <Package size={16} />

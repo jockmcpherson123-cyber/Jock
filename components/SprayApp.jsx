@@ -116,6 +116,7 @@ const productJug = (prod) => (prod && prod.jugSize > 0 ? { size: Number(prod.jug
 
 // ── PALETTE ───────────────────────────────────────────────────────────────
 import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, AMBER, RED, BLUE, PAGE } from '@/lib/theme'
+import { formatNumber, formatMoney, formatDate } from '@/lib/format'
 const CREAM = '#F7F5EF'
 // Clubhouse × Instrument restyle: "soft stone" surfaces + warm-neutral inks
 // (warmth dialled out). Mirrors the CSS tokens in globals.css so inline styles
@@ -1650,14 +1651,14 @@ function InventoryAudit({ products = [], onSaveProduct, userName = '' }) {
       <SectionHeader title="Inventory Count" subtitle="Count the shelf, enter each number, and apply — stock updates and every change is logged." />
 
       {(() => {
-        let total = 0; let priced = 0
-        ;(products || []).forEach((p) => { const v = productStockValue(p); if (v != null) { total += v; priced++ } })
+        let total = 0; let priced = 0; let needCount = 0
+        ;(products || []).forEach((p) => { const v = productStockValue(p); if (v != null) { total += Math.max(0, v); priced++; if (v < 0) needCount++ } })
         if (!priced) return null
         return (
           <div className="rounded-2xl p-4 text-white shadow-sm mt-3" style={{ backgroundColor: FOREST }}>
             <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Inventory value on hand</p>
-            <p className="font-display text-2xl font-bold mt-0.5">${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-            <p className="font-body text-[10px] opacity-70">{priced} priced product{priced !== 1 ? 's' : ''} · stock × case price</p>
+            <p className="font-display text-2xl font-bold mt-0.5">{formatMoney(total)}</p>
+            <p className="font-body text-[10px] opacity-70">{priced} priced product{priced !== 1 ? 's' : ''} · stock × case price{needCount > 0 ? ` · ${needCount} need a count` : ''}</p>
           </div>
         )
       })()}
@@ -1677,7 +1678,7 @@ function InventoryAudit({ products = [], onSaveProduct, userName = '' }) {
             <div key={p.name} className="bg-white rounded-xl border border-black/5 p-3 flex items-center gap-3">
               <div className="min-w-0 flex-1">
                 <p className="font-body text-[13.5px] font-bold truncate" style={{ color: FOREST }}>{p.name}</p>
-                <p className="font-body text-[11px]" style={{ color: INK_3 }}>On hand: {prev}{p.unit ? ` ${p.unit}` : ''}</p>
+                <p className="font-body text-[11px]" style={{ color: prev < 0 ? RED : INK_3 }}>On hand: {prev < 0 ? `${formatNumber(prev)}${p.unit ? ` ${p.unit}` : ''} (count needed)` : `${prev}${p.unit ? ` ${p.unit}` : ''}`}</p>
               </div>
               {v != null && v !== 0 && (
                 <span className="font-body text-[12px] font-bold tabular-nums whitespace-nowrap" style={{ color: vColor(v) }}>{v > 0 ? '+' : ''}{v}</span>
@@ -3065,7 +3066,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
               {plan.stockIssues.length > 0 ? (
                 <div className="rounded-lg px-3 py-2 mt-2 font-body text-[12px] flex items-start gap-1.5" style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}>
                   <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-                  <span><b>Short on stock for this job:</b> {plan.stockIssues.map((l) => `${l.name} — need ${l.need}, have ${l.stock} ${l.stockUnit}`).join('; ')}.</span>
+                  <span><b>Short on stock for this job:</b> {plan.stockIssues.map((l) => `${l.name} — need ${l.need}, have ${Number(l.stock) < 0 ? '0 (count needed)' : `${l.stock} ${l.stockUnit}`}`).join('; ')}.</span>
                 </div>
               ) : (
                 <p className="font-body text-[12px] text-slate-500 mt-2 flex items-center gap-1.5"><Check size={14} style={{ color: FERN }} /> Enough stock on hand for every product.</p>
@@ -4247,7 +4248,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
                         {overLimit && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">OVER</span>}
                       </p>
                       <p className={`${manage ? 'text-[11px]' : 'text-xs'} text-slate-400`}>
-                        {p.rate} {p.basis}{insufficient ? ` · only ${stock} ${unit} in stock` : ''}
+                        {p.rate} {p.basis}{insufficient ? (Number(stock) < 0 ? ` · stock count needed` : ` · only ${stock} ${unit} in stock`) : ''}
                       </p>
                       {p.target && String(p.target).trim() && (
                         <p className="text-[11px] mt-0.5 flex items-start gap-1" style={{ color: FERN }}>
@@ -4305,7 +4306,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
                 {plan.stockIssues.length > 0 && (
                   <div className="rounded-lg px-3 py-2 mb-2.5 font-body text-[11px] flex items-start gap-1.5" style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}>
                     <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                    <span><b>Short on stock:</b> {plan.stockIssues.map((l) => `${l.name} (need ${l.need}, have ${l.stock})`).join('; ')}. Order or reduce the job before spraying.</span>
+                    <span><b>Short on stock:</b> {plan.stockIssues.map((l) => `${l.name} (need ${l.need}, have ${Number(l.stock) < 0 ? '0 — count needed' : l.stock})`).join('; ')}. Order or reduce the job before spraying.</span>
                   </div>
                 )}
                 <ol className="space-y-1.5">
@@ -10990,6 +10991,10 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
 
   const gddSeries = gddFromDaily(daily)
   const seasonGdd = gddSeries.length ? gddSeries[gddSeries.length - 1].acc : 0
+  // Season GDD counts observed days only (gddFromDaily caps at today), so the day
+  // count is days of real weather since Jan 1 — not the forecast rows.
+  const seasonDays = gddSeries.length
+  const forecastGdd = Math.round((daily || []).filter((d) => d.date > localDateISO() && d.tMax != null && d.tMin != null).slice(0, 7).reduce((s, d) => s + Math.max(0, (d.tMax + d.tMin) / 2 - 50), 0))
 
   // Both PGRs and DMI (FRAC 3) fungicides suppress growth, so either resets the
   // clock — but only for areas actually running a PGR program (a DMI on the rough
@@ -11132,7 +11137,7 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
       <div className="rounded-2xl p-4 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
         <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Season GDD (base 50°F)</p>
         <p className="font-display text-3xl font-bold mt-0.5">{Math.round(seasonGdd).toLocaleString()}</p>
-        <p className="font-body text-[11px] opacity-70 mt-0.5">Accumulated since Jan 1 · {daily.length} days of weather</p>
+        <p className="font-body text-[11px] opacity-70 mt-0.5">Accumulated since Jan 1 · {seasonDays} days of weather{forecastGdd > 0 ? ` · +${forecastGdd} forecast next 7 days` : ''}</p>
       </div>
 
       {/* Parked for now — the "Program read · AI" card is hidden. The
@@ -13741,6 +13746,8 @@ function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, cli
   const PGR_TARGET = 360 // classic greens reapply target (base 32°F)
   const gddSeries = gddFromDaily(daily)
   const seasonGdd = gddSeries.length ? gddSeries[gddSeries.length - 1].acc : 0
+  const seasonDays = gddSeries.length
+  const forecastGdd = Math.round((daily || []).filter((d) => d.date > localDateISO() && d.tMax != null && d.tMin != null).slice(0, 7).reduce((s, d) => s + Math.max(0, (d.tMax + d.tMin) / 2 - 50), 0))
 
   // Pre-emergent nudge — the nearest actionable germination window, so Home
   // flags it without opening the Timing tab. Only surfaces when it's in season
@@ -13812,7 +13819,7 @@ function TurfDashboard({ daily = [], sheets = [], products = [], areas = {}, cli
       <button onClick={() => onGo('gdd')} className="w-full text-left rounded-2xl p-4 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
         <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Season GDD (base 50°F)</p>
         <p className="font-display text-3xl font-bold mt-0.5">{hasLocation ? Math.round(seasonGdd).toLocaleString() : '—'}</p>
-        <p className="font-body text-[11px] opacity-70 mt-0.5">{hasLocation ? `Accumulated since Jan 1 · ${daily.length} days of weather` : 'Add your course location in Settings to track GDD'}</p>
+        <p className="font-body text-[11px] opacity-70 mt-0.5">{hasLocation ? `Accumulated since Jan 1 · ${seasonDays} days of weather${forecastGdd > 0 ? ` · +${forecastGdd} forecast next 7 days` : ''}` : 'Add your course location in Settings to track GDD'}</p>
       </button>
 
       {preem && (() => {
