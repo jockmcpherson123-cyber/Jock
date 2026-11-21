@@ -182,7 +182,7 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
     <div>
       <div className="flex items-start justify-between gap-3 flex-wrap mb-1">
         <div>
-          <h2 className="font-display text-lg font-semibold" style={{ color: INK }}>Wetting Agent Timing</h2>
+          <h2 className="font-display text-lg font-semibold" style={{ color: INK }}>Wetting Agents</h2>
           <p className="font-body text-xs mb-3" style={{ color: INK_3 }}>
             Degree-day wear-off on your indicator greens, confirmed by moisture uniformity.
           </p>
@@ -451,7 +451,7 @@ function buildProjection(coordPts, W, H, pad) {
   return (p) => ({ x: offX + (p.lng * k - minX) * scale, y: offY + (-p.lat - minY) * scale })
 }
 
-// Moisture colour ramp: 0 = dry (red) · 0.5 = mid (green) · 1 = wet (blue).
+// Moisture color ramp: 0 = dry (red) · 0.5 = mid (green) · 1 = wet (blue).
 function heatRGB(t) {
   const u = Math.max(0, Math.min(1, t))
   const lerp = (a, b, k) => a + (b - a) * k
@@ -487,8 +487,8 @@ function fitZoom(coordPts, W, H, pad) {
 }
 
 // Top-down moisture map: the green's reading points on a soft heatmap of their
-// %VWC (blue wet → red dry, IDW-interpolated), value markers coloured to match,
-// the next point to walk to (gold ring), your live GPS dot, and a colour scale.
+// %VWC (blue wet → red dry, IDW-interpolated), value markers colored to match,
+// the next point to walk to (gold ring), your live GPS dot, and a color scale.
 // With a Mapbox token, the green's satellite aerial sits behind the heatmap.
 // Tap a point to jump to its input.
 function GreenMap({ points, vals, pos, nextId, onPick, heatOn, token }) {
@@ -575,7 +575,7 @@ function GreenMap({ points, vals, pos, nextId, onPick, heatOn, token }) {
             <circle cx={posXY.x} cy={posXY.y} r="5" fill="#2563EB" stroke="white" strokeWidth="2" />
           </>
         )}
-        {/* colour scale (wet top → dry bottom) */}
+        {/* color scale (wet top → dry bottom) */}
         {heatOn && valued.length >= 2 && (
           <>
             <defs><linearGradient id="wa-scale" x1="0" y1="0" x2="0" y2="1">

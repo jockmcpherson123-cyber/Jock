@@ -143,7 +143,7 @@ function RainfallYearCard({ rain, prev, canEdit, onEditDay }) {
       <div className="flex items-center justify-between mb-2">
         <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide">Rainfall · {rain.year}</p>
         {canEdit && (
-          <button onClick={() => onEditDay(new Date().toISOString().slice(0, 10), null)} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ color: RAIN_BLUE, border: `1px solid #DBEAFE`, backgroundColor: '#F0F6FF' }}>+ Add gauge reading</button>
+          <button onClick={() => onEditDay(new Date().toISOString().slice(0, 10), null)} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FOREST }}>+ Add gauge reading</button>
         )}
       </div>
       <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
@@ -381,7 +381,7 @@ export default function Weather({ location, courseInfo, products = [], manage = 
       )}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h2 className="font-display text-lg font-semibold text-slate-900">Weather &amp; Agronomics</h2>
+          <h2 className="font-display text-lg font-semibold text-slate-900">Weather</h2>
           <p className="font-body text-xs text-slate-400 mt-0.5 flex items-center gap-1">
             <MapPin size={11} />{location.address || `${location.lat}, ${location.lng}`}
           </p>

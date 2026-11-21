@@ -132,7 +132,7 @@ export default function StimpCam({ onClose, onResult }) {
       let row = (yy * width + x0) * 4, grow = yy * width + x0
       for (let x = 0; x < bw; x++, row += 4, grow++) {
         const r = data[row], g1 = data[row + 1], b = data[row + 2]
-        // White = bright AND low colour-saturation (grass is green-dominant → rejected)
+        // White = bright AND low color-saturation (grass is green-dominant → rejected)
         const mx = r > g1 ? (r > b ? r : b) : (g1 > b ? g1 : b)
         const mn = r < g1 ? (r < b ? r : b) : (g1 < b ? g1 : b)
         if (mn > 160 && mx - mn < 46) {

@@ -4,7 +4,7 @@
 // A wall-TV / landscape-iPad overview for a multi-course property. The top strip
 // is shared across the whole property (sprays this week, open jobs, 7-day rain,
 // season GDD, live weather); below it each course gets its own card in its own
-// colour — live Greens Speed / Height of Cut, plus an editable Moisture Target,
+// color — live Greens Speed / Height of Cut, plus an editable Moisture Target,
 // Today's Focus note and a checkable To-Do list. Blue and Gold stay independent.
 // The live data refreshes on a timer; the editable fields persist to settings.
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -87,7 +87,7 @@ export default function CommandCentre() {
   const today = localDateISO()
   const year = today.slice(0, 4)
 
-  // Courses (name + colour). Fall back to a single property-wide card.
+  // Courses (name + color). Fall back to a single property-wide card.
   let courses = Array.isArray(courseInfo.courses) ? courseInfo.courses.filter((c) => c && c.name) : []
   const allMode = courses.length === 0
   if (allMode) courses = [{ name: courseInfo.clubName || 'Course', color: FERN, _all: true }]

@@ -26,7 +26,7 @@ import { FOREST, FERN, GOLD } from '@/lib/theme'
 
 // Sponsor tiers (biggest → smallest), like a championship program.
 const SPONSOR_TIERS = ['Platinum', 'Gold', 'Silver', 'Bronze', 'Industry Partner']
-// Brand-colour presets for the handbook (name → hex). First is the app default.
+// Brand-color presets for the handbook (name → hex). First is the app default.
 const BRAND_COLORS = [
   { name: 'Congressional Green', hex: '#16291F' },
   { name: 'Championship Navy', hex: '#1C3A6E' },
@@ -230,8 +230,8 @@ export default function Tournament({ courseInfo: courseInfoProp }) {
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <div className="min-w-0">
           <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>Tournament Operations</p>
-          <h2 className="font-display text-2xl font-semibold text-slate-900 truncate">{selected?.name || 'Tournament'}</h2>
-          {selected && <p className="font-body text-xs text-slate-500 mt-0.5">{[fmtRange(selected.startDate, selected.endDate), selected.location].filter(Boolean).join(' · ')}</p>}
+          <h2 className="font-display text-lg font-semibold text-slate-900 truncate">Tournament</h2>
+          {selected && <p className="font-body text-xs text-slate-500 mt-0.5">{[selected.name, fmtRange(selected.startDate, selected.endDate), selected.location].filter(Boolean).join(' · ')}</p>}
         </div>
         {tournaments.length > 1 && (
           <div className="w-56">
@@ -1041,7 +1041,7 @@ function waitImgs(el) {
 
 // Build the magazine handbook as a self-contained HTML string (styles scoped
 // under .mag). Used for both the browser print and the downloadable PDF: a
-// colour cover, a Contents page, then each section as a numbered article with a
+// color cover, a Contents page, then each section as a numbered article with a
 // lead photo, drop cap, and a photo gallery.
 function buildHandbookHTML(handbook, tournament, clubNameRaw, people = []) {
   const sections = handbook.sections || []
@@ -1271,7 +1271,7 @@ function buildHandbookHTML(handbook, tournament, clubNameRaw, people = []) {
   return `${style}<div class="mag">${cover}${toc}${arts}${schedulePage}${holesPage}${sponsorsPage}${meetTeamPage}${directoryPage}${yearsPage}${thankYouPage}<div class="foot">${clubName} · ${esc(tournament.name)} · Volunteer Handbook</div>${backCover}</div>`
 }
 
-// Hex colour → rgba() string with the given alpha (for photo overlays).
+// Hex color → rgba() string with the given alpha (for photo overlays).
 function hexA(hex, a) {
   const h = String(hex || '#16291F').replace('#', '')
   const n = h.length === 3 ? h.split('').map((c) => c + c).join('') : h
@@ -1412,7 +1412,7 @@ function HandbookTab({ tournament, people = [], onSave, showToast, courseInfo })
 
   const print = () => {
     printHTML(buildHandbookHTML(handbookData(), tournament, courseInfo.clubName || '', people))
-    showToast('Tip: turn on "Background graphics" in the print dialog for the colour cover')
+    showToast('Tip: turn on "Background graphics" in the print dialog for the color cover')
   }
 
   // One-tap professional PDF (for emailing volunteers or sending to a print
@@ -1479,10 +1479,10 @@ function HandbookTab({ tournament, people = [], onSave, showToast, courseInfo })
       {/* Branding & sponsors */}
       <Card>
         <p className="font-display text-base font-semibold text-slate-900 mb-1">Branding & Sponsors</p>
-        <p className="font-body text-xs text-slate-500 mb-3">Set the booklet's brand colour, cover, club logo and sponsors. Transparent PNG logos look best.</p>
+        <p className="font-body text-xs text-slate-500 mb-3">Set the booklet's brand color, cover, club logo and sponsors. Transparent PNG logos look best.</p>
 
-        {/* Brand colour */}
-        <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Brand colour</label>
+        {/* Brand color */}
+        <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Brand color</label>
         <div className="flex flex-wrap items-center gap-2 mb-4">
           {BRAND_COLORS.map((c) => (
             <button key={c.hex} onClick={() => { setThemeColor(c.hex); setDirty(true) }} title={c.name} className="w-8 h-8 rounded-full border-2 transition" style={{ backgroundColor: c.hex, borderColor: themeColor === c.hex ? GOLD : 'transparent', boxShadow: themeColor === c.hex ? '0 0 0 2px white inset' : 'none' }} aria-label={c.name} />
@@ -1519,7 +1519,7 @@ function HandbookTab({ tournament, people = [], onSave, showToast, courseInfo })
             ) : (
               <PhotoAdder onAdd={uploadCover} busy={imgBusy} label="Add cover photo" multiple={false} />
             )}
-            <p className="font-body text-[10px] text-slate-400 mt-1 w-40">A course or trophy shot behind the title, tinted in your brand colour.</p>
+            <p className="font-body text-[10px] text-slate-400 mt-1 w-40">A course or trophy shot behind the title, tinted in your brand color.</p>
           </div>
         </div>
 

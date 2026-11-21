@@ -67,7 +67,7 @@ export default function MowingRoutes({ courses = [], courseInfo = {}, manage, on
   }
 
   // Print one palm-size card per mower for this route — the greens each guy mows
-  // as a route (arrows to the next green), in the mower's colour. Cut and hand out.
+  // as a route (arrows to the next green), in the mower's color. Cut and hand out.
   const printCards = () => {
     const esc = (x) => String(x ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]))
     const tint = (hex, a) => { const h = hex.replace('#', ''); const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16); return `rgba(${r},${g},${b},${a})` }

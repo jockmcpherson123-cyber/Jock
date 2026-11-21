@@ -36,7 +36,7 @@ export default function HocEditor({ courseInfo = {}, areas = {}, practices = [],
         <label className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">{title}</label>
         <div className="flex gap-2">
           {rows.length === 0 && allMowed.length > 0 && <button onClick={seed} className="font-body text-[11px] font-bold" style={{ color: FERN }}>Add my surfaces</button>}
-          <button onClick={() => addRow()} className="font-body text-[11px] font-bold" style={{ color: FOREST }}>+ Add surface</button>
+          <button onClick={() => addRow()} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FOREST }}>+ Add surface</button>
         </div>
       </div>
       {rows.length === 0 ? (

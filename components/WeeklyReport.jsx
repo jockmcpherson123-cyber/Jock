@@ -434,7 +434,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
       }
       /* Applied only while capturing the PDF/email image — hides edit chrome + blank rows. */
       .wr-capturing .no-print, .wr-capturing .empty-hide-print, .wr-capturing .cap-hide { display: none !important; }
-      /* Same darker-colour treatment for the captured image (Print button, PDF,
+      /* Same darker-color treatment for the captured image (Print button, PDF,
          email) — pale shades wash out on paper, so deepen them. */
       .wr-capturing [style*="f0f6f2" i] { background:#bcd3c3 !important; border-color:#8fb49f !important; }
       .wr-capturing [style*="f8faf8" i], .wr-capturing [style*="fcfcfa" i] { background:#dce9e0 !important; border-color:#adc7b6 !important; }
@@ -532,7 +532,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         {/* Sprays next week (pulled from program + hand-typed) */}
         <div className="flex items-center justify-between">
           <H icon={Calendar}>Planned sprays — next week</H>
-          <button onClick={addSpray} className="no-print font-body text-[11px] font-bold" style={{ color: FOREST }}>+ Add spray</button>
+          <button onClick={addSpray} className="no-print font-body text-[12px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FOREST }}>+ Add spray</button>
         </div>
         {sprayDays.length === 0 && manualSpraysShown.length === 0 ? (
           <p className="font-body text-[12px] text-slate-400"><span className="no-print">Tap “+ Add spray” to type one, or it fills from your Annual Program.</span></p>

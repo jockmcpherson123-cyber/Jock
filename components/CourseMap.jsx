@@ -1084,7 +1084,7 @@ export default function CourseMap({ user, manage }) {
             {/* Add-head controls (managers) */}
             {manage && (
               <div className="absolute z-[500] top-3 left-3 flex flex-col gap-2">
-                <button onClick={() => setAddMode((v) => !v)} className="font-body text-[12px] font-bold px-3 h-10 rounded-full shadow flex items-center gap-1.5" style={addMode ? { backgroundColor: '#2563EB', color: '#fff' } : { backgroundColor: '#fff', color: FOREST }}><Plus size={15} /> Add head</button>
+                <button onClick={() => setAddMode((v) => !v)} className="font-body text-[12px] font-bold px-3 h-10 rounded-full shadow flex items-center gap-1.5 text-white" style={addMode ? { backgroundColor: '#2563EB' } : { backgroundColor: FOREST }}><Plus size={15} /> Add head</button>
                 <button onClick={addAtGps} disabled={!gps} title="Add at my location" className="font-body text-[12px] font-bold px-3 h-10 rounded-full shadow flex items-center gap-1.5 bg-white disabled:opacity-50" style={{ color: FOREST }}><Crosshair size={14} /> At my GPS</button>
                 <button onClick={() => setDrawOpen(true)} className="font-body text-[12px] font-bold px-3 h-10 rounded-full shadow flex items-center gap-1.5 bg-white" style={{ color: FOREST }}><Plus size={15} /> Draw / edit</button>
               </div>
