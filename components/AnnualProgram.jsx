@@ -2236,6 +2236,37 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                 </div>
               )}
 
+              {/* Price check — confirm each product's cost makes sense. Sorted by
+                  $/oz so a case price entered for the wrong pack size stands out
+                  (e.g. Daconil Action at ~$1.62/oz vs the spreadsheet's ~$0.75). */}
+              {(() => {
+                const priced = earlyOrder.rows.filter((r) => r.costPerOz != null).sort((a, b) => b.costPerOz - a.costPerOz)
+                const unpriced = earlyOrder.rows.filter((r) => r.missingPrice).map((r) => r.name)
+                if (priced.length === 0 && unpriced.length === 0) return null
+                return (
+                  <details className="bg-white rounded-xl border border-black/5 p-3 shadow-sm mb-3">
+                    <summary className="font-body text-[12px] font-bold text-slate-700 cursor-pointer select-none flex items-center gap-1.5">
+                      <DollarSign size={13} style={{ color: FERN }} /> Price check · {priced.length} priced{unpriced.length ? ` · ${unpriced.length} unpriced` : ''}
+                    </summary>
+                    <p className="font-body text-[11px] text-slate-400 mt-1.5 mb-2">Cost per ounce, highest first. Confirm any that look high — usually a case price entered against the wrong pack size.</p>
+                    <div className="space-y-0.5">
+                      {priced.map((r) => (
+                        <div key={r.name} className="flex items-center justify-between gap-2 font-body text-[12px] py-0.5">
+                          <span className="text-slate-600 truncate flex-1 min-w-0">{r.name}</span>
+                          <span className="text-slate-400 tabular-nums shrink-0 text-[11px]">{r.ozPerCase ? `$${Number(r.costPerCase).toLocaleString('en-US', { maximumFractionDigits: 2 })}/${r.ozPerCase}oz` : ''}</span>
+                          <span className="font-bold text-slate-900 tabular-nums shrink-0" style={{ width: 70, textAlign: 'right' }}>${r.costPerOz.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}/oz</span>
+                        </div>
+                      ))}
+                      {unpriced.length > 0 && (
+                        <div className="pt-1.5 mt-1 border-t border-slate-100">
+                          <p className="font-body text-[11px]"><span className="font-bold text-amber-600">No price yet:</span> <span className="text-slate-500">{unpriced.join(', ')}</span></p>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                )
+              })()}
+
               {(earlyOrder.byTypeCost.length > 0 || earlyOrder.byAreaCost.length > 0) && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
                   {[['Cost by type', earlyOrder.byTypeCost.map((r) => [r.type, r.cost])], ['Cost by area', earlyOrder.byAreaCost.map((r) => [r.area, r.cost])]].map(([title, items]) => (
