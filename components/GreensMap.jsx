@@ -387,7 +387,7 @@ export default function GreensMap({ user }) {
 }
 
 // ── Add photo ──────────────────────────────────────────────────────────────
-function AddPhoto({ courses, clubId, defaultCourseId, onClose, onDone }) {
+export function AddPhoto({ courses, clubId, defaultCourseId, onClose, onDone }) {
   const [file, setFile] = useState(null)
   const [worldFile, setWorldFile] = useState(null)
   const [courseId, setCourseId] = useState(defaultCourseId || courses[0]?.id || '')

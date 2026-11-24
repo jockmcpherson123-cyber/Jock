@@ -15,6 +15,8 @@ import { MapPin, Crosshair, Navigation, Layers, Check, X, Trash2, Loader2, Plus,
 import * as db from '@/lib/db'
 import ArcTool from '@/components/ArcTool'
 import { fitSimilarity, fitResiduals, imageCornerLatLngs, metresToFeet, pixelToLatLng } from '@/lib/geocalib'
+import * as cmdb from '@/lib/coursemap/db'
+import { worldFileCorners } from '@/lib/coursemap/geo'
 import { SYMBOL_GROUPS, PIPE_ITEMS, symbolById, symbolColor, symbolSvg, isPartCircle } from '@/lib/irrigationSymbols'
 
 import { FOREST, FERN, GOLD } from '@/lib/theme'
@@ -212,6 +214,8 @@ export default function CourseMap({ user, manage }) {
   const transformRefL = useRef(null)
   const removedRefL = useRef([])
   const courseInfoRefL = useRef({})
+  const aerialRef = useRef(null)          // the uploaded course aerial, under the pipes
+  const [aerial, setAerial] = useState(null)
   useEffect(() => { drawRefState.current = draw }, [draw])
   useEffect(() => { eraserRef.current = eraser }, [eraser])
   useEffect(() => { pipesRefL.current = pipes }, [pipes])
@@ -427,6 +431,42 @@ export default function CourseMap({ user, manage }) {
 
   // Keep overlay opacity live
   useEffect(() => { if (overlayRef.current) overlayRef.current.setOpacity(opacity) }, [opacity])
+
+  // Load the club's default course aerial (uploaded once in Settings → Course
+  // Aerial, shared with the Course Map), so the Irrigation Map shows the same
+  // up-to-date photo under the pipes and heads.
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      try {
+        const c = await cmdb.fetchCourseContext()
+        const imgs = await cmdb.fetchImagery(c.courses?.[0]?.id)
+        const def = imgs.find((i) => i.id === c.settings?.default_imagery_id) || imgs[0] || null
+        if (live) setAerial(def)
+      } catch (e) { console.error('aerial load', e) }
+    })()
+    return () => { live = false }
+  }, [])
+
+  // Place the aerial as a base layer, beneath the as-built overlay + heads (they
+  // are positioned in real lat/lon by the calibration, so this never moves them).
+  useEffect(() => {
+    const L = LRef.current, map = mainMap.current
+    if (!L || !map || mode !== 'map') return
+    let live = true
+    ;(async () => {
+      if (aerialRef.current) { aerialRef.current.remove(); aerialRef.current = null }
+      if (!aerial || !aerial.filePath || typeof L.imageOverlay?.rotated !== 'function') return
+      const url = await cmdb.signedUrl(aerial.filePath)
+      if (!live || !url) return
+      const c = worldFileCorners({ A: aerial.pxSizeX, D: 0, B: 0, E: aerial.pxSizeY, C: aerial.ulX, F: aerial.ulY }, aerial.widthPx, aerial.heightPx, aerial.crs || 'EPSG:3857')
+      try {
+        const ov = L.imageOverlay.rotated(url, L.latLng(c.topLeft.lat, c.topLeft.lon), L.latLng(c.topRight.lat, c.topRight.lon), L.latLng(c.bottomLeft.lat, c.bottomLeft.lon), { opacity: 1, interactive: false })
+        ov.addTo(map); ov.bringToBack(); aerialRef.current = ov
+      } catch (e) { console.error('aerial place', e) }
+    })()
+    return () => { live = false }
+  }, [aerial, mode, mapTick])
 
   // Live location marker — a blue dot with a direction arrow (phone compass) so
   // you can tell which way you're facing and walk the right way.

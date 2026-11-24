@@ -101,6 +101,7 @@ import GpsCoverage from '@/components/GpsCoverage'
 import ProductPerformance from '@/components/ProductPerformance'
 import BudgetApp from '@/components/BudgetApp'
 import GreensMap from '@/components/GreensMap'
+import AerialSettings from '@/components/AerialSettings'
 import { libraryComplianceGaps } from '@/lib/compliance'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
@@ -7442,7 +7443,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       <SectionHeader title="Settings" subtitle="Manage people, areas, and club details — changes apply everywhere instantly" />
 
       <div className="flex gap-2 mt-4 mb-5 overflow-x-auto pb-1">
-        {[['property', 'Property Setup'], ['course', 'Course Info'], ['location', 'Location'], ['people', 'People'], ...(canUsers ? [['users', 'Users & Logins']] : []), ['areas', 'Sprayer Areas'], ['sprayers', 'Sprayers'], ['lists', 'Lists'], ['backup', 'Backup']].map(([k, l]) => (
+        {[['property', 'Property Setup'], ['course', 'Course Info'], ['location', 'Location'], ['aerial', 'Course Aerial'], ['people', 'People'], ...(canUsers ? [['users', 'Users & Logins']] : []), ['areas', 'Sprayer Areas'], ['sprayers', 'Sprayers'], ['lists', 'Lists'], ['backup', 'Backup']].map(([k, l]) => (
           <button key={k} onClick={() => setSection(k)} className="font-body text-xs font-semibold px-3.5 py-1.5 rounded-full whitespace-nowrap transition" style={section === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
@@ -7452,6 +7453,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       {section === 'property' && <PropertySetup courseInfo={courseInfo} areas={areas} grassTypes={grassChoices} soilTypes={soilTypes} onSave={onSave} />}
       {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} grassTypes={grassTypes} onSave={onSave} />}
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
+      {section === 'aerial' && <AerialSettings />}
       {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} onSave={onSave} />}
       {section === 'users' && canUsers && <UsersSettings />}
       {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassChoices} soilTypes={soilTypes} courses={courseInfo?.courses || []} onSave={onSave} />}
