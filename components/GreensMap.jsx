@@ -37,6 +37,7 @@ export default function GreensMap({ user }) {
   const [loading, setLoading] = useState(true)
   const [addOpen, setAddOpen] = useState(false)
   const [notice, setNotice] = useState('')
+  const [mapReady, setMapReady] = useState(false)
 
   const LRef = useRef(null)
   const mapRef = useRef(null)
@@ -82,19 +83,27 @@ export default function GreensMap({ user }) {
     let tries = 0
     const t = setInterval(() => {
       const L = LRef.current
-      if (!L || !elRef.current || mapRef.current) { if (++tries > 50) clearInterval(t); return }
+      if (!L || !elRef.current || mapRef.current) { if (++tries > 100) clearInterval(t); return }
       clearInterval(t)
       const map = L.map(elRef.current, { center: CONGRESSIONAL, zoom: 16, zoomControl: true, preferCanvas: true, maxBoundsViscosity: 1.0, attributionControl: false })
       mapRef.current = map
       setTimeout(() => map.invalidateSize(), 150)
+      setMapReady(true) // tell the overlay effect the map exists now
     }, 60)
-    return () => clearInterval(t)
+    // Tear the map down when leaving the Map tab or unmounting, so returning
+    // rebuilds it cleanly (otherwise the box points at a dead map → blank).
+    return () => {
+      clearInterval(t)
+      if (mapRef.current) { try { mapRef.current.remove() } catch { /* ignore */ } mapRef.current = null }
+      overlayRef.current = null; basemapRef.current = null
+      setMapReady(false)
+    }
   }, [tab])
 
   // Draw / update the selected photo overlay.
   useEffect(() => {
     const L = LRef.current, map = mapRef.current
-    if (!L || !map || tab !== 'map') return
+    if (!L || !map || !mapReady || tab !== 'map') return
     let live = true
     ;(async () => {
       // clear layers + any previous lock
@@ -128,7 +137,7 @@ export default function GreensMap({ user }) {
       }
     })()
     return () => { live = false }
-  }, [selId, imagery, tab])
+  }, [selId, imagery, tab, mapReady])
 
   // Keep overlay opacity live.
   useEffect(() => { if (overlayRef.current?.setOpacity) overlayRef.current.setOpacity(opacity) }, [opacity])
