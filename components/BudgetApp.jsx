@@ -16,7 +16,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Download, Upload, Lock } from 'lucide-react'
 import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, RED, AMBER, PAGE } from '@/lib/theme'
 import * as bdb from '@/lib/budget/db'
+import * as maindb from '@/lib/db'
 import { planImport, parseMoneyToCents } from '@/lib/budget/import'
+import { committedByGl } from '@/lib/budget/committed'
 import {
   computeLine, aggregate, latestPostedMonth, fiscalMonthIndex, yearProgressFraction,
   monthLabel, FY_MONTHS, formatMoneyCents, formatSignedCents, formatPct,
@@ -55,6 +57,7 @@ export default function BudgetApp({ user }) {
   const [refreshKey, setRefreshKey] = useState(0)
   const [profiles, setProfiles] = useState({})
   const [activity, setActivity] = useState([])
+  const [committed, setCommitted] = useState({}) // { glCode: cents }
   const reload = () => setRefreshKey((k) => k + 1)
   const myId = user?.id || null
 
@@ -78,11 +81,14 @@ export default function BudgetApp({ user }) {
     setLoading(true); setErr('')
     ;(async () => {
       try {
-        const [d, b, profs, act] = await Promise.all([
+        const [d, b, profs, act, sheets, fertSheets, products, settings] = await Promise.all([
           bdb.fetchBudgetData(yearId), bdb.fetchImportBatches(20), bdb.fetchProfilesMap(), bdb.fetchActivity(120),
+          maindb.fetchSheets().catch(() => []), maindb.fetchFertSheets().catch(() => []),
+          maindb.fetchProducts().catch(() => []), maindb.fetchSettings().catch(() => ({ areas: {} })),
         ])
         if (!live) return
         setData(d); setBatches(b); setProfiles(profs); setActivity(act)
+        setCommitted(committedByGl({ sheets, fertSheets, products, areas: settings.areas || {}, today: new Date() }))
       } catch (e) {
         if (live) setErr('Could not load the budget — check your connection.')
         console.error(e)
@@ -110,7 +116,7 @@ export default function BudgetApp({ user }) {
   const computed = useMemo(() => {
     if (!data) return null
     const byLine = {}
-    for (const l of data.lines) byLine[l.id] = computeLine(data.inputsByLine[l.id], through)
+    for (const l of data.lines) byLine[l.id] = computeLine({ ...data.inputsByLine[l.id], committedCents: committed[l.glCode] || 0 }, through)
     const withCalc = data.lines.map((l) => ({ line: l, c: byLine[l.id] }))
     const operating = withCalc.filter((x) => x.line.section === 'operating')
     const payroll = withCalc.filter((x) => x.line.section === 'payroll')
@@ -122,7 +128,7 @@ export default function BudgetApp({ user }) {
       payrollAgg: aggregate(payroll.map((x) => x.c)),
       totalAgg: aggregate(withCalc.map((x) => x.c)),
     }
-  }, [data, through])
+  }, [data, through, committed])
 
   // ---- hooks done; safe to branch ----
   if (loading) return <Centered>Loading the budget…</Centered>
