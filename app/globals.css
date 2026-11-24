@@ -98,3 +98,16 @@ html { overscroll-behavior: none; }
 @media (max-width: 767px) {
   .ap-fig { min-width: var(--apw, 60px); }
 }
+
+/* Shared course-area labels on the maps — clean white text, no box. */
+.leaflet-tooltip.cm-area-label {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.85);
+  padding: 0;
+}
+.leaflet-tooltip.cm-area-label::before { display: none; }

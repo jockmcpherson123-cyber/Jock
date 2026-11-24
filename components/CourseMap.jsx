@@ -27,6 +27,8 @@ const IMAGE_H = 7047
 const OVERLAY_URL = '/api/course-overlay'
 // Fallback map centre if the club location isn't set — Congressional CC.
 const FALLBACK = { lat: 38.9803, lng: -77.1636 }
+// Colors for the shared course areas (greens/tees/etc.) drawn in the Course Map.
+const AREA_COLORS = { green: '#22C55E', approach: '#A3E635', fairway: '#4AD07D', tee: '#14B8A6', bunker: '#E8D8A0', other: '#9AA6B2' }
 const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 const SAT_ATTR = 'Imagery © Esri, Maxar, Earthstar Geographics'
 
@@ -218,6 +220,10 @@ export default function CourseMap({ user, manage }) {
   const courseInfoRefL = useRef({})
   const aerialRef = useRef(null)          // the uploaded course aerial, under the pipes
   const [aerial, setAerial] = useState(null)
+  const [sharedAreas, setSharedAreas] = useState([])   // greens/tees/etc. from the shared areas table
+  const [showSharedAreas, setShowSharedAreas] = useState(true)
+  const cmCourseIdRef = useRef(null)
+  const areasLayerRef = useRef(null)
   useEffect(() => { drawRefState.current = draw }, [draw])
   useEffect(() => { eraserRef.current = eraser }, [eraser])
   useEffect(() => { pipesRefL.current = pipes }, [pipes])
@@ -444,10 +450,12 @@ export default function CourseMap({ user, manage }) {
     ;(async () => {
       try {
         const c = await cmdb.fetchCourseContext()
-        const imgs = await cmdb.fetchImagery(c.courses?.[0]?.id)
+        const courseId = c.courses?.[0]?.id || null
+        cmCourseIdRef.current = courseId
+        const [imgs, areas] = await Promise.all([cmdb.fetchImagery(courseId), cmdb.fetchAreas(courseId)])
         const def = imgs.find((i) => i.id === c.settings?.default_imagery_id) || imgs[0] || null
-        if (live) setAerial(def)
-      } catch (e) { console.error('aerial load', e) }
+        if (live) { setAerial(def); setSharedAreas(areas) }
+      } catch (e) { console.error('aerial/areas load', e) }
     })()
     return () => { live = false }
   }, [])
@@ -482,6 +490,24 @@ export default function CourseMap({ user, manage }) {
     })()
     return () => { live = false }
   }, [aerial, mode, mapTick, showAerial])
+
+  // Shared course areas (greens/tees/etc.) — the same ones the Course Map draws.
+  // Drawing/editing them there shows here too, and vice-versa.
+  useEffect(() => {
+    const L = LRef.current, map = mainMap.current
+    if (!L || !map || mode !== 'map') return
+    if (areasLayerRef.current) { map.removeLayer(areasLayerRef.current); areasLayerRef.current = null }
+    if (!showSharedAreas || !sharedAreas.length) return
+    const grp = L.layerGroup().addTo(map)
+    for (const a of sharedAreas) {
+      if (!a.ring?.length) continue
+      const color = AREA_COLORS[a.type] || '#9AA6B2'
+      const poly = L.polygon(a.ring.map(([lon, lat]) => [lat, lon]), { color, weight: 2, opacity: 0.95, fillOpacity: 0.12, interactive: true })
+      poly.bindTooltip(a.name || `${a.type}${a.hole ? ' ' + a.hole : ''}`, { permanent: true, direction: 'center', className: 'cm-area-label' })
+      poly.addTo(grp)
+    }
+    areasLayerRef.current = grp
+  }, [sharedAreas, showSharedAreas, mode, mapTick])
 
   // Live location marker — a blue dot with a direction arrow (phone compass) so
   // you can tell which way you're facing and walk the right way.
@@ -1122,6 +1148,9 @@ export default function CourseMap({ user, manage }) {
                 <button onClick={() => setShowAerial((v) => !v)} title={showAerial ? 'Hide aerial photo' : 'Show aerial photo'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showAerial ? FERN : '#94A3B8' }}><Camera size={17} /></button>
               )}
               <button onClick={() => setShowAsBuilt((v) => !v)} title={showAsBuilt ? 'Hide as-built (pipes, surfaces, wires)' : 'Show as-built'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center font-body text-[11px] font-extrabold" style={{ color: showAsBuilt ? '#2563EB' : '#94A3B8' }}>AB</button>
+              {sharedAreas.length > 0 && (
+                <button onClick={() => setShowSharedAreas((v) => !v)} title={showSharedAreas ? 'Hide course areas' : 'Show course areas'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showSharedAreas ? '#22C55E' : '#94A3B8' }}><MapPin size={17} /></button>
+              )}
               {shapes.length > 0 && (
                 <button onClick={() => setShowShapes((v) => !v)} title={showShapes ? 'Hide surfaces' : 'Show surfaces'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center font-body text-[14px] font-bold" style={{ color: showShapes ? '#3f9b47' : '#94A3B8' }}>▦</button>
               )}
