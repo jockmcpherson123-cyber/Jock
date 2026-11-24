@@ -1,0 +1,478 @@
+'use client'
+
+// ============================================================================
+//  Course Map — Greens today (Phase D).
+//
+//  Per-green moisture heatmap (clipped to the green, drawn on a crop of the
+//  aerial), morning/afternoon/change views, tonight's watering-depth suggestion
+//  and the per-green plan, plus the readings import. All math is lib/coursemap.
+//
+//  No React hook is placed after an early return.
+// ============================================================================
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Upload } from 'lucide-react'
+import { FOREST, FERN, GOLD, HAIR, INK, INK_2, INK_3, PAPER, PAPER_2, RED, BLUE } from '@/lib/theme'
+import * as cmdb from '@/lib/coursemap/db'
+import { planReadingsImport, guessReadingMapping } from '@/lib/coursemap/import'
+import { idwValue, moistureStops, changeStops, colorAt, changeReadings } from '@/lib/coursemap/heat'
+import { suggestDepth, planByDepth } from '@/lib/coursemap/depth'
+import { lonLatToPixel } from '@/lib/coursemap/geo'
+import { formatNumber, formatDate } from '@/lib/format'
+
+const DEFAULT_TARGET = { lo: 20, hi: 30, aim: 25 } // Phase E replaces with the season's target
+const GREEN_OK = '#1E7A46'
+const canApprove = (role) => role === 'superintendent' || role === 'director'
+const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+const statusOf = (avg, t) => avg == null ? { label: '—', c: INK_3 } : avg < t.lo ? { label: 'Low', c: RED } : avg > t.hi ? { label: 'High', c: BLUE } : { label: 'In range', c: GREEN_OK }
+
+export default function GreensToday({ ctx, courseId, manage, user, activeImagery }) {
+  const target = DEFAULT_TARGET
+  const date = todayISO()
+  const [greens, setGreens] = useState([])
+  const [rounds, setRounds] = useState([]) // today's rounds with readings
+  const [plan, setPlan] = useState({ depths: {}, day: {} })
+  const [view, setView] = useState('morning')
+  const [selId, setSelId] = useState(null)
+  const [showSpots, setShowSpots] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [addOpen, setAddOpen] = useState(false)
+  const [aerial, setAerial] = useState(null)
+  const [etDraft, setEtDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = async () => {
+    if (!courseId) { setLoading(false); return }
+    const g = await cmdb.fetchGreens(courseId)
+    setGreens(g)
+    const start = `${date}T00:00:00`; const end = `${date}T23:59:59.999`
+    const rs = await cmdb.fetchDayRounds(courseId, g.map((x) => x.id), new Date(start).toISOString(), new Date(end).toISOString())
+    setRounds(rs)
+    const p = await cmdb.fetchWateringPlan(courseId, date)
+    setPlan(p); setEtDraft(p.day?.forecast_et != null ? String(p.day.forecast_et) : '0.10')
+    setView(rs.some((r) => r.slot === 'afternoon') ? 'afternoon' : 'morning')
+    setSelId((cur) => cur || g[0]?.id || null)
+    setLoading(false)
+  }
+  useEffect(() => { load() /* eslint-disable-next-line */ }, [courseId])
+
+  // Load the aerial image once (for cropping under the heatmap).
+  useEffect(() => {
+    let live = true
+    if (!activeImagery?.filePath) { setAerial(null); return }
+    cmdb.signedUrl(activeImagery.filePath).then((url) => {
+      if (!live || !url) return
+      const img = new Image(); img.crossOrigin = 'anonymous'
+      img.onload = () => { if (live) setAerial(img) }
+      img.src = url
+    })
+    return () => { live = false }
+  }, [activeImagery?.id])
+
+  // round pickers
+  const roundsByGreen = useMemo(() => {
+    const m = {}
+    for (const r of rounds) {
+      const b = (m[r.areaId] ||= { morning: null, afternoon: null, latest: null })
+      if (r.slot === 'morning' && !b.morning) b.morning = r
+      if (r.slot === 'afternoon' && !b.afternoon) b.afternoon = r
+      if (!b.latest || new Date(r.startedAt) > new Date(b.latest.startedAt)) b.latest = r
+    }
+    return m
+  }, [rounds])
+
+  const roundForView = (areaId) => {
+    const b = roundsByGreen[areaId]; if (!b) return null
+    return view === 'afternoon' ? b.afternoon : view === 'change' ? b.afternoon : b.morning
+  }
+  const greenAvg = (areaId) => { const r = roundForView(areaId); return r?.avg != null ? Number(r.avg) : null }
+
+  const setDepth = async (areaId, depth) => {
+    if (plan.day?.approved_at) return
+    setBusy(true)
+    try { await cmdb.setWateringDepth({ clubId: ctx.club.id, courseId, areaId, date, depthIn: depth }); const p = await cmdb.fetchWateringPlan(courseId, date); setPlan(p) } catch (e) { console.error(e) }
+    setBusy(false)
+  }
+  const saveEt = async () => {
+    const et = Number(etDraft)
+    if (!isFinite(et)) return
+    try { await cmdb.saveForecastEt({ clubId: ctx.club.id, courseId, date, et }); setPlan((p) => ({ ...p, day: { ...p.day, forecast_et: et } })) } catch (e) { console.error(e) }
+  }
+  const toggleApprove = async () => {
+    setBusy(true)
+    try { await cmdb.approveWateringDay({ clubId: ctx.club.id, courseId, date, approve: !plan.day?.approved_at }); const p = await cmdb.fetchWateringPlan(courseId, date); setPlan(p) } catch (e) { console.error(e) }
+    setBusy(false)
+  }
+
+  if (loading) return <p className="font-body text-[13px]" style={{ color: INK_2 }}>Loading…</p>
+  if (greens.length === 0) {
+    return (
+      <div>
+        {manage && <div className="flex justify-end mb-3"><button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 font-body text-[12px] font-bold px-3 py-2 rounded-xl text-white" style={{ backgroundColor: FOREST }}><Upload size={14} /> Add readings</button></div>}
+        {addOpen && <AddReadings ctx={ctx} courseId={courseId} greens={greens} onClose={() => setAddOpen(false)} onDone={() => { setAddOpen(false); setLoading(true); load() }} />}
+        <div className="rounded-2xl border border-dashed p-8 text-center" style={{ borderColor: HAIR }}><p className="font-body text-[13px]" style={{ color: INK_2 }}>Draw your greens on the <b>Map</b> tab first.</p></div>
+      </div>
+    )
+  }
+
+  const sel = greens.find((g) => g.id === selId) || greens[0]
+  const selRound = roundForView(sel.id)
+  const latest = roundsByGreen[sel.id]?.latest
+  const et = plan.day?.forecast_et != null ? Number(plan.day.forecast_et) : Number(etDraft) || 0
+  const ipp = ctx?.settings?.inches_per_point ?? 0.03
+  const maxDepth = ctx?.settings?.max_depth ?? 0.25
+  const suggested = latest?.avg != null ? suggestDepth({ et, aim: target.aim, latestAvg: Number(latest.avg), inchesPerPoint: ipp, maxDepth }) : null
+
+  // readings for the heat view
+  let heatReadings = selRound?.readings || []
+  let changeMissing = false
+  if (view === 'change') {
+    const b = roundsByGreen[sel.id]
+    if (b?.morning && b?.afternoon) heatReadings = changeReadings(b.afternoon.readings, b.morning.readings)
+    else { heatReadings = []; changeMissing = true }
+  }
+  const vals = heatReadings.map((r) => r.vwcPct).filter((v) => v != null)
+  const lo = view === 'change' ? -6 : target.lo
+  const hi = view === 'change' ? 0 : target.hi
+
+  // tonight's plan grouping
+  const greenDepths = greens.map((g) => ({ green: g.hole || greens.indexOf(g) + 1, depth: plan.depths[g.id]?.depth ?? undefined })).filter((x) => x.depth !== undefined)
+  const planGroups = planByDepth(greenDepths.map((x) => ({ green: x.green, depth: x.depth })))
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex gap-1.5">
+          {[['morning', 'Morning'], ['afternoon', 'Afternoon'], ['change', 'Change']].map(([k, label]) => (
+            <button key={k} onClick={() => setView(k)} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full" style={view === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{label}</button>
+          ))}
+        </div>
+        {manage && <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 font-body text-[12px] font-bold px-3 py-2 rounded-xl text-white" style={{ backgroundColor: FOREST }}><Upload size={14} /> Add readings</button>}
+      </div>
+      {addOpen && <AddReadings ctx={ctx} courseId={courseId} greens={greens} onClose={() => setAddOpen(false)} onDone={() => { setAddOpen(false); setLoading(true); load() }} />}
+
+      {/* Green buttons */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {greens.map((g, i) => {
+          const avg = greenAvg(g.id)
+          const st = statusOf(avg, target)
+          const on = g.id === sel.id
+          return (
+            <button key={g.id} onClick={() => setSelId(g.id)} className="rounded-xl px-2.5 py-1.5 text-center min-w-[52px]" style={on ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', border: `1px solid ${HAIR}` }}>
+              <div className="font-body text-[12px] font-bold" style={{ color: on ? 'white' : INK }}>{g.hole || i + 1}</div>
+              <div className="font-body text-[10px]" style={{ color: on ? 'rgba(255,255,255,0.85)' : st.c }}>{avg != null ? `${avg.toFixed(0)}%` : '—'}</div>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Main card */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="rounded-2xl border p-3" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
+          {changeMissing ? (
+            <div className="h-64 flex items-center justify-center text-center font-body text-[13px]" style={{ color: INK_3 }}>Need a morning and an afternoon round today.</div>
+          ) : vals.length === 0 ? (
+            <div className="h-64 flex items-center justify-center text-center font-body text-[13px]" style={{ color: INK_3 }}>No {view} readings on this green today.</div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <p className="font-body text-[11.5px] font-bold" style={{ color: INK_2 }}>Low {Math.min(...vals).toFixed(1)}% · High {Math.max(...vals).toFixed(1)}% · {vals.length} readings</p>
+                <button onClick={() => setShowSpots((v) => !v)} className="font-body text-[11px] font-bold px-2 py-1 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK_2 }}>{showSpots ? 'Hide spots' : 'Show spots'}</button>
+              </div>
+              <GreenHeat green={sel} readings={heatReadings} mode={view === 'change' ? 'change' : 'abs'} lo={lo} hi={hi} showSpots={showSpots} aerial={aerial} georef={activeImagery} />
+              <ColorBar mode={view === 'change' ? 'change' : 'abs'} lo={lo} hi={hi} />
+            </>
+          )}
+        </div>
+
+        <div className="rounded-2xl border p-4" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
+          <p className="font-body text-[12px]" style={{ color: INK_3 }}>Green {sel.hole || ''} {selRound ? `· ${formatDate(selRound.startedAt, 'list')}` : ''}</p>
+          {view === 'change' ? (
+            <>
+              <p className="font-display text-3xl font-bold mt-1" style={{ color: INK }}>{vals.length ? `${(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)} pts` : '—'}</p>
+              <span className="font-body text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ color: '#9A3412', backgroundColor: '#FDE8D6' }}>Dried {vals.length ? Math.abs(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '0'} points since morning</span>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 mt-1">
+                <p className="font-display text-3xl font-bold" style={{ color: FOREST }}>{selRound?.avg != null ? `${Number(selRound.avg).toFixed(1)}%` : '—'}</p>
+                {selRound?.avg != null && <span className="font-body text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ color: statusOf(Number(selRound.avg), target).c, backgroundColor: '#F1F5F1' }}>{statusOf(Number(selRound.avg), target).label}</span>}
+              </div>
+              {selRound && <DriestSpot round={selRound} />}
+            </>
+          )}
+
+          {/* Water tonight */}
+          <div className="mt-4 pt-3 border-t" style={{ borderColor: HAIR }}>
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: INK_3 }}>Water tonight</p>
+            <div className="flex flex-wrap gap-1.5">
+              {[['Skip', null], ['.05', 0.05], ['.10', 0.10], ['.15', 0.15], ['.20', 0.20]].map(([label, d]) => {
+                const chosen = plan.depths[sel.id]?.depth
+                const isChosen = (d == null && chosen === null && sel.id in plan.depths) || (d != null && chosen === d)
+                const isSuggest = d === suggested
+                return (
+                  <button key={label} onClick={() => setDepth(sel.id, d)} disabled={busy || !!plan.day?.approved_at}
+                    className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg disabled:opacity-60"
+                    style={isChosen ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: isSuggest ? `2px dashed ${GOLD}` : `1px solid ${HAIR}` }}>{label}</button>
+                )
+              })}
+            </div>
+            <p className="font-body text-[11px] mt-1.5" style={{ color: INK_3 }}>
+              {suggested != null ? `Suggested ${suggested.toFixed(2)} in — ` : ''}uses the latest reading{latest ? ` (${formatDate(latest.startedAt, 'list')} · ${Number(latest.avg).toFixed(1)}%)` : ''}.
+            </p>
+            <div className="flex items-center gap-2 mt-2">
+              <span className="font-body text-[11px]" style={{ color: INK_2 }}>Forecast ET</span>
+              <input value={etDraft} onChange={(e) => setEtDraft(e.target.value)} onBlur={saveEt} disabled={!manage} className="w-16 font-body text-[12px] px-2 py-1 rounded-lg text-right" style={{ border: `1px solid ${HAIR}` }} />
+              <span className="font-body text-[11px]" style={{ color: INK_3 }}>in</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tonight's plan · all greens */}
+      <div className="rounded-2xl border p-4 mt-4" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
+        <div className="flex items-center justify-between mb-2">
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>Tonight's plan · all greens</p>
+          {plan.day?.approved_at ? (
+            <span className="font-body text-[12px] font-bold" style={{ color: GREEN_OK }}>Approved ✓ {canApprove(user?.role) && <button onClick={toggleApprove} className="ml-2 underline" style={{ color: INK_3 }}>undo</button>}</span>
+          ) : canApprove(user?.role) ? (
+            <button onClick={toggleApprove} disabled={busy} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg text-white" style={{ backgroundColor: FOREST }}>Approve for Lynx</button>
+          ) : null}
+        </div>
+        {planGroups.length === 0 ? <p className="font-body text-[12px]" style={{ color: INK_3 }}>No depths chosen yet.</p> : (
+          <div className="space-y-1">
+            {planGroups.map((g, i) => <p key={i} className="font-body text-[13px]" style={{ color: INK }}><b>{g.depth == null ? 'Skip' : `${g.depth.toFixed(2)} in`}</b> · greens {g.greens.join(', ')}</p>)}
+          </div>
+        )}
+        <p className="font-body text-[10.5px] mt-2" style={{ color: INK_3 }}>Enter this in Lynx Drive — there's no automatic connection to Toro Lynx.</p>
+      </div>
+
+      {/* More */}
+      {selRound && <MoreTable round={selRound} />}
+    </div>
+  )
+}
+
+function DriestSpot({ round }) {
+  let lo = null
+  for (const r of round.readings) if (r.vwcPct != null && (!lo || r.vwcPct < lo.vwcPct)) lo = r
+  if (!lo) return null
+  return <p className="font-body text-[12px] mt-1" style={{ color: INK_2 }}>Driest spot <b>{Number(lo.vwcPct).toFixed(1)}%</b>{lo.spot ? ` · spot ${lo.spot}` : ''}</p>
+}
+
+function MoreTable({ round }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="rounded-2xl border mt-4" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
+      <button onClick={() => setOpen((v) => !v)} className="w-full text-left px-4 py-2.5 font-body text-[12px] font-bold" style={{ color: FOREST }}>More · every reading on this green {open ? '▲' : '▾'}</button>
+      {open && (
+        <div className="overflow-x-auto px-4 pb-3">
+          <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+            <thead><tr>{['Spot', 'Moisture', 'Soil °F', 'Salinity', 'Time'].map((h, i) => <th key={h} className={`font-body text-[10px] font-bold uppercase px-2 py-1.5 ${i === 0 ? 'text-left' : 'text-right'}`} style={{ color: INK_3 }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {round.readings.map((r) => (
+                <tr key={r.id} className="border-t" style={{ borderColor: HAIR }}>
+                  <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{r.spot || '—'}</td>
+                  <td className="px-2 py-1.5 font-body text-[12px] text-right tabular-nums" style={{ color: INK }}>{Number(r.vwcPct).toFixed(1)}%</td>
+                  <td className="px-2 py-1.5 font-body text-[12px] text-right tabular-nums" style={{ color: INK_2 }}>{r.soilTempF != null ? Number(r.soilTempF).toFixed(1) : '—'}</td>
+                  <td className="px-2 py-1.5 font-body text-[12px] text-right tabular-nums" style={{ color: INK_2 }}>{r.salinityDsm != null ? Number(r.salinityDsm).toFixed(3) : '—'}</td>
+                  <td className="px-2 py-1.5 font-body text-[12px] text-right tabular-nums" style={{ color: INK_3 }}>{r.takenAt ? formatDate(r.takenAt, 'list') : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ColorBar({ mode, lo, hi }) {
+  const stops = mode === 'change' ? changeStops() : moistureStops(lo, hi)
+  const min = stops[0].v, max = stops[stops.length - 1].v
+  const grad = `linear-gradient(to right, ${stops.map((s) => `${s.color} ${((s.v - min) / (max - min) * 100).toFixed(0)}%`).join(', ')})`
+  return (
+    <div className="mt-2">
+      <div className="h-2.5 rounded-full" style={{ background: grad }} />
+      <div className="flex justify-between font-body text-[10px] mt-0.5" style={{ color: INK_3 }}>
+        {mode === 'change' ? <><span>Dried</span><span>No change</span></> : <><span>Dry</span><span>{lo}</span><span>{hi}</span><span>Wet</span></>}
+      </div>
+    </div>
+  )
+}
+
+// ── The heatmap canvas ─────────────────────────────────────────────────────
+function GreenHeat({ green, readings, mode, lo, hi, showSpots, aerial, georef }) {
+  const canvasRef = useRef(null)
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !green?.ring?.length) return
+    const ring = green.ring
+    const lons = ring.map((p) => p[0]), lats = ring.map((p) => p[1])
+    const minLon = Math.min(...lons), maxLon = Math.max(...lons), minLat = Math.min(...lats), maxLat = Math.max(...lats)
+    const pad = 0.08
+    const padLon = (maxLon - minLon) * pad, padLat = (maxLat - minLat) * pad
+    const bbox = { minLon: minLon - padLon, maxLon: maxLon + padLon, minLat: minLat - padLat, maxLat: maxLat + padLat }
+
+    const haveGeoref = georef && georef.ulX != null
+    // canvas size from the green's aspect
+    const W = 540
+    let aspect = (bbox.maxLat - bbox.minLat) / ((bbox.maxLon - bbox.minLon) * Math.cos((minLat + maxLat) / 2 * Math.PI / 180))
+    if (!isFinite(aspect) || aspect <= 0) aspect = 0.7
+    const H = Math.max(220, Math.min(560, Math.round(W * aspect)))
+    canvas.width = W; canvas.height = H
+    const ctx = canvas.getContext('2d')
+    ctx.clearRect(0, 0, W, H)
+
+    // crop-pixel transform from the aerial if we have georef, else equirectangular
+    let toC
+    if (haveGeoref) {
+      const corners = ring.concat([[bbox.minLon, bbox.minLat], [bbox.maxLon, bbox.maxLat]])
+      const pix = [[bbox.minLon, bbox.maxLat], [bbox.maxLon, bbox.minLat]].map(([lo2, la2]) => lonLatToPixel(lo2, la2, georef))
+      const col0 = Math.min(pix[0].col, pix[1].col), col1 = Math.max(pix[0].col, pix[1].col)
+      const row0 = Math.min(pix[0].row, pix[1].row), row1 = Math.max(pix[0].row, pix[1].row)
+      const cw = col1 - col0, ch = row1 - row0
+      const sx = cw / W, sy = ch / H
+      toC = (lon, lat) => { const p = lonLatToPixel(lon, lat, georef); return [(p.col - col0) / sx, (p.row - row0) / sy] }
+      if (aerial) { try { ctx.drawImage(aerial, col0, row0, cw, ch, 0, 0, W, H) } catch { /* taint-safe */ } }
+      else { ctx.fillStyle = '#1d3326'; ctx.fillRect(0, 0, W, H) }
+    } else {
+      toC = (lon, lat) => [(lon - bbox.minLon) / (bbox.maxLon - bbox.minLon) * W, (bbox.maxLat - lat) / (bbox.maxLat - bbox.minLat) * H]
+      ctx.fillStyle = '#1d3326'; ctx.fillRect(0, 0, W, H)
+    }
+
+    // polygon path (canvas coords) for clipping + outline
+    const path = new Path2D()
+    ring.forEach((p, i) => { const [x, y] = toC(p[0], p[1]); if (i === 0) path.moveTo(x, y); else path.lineTo(x, y) })
+    path.closePath()
+
+    // heatmap, clipped to the green
+    const stops = mode === 'change' ? changeStops() : moistureStops(lo, hi)
+    ctx.save(); ctx.clip(path); ctx.globalAlpha = 0.62
+    const stepLon = (bbox.maxLon - bbox.minLon) / 70, stepLat = (bbox.maxLat - bbox.minLat) / 70
+    for (let la = bbox.minLat; la <= bbox.maxLat; la += stepLat) {
+      for (let lo2 = bbox.minLon; lo2 <= bbox.maxLon; lo2 += stepLon) {
+        const v = idwValue(lo2, la, readings)
+        if (v == null) continue
+        const col = colorAt(v, stops); if (!col) continue
+        const [x, y] = toC(lo2, la)
+        ctx.fillStyle = col
+        ctx.fillRect(Math.floor(x) - 1, Math.floor(y) - 1, (W / 70) + 2, (H / 70) + 2)
+      }
+    }
+    ctx.restore()
+
+    // outline
+    ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.stroke(path)
+
+    // reading dots
+    let loR = null, hiR = null
+    for (const r of readings) { if (r.vwcPct == null) continue; if (!loR || r.vwcPct < loR.vwcPct) loR = r; if (!hiR || r.vwcPct > hiR.vwcPct) hiR = r }
+    for (const r of readings) {
+      if (r.lat == null) continue
+      const [x, y] = toC(r.lon, r.lat)
+      ctx.beginPath(); ctx.arc(x, y, 3.5, 0, 7); ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = 1; ctx.fill(); ctx.stroke()
+      if (showSpots && r.spot) { ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif'; ctx.fillText(String(r.spot), x + 5, y - 5) }
+    }
+    // low/high pins
+    const pin = (r, color, label) => {
+      if (!r || r.lat == null) return
+      const [x, y] = toC(r.lon, r.lat)
+      ctx.beginPath(); ctx.arc(x, y, 6, 0, 7); ctx.fillStyle = color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.fill(); ctx.stroke()
+      ctx.fillStyle = color; ctx.font = 'bold 10px sans-serif'; ctx.fillText(label, x + 8, y + 3)
+    }
+    if (mode === 'change') { pin(loR, '#9A3412', 'Most dried'); pin(hiR, '#F5A623', 'Least dried') }
+    else { pin(loR, RED, 'Low'); pin(hiR, BLUE, 'High') }
+  }, [green, readings, mode, lo, hi, showSpots, aerial, georef])
+
+  return <canvas ref={canvasRef} style={{ width: '100%', height: 'auto', borderRadius: 12, display: 'block', backgroundColor: '#1d3326' }} />
+}
+
+// ── Readings import (moved here; used by Greens today) ─────────────────────────
+const READING_FIELDS = [['time', 'Time', true], ['lat', 'Latitude', true], ['lon', 'Longitude', true], ['moisture', 'Moisture', true], ['temperature', 'Soil temp', false], ['salinity', 'Salinity', false], ['id', 'Spot / reading id', false]]
+const Mini = ({ label, v, warn }) => (
+  <div className="rounded-xl border p-2.5" style={{ borderColor: HAIR }}><p className="font-body text-[9.5px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>{label}</p><p className="font-display text-[15px] font-bold" style={{ color: warn ? '#B7791F' : FOREST }}>{v}</p></div>
+)
+
+export function AddReadings({ ctx, courseId, greens, onClose, onDone }) {
+  const [stage, setStage] = useState('file')
+  const [fileName, setFileName] = useState('')
+  const [headers, setHeaders] = useState([])
+  const [rows, setRows] = useState([])
+  const [mapping, setMapping] = useState({})
+  const [assign, setAssign] = useState({})
+  const [keys, setKeys] = useState(new Set())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => { cmdb.fetchMoistureMapping().then((m) => m && setMapping((cur) => ({ ...m, ...cur }))); cmdb.fetchReadingKeys().then(setKeys) }, [])
+
+  async function onFile(file) {
+    setError('')
+    try {
+      const XLSX = await import('xlsx')
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+      const arr = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' })
+      const hr = arr.findIndex((r) => r.some((c) => String(c).trim()))
+      if (hr < 0) { setError('That file looks empty.'); return }
+      const hs = arr[hr].map((h) => String(h).trim())
+      const objs = arr.slice(hr + 1).filter((r) => r.some((c) => String(c).trim())).map((r) => Object.fromEntries(hs.map((h, i) => [h, r[i] ?? ''])))
+      setHeaders(hs); setRows(objs); setFileName(file.name)
+      setMapping((m) => ({ ...guessReadingMapping(hs), ...m })); setStage('map')
+    } catch (e) { setError('Could not read that file.'); console.error(e) }
+  }
+
+  const plan = useMemo(() => planReadingsImport({ rows, mapping, greens, existingKeys: keys }), [rows, mapping, greens, keys])
+
+  async function doImport() {
+    setBusy(true); setError('')
+    try {
+      await cmdb.saveMoistureMapping(mapping)
+      const assigned = plan.unplaced.map((u, i) => ({ u, areaId: assign[i] })).filter((x) => x.areaId).map((x) => ({ ...x.u, areaId: x.areaId }))
+      const placed = [...plan.placed, ...assigned]
+      const res = await cmdb.importReadings({ clubId: ctx.club.id, courseId, placed })
+      onDone(`Imported ${res.readingsInserted} readings in ${res.roundsInserted} round(s).`)
+    } catch (e) { setError('Import failed — ' + (e.message || '')); setBusy(false) }
+  }
+
+  const colSel = (field, label, req) => (
+    <label className="flex items-center justify-between gap-3 py-1.5"><span className="font-body text-[12px]" style={{ color: INK_2 }}>{label}{req ? ' *' : ''}</span>
+      <select value={mapping[field] || ''} onChange={(e) => setMapping((m) => ({ ...m, [field]: e.target.value }))} className="font-body text-[12px] px-2 py-1.5 rounded-lg bg-white" style={{ border: `1px solid ${HAIR}`, minWidth: 160 }}>
+        <option value="">—</option>{headers.map((h) => <option key={h} value={h}>{h}</option>)}
+      </select></label>
+  )
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-start justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(10,20,14,0.5)' }} onClick={onClose}>
+      <div className="relative w-full max-w-2xl my-8 rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3"><h3 className="font-display text-lg font-bold" style={{ color: FOREST }}>Add readings</h3><button onClick={onClose} className="font-body text-xl px-2" style={{ color: INK_3 }}>×</button></div>
+        {error && <div className="mb-3 rounded-xl px-3 py-2 font-body text-[12px]" style={{ backgroundColor: '#F6E5E2', color: RED }}>{error}</div>}
+        {stage === 'file' && (
+          <label className="block rounded-2xl border-2 border-dashed p-8 text-center cursor-pointer" style={{ borderColor: HAIR, color: FERN }}><Upload size={22} className="inline" /><p className="font-body text-[13px] font-bold mt-1">Choose a DEACON CSV or Excel file</p><input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} /></label>
+        )}
+        {stage === 'map' && (
+          <div>
+            <p className="font-body text-[12px] mb-2" style={{ color: INK_2 }}><b>{fileName}</b> · {rows.length} rows. Map the columns:</p>
+            <div className="rounded-xl border p-3" style={{ borderColor: HAIR }}>{READING_FIELDS.map(([f, label, req]) => colSel(f, label, req))}</div>
+            <div className="flex justify-between mt-4"><button onClick={() => setStage('file')} className="font-body text-[12px] font-bold px-3 py-2 rounded-xl" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>Back</button><button onClick={() => setStage('review')} disabled={!mapping.time || !mapping.lat || !mapping.lon || !mapping.moisture} className="font-body text-[12px] font-bold px-4 py-2 rounded-xl text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Preview →</button></div>
+          </div>
+        )}
+        {stage === 'review' && (
+          <div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3"><Mini label="Rows" v={plan.total} /><Mini label="Placed" v={plan.placedCount} /><Mini label="Unplaced" v={plan.unplacedCount} warn={plan.unplacedCount > 0} /><Mini label="Duplicates" v={plan.duplicates} /></div>
+            <p className="font-body text-[12px] mb-2" style={{ color: INK_2 }}>{plan.rounds.length} round(s): {plan.rounds.map((r) => `${(greens.find((g) => g.id === r.areaId)?.name) || 'green'} ${r.slot} avg ${r.avg}%`).join(' · ') || '—'}</p>
+            {plan.unplacedCount > 0 && (
+              <div className="rounded-xl border p-3 mb-3 max-h-56 overflow-y-auto" style={{ borderColor: HAIR }}>
+                <p className="font-body text-[11px] font-bold uppercase mb-2" style={{ color: '#B7791F' }}>Unplaced — assign or ignore</p>
+                {plan.unplaced.map((u, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 py-0.5"><span className="font-body text-[12px]" style={{ color: INK }}>{u.spot ? `spot ${u.spot}` : `${u.lat?.toFixed?.(5)}, ${u.lon?.toFixed?.(5)}`} <span style={{ color: INK_3 }}>({u.reason})</span></span>
+                    <select value={assign[i] || ''} onChange={(e) => setAssign((a) => ({ ...a, [i]: e.target.value }))} className="font-body text-[12px] px-2 py-1 rounded-lg bg-white" style={{ border: `1px solid ${HAIR}` }}><option value="">Ignore</option>{greens.map((g) => <option key={g.id} value={g.id}>{g.name || `Green ${g.hole || ''}`}</option>)}</select></div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-between"><button onClick={() => setStage('map')} className="font-body text-[12px] font-bold px-3 py-2 rounded-xl" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>Back</button><button onClick={doImport} disabled={busy || (plan.placedCount === 0 && Object.values(assign).filter(Boolean).length === 0)} className="font-body text-[12px] font-bold px-4 py-2 rounded-xl text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>{busy ? 'Importing…' : 'Import'}</button></div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

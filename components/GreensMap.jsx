@@ -12,11 +12,11 @@
 //  No React hook is placed after an early return.
 // ============================================================================
 import 'leaflet/dist/leaflet.css'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Upload, Layers } from 'lucide-react'
 import { FOREST, FERN, GOLD, HAIR, INK, INK_2, INK_3, PAPER } from '@/lib/theme'
 import * as cmdb from '@/lib/coursemap/db'
-import { planReadingsImport, guessReadingMapping } from '@/lib/coursemap/import'
+import GreensToday from '@/components/GreensToday'
 import { parseWorldFile, parseNearmapName, upperLeftFromCenter, worldFileCorners, geodesicAreaSqft, perimeterFt } from '@/lib/coursemap/geo'
 import { formatDate, formatNumber } from '@/lib/format'
 
@@ -375,7 +375,7 @@ export default function GreensMap({ user }) {
         </div>
       )}
 
-      {tab === 'greens' && <GreensToday ctx={ctx} courseId={courseId} manage={manage} />}
+      {tab === 'greens' && <GreensToday ctx={ctx} courseId={courseId} manage={manage} user={user} activeImagery={imagery.find((i) => i.id === selId) || null} />}
       {tab === 'targets' && <Placeholder title="Targets" note="Seasonal moisture ranges, judged per round against the target active that day." phase="E" />}
     </div>
   )
@@ -570,186 +570,6 @@ function CourseTotals({ areas }) {
   )
 }
 
-// ── Greens today (Phase C: import + a rounds summary; full page is Phase D) ─────
-function GreensToday({ ctx, courseId, manage }) {
-  const [greens, setGreens] = useState([])
-  const [rounds, setRounds] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [addOpen, setAddOpen] = useState(false)
-  const [notice, setNotice] = useState('')
-
-  const load = async () => {
-    if (!courseId) { setLoading(false); return }
-    const g = await cmdb.fetchGreens(courseId)
-    setGreens(g)
-    setRounds(await cmdb.fetchRounds(courseId, g.map((x) => x.id)))
-    setLoading(false)
-  }
-  useEffect(() => { load() /* eslint-disable-next-line */ }, [courseId])
-
-  const greenName = (areaId) => { const g = greens.find((x) => x.id === areaId); return g ? (g.name || `Green${g.hole ? ' ' + g.hole : ''}`) : 'Green' }
-  // latest round per green
-  const latestByGreen = {}
-  for (const r of rounds) if (!latestByGreen[r.areaId]) latestByGreen[r.areaId] = r
-
-  if (loading) return <p className="font-body text-[13px]" style={{ color: INK_2 }}>Loading…</p>
-
-  return (
-    <div>
-      {notice && <div className="mb-3 rounded-xl px-3 py-2 font-body text-[12px] flex items-center justify-between" style={{ backgroundColor: '#E7F3EC', color: '#1E7A46' }}><span>{notice}</span><button onClick={() => setNotice('')} className="font-bold px-2">×</button></div>}
-      <div className="flex items-center justify-between mb-3">
-        <p className="font-body text-[12.5px]" style={{ color: INK_2 }}>{rounds.length} round{rounds.length === 1 ? '' : 's'} · {greens.length} green{greens.length === 1 ? '' : 's'} drawn</p>
-        {manage && <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 font-body text-[12px] font-bold px-3 py-2 rounded-xl text-white" style={{ backgroundColor: FOREST }}><Upload size={14} /> Add readings</button>}
-      </div>
-
-      {greens.length === 0 && <div className="rounded-2xl border border-dashed p-8 text-center" style={{ borderColor: HAIR }}><p className="font-body text-[13px]" style={{ color: INK_2 }}>Draw your greens on the <b>Map</b> tab first, then import readings so each one lands on the right green.</p></div>}
-
-      {addOpen && <AddReadings ctx={ctx} courseId={courseId} greens={greens} onClose={() => setAddOpen(false)} onDone={(msg) => { setAddOpen(false); setNotice(msg); setLoading(true); load() }} />}
-
-      {greens.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {greens.map((g) => {
-            const r = latestByGreen[g.id]
-            return (
-              <div key={g.id} className="rounded-2xl border p-3.5" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
-                <p className="font-body text-[13px] font-bold" style={{ color: INK }}>{g.name || `Green${g.hole ? ' ' + g.hole : ''}`}</p>
-                {r ? (
-                  <>
-                    <p className="font-display text-2xl font-bold mt-1" style={{ color: FOREST }}>{Number(r.avg).toFixed(1)}%<span className="font-body text-[11px] font-normal" style={{ color: INK_3 }}> avg</span></p>
-                    <p className="font-body text-[11.5px]" style={{ color: INK_2 }}>low {Number(r.min).toFixed(1)}% · high {Number(r.max).toFixed(1)}% · {r.n} readings</p>
-                    <p className="font-body text-[11px] mt-0.5" style={{ color: INK_3 }}>{formatDate(r.startedAt, 'list')}</p>
-                  </>
-                ) : <p className="font-body text-[12px] mt-1" style={{ color: INK_3 }}>No readings yet</p>}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-const READING_FIELDS = [['time', 'Time', true], ['lat', 'Latitude', true], ['lon', 'Longitude', true], ['moisture', 'Moisture', true], ['temperature', 'Soil temp', false], ['salinity', 'Salinity', false], ['id', 'Spot / reading id', false]]
-
-function AddReadings({ ctx, courseId, greens, onClose, onDone }) {
-  const [stage, setStage] = useState('file')
-  const [fileName, setFileName] = useState('')
-  const [headers, setHeaders] = useState([])
-  const [rows, setRows] = useState([])
-  const [mapping, setMapping] = useState({})
-  const [assign, setAssign] = useState({}) // unplaced index -> areaId | '' (ignore)
-  const [keys, setKeys] = useState(new Set())
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-
-  useEffect(() => { cmdb.fetchMoistureMapping().then((m) => m && setMapping((cur) => ({ ...m, ...cur }))); cmdb.fetchReadingKeys().then(setKeys) }, [])
-
-  async function onFile(file) {
-    setError('')
-    try {
-      const XLSX = await import('xlsx')
-      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
-      const arr = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' })
-      const hr = arr.findIndex((r) => r.some((c) => String(c).trim()))
-      if (hr < 0) { setError('That file looks empty.'); return }
-      const hs = arr[hr].map((h) => String(h).trim())
-      const objs = arr.slice(hr + 1).filter((r) => r.some((c) => String(c).trim())).map((r) => Object.fromEntries(hs.map((h, i) => [h, r[i] ?? ''])))
-      setHeaders(hs); setRows(objs); setFileName(file.name)
-      setMapping((m) => ({ ...guessReadingMapping(hs), ...m })); setStage('map')
-    } catch (e) { setError('Could not read that file.'); console.error(e) }
-  }
-
-  const plan = useMemo(() => planReadingsImport({ rows, mapping, greens, existingKeys: keys }), [rows, mapping, greens, keys])
-
-  async function doImport() {
-    setBusy(true); setError('')
-    try {
-      await cmdb.saveMoistureMapping(mapping)
-      const assignedUnplaced = plan.unplaced.map((u, i) => ({ u, areaId: assign[i] })).filter((x) => x.areaId).map((x) => ({ ...x.u, areaId: x.areaId, dedupeKey: `assigned-${x.u.lat}-${x.u.lon}` }))
-      const placed = [...plan.placed, ...assignedUnplaced]
-      const res = await cmdb.importReadings({ clubId: ctx.club.id, courseId, placed })
-      onDone(`Imported ${res.readingsInserted} readings in ${res.roundsInserted} round(s).`)
-    } catch (e) { setError('Import failed — ' + (e.message || '')); setBusy(false) }
-  }
-
-  const colSel = (field, label, req) => (
-    <label className="flex items-center justify-between gap-3 py-1.5">
-      <span className="font-body text-[12px]" style={{ color: INK_2 }}>{label}{req ? ' *' : ''}</span>
-      <select value={mapping[field] || ''} onChange={(e) => setMapping((m) => ({ ...m, [field]: e.target.value }))} className="font-body text-[12px] px-2 py-1.5 rounded-lg bg-white" style={{ border: `1px solid ${HAIR}`, minWidth: 160 }}>
-        <option value="">—</option>
-        {headers.map((h) => <option key={h} value={h}>{h}</option>)}
-      </select>
-    </label>
-  )
-
-  return (
-    <div className="fixed inset-0 z-[80] flex items-start justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(10,20,14,0.5)' }} onClick={onClose}>
-      <div className="relative w-full max-w-2xl my-8 rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-display text-lg font-bold" style={{ color: FOREST }}>Add readings</h3>
-          <button onClick={onClose} className="font-body text-xl px-2" style={{ color: INK_3 }}>×</button>
-        </div>
-        {error && <div className="mb-3 rounded-xl px-3 py-2 font-body text-[12px]" style={{ backgroundColor: '#F6E5E2', color: '#B23A2E' }}>{error}</div>}
-
-        {stage === 'file' && (
-          <label className="block rounded-2xl border-2 border-dashed p-8 text-center cursor-pointer" style={{ borderColor: HAIR, color: FERN }}>
-            <Upload size={22} className="inline" />
-            <p className="font-body text-[13px] font-bold mt-1">Choose a DEACON CSV or Excel file</p>
-            <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
-          </label>
-        )}
-
-        {stage === 'map' && (
-          <div>
-            <p className="font-body text-[12px] mb-2" style={{ color: INK_2 }}><b>{fileName}</b> · {rows.length} rows. Map the columns:</p>
-            <div className="rounded-xl border p-3" style={{ borderColor: HAIR }}>{READING_FIELDS.map(([f, label, req]) => colSel(f, label, req))}</div>
-            <div className="flex justify-between mt-4">
-              <button onClick={() => setStage('file')} className="font-body text-[12px] font-bold px-3 py-2 rounded-xl" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>Back</button>
-              <button onClick={() => setStage('review')} disabled={!mapping.time || !mapping.lat || !mapping.lon || !mapping.moisture} className="font-body text-[12px] font-bold px-4 py-2 rounded-xl text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Preview →</button>
-            </div>
-          </div>
-        )}
-
-        {stage === 'review' && (
-          <div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-              <Mini label="Rows" v={plan.total} />
-              <Mini label="Placed" v={plan.placedCount} />
-              <Mini label="Unplaced" v={plan.unplacedCount} warn={plan.unplacedCount > 0} />
-              <Mini label="Duplicates" v={plan.duplicates} />
-            </div>
-            <p className="font-body text-[12px] mb-2" style={{ color: INK_2 }}>{plan.rounds.length} round(s): {plan.rounds.map((r) => `${(greens.find((g) => g.id === r.areaId)?.name) || 'green'} ${r.slot} avg ${r.avg}%`).join(' · ') || '—'}</p>
-            {plan.unplacedCount > 0 && (
-              <div className="rounded-xl border p-3 mb-3 max-h-56 overflow-y-auto" style={{ borderColor: HAIR }}>
-                <p className="font-body text-[11px] font-bold uppercase mb-2" style={{ color: '#B7791F' }}>Unplaced — assign to a green or leave to ignore</p>
-                {plan.unplaced.map((u, i) => (
-                  <div key={i} className="flex items-center justify-between gap-2 py-0.5">
-                    <span className="font-body text-[12px]" style={{ color: INK }}>{u.spot ? `spot ${u.spot}` : `${u.lat?.toFixed?.(5)}, ${u.lon?.toFixed?.(5)}`} <span style={{ color: INK_3 }}>({u.reason})</span></span>
-                    <select value={assign[i] || ''} onChange={(e) => setAssign((a) => ({ ...a, [i]: e.target.value }))} className="font-body text-[12px] px-2 py-1 rounded-lg bg-white" style={{ border: `1px solid ${HAIR}` }}>
-                      <option value="">Ignore</option>
-                      {greens.map((g) => <option key={g.id} value={g.id}>{g.name || `Green ${g.hole || ''}`}</option>)}
-                    </select>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="flex justify-between">
-              <button onClick={() => setStage('map')} className="font-body text-[12px] font-bold px-3 py-2 rounded-xl" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>Back</button>
-              <button onClick={doImport} disabled={busy || (plan.placedCount === 0 && Object.values(assign).filter(Boolean).length === 0)} className="font-body text-[12px] font-bold px-4 py-2 rounded-xl text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>{busy ? 'Importing…' : 'Import'}</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-const Mini = ({ label, v, warn }) => (
-  <div className="rounded-xl border p-2.5" style={{ borderColor: HAIR }}>
-    <p className="font-body text-[9.5px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>{label}</p>
-    <p className="font-display text-[15px] font-bold" style={{ color: warn ? '#B7791F' : FOREST }}>{v}</p>
-  </div>
-)
 
 function Placeholder({ title, note, phase }) {
   return (
