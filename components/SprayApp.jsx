@@ -100,6 +100,7 @@ import StimpCam from '@/components/StimpCam'
 import GpsCoverage from '@/components/GpsCoverage'
 import ProductPerformance from '@/components/ProductPerformance'
 import BudgetApp from '@/components/BudgetApp'
+import GreensMap from '@/components/GreensMap'
 import { libraryComplianceGaps } from '@/lib/compliance'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
@@ -317,6 +318,7 @@ const NAV_MANAGER = [
   ] },
   { title: 'Course & Crew', items: [
     { id: 'irrmap', label: 'Irrigation Map', m: 'map', r: 'map' },
+    { id: 'coursemap', label: 'Course Map', m: 'greensmap', r: null },
     { id: 'parts', label: 'Parts', m: 'map', r: 'parts' },
     { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
     { id: 'training', label: 'Training', m: 'spray', r: 'training' },
@@ -469,6 +471,7 @@ export default function SprayApp({ user }) {
 
           <div className="flex-1 min-w-0">
             {sel.m === 'budget' ? <BudgetApp user={user} />
+              : sel.m === 'greensmap' ? <GreensMap user={user} />
               : sel.m === 'spray' ? <SprayOpsModule user={user} nav={nav} hideChrome homeMode={!!sel.home} course={sel.follow ? course : ''} />
               : sel.m === 'turf' ? <TurfPerformanceModule user={user} nav={nav} hideChrome course={sel.follow ? course : ''} />
               : sel.m === 'playbook' ? <PlaybookModule user={user} manage={manage} hideChrome />
