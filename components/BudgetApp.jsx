@@ -16,11 +16,13 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Download, Upload, Lock } from 'lucide-react'
 import { FOREST, FERN, GOLD, PAPER, PAPER_2, HAIR, INK, INK_2, INK_3, RED, AMBER, PAGE } from '@/lib/theme'
 import * as bdb from '@/lib/budget/db'
+import { planImport, parseMoneyToCents } from '@/lib/budget/import'
 import {
   computeLine, aggregate, latestPostedMonth, fiscalMonthIndex, yearProgressFraction,
   monthLabel, FY_MONTHS, formatMoneyCents, formatSignedCents, formatPct,
   GROUP_LABELS, OPERATING_GROUP_ORDER,
 } from '@/lib/budget/calc'
+import { formatDate } from '@/lib/format'
 
 const GREEN = '#1E7A46'
 const STATUS = {
@@ -48,6 +50,9 @@ export default function BudgetApp({ user }) {
   const [selLineId, setSelLineId] = useState(null)
   const [sort, setSort] = useState({ key: 'sort', dir: 1 })
   const [notice, setNotice] = useState('')
+  const [batches, setBatches] = useState([])
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   // Load the list of years once.
   useEffect(() => {
@@ -69,9 +74,9 @@ export default function BudgetApp({ user }) {
     setLoading(true); setErr('')
     ;(async () => {
       try {
-        const d = await bdb.fetchBudgetData(yearId)
+        const [d, b] = await Promise.all([bdb.fetchBudgetData(yearId), bdb.fetchImportBatches(20)])
         if (!live) return
-        setData(d)
+        setData(d); setBatches(b)
       } catch (e) {
         if (live) setErr('Could not load the budget — check your connection.')
         console.error(e)
@@ -80,7 +85,7 @@ export default function BudgetApp({ user }) {
       }
     })()
     return () => { live = false }
-  }, [yearId])
+  }, [yearId, refreshKey])
 
   const year = years.find((y) => y.id === yearId) || null
 
@@ -145,9 +150,17 @@ export default function BudgetApp({ user }) {
         year={year} years={years} onYear={(id) => { setYearId(id); setSelLineId(null) }}
         through={through} onThrough={(m) => { setThrough(m); setTouchedThrough(true) }}
         isAdmin={isAdmin} onExport={exportCsv}
-        onUpload={() => setNotice('Jonas file upload arrives in Phase 2.')}
-        data={data}
+        onUpload={() => setUploadOpen(true)}
+        batches={batches}
       />
+
+      {uploadOpen && (
+        <UploadModal
+          year={year} lines={data.lines}
+          onClose={() => setUploadOpen(false)}
+          onDone={(msg) => { setUploadOpen(false); setNotice(msg); setRefreshKey((k) => k + 1) }}
+        />
+      )}
 
       {notice && (
         <div className="mb-3 rounded-xl px-3 py-2 font-body text-[12px] flex items-center justify-between" style={{ backgroundColor: '#FBF2E0', color: AMBER }}>
@@ -186,8 +199,9 @@ export default function BudgetApp({ user }) {
 }
 
 // ── Header ─────────────────────────────────────────────────────────────────
-function Header({ year, years, onYear, through, onThrough, isAdmin, onExport, onUpload, data }) {
-  const anyActual = Object.values(data.actualsByLine || {}).some((a) => a.length)
+function Header({ year, years, onYear, through, onThrough, isAdmin, onExport, onUpload, batches }) {
+  const jonas = (batches || []).find((b) => b.source === 'jonas')
+  const ottimate = (batches || []).find((b) => b.source === 'ottimate')
   return (
     <div className="mb-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -214,7 +228,10 @@ function Header({ year, years, onYear, through, onThrough, isAdmin, onExport, on
         </div>
       </div>
       <div className="mt-2 font-body text-[11px]" style={{ color: INK_3 }}>
-        {anyActual ? 'Jonas posted — actuals loaded' : 'No actuals uploaded yet — showing the approved plan.'}
+        {jonas
+          ? `Jonas posted thru ${jonas.periodThrough ? formatDate(jonas.periodThrough, 'header') : '—'}`
+          : 'No Jonas file uploaded yet — showing the approved plan.'}
+        {ottimate && ` · Ottimate synced ${formatDate(ottimate.uploadedAt, 'list')}`}
       </div>
     </div>
   )
@@ -688,6 +705,211 @@ const Centered = ({ children }) => (
 )
 const Empty = ({ children }) => (
   <div className="rounded-2xl border p-8 text-center font-body text-[13px]" style={{ borderColor: HAIR, color: INK_3, backgroundColor: 'white' }}>{children}</div>
+)
+
+// ── Jonas file upload (CSV/XLSX) with a column-mapping step ────────────────────
+const MAP_FIELDS = [
+  ['gl', 'GL account', true],
+  ['date', 'Date or period', true],
+  ['amount', 'Amount', false],
+  ['debit', 'Debit', false],
+  ['credit', 'Credit', false],
+  ['vendor', 'Vendor', false],
+  ['description', 'Description / memo', false],
+  ['reference', 'Invoice / reference', false],
+]
+function autoGuess(headers, cur) {
+  const find = (re) => headers.find((h) => re.test(h.toLowerCase())) || ''
+  return {
+    gl: cur.gl || find(/\b(gl|account|acct)\b/),
+    date: cur.date || find(/date|period|posted/),
+    amount: cur.amount || find(/^amount$|^total$|net/),
+    debit: cur.debit || find(/debit/),
+    credit: cur.credit || find(/credit/),
+    vendor: cur.vendor || find(/vendor|supplier|payee|name/),
+    description: cur.description || find(/desc|memo|detail|narr/),
+    reference: cur.reference || find(/ref|invoice|doc|number|no\b/),
+    useDebitCredit: cur.useDebitCredit || false,
+  }
+}
+const maxDate = (dates) => dates.filter(Boolean).map((d) => bdbIso(d)).filter(Boolean).sort().slice(-1)[0] || null
+function bdbIso(v) {
+  if (!v) return null
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return v
+  const d = new Date(v); return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+}
+
+function UploadModal({ year, lines, onClose, onDone }) {
+  const [stage, setStage] = useState('file')
+  const [fileName, setFileName] = useState('')
+  const [headers, setHeaders] = useState([])
+  const [rows, setRows] = useState([])
+  const [mapping, setMapping] = useState({ useDebitCredit: false })
+  const [aliases, setAliases] = useState({})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let live = true
+    bdb.fetchImportConfig('jonas').then((cfg) => { if (live) { setMapping((m) => ({ ...cfg.mapping, ...m })); setAliases(cfg.glAliases || {}) } })
+    return () => { live = false }
+  }, [])
+
+  const glToLine = useMemo(() => Object.fromEntries(lines.map((l) => [l.glCode, l.id])), [lines])
+  const aliasesLineId = useMemo(() => {
+    const out = {}
+    for (const [raw, gl] of Object.entries(aliases)) if (glToLine[gl]) out[raw] = glToLine[gl]
+    return out
+  }, [aliases, glToLine])
+
+  const mappedRows = useMemo(() => rows.map((r) => ({
+    glRaw: r[mapping.gl],
+    dateRaw: r[mapping.date],
+    amountCents: mapping.useDebitCredit
+      ? parseMoneyToCents(r[mapping.debit]) - parseMoneyToCents(r[mapping.credit])
+      : parseMoneyToCents(r[mapping.amount]),
+    vendor: mapping.vendor ? r[mapping.vendor] : null,
+    invoiceNo: mapping.reference ? r[mapping.reference] : null,
+    memo: mapping.description ? r[mapping.description] : null,
+  })), [rows, mapping])
+
+  const plan = useMemo(() => planImport({ rows: mappedRows, lines, aliases: aliasesLineId, startsOn: year.startsOn }), [mappedRows, lines, aliasesLineId, year])
+
+  async function onFile(file) {
+    setError('')
+    try {
+      const XLSX = await import('xlsx')
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array' })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const arr = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' })
+      const hr = arr.findIndex((r) => r.some((c) => String(c).trim()))
+      if (hr < 0) { setError('That file looks empty.'); return }
+      const hs = arr[hr].map((h) => String(h).trim())
+      const objs = arr.slice(hr + 1).filter((r) => r.some((c) => String(c).trim())).map((r) => Object.fromEntries(hs.map((h, i) => [h, r[i] ?? ''])))
+      setHeaders(hs); setRows(objs); setFileName(file.name)
+      setMapping((m) => autoGuess(hs, m)); setStage('map')
+    } catch (e) { setError('Could not read that file. Use the Jonas CSV or Excel export.'); console.error(e) }
+  }
+
+  // unmatched, grouped by GL so mapping one maps them all
+  const unmatchedByGl = useMemo(() => {
+    const by = {}
+    for (const u of plan.unmatched) (by[u.glRaw || '(blank)'] ||= []).push(u)
+    return Object.entries(by)
+  }, [plan])
+
+  async function apply() {
+    setBusy(true); setError('')
+    try {
+      await bdb.saveImportConfig('jonas', { mapping, glAliases: aliases })
+      await bdb.applyJonasImport({
+        lineIds: lines.map((l) => l.id), matched: plan.matched, monthsTouched: plan.monthsTouched,
+        fileName, periodThrough: maxDate(plan.matched.map((r) => r.invoiceDate)), unmatchedCount: plan.unmatchedCount,
+      })
+      onDone(`Imported ${plan.matched.length} rows from ${fileName} — ${formatMoneyCents(plan.totalCents)} across ${plan.monthsTouched.length} month(s).`)
+    } catch (e) { setError('Import failed — ' + (e.message || 'please try again.')); setBusy(false) }
+  }
+
+  const colSelect = (field, label, required) => (
+    <label className="flex items-center justify-between gap-3 py-1.5">
+      <span className="font-body text-[12px]" style={{ color: INK_2 }}>{label}{required ? ' *' : ''}</span>
+      <select value={mapping[field] || ''} onChange={(e) => setMapping((m) => ({ ...m, [field]: e.target.value }))}
+        className="font-body text-[12px] px-2 py-1.5 rounded-lg bg-white" style={{ border: `1px solid ${HAIR}`, minWidth: 180 }}>
+        <option value="">—</option>
+        {headers.map((h) => <option key={h} value={h}>{h}</option>)}
+      </select>
+    </label>
+  )
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-start justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(10,20,14,0.5)' }} onClick={onClose}>
+      <div className="relative w-full max-w-2xl my-8 rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-display text-lg font-bold" style={{ color: FOREST }}>Upload Jonas file</h3>
+          <button onClick={onClose} className="font-body text-xl px-2" style={{ color: INK_3 }} aria-label="Close">×</button>
+        </div>
+        {error && <div className="mb-3 rounded-xl px-3 py-2 font-body text-[12px]" style={{ backgroundColor: '#F6E5E2', color: RED }}>{error}</div>}
+
+        {stage === 'file' && (
+          <div>
+            <p className="font-body text-[12.5px] mb-3" style={{ color: INK_2 }}>Upload the GL export from Jonas (CSV or Excel). You'll map the columns next — the mapping is saved and reused for future uploads.</p>
+            <label className="block rounded-2xl border-2 border-dashed p-8 text-center cursor-pointer" style={{ borderColor: HAIR, color: FERN }}>
+              <Upload size={22} className="inline" />
+              <p className="font-body text-[13px] font-bold mt-1">Choose a .csv or .xlsx file</p>
+              <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+            </label>
+          </div>
+        )}
+
+        {stage === 'map' && (
+          <div>
+            <p className="font-body text-[12px] mb-2" style={{ color: INK_2 }}><b>{fileName}</b> · {rows.length} rows. Tell me which column is which:</p>
+            <label className="flex items-center gap-2 mb-1 font-body text-[12px]" style={{ color: INK_2 }}>
+              <input type="checkbox" checked={!!mapping.useDebitCredit} onChange={(e) => setMapping((m) => ({ ...m, useDebitCredit: e.target.checked }))} />
+              This file uses separate Debit / Credit columns (not one Amount)
+            </label>
+            <div className="rounded-xl border p-3" style={{ borderColor: HAIR }}>
+              {MAP_FIELDS.filter(([f]) => mapping.useDebitCredit ? f !== 'amount' : (f !== 'debit' && f !== 'credit')).map(([f, label, req]) => colSelect(f, label, req))}
+            </div>
+            <div className="flex justify-between mt-4">
+              <button onClick={() => setStage('file')} className="font-body text-[12px] font-bold px-3 py-2 rounded-xl" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>Back</button>
+              <button onClick={() => setStage('review')} disabled={!mapping.gl || !mapping.date || (mapping.useDebitCredit ? (!mapping.debit && !mapping.credit) : !mapping.amount)}
+                className="font-body text-[12px] font-bold px-4 py-2 rounded-xl text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Preview →</button>
+            </div>
+          </div>
+        )}
+
+        {stage === 'review' && (
+          <div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+              <Mini label="Rows read" v={plan.rowCount} />
+              <Mini label="Matched" v={plan.matchedCount} />
+              <Mini label="Unmatched" v={plan.unmatchedCount} warn={plan.unmatchedCount > 0} />
+              <Mini label="Total" v={formatMoneyCents(plan.totalCents)} />
+            </div>
+            <p className="font-body text-[12px] mb-3" style={{ color: INK_2 }}>
+              Operating {formatMoneyCents(plan.bySection.operating)} · Payroll {formatMoneyCents(plan.bySection.payroll)} ·
+              Months: {plan.monthsTouched.map((m) => monthLabel(m)).join(', ') || '—'}
+            </p>
+
+            {unmatchedByGl.length > 0 && (
+              <div className="rounded-xl border p-3 mb-3" style={{ borderColor: HAIR }}>
+                <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: AMBER }}>Unmatched — map each GL to a line, or leave to ignore</p>
+                <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                  {unmatchedByGl.map(([gl, list]) => (
+                    <div key={gl} className="flex items-center justify-between gap-2">
+                      <span className="font-body text-[12px]" style={{ color: INK }}>{gl} <span style={{ color: INK_3 }}>({list.length})</span></span>
+                      <select value={aliases[gl] || ''} onChange={(e) => setAliases((a) => { const n = { ...a }; if (e.target.value) n[gl] = e.target.value; else delete n[gl]; return n })}
+                        className="font-body text-[12px] px-2 py-1.5 rounded-lg bg-white" style={{ border: `1px solid ${HAIR}`, minWidth: 220 }}>
+                        <option value="">Ignore</option>
+                        {lines.map((l) => <option key={l.id} value={l.glCode}>{l.glCode} · {l.description}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <p className="font-body text-[11px] mb-3" style={{ color: INK_3 }}>Re-uploading a period replaces that period's Jonas rows, so applying this won't double-count {plan.monthsTouched.map((m) => monthLabel(m)).join(', ')}.</p>
+            <div className="flex justify-between">
+              <button onClick={() => setStage('map')} className="font-body text-[12px] font-bold px-3 py-2 rounded-xl" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>Back</button>
+              <button onClick={apply} disabled={busy || plan.matchedCount === 0}
+                className="font-body text-[12px] font-bold px-4 py-2 rounded-xl text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>
+                {busy ? 'Importing…' : `Apply ${plan.matchedCount} rows`}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+const Mini = ({ label, v, warn }) => (
+  <div className="rounded-xl border p-2.5" style={{ borderColor: HAIR }}>
+    <p className="font-body text-[9.5px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>{label}</p>
+    <p className="font-display text-[15px] font-bold" style={{ color: warn ? AMBER : FOREST }}>{v}</p>
+  </div>
 )
 
 // ── CSV export of the current operating table ──────────────────────────────────
