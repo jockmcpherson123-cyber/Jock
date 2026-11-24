@@ -135,9 +135,11 @@ export default function GreensMap({ user }) {
         const fit = () => {
           map.invalidateSize()
           map.setMinZoom(0); map.setMaxBounds(null)
-          map.fitBounds(bounds, { padding: [6, 6] })
-          map.setMinZoom(map.getBoundsZoom(bounds)) // can't zoom out past the photo
-          map.setMaxBounds(bounds.pad(0.02))        // can't pan off it
+          // COVER: fill the box edge-to-edge (crop), centered on the photo.
+          const z = map.getBoundsZoom(bounds, true)
+          map.setView(bounds.getCenter(), z, { animate: false })
+          map.setMinZoom(z)            // can't zoom out past a full box
+          map.setMaxBounds(bounds)     // can't pan off the photo
         }
         fit()
         setTimeout(fit, 200) // once more after layout settles
