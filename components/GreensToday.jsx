@@ -192,7 +192,7 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
             <>
               <div className="flex items-center justify-between mb-2">
                 <p className="font-body text-[11.5px] font-bold" style={{ color: INK_2 }}>Low {Math.min(...vals).toFixed(1)}% · High {Math.max(...vals).toFixed(1)}% · {vals.length} readings</p>
-                <button onClick={() => setShowSpots((v) => !v)} className="font-body text-[11px] font-bold px-2 py-1 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK_2 }}>{showSpots ? 'Hide spots' : 'Show spots'}</button>
+                <button onClick={() => setShowSpots((v) => !v)} className="font-body text-[11px] font-bold px-2 py-1 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK_2 }}>{showSpots ? 'Hide values' : 'Show values'}</button>
               </div>
               <GreenHeat green={sel} readings={heatReadings} mode={view === 'change' ? 'change' : 'abs'} lo={lo} hi={hi} showSpots={showSpots} aerial={aerial} georef={activeImagery} />
               <ColorBar mode={view === 'change' ? 'change' : 'abs'} lo={lo} hi={hi} />
@@ -387,7 +387,11 @@ function GreenHeat({ green, readings, mode, lo, hi, showSpots, aerial, georef })
       if (r.lat == null) continue
       const [x, y] = toC(r.lon, r.lat)
       ctx.beginPath(); ctx.arc(x, y, 3.5, 0, 7); ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = 1; ctx.fill(); ctx.stroke()
-      if (showSpots && r.spot) { ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif'; ctx.fillText(String(r.spot), x + 5, y - 5) }
+      if (showSpots && r.vwcPct != null) {
+        const txt = mode === 'change' ? `${r.vwcPct > 0 ? '+' : ''}${Number(r.vwcPct).toFixed(1)}` : `${Number(r.vwcPct).toFixed(1)}%`
+        ctx.font = 'bold 11px sans-serif'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeText(txt, x + 5, y - 4)
+        ctx.fillStyle = '#fff'; ctx.fillText(txt, x + 5, y - 4)
+      }
     }
     // low/high pins
     const pin = (r, color, label) => {
