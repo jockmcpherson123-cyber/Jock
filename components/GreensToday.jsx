@@ -18,7 +18,10 @@ import { idwValue, moistureStops, changeStops, colorAt, changeReadings } from '@
 import { suggestDepth, planByDepth } from '@/lib/coursemap/depth'
 import { lonLatToPixel } from '@/lib/coursemap/geo'
 import { resolveTarget, withException, coverageIssues, timelineMonths } from '@/lib/coursemap/targets'
+import { fetchWeather, dailyFromHourly } from '@/lib/weather'
 import { formatNumber, formatDate } from '@/lib/format'
+
+const ringCentroid = (ring) => { let x = 0, y = 0; for (const [lon, lat] of ring) { x += lon; y += lat } return [x / ring.length, y / ring.length] }
 
 const DEFAULT_TARGET = { lo: 20, hi: 30, aim: 25 } // fallback until a season is defined
 const GREEN_OK = '#1E7A46'
@@ -41,6 +44,8 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
   const [addOpen, setAddOpen] = useState(false)
   const [aerial, setAerial] = useState(null)
   const [etDraft, setEtDraft] = useState('')
+  const [autoEt, setAutoEt] = useState(null)
+  const [adjTarget, setAdjTarget] = useState(null)
   const [busy, setBusy] = useState(false)
 
   const load = async () => {
@@ -75,6 +80,39 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
     })
     return () => { live = false }
   }, [activeImagery?.id])
+
+  // Auto ET — tomorrow's forecast evapotranspiration (inches) for the course,
+  // from the app's weather source, using a green's location.
+  useEffect(() => {
+    let live = true
+    if (!greens.length) return
+    const [lon, lat] = ringCentroid(greens[0].ring)
+    ;(async () => {
+      try {
+        const daily = dailyFromHourly(await fetchWeather(lat, lon, { pastDays: 1, forecastDays: 3 }))
+        const tmr = shiftDate(todayISO(), 1)
+        const d = daily.find((x) => x.date === tmr)
+        if (live && d?.et != null) setAutoEt(Math.round(Number(d.et) * 100) / 100)
+      } catch (e) { console.error('auto ET', e) }
+    })()
+    return () => { live = false }
+  }, [greens])
+
+  // Default the ET field to the auto forecast when nothing is saved for the day.
+  useEffect(() => {
+    if (autoEt != null && (plan.day?.forecast_et == null)) setEtDraft(String(autoEt))
+  }, [autoEt, plan.day?.forecast_et])
+
+  const reloadTargets = async () => setTargets(await cmdb.fetchTargets(courseId))
+  const saveRange = async () => {
+    const lo = Number(adjTarget.lo), hi = Number(adjTarget.hi), aim = adjTarget.aim === '' || adjTarget.aim == null ? null : Number(adjTarget.aim)
+    if (!(hi > lo)) { alert('High must be above Low.'); return }
+    const full = targets.find((t) => t.id === baseTarget.id)
+    try {
+      await cmdb.saveTarget(full ? { ...full, clubId: ctx.club.id, courseId, vwcLo: lo, vwcHi: hi, aim } : { clubId: ctx.club.id, courseId, name: 'All season', startMd: '11-01', endMd: '10-31', vwcLo: lo, vwcHi: hi, aim })
+      await reloadTargets(); setAdjTarget(null)
+    } catch (e) { console.error(e); alert('Could not save the range.') }
+  }
 
   // round pickers
   const roundsByGreen = useMemo(() => {
@@ -126,7 +164,8 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
   const selTarget = targetFor(sel.id)
   const selRound = roundForView(sel.id)
   const latest = roundsByGreen[sel.id]?.latest
-  const et = plan.day?.forecast_et != null ? Number(plan.day.forecast_et) : Number(etDraft) || 0
+  const et = plan.day?.forecast_et != null ? Number(plan.day.forecast_et) : (Number(etDraft) || autoEt || 0)
+  const etIsAuto = plan.day?.forecast_et == null && autoEt != null && (etDraft === '' || Number(etDraft) === autoEt)
   const ipp = ctx?.settings?.inches_per_point ?? 0.03
   const maxDepth = ctx?.settings?.max_depth ?? 0.25
   const suggested = latest?.avg != null ? suggestDepth({ et, aim: selTarget.aim, latestAvg: Number(latest.avg), inchesPerPoint: ipp, maxDepth }) : null
@@ -155,7 +194,20 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
         <button onClick={() => setDate(shiftDate(date, 1))} className="font-body text-[13px] font-bold px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK_2 }} aria-label="Next day">›</button>
         {date !== todayISO() && <button onClick={() => setDate(todayISO())} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: FERN }}>Today</button>}
         <span className="font-body text-[11.5px] ml-1" style={{ color: INK_3 }}>target {selTarget.lo}–{selTarget.hi}%{selTarget.exception ? ' (green exception)' : ''} · aim {selTarget.aim}</span>
+        {manage && !adjTarget && <button onClick={() => setAdjTarget({ lo: baseTarget.lo, hi: baseTarget.hi, aim: baseTarget.aim })} className="font-body text-[11.5px] font-bold" style={{ color: FERN }}>Adjust range</button>}
       </div>
+      {adjTarget && (
+        <div className="rounded-xl border p-2.5 mb-3 flex flex-wrap items-end gap-2" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
+          <span className="font-body text-[11.5px] font-bold self-center" style={{ color: INK_2 }}>{baseTarget.name || 'Season'} range</span>
+          {[['lo', 'Low %'], ['hi', 'High %'], ['aim', 'Aim']].map(([k, label]) => (
+            <div key={k}><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>{label}</label>
+              <input value={adjTarget[k] ?? ''} onChange={(e) => setAdjTarget((a) => ({ ...a, [k]: e.target.value }))} className="w-16 font-body text-[12px] px-2 py-1 rounded-lg mt-0.5 text-right" style={{ border: `1px solid ${HAIR}` }} /></div>
+          ))}
+          <button onClick={saveRange} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg text-white" style={{ backgroundColor: FOREST }}>Save</button>
+          <button onClick={() => setAdjTarget(null)} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button>
+          <span className="font-body text-[10.5px] self-center" style={{ color: INK_3 }}>Changes the whole {baseTarget.name || 'season'} — full control on the Targets tab.</span>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-3">
         <div className="flex gap-1.5">
           {[['morning', 'Morning'], ['afternoon', 'Afternoon'], ['change', 'Change']].map(([k, label]) => (
@@ -238,7 +290,7 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
             <div className="flex items-center gap-2 mt-2">
               <span className="font-body text-[11px]" style={{ color: INK_2 }}>Forecast ET</span>
               <input value={etDraft} onChange={(e) => setEtDraft(e.target.value)} onBlur={saveEt} disabled={!manage} className="w-16 font-body text-[12px] px-2 py-1 rounded-lg text-right" style={{ border: `1px solid ${HAIR}` }} />
-              <span className="font-body text-[11px]" style={{ color: INK_3 }}>in</span>
+              <span className="font-body text-[11px]" style={{ color: INK_3 }}>in {etIsAuto ? '· auto from forecast' : autoEt != null ? `· forecast ${autoEt}` : ''}</span>
             </div>
           </div>
         </div>
