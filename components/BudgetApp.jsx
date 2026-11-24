@@ -19,6 +19,7 @@ import * as bdb from '@/lib/budget/db'
 import * as maindb from '@/lib/db'
 import { planImport, parseMoneyToCents } from '@/lib/budget/import'
 import { committedByGl } from '@/lib/budget/committed'
+import BudgetBuilder from '@/components/BudgetBuilder'
 import {
   computeLine, aggregate, latestPostedMonth, fiscalMonthIndex, yearProgressFraction,
   monthLabel, FY_MONTHS, formatMoneyCents, formatSignedCents, formatPct,
@@ -59,6 +60,7 @@ export default function BudgetApp({ user }) {
   const [activity, setActivity] = useState([])
   const [committed, setCommitted] = useState({}) // { glCode: cents }
   const reload = () => setRefreshKey((k) => k + 1)
+  const reloadYears = async () => { const ys = await bdb.fetchBudgetYears(); setYears(ys); reload() }
   const myId = user?.id || null
 
   // Load the list of years once.
@@ -214,7 +216,7 @@ export default function BudgetApp({ user }) {
       {tab === 'payroll' && <PayrollTab payroll={computed.payroll} agg={computed.payrollAgg} />}
 
       {tab === 'requests' && <RequestsTab transfers={data.transfers} lineById={lineNameMap(data.lines)} profiles={profiles} isAdmin={isAdmin} year={year} reload={reload} />}
-      {tab === 'build' && <Placeholder phase={4} title={`Build FY${year.fiscalYear + 1} budget`} note="Start from this year or last year's actuals, spread across months, submit and approve." />}
+      {tab === 'build' && <BudgetBuilder currentYear={year} years={years} isAdmin={isAdmin} canEdit onReloadYears={reloadYears} />}
       {tab === 'activity' && <ActivityTab activity={activity} profiles={profiles} />}
     </div>
   )
