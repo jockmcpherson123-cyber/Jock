@@ -16,7 +16,9 @@ import * as db from '@/lib/db'
 import ArcTool from '@/components/ArcTool'
 import { fitSimilarity, fitResiduals, imageCornerLatLngs, metresToFeet, pixelToLatLng } from '@/lib/geocalib'
 import * as cmdb from '@/lib/coursemap/db'
-import { worldFileCorners } from '@/lib/coursemap/geo'
+import { worldFileCorners, geodesicAreaSqft } from '@/lib/coursemap/geo'
+
+const AREA_TYPE_LIST = [['green', 'Green'], ['approach', 'Approach'], ['fairway', 'Fairway'], ['tee', 'Tee'], ['bunker', 'Bunker'], ['other', 'Other']]
 import { SYMBOL_GROUPS, PIPE_ITEMS, symbolById, symbolColor, symbolSvg, isPartCircle } from '@/lib/irrigationSymbols'
 
 import { FOREST, FERN, GOLD } from '@/lib/theme'
@@ -223,7 +225,19 @@ export default function CourseMap({ user, manage }) {
   const [sharedAreas, setSharedAreas] = useState([])   // greens/tees/etc. from the shared areas table
   const [showSharedAreas, setShowSharedAreas] = useState(true)
   const cmCourseIdRef = useRef(null)
+  const cmClubIdRef = useRef(null)
   const areasLayerRef = useRef(null)
+  // Shared-area editing (same table as the Course Map).
+  const [areaMode, setAreaMode] = useState(null)       // null | 'draw' | 'edit'
+  const [areaDrawPts, setAreaDrawPts] = useState([])   // [[lat,lon],…]
+  const [selAreaId, setSelAreaId] = useState(null)
+  const [newAreaForm, setNewAreaForm] = useState(null) // {type,hole,name} while naming a drawn area
+  const [areaEditRing, setAreaEditRing] = useState(null)
+  const [areaBusy, setAreaBusy] = useState(false)
+  const areaDrawRef = useRef(false)
+  const areaDrawLayerRef = useRef(null)
+  const areaEditLayerRef = useRef(null)
+  const areaEditRingRef = useRef(null)
   useEffect(() => { drawRefState.current = draw }, [draw])
   useEffect(() => { eraserRef.current = eraser }, [eraser])
   useEffect(() => { pipesRefL.current = pipes }, [pipes])
@@ -452,6 +466,7 @@ export default function CourseMap({ user, manage }) {
         const c = await cmdb.fetchCourseContext()
         const courseId = c.courses?.[0]?.id || null
         cmCourseIdRef.current = courseId
+        cmClubIdRef.current = c.club?.id || null
         const [imgs, areas] = await Promise.all([cmdb.fetchImagery(courseId), cmdb.fetchAreas(courseId)])
         const def = imgs.find((i) => i.id === c.settings?.default_imagery_id) || imgs[0] || null
         if (live) { setAerial(def); setSharedAreas(areas) }
@@ -501,13 +516,50 @@ export default function CourseMap({ user, manage }) {
     const grp = L.layerGroup().addTo(map)
     for (const a of sharedAreas) {
       if (!a.ring?.length) continue
+      if (areaMode === 'edit' && a.id === selAreaId) continue // edit overlay draws this one
       const color = AREA_COLORS[a.type] || '#9AA6B2'
-      const poly = L.polygon(a.ring.map(([lon, lat]) => [lat, lon]), { color, weight: 2, opacity: 0.95, fillOpacity: 0.12, interactive: true })
+      const sel = a.id === selAreaId
+      const poly = L.polygon(a.ring.map(([lon, lat]) => [lat, lon]), { color, weight: sel ? 3 : 2, opacity: 0.95, fillOpacity: sel ? 0.28 : 0.12, interactive: true })
       poly.bindTooltip(a.name || `${a.type}${a.hole ? ' ' + a.hole : ''}`, { permanent: true, direction: 'center', className: 'cm-area-label' })
+      poly.on('click', (e) => { if (e.originalEvent) e.originalEvent.stopPropagation?.(); if (!areaDrawRef.current) { setSelAreaId(a.id); setAreaMode(null) } })
       poly.addTo(grp)
     }
     areasLayerRef.current = grp
-  }, [sharedAreas, showSharedAreas, mode, mapTick])
+  }, [sharedAreas, showSharedAreas, mode, mapTick, selAreaId, areaMode])
+
+  // Keep the area-draw click-router ref in sync.
+  useEffect(() => { areaDrawRef.current = areaMode === 'draw' }, [areaMode])
+
+  // Area draw preview.
+  useEffect(() => {
+    const L = LRef.current, map = mainMap.current
+    if (!L || !map) return
+    if (areaDrawLayerRef.current) { map.removeLayer(areaDrawLayerRef.current); areaDrawLayerRef.current = null }
+    if (areaMode !== 'draw' || areaDrawPts.length === 0) return
+    const grp = L.layerGroup().addTo(map)
+    if (areaDrawPts.length >= 3) L.polygon(areaDrawPts, { color: GOLD, weight: 2, dashArray: '5,5', fillOpacity: 0.15 }).addTo(grp)
+    else if (areaDrawPts.length === 2) L.polyline(areaDrawPts, { color: GOLD, weight: 2, dashArray: '5,5' }).addTo(grp)
+    areaDrawPts.forEach((p) => L.circleMarker(p, { radius: 5, color: GOLD, weight: 2, fillColor: '#fff', fillOpacity: 1 }).addTo(grp))
+    areaDrawLayerRef.current = grp
+  }, [areaMode, areaDrawPts])
+
+  // Area edit — draggable vertices.
+  useEffect(() => {
+    const L = LRef.current, map = mainMap.current
+    if (!L || !map) return
+    if (areaEditLayerRef.current) { map.removeLayer(areaEditLayerRef.current); areaEditLayerRef.current = null }
+    if (areaMode !== 'edit' || !areaEditRingRef.current) return
+    const grp = L.layerGroup().addTo(map)
+    const toLL = (ring) => ring.map(([lon, lat]) => [lat, lon])
+    const poly = L.polygon(toLL(areaEditRingRef.current), { color: GOLD, weight: 2, fillOpacity: 0.2 }).addTo(grp)
+    areaEditRingRef.current.forEach((pt, i) => {
+      const m = L.marker([pt[1], pt[0]], { draggable: true, icon: L.divIcon({ className: '', html: `<div style="width:13px;height:13px;border-radius:50%;background:#fff;border:2px solid ${GOLD};box-shadow:0 0 0 1px rgba(0,0,0,.3)"></div>`, iconSize: [13, 13], iconAnchor: [6, 6] }) }).addTo(grp)
+      m.on('drag', (e) => { const ll = e.target.getLatLng(); areaEditRingRef.current[i] = [ll.lng, ll.lat]; poly.setLatLngs(toLL(areaEditRingRef.current)) })
+      m.on('dragend', () => setAreaEditRing(areaEditRingRef.current.map((p) => [...p])))
+    })
+    areaEditLayerRef.current = grp
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areaMode, selAreaId])
 
   // Live location marker — a blue dot with a direction arrow (phone compass) so
   // you can tell which way you're facing and walk the right way.
@@ -550,6 +602,7 @@ export default function CourseMap({ user, manage }) {
     const map = mainMap.current
     if (!map) return
     const handler = (e) => {
+      if (areaDrawRef.current) { setAreaDrawPts((p) => [...p, [e.latlng.lat, e.latlng.lng]]); return }
       if (moveRef.current) { placeRef.current?.(e.latlng, 'relocate'); return }
       if (drawRefState.current) { setDraw((d) => (d ? { ...d, pts: [...d.pts, [e.latlng.lat, e.latlng.lng]] } : d)); return }
       if (eraserRef.current) { eraseNearestPipe(e.latlng); return }
@@ -978,6 +1031,37 @@ export default function CourseMap({ user, manage }) {
   const startDraw = (shape, kind, color) => { setSelShape(null); setEraser(false); setAddMode(false); setStampSym(null); setMoveMode(false); setDraw({ shape, kind, color, pts: [] }) }
   const undoVertex = () => setDraw((d) => (d ? { ...d, pts: d.pts.slice(0, -1) } : d))
   const cancelDraw = () => setDraw(null)
+
+  // ── Shared course areas: draw / edit / delete (writes the same areas table) ──
+  const reloadAreas = async () => { try { setSharedAreas(await cmdb.fetchAreas(cmCourseIdRef.current)) } catch (e) { console.error(e) } }
+  const startAreaDraw = () => { setDraw(null); setEraser(false); setAddMode(false); setStampSym(null); setMoveMode(false); setSelAreaId(null); setNewAreaForm(null); setAreaDrawPts([]); setAreaMode('draw') }
+  const finishAreaDraw = () => { if (areaDrawPts.length >= 3) setNewAreaForm({ type: 'green', hole: '', name: '' }) }
+  const cancelAreaDraw = () => { setAreaMode(null); setAreaDrawPts([]); setNewAreaForm(null) }
+  const saveNewArea = async () => {
+    if (!cmClubIdRef.current || areaDrawPts.length < 3) return
+    setAreaBusy(true)
+    try {
+      const ring = areaDrawPts.map(([lat, lon]) => [lon, lat])
+      await cmdb.saveArea({ clubId: cmClubIdRef.current, courseId: cmCourseIdRef.current, hole: newAreaForm.hole ? Number(newAreaForm.hole) : null, type: newAreaForm.type, name: newAreaForm.name || `${newAreaForm.type}${newAreaForm.hole ? ' ' + newAreaForm.hole : ''}`, ring, sqft: geodesicAreaSqft(ring) })
+      await reloadAreas()
+    } catch (e) { console.error(e) }
+    setAreaBusy(false); setAreaMode(null); setAreaDrawPts([]); setNewAreaForm(null)
+  }
+  const selArea = sharedAreas.find((a) => a.id === selAreaId) || null
+  const startAreaEdit = () => { if (!selArea) return; areaEditRingRef.current = selArea.ring.map((p) => [...p]); setAreaEditRing(selArea.ring.map((p) => [...p])); setAreaMode('edit') }
+  const cancelAreaEdit = () => { setAreaMode(null); setAreaEditRing(null); areaEditRingRef.current = null }
+  const saveAreaEdit = async () => {
+    if (!selArea || !areaEditRingRef.current) return
+    setAreaBusy(true)
+    try { await cmdb.saveArea({ id: selArea.id, hole: selArea.hole, type: selArea.type, name: selArea.name, ring: areaEditRingRef.current, sqft: geodesicAreaSqft(areaEditRingRef.current) }); await reloadAreas() } catch (e) { console.error(e) }
+    setAreaBusy(false); setAreaMode(null); setAreaEditRing(null); areaEditRingRef.current = null
+  }
+  const deleteSelArea = async () => {
+    if (!selArea || !window.confirm(`Delete ${selArea.name || selArea.type}? This removes it from both maps.`)) return
+    setAreaBusy(true)
+    try { await cmdb.deleteArea(selArea.id); setSelAreaId(null); setAreaMode(null); await reloadAreas() } catch (e) { console.error(e) }
+    setAreaBusy(false)
+  }
   async function finishDraw() {
     const d = drawRefState.current
     if (!d) return
@@ -1138,7 +1222,51 @@ export default function CourseMap({ user, manage }) {
           </div>
 
           <div className="relative" key="map-wrap">
-            <div ref={mapCbRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: mapPxH, minHeight: 460, backgroundColor: '#0b1e12', cursor: addMode || moveMode ? 'crosshair' : '' }} />
+            <div ref={mapCbRef} className="w-full rounded-xl overflow-hidden border border-black/10" style={{ height: mapPxH, minHeight: 460, backgroundColor: '#0b1e12', cursor: (addMode || moveMode || areaMode === 'draw') ? 'crosshair' : '' }} />
+
+            {/* Shared course-area editing (same areas as the Course Map) */}
+            {manage && mode === 'map' && !areaMode && !selArea && (
+              <button onClick={startAreaDraw} className="absolute z-[550] bottom-3 left-3 bg-white shadow rounded-full px-3.5 py-2 font-body text-[12px] font-bold flex items-center gap-1.5" style={{ color: FOREST }}><Plus size={14} /> Draw area</button>
+            )}
+            {areaMode === 'draw' && (
+              <div className="absolute z-[650] top-2 left-1/2 -translate-x-1/2 bg-white/95 rounded-xl shadow px-2.5 py-2 flex flex-wrap items-center gap-2">
+                <span className="font-body text-[12px] font-bold" style={{ color: FERN }}>Tap corners ({areaDrawPts.length})</span>
+                <button onClick={() => setAreaDrawPts((p) => p.slice(0, -1))} disabled={!areaDrawPts.length} className="font-body text-[12px] font-bold px-2.5 py-1 rounded-lg disabled:opacity-40" style={{ border: '1px solid #E2E8E4', color: '#475569' }}>Undo</button>
+                <button onClick={finishAreaDraw} disabled={areaDrawPts.length < 3} className="font-body text-[12px] font-bold px-3 py-1 rounded-lg text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Finish</button>
+                <button onClick={cancelAreaDraw} className="font-body text-[12px] font-bold px-2.5 py-1 rounded-lg" style={{ color: '#475569' }}>Cancel</button>
+              </div>
+            )}
+            {newAreaForm && (
+              <div className="absolute z-[660] top-14 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-lg p-3 w-[300px]">
+                <div className="flex gap-2">
+                  <select value={newAreaForm.type} onChange={(e) => setNewAreaForm((f) => ({ ...f, type: e.target.value }))} className="font-body text-[12px] px-2 py-1.5 rounded-lg bg-white flex-1" style={{ border: '1px solid #E2E8E4' }}>{AREA_TYPE_LIST.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+                  <input value={newAreaForm.hole} onChange={(e) => setNewAreaForm((f) => ({ ...f, hole: e.target.value.replace(/[^0-9]/g, '') }))} placeholder="Hole" className="w-16 font-body text-[12px] px-2 py-1.5 rounded-lg" style={{ border: '1px solid #E2E8E4' }} />
+                </div>
+                <input value={newAreaForm.name} onChange={(e) => setNewAreaForm((f) => ({ ...f, name: e.target.value }))} placeholder={`${newAreaForm.type}${newAreaForm.hole ? ' ' + newAreaForm.hole : ''}`} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-2" style={{ border: '1px solid #E2E8E4' }} />
+                <div className="flex items-center justify-between mt-2">
+                  <span className="font-body text-[12px]" style={{ color: '#334155' }}><b>{Math.round(geodesicAreaSqft(areaDrawPts.map(([lat, lon]) => [lon, lat]))).toLocaleString()}</b> sqft</span>
+                  <div className="flex gap-2"><button onClick={cancelAreaDraw} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: '#475569' }}>Cancel</button><button onClick={saveNewArea} disabled={areaBusy} className="font-body text-[12px] font-bold px-3.5 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Save area</button></div>
+                </div>
+              </div>
+            )}
+            {selArea && (
+              <div className="absolute z-[600] bottom-3 left-3 bg-white/95 backdrop-blur rounded-xl shadow p-3 w-64">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm" style={{ backgroundColor: AREA_COLORS[selArea.type] || '#9AA6B2' }} /><div><p className="font-body text-[13px] font-bold" style={{ color: '#1A1A16' }}>{selArea.name || `${selArea.type}${selArea.hole ? ' ' + selArea.hole : ''}`}</p><p className="font-body text-[11px]" style={{ color: '#8A8984' }}>{Math.round(selArea.sqft ?? geodesicAreaSqft(selArea.ring)).toLocaleString()} sqft</p></div></div>
+                  <button onClick={() => { setSelAreaId(null); cancelAreaEdit() }} className="font-body text-lg px-1" style={{ color: '#8A8984' }}>×</button>
+                </div>
+                {manage && (
+                  <div className="flex gap-2 mt-2">
+                    {areaMode === 'edit' ? (
+                      <><span className="font-body text-[11px] self-center" style={{ color: FERN }}>Drag the dots</span><button onClick={saveAreaEdit} disabled={areaBusy} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40 ml-auto" style={{ backgroundColor: FOREST }}>Save</button><button onClick={cancelAreaEdit} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: '#475569' }}>Cancel</button></>
+                    ) : (
+                      <><button onClick={startAreaEdit} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg text-white" style={{ backgroundColor: FOREST }}>Edit shape</button><button onClick={deleteSelArea} disabled={areaBusy} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: '#B23A2E', border: '1px solid #E2E8E4' }}>Delete</button></>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Floating controls */}
             <div className="absolute z-[500] top-3 right-3 flex flex-col gap-2">
               <button onClick={recenter} title={locate ? 'Center on me' : 'Show my location'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: locate ? FOREST : '#94A3B8' }}><Navigation size={17} /></button>
