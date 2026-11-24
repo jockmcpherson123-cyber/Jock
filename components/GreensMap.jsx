@@ -16,7 +16,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Upload, Layers } from 'lucide-react'
 import { FOREST, FERN, GOLD, HAIR, INK, INK_2, INK_3, PAPER } from '@/lib/theme'
 import * as cmdb from '@/lib/coursemap/db'
-import GreensToday from '@/components/GreensToday'
+import GreensToday, { MoistureTargets } from '@/components/GreensToday'
+import { resolveTarget } from '@/lib/coursemap/targets'
 import { parseWorldFile, parseNearmapName, upperLeftFromCenter, worldFileCorners, geodesicAreaSqft, perimeterFt } from '@/lib/coursemap/geo'
 import { formatDate, formatNumber } from '@/lib/format'
 
@@ -35,6 +36,7 @@ export default function GreensMap({ user }) {
   const manage = canManage(user?.role)
   const [tab, setTab] = useState('map') // Phase A ships the Map tab
   const [ctx, setCtx] = useState(null)
+  const [targetTxt, setTargetTxt] = useState('—')
   const [courseId, setCourseId] = useState('')
   const [imagery, setImagery] = useState([])
   const [selId, setSelId] = useState('')
@@ -78,6 +80,10 @@ export default function GreensMap({ user }) {
         setCtx(c)
         const cid = c.courses[0]?.id || ''
         setCourseId(cid)
+        cmdb.fetchTargets(cid).then((tg) => {
+          const t = resolveTarget(tg, new Date().toISOString().slice(0, 10))
+          if (live && t) setTargetTxt(`${t.lo}–${t.hi}%`)
+        }).catch(() => {})
         const imgs = await cmdb.fetchImagery(cid)
         if (!live) return
         setImagery(imgs)
@@ -294,14 +300,13 @@ export default function GreensMap({ user }) {
   // ---- hooks done ----
   if (loading) return <div className={`${PAGE} py-16`}><p className="font-body text-[13px] text-center" style={{ color: INK_2 }}>Loading the course map…</p></div>
 
-  const targetTxt = '20–30%' // Phase E will make this the active season's range
 
   return (
     <div className={`${PAGE} py-5`}>
       <div className="mb-3">
         <h1 className="font-display text-2xl font-bold" style={{ color: FOREST }}>Course Map</h1>
         <div className="mt-1 h-px" style={{ width: 30, backgroundColor: GOLD }} />
-        <p className="font-body text-[13px] mt-1.5" style={{ color: INK_2 }}>{ctx?.club?.name || 'Your club'} · {ctx?.courses?.[0]?.name || 'Blue'} · target {targetTxt}</p>
+        <p className="font-body text-[13px] mt-1.5" style={{ color: INK_2 }}>{ctx?.club?.name || 'Your club'} · {ctx?.courses?.[0]?.name || 'Blue'} · from DEACON · target {targetTxt}</p>
       </div>
 
       <div className="flex gap-1.5 border-b mb-4" style={{ borderColor: HAIR }}>
@@ -376,7 +381,7 @@ export default function GreensMap({ user }) {
       )}
 
       {tab === 'greens' && <GreensToday ctx={ctx} courseId={courseId} manage={manage} user={user} activeImagery={imagery.find((i) => i.id === selId) || null} />}
-      {tab === 'targets' && <Placeholder title="Targets" note="Seasonal moisture ranges, judged per round against the target active that day." phase="E" />}
+      {tab === 'targets' && <MoistureTargets ctx={ctx} courseId={courseId} manage={manage} />}
     </div>
   )
 }

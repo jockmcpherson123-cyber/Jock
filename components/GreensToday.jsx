@@ -17,20 +17,23 @@ import { planReadingsImport, guessReadingMapping } from '@/lib/coursemap/import'
 import { idwValue, moistureStops, changeStops, colorAt, changeReadings } from '@/lib/coursemap/heat'
 import { suggestDepth, planByDepth } from '@/lib/coursemap/depth'
 import { lonLatToPixel } from '@/lib/coursemap/geo'
+import { resolveTarget, withException, coverageIssues, timelineMonths } from '@/lib/coursemap/targets'
 import { formatNumber, formatDate } from '@/lib/format'
 
-const DEFAULT_TARGET = { lo: 20, hi: 30, aim: 25 } // Phase E replaces with the season's target
+const DEFAULT_TARGET = { lo: 20, hi: 30, aim: 25 } // fallback until a season is defined
 const GREEN_OK = '#1E7A46'
 const canApprove = (role) => role === 'superintendent' || role === 'director'
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+const shiftDate = (iso, days) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + days); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 const statusOf = (avg, t) => avg == null ? { label: '—', c: INK_3 } : avg < t.lo ? { label: 'Low', c: RED } : avg > t.hi ? { label: 'High', c: BLUE } : { label: 'In range', c: GREEN_OK }
 
 export default function GreensToday({ ctx, courseId, manage, user, activeImagery }) {
-  const target = DEFAULT_TARGET
-  const date = todayISO()
+  const [date, setDate] = useState(todayISO())
   const [greens, setGreens] = useState([])
-  const [rounds, setRounds] = useState([]) // today's rounds with readings
+  const [rounds, setRounds] = useState([]) // the day's rounds with readings
   const [plan, setPlan] = useState({ depths: {}, day: {} })
+  const [targets, setTargets] = useState([])
+  const [exceptions, setExceptions] = useState([])
   const [view, setView] = useState('morning')
   const [selId, setSelId] = useState(null)
   const [showSpots, setShowSpots] = useState(false)
@@ -49,11 +52,16 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
     setRounds(rs)
     const p = await cmdb.fetchWateringPlan(courseId, date)
     setPlan(p); setEtDraft(p.day?.forecast_et != null ? String(p.day.forecast_et) : '0.10')
+    const [tg, ex] = await Promise.all([cmdb.fetchTargets(courseId), cmdb.fetchExceptions()])
+    setTargets(tg); setExceptions(ex)
     setView(rs.some((r) => r.slot === 'afternoon') ? 'afternoon' : 'morning')
     setSelId((cur) => cur || g[0]?.id || null)
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line */ }, [courseId])
+  useEffect(() => { load() /* eslint-disable-next-line */ }, [courseId, date])
+
+  const baseTarget = resolveTarget(targets, date) || DEFAULT_TARGET
+  const targetFor = (areaId) => withException(baseTarget, exceptions, areaId)
 
   // Load the aerial image once (for cropping under the heatmap).
   useEffect(() => {
@@ -115,12 +123,13 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
   }
 
   const sel = greens.find((g) => g.id === selId) || greens[0]
+  const selTarget = targetFor(sel.id)
   const selRound = roundForView(sel.id)
   const latest = roundsByGreen[sel.id]?.latest
   const et = plan.day?.forecast_et != null ? Number(plan.day.forecast_et) : Number(etDraft) || 0
   const ipp = ctx?.settings?.inches_per_point ?? 0.03
   const maxDepth = ctx?.settings?.max_depth ?? 0.25
-  const suggested = latest?.avg != null ? suggestDepth({ et, aim: target.aim, latestAvg: Number(latest.avg), inchesPerPoint: ipp, maxDepth }) : null
+  const suggested = latest?.avg != null ? suggestDepth({ et, aim: selTarget.aim, latestAvg: Number(latest.avg), inchesPerPoint: ipp, maxDepth }) : null
 
   // readings for the heat view
   let heatReadings = selRound?.readings || []
@@ -131,8 +140,8 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
     else { heatReadings = []; changeMissing = true }
   }
   const vals = heatReadings.map((r) => r.vwcPct).filter((v) => v != null)
-  const lo = view === 'change' ? -6 : target.lo
-  const hi = view === 'change' ? 0 : target.hi
+  const lo = view === 'change' ? -6 : selTarget.lo
+  const hi = view === 'change' ? 0 : selTarget.hi
 
   // tonight's plan grouping
   const greenDepths = greens.map((g) => ({ green: g.hole || greens.indexOf(g) + 1, depth: plan.depths[g.id]?.depth ?? undefined })).filter((x) => x.depth !== undefined)
@@ -140,6 +149,13 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
 
   return (
     <div>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <button onClick={() => setDate(shiftDate(date, -1))} className="font-body text-[13px] font-bold px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK_2 }} aria-label="Previous day">‹</button>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="font-body text-[12px] px-2 py-1.5 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK }} />
+        <button onClick={() => setDate(shiftDate(date, 1))} className="font-body text-[13px] font-bold px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK_2 }} aria-label="Next day">›</button>
+        {date !== todayISO() && <button onClick={() => setDate(todayISO())} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: FERN }}>Today</button>}
+        <span className="font-body text-[11.5px] ml-1" style={{ color: INK_3 }}>target {selTarget.lo}–{selTarget.hi}%{selTarget.exception ? ' (green exception)' : ''} · aim {selTarget.aim}</span>
+      </div>
       <div className="flex items-center justify-between mb-3">
         <div className="flex gap-1.5">
           {[['morning', 'Morning'], ['afternoon', 'Afternoon'], ['change', 'Change']].map(([k, label]) => (
@@ -154,7 +170,7 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
       <div className="flex flex-wrap gap-1.5 mb-4">
         {greens.map((g, i) => {
           const avg = greenAvg(g.id)
-          const st = statusOf(avg, target)
+          const st = statusOf(avg, targetFor(g.id))
           const on = g.id === sel.id
           return (
             <button key={g.id} onClick={() => setSelId(g.id)} className="rounded-xl px-2.5 py-1.5 text-center min-w-[52px]" style={on ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', border: `1px solid ${HAIR}` }}>
@@ -195,7 +211,7 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
             <>
               <div className="flex items-center gap-2 mt-1">
                 <p className="font-display text-3xl font-bold" style={{ color: FOREST }}>{selRound?.avg != null ? `${Number(selRound.avg).toFixed(1)}%` : '—'}</p>
-                {selRound?.avg != null && <span className="font-body text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ color: statusOf(Number(selRound.avg), target).c, backgroundColor: '#F1F5F1' }}>{statusOf(Number(selRound.avg), target).label}</span>}
+                {selRound?.avg != null && <span className="font-body text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ color: statusOf(Number(selRound.avg), selTarget).c, backgroundColor: '#F1F5F1' }}>{statusOf(Number(selRound.avg), selTarget).label}</span>}
               </div>
               {selRound && <DriestSpot round={selRound} />}
             </>
@@ -473,6 +489,148 @@ export function AddReadings({ ctx, courseId, greens, onClose, onDone }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ── Targets page (Phase E) ──────────────────────────────────────────────────
+const MONTH_LABEL = { '11': 'Nov', '12': 'Dec', '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr', '05': 'May', '06': 'Jun', '07': 'Jul', '08': 'Aug', '09': 'Sep', '10': 'Oct' }
+const SEASON_COLORS = ['#2563EB', '#14B8A6', '#22C55E', '#F59E0B', '#9333EA', '#EF4444', '#0EA5E9']
+
+export function MoistureTargets({ ctx, courseId, manage }) {
+  const [targets, setTargets] = useState([])
+  const [exceptions, setExceptions] = useState([])
+  const [greens, setGreens] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [draft, setDraft] = useState(null) // season being added/edited
+  const [exDraft, setExDraft] = useState(null)
+
+  const load = async () => {
+    const [tg, ex, g] = await Promise.all([cmdb.fetchTargets(courseId), cmdb.fetchExceptions(), cmdb.fetchGreens(courseId)])
+    setTargets(tg); setExceptions(ex); setGreens(g); setLoading(false)
+  }
+  useEffect(() => { if (courseId) load() /* eslint-disable-next-line */ }, [courseId])
+
+  const colorOf = (id) => SEASON_COLORS[Math.max(0, targets.findIndex((t) => t.id === id)) % SEASON_COLORS.length]
+  const issues = coverageIssues(targets)
+  const months = timelineMonths(targets)
+
+  const saveSeason = async (s) => {
+    try { await cmdb.saveTarget({ ...s, clubId: ctx.club.id, courseId }); setDraft(null); await load() } catch (e) { console.error(e); alert('Could not save — ' + (e.message || '')) }
+  }
+  const delSeason = async (id) => { if (!window.confirm('Delete this season?')) return; try { await cmdb.deleteTarget(id); await load() } catch (e) { console.error(e) } }
+  const saveEx = async (e2) => { try { await cmdb.saveException({ ...e2, clubId: ctx.club.id }); setExDraft(null); await load() } catch (e) { console.error(e) } }
+  const delEx = async (id) => { try { await cmdb.deleteException(id); await load() } catch (e) { console.error(e) } }
+
+  if (loading) return <p className="font-body text-[13px]" style={{ color: INK_2 }}>Loading…</p>
+
+  return (
+    <div>
+      {/* Year timeline */}
+      <div className="rounded-2xl border p-4 mb-4" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
+        <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Year · Nov → Oct</p>
+        <div className="flex rounded-lg overflow-hidden" style={{ height: 30 }}>
+          {months.map((m, i) => (
+            <div key={i} className="flex-1 flex items-center justify-center" style={{ backgroundColor: m.target ? colorOf(m.target.id) : '#E2E0DB' }} title={m.target ? `${m.target.name}: ${m.target.lo}-${m.target.hi}%` : 'No season'}>
+              <span className="font-body text-[9px] font-bold" style={{ color: m.target ? 'white' : INK_3 }}>{MONTH_LABEL[m.month]}</span>
+            </div>
+          ))}
+        </div>
+        {issues.length > 0 && <p className="font-body text-[11.5px] mt-2" style={{ color: '#B7791F' }}>⚠ {issues.join(' ')}</p>}
+      </div>
+
+      {/* Seasons */}
+      <div className="flex items-center justify-between mb-2">
+        <p className="font-body text-[12px] font-bold" style={{ color: FOREST }}>Seasons</p>
+        {manage && <button onClick={() => setDraft({ name: '', startMd: '', endMd: '', vwcLo: 20, vwcHi: 30, aim: '', salinityMax: '' })} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FOREST }}>+ Add season</button>}
+      </div>
+      <div className="rounded-2xl border overflow-x-auto mb-2" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
+        <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: 640 }}>
+          <thead><tr style={{ backgroundColor: PAPER }}>{['Season', 'Start', 'End', 'Low', 'High', 'Aim', 'Max salt', ''].map((h) => <th key={h} className="font-body text-[10px] font-bold uppercase px-2 py-2 text-left" style={{ color: INK_3 }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {targets.map((t) => (
+              <tr key={t.id} className="border-t" style={{ borderColor: HAIR }}>
+                <td className="px-2 py-1.5 font-body text-[12px] font-semibold" style={{ color: INK }}><span className="inline-block w-2.5 h-2.5 rounded-sm mr-1.5" style={{ backgroundColor: colorOf(t.id) }} />{t.name || '—'}</td>
+                <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK_2 }}>{t.startMd}</td>
+                <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK_2 }}>{t.endMd}</td>
+                <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{t.vwcLo}%</td>
+                <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{t.vwcHi}%</td>
+                <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{t.aim ?? ((Number(t.vwcLo) + Number(t.vwcHi)) / 2)}</td>
+                <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK_2 }}>{t.salinityMax ?? '—'}</td>
+                <td className="px-2 py-1.5 text-right whitespace-nowrap">{manage && <><button onClick={() => setDraft({ ...t })} className="font-body text-[11px] font-bold px-2" style={{ color: FERN }}>Edit</button><button onClick={() => delSeason(t.id)} className="font-body text-[11px] font-bold px-2" style={{ color: '#B23A2E' }}>Delete</button></>}</td>
+              </tr>
+            ))}
+            {targets.length === 0 && <tr><td colSpan={8} className="px-2 py-4 text-center font-body text-[12px]" style={{ color: INK_3 }}>No seasons yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {draft && <SeasonForm value={draft} onChange={setDraft} onSave={() => saveSeason(draft)} onCancel={() => setDraft(null)} />}
+
+      {/* Green exceptions */}
+      <div className="flex items-center justify-between mb-2 mt-5">
+        <p className="font-body text-[12px] font-bold" style={{ color: FOREST }}>Green exceptions</p>
+        {manage && greens.length > 0 && <button onClick={() => setExDraft({ areaId: greens[0].id, targetId: '', vwcLo: '', vwcHi: '', aim: '', reason: '' })} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>+ Add exception</button>}
+      </div>
+      <div className="rounded-2xl border overflow-x-auto" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
+        <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: 560 }}>
+          <thead><tr style={{ backgroundColor: PAPER }}>{['Green', 'Season', 'Low', 'High', 'Aim', 'Reason', ''].map((h) => <th key={h} className="font-body text-[10px] font-bold uppercase px-2 py-2 text-left" style={{ color: INK_3 }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {exceptions.map((e) => {
+              const g = greens.find((x) => x.id === e.areaId)
+              return (
+                <tr key={e.id} className="border-t" style={{ borderColor: HAIR }}>
+                  <td className="px-2 py-1.5 font-body text-[12px] font-semibold" style={{ color: INK }}>{g ? (g.name || `Green ${g.hole || ''}`) : '—'}</td>
+                  <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK_2 }}>{e.targetId ? (targets.find((t) => t.id === e.targetId)?.name || '—') : 'All'}</td>
+                  <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{e.vwcLo ?? '—'}</td>
+                  <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{e.vwcHi ?? '—'}</td>
+                  <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{e.aim ?? '—'}</td>
+                  <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK_2 }}>{e.reason || '—'}</td>
+                  <td className="px-2 py-1.5 text-right">{manage && <button onClick={() => delEx(e.id)} className="font-body text-[11px] font-bold px-2" style={{ color: '#B23A2E' }}>Delete</button>}</td>
+                </tr>
+              )
+            })}
+            {exceptions.length === 0 && <tr><td colSpan={7} className="px-2 py-4 text-center font-body text-[12px]" style={{ color: INK_3 }}>No exceptions. Greens follow the season range.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {exDraft && <ExceptionForm value={exDraft} greens={greens} targets={targets} onChange={setExDraft} onSave={() => saveEx(exDraft)} onCancel={() => setExDraft(null)} />}
+    </div>
+  )
+}
+
+function SeasonForm({ value, onChange, onSave, onCancel }) {
+  const set = (k, v) => onChange({ ...value, [k]: v })
+  const field = (k, label, ph) => (
+    <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>{label}</label>
+      <input value={value[k] ?? ''} onChange={(e) => set(k, e.target.value)} placeholder={ph} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
+  )
+  const valid = value.name && /^\d{2}-\d{2}$/.test(value.startMd) && /^\d{2}-\d{2}$/.test(value.endMd) && value.vwcLo !== '' && value.vwcHi !== ''
+  return (
+    <div className="rounded-2xl border p-3 mb-2" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {field('name', 'Name', 'Winter')}{field('startMd', 'Start MM-DD', '11-01')}{field('endMd', 'End MM-DD', '03-31')}{field('salinityMax', 'Max salt', 'optional')}
+        {field('vwcLo', 'Low %', '18')}{field('vwcHi', 'High %', '26')}{field('aim', 'Aim', 'optional')}
+      </div>
+      <div className="flex justify-end gap-2 mt-2"><button onClick={onCancel} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button><button onClick={onSave} disabled={!valid} className="font-body text-[12px] font-bold px-4 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Save season</button></div>
+    </div>
+  )
+}
+
+function ExceptionForm({ value, greens, targets, onChange, onSave, onCancel }) {
+  const set = (k, v) => onChange({ ...value, [k]: v })
+  return (
+    <div className="rounded-2xl border p-3 mb-2" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Green</label>
+          <select value={value.areaId} onChange={(e) => set('areaId', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5 bg-white" style={{ border: `1px solid ${HAIR}` }}>{greens.map((g) => <option key={g.id} value={g.id}>{g.name || `Green ${g.hole || ''}`}</option>)}</select></div>
+        <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Season</label>
+          <select value={value.targetId} onChange={(e) => set('targetId', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5 bg-white" style={{ border: `1px solid ${HAIR}` }}><option value="">All seasons</option>{targets.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+        <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Reason</label><input value={value.reason} onChange={(e) => set('reason', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
+        <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Low %</label><input value={value.vwcLo} onChange={(e) => set('vwcLo', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
+        <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>High %</label><input value={value.vwcHi} onChange={(e) => set('vwcHi', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
+        <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Aim</label><input value={value.aim} onChange={(e) => set('aim', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
+      </div>
+      <div className="flex justify-end gap-2 mt-2"><button onClick={onCancel} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button><button onClick={onSave} className="font-body text-[12px] font-bold px-4 py-1.5 rounded-lg text-white" style={{ backgroundColor: FOREST }}>Save</button></div>
     </div>
   )
 }
