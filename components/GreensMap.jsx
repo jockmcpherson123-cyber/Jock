@@ -82,7 +82,7 @@ export default function GreensMap({ user }) {
         setCourseId(cid)
         cmdb.fetchTargets(cid).then((tg) => {
           const t = resolveTarget(tg, new Date().toISOString().slice(0, 10))
-          if (live && t) setTargetTxt(`${t.lo}–${t.hi}%`)
+          if (live && t) setTargetTxt(`${t.aim}%`)
         }).catch(() => {})
         const imgs = await cmdb.fetchImagery(cid)
         if (!live) return

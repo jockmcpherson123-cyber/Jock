@@ -17,7 +17,7 @@ import { planReadingsImport, guessReadingMapping } from '@/lib/coursemap/import'
 import { idwValue, moistureStops, changeStops, colorAt, changeReadings } from '@/lib/coursemap/heat'
 import { suggestDepth, planByDepth } from '@/lib/coursemap/depth'
 import { lonLatToPixel } from '@/lib/coursemap/geo'
-import { resolveTarget, withException, coverageIssues, timelineMonths } from '@/lib/coursemap/targets'
+import { resolveTarget, withException, coverageIssues, timelineMonths, targetFields, targetAvg } from '@/lib/coursemap/targets'
 import { fetchWeather, dailyFromHourly } from '@/lib/weather'
 import { formatNumber, formatDate } from '@/lib/format'
 
@@ -28,7 +28,12 @@ const GREEN_OK = '#1E7A46'
 const canApprove = (role) => role === 'superintendent' || role === 'director'
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 const shiftDate = (iso, days) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + days); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
-const statusOf = (avg, t) => avg == null ? { label: '—', c: INK_3 } : avg < t.lo ? { label: 'Low', c: RED } : avg > t.hi ? { label: 'High', c: BLUE } : { label: 'In range', c: GREEN_OK }
+const statusOf = (avg, t) => {
+  if (avg == null || t == null) return { label: '—', c: INK_3 }
+  const d = avg - (t.aim ?? ((t.lo + t.hi) / 2))
+  if (Math.abs(d) <= 2) return { label: 'On target', c: GREEN_OK }
+  return d < 0 ? { label: `${Math.abs(d).toFixed(1)} under`, c: RED } : { label: `${d.toFixed(1)} over`, c: BLUE }
+}
 
 export default function GreensToday({ ctx, courseId, manage, user, activeImagery }) {
   const [date, setDate] = useState(todayISO())
@@ -105,13 +110,14 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
 
   const reloadTargets = async () => setTargets(await cmdb.fetchTargets(courseId))
   const saveRange = async () => {
-    const lo = Number(adjTarget.lo), hi = Number(adjTarget.hi), aim = adjTarget.aim === '' || adjTarget.aim == null ? null : Number(adjTarget.aim)
-    if (!(hi > lo)) { alert('High must be above Low.'); return }
-    const full = targets.find((t) => t.id === baseTarget.id)
+    const t = Number(adjTarget.target)
+    if (!isFinite(t)) { alert('Enter a target %.'); return }
+    const f = targetFields(t)
+    const full = targets.find((x) => x.id === baseTarget.id)
     try {
-      await cmdb.saveTarget(full ? { ...full, clubId: ctx.club.id, courseId, vwcLo: lo, vwcHi: hi, aim } : { clubId: ctx.club.id, courseId, name: 'All season', startMd: '11-01', endMd: '10-31', vwcLo: lo, vwcHi: hi, aim })
+      await cmdb.saveTarget(full ? { ...full, clubId: ctx.club.id, courseId, ...f } : { clubId: ctx.club.id, courseId, name: 'All season', startMd: '11-01', endMd: '10-31', ...f })
       await reloadTargets(); setAdjTarget(null)
-    } catch (e) { console.error(e); alert('Could not save the range.') }
+    } catch (e) { console.error(e); alert('Could not save the target.') }
   }
 
   // round pickers
@@ -193,19 +199,16 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="font-body text-[12px] px-2 py-1.5 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK }} />
         <button onClick={() => setDate(shiftDate(date, 1))} className="font-body text-[13px] font-bold px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK_2 }} aria-label="Next day">›</button>
         {date !== todayISO() && <button onClick={() => setDate(todayISO())} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: FERN }}>Today</button>}
-        <span className="font-body text-[11.5px] ml-1" style={{ color: INK_3 }}>target {selTarget.lo}–{selTarget.hi}%{selTarget.exception ? ' (green exception)' : ''} · aim {selTarget.aim}</span>
-        {manage && !adjTarget && <button onClick={() => setAdjTarget({ lo: baseTarget.lo, hi: baseTarget.hi, aim: baseTarget.aim })} className="font-body text-[11.5px] font-bold" style={{ color: FERN }}>Adjust range</button>}
+        <span className="font-body text-[11.5px] ml-1" style={{ color: INK_3 }}>target {selTarget.aim}%{selTarget.exception ? ' (green exception)' : ''}</span>
+        {manage && !adjTarget && <button onClick={() => setAdjTarget({ target: baseTarget.aim })} className="font-body text-[11.5px] font-bold" style={{ color: FERN }}>Adjust target</button>}
       </div>
       {adjTarget && (
         <div className="rounded-xl border p-2.5 mb-3 flex flex-wrap items-end gap-2" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
-          <span className="font-body text-[11.5px] font-bold self-center" style={{ color: INK_2 }}>{baseTarget.name || 'Season'} range</span>
-          {[['lo', 'Low %'], ['hi', 'High %'], ['aim', 'Aim']].map(([k, label]) => (
-            <div key={k}><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>{label}</label>
-              <input value={adjTarget[k] ?? ''} onChange={(e) => setAdjTarget((a) => ({ ...a, [k]: e.target.value }))} className="w-16 font-body text-[12px] px-2 py-1 rounded-lg mt-0.5 text-right" style={{ border: `1px solid ${HAIR}` }} /></div>
-          ))}
+          <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>{baseTarget.name || 'Season'} target %</label>
+            <input value={adjTarget.target ?? ''} onChange={(e) => setAdjTarget({ target: e.target.value })} className="w-20 font-body text-[13px] px-2 py-1.5 rounded-lg mt-0.5 text-right" style={{ border: `1px solid ${HAIR}` }} /></div>
           <button onClick={saveRange} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg text-white" style={{ backgroundColor: FOREST }}>Save</button>
           <button onClick={() => setAdjTarget(null)} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button>
-          <span className="font-body text-[10.5px] self-center" style={{ color: INK_3 }}>Changes the whole {baseTarget.name || 'season'} — full control on the Targets tab.</span>
+          <span className="font-body text-[10.5px] self-center" style={{ color: INK_3 }}>Sets the average for the whole {baseTarget.name || 'season'} — more on the Targets tab.</span>
         </div>
       )}
       <div className="flex items-center justify-between mb-3">
@@ -247,7 +250,7 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
                 <button onClick={() => setShowSpots((v) => !v)} className="font-body text-[11px] font-bold px-2 py-1 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK_2 }}>{showSpots ? 'Hide values' : 'Show values'}</button>
               </div>
               <GreenHeat green={sel} readings={heatReadings} mode={view === 'change' ? 'change' : 'abs'} lo={lo} hi={hi} showSpots={showSpots} aerial={aerial} georef={activeImagery} />
-              <ColorBar mode={view === 'change' ? 'change' : 'abs'} lo={lo} hi={hi} />
+              <ColorBar mode={view === 'change' ? 'change' : 'abs'} lo={lo} hi={hi} target={selTarget.aim} />
             </>
           )}
         </div>
@@ -354,7 +357,7 @@ function MoreTable({ round }) {
   )
 }
 
-function ColorBar({ mode, lo, hi }) {
+function ColorBar({ mode, lo, hi, target }) {
   const stops = mode === 'change' ? changeStops() : moistureStops(lo, hi)
   const min = stops[0].v, max = stops[stops.length - 1].v
   const grad = `linear-gradient(to right, ${stops.map((s) => `${s.color} ${((s.v - min) / (max - min) * 100).toFixed(0)}%`).join(', ')})`
@@ -362,7 +365,7 @@ function ColorBar({ mode, lo, hi }) {
     <div className="mt-2">
       <div className="h-2.5 rounded-full" style={{ background: grad }} />
       <div className="flex justify-between font-body text-[10px] mt-0.5" style={{ color: INK_3 }}>
-        {mode === 'change' ? <><span>Dried</span><span>No change</span></> : <><span>Dry</span><span>{lo}</span><span>{hi}</span><span>Wet</span></>}
+        {mode === 'change' ? <><span>Dried</span><span>No change</span></> : <><span>Dry</span><span>target {target}%</span><span>Wet</span></>}
       </div>
     </div>
   )
@@ -572,10 +575,10 @@ export function MoistureTargets({ ctx, courseId, manage }) {
   const months = timelineMonths(targets)
 
   const saveSeason = async (s) => {
-    try { await cmdb.saveTarget({ ...s, clubId: ctx.club.id, courseId }); setDraft(null); await load() } catch (e) { console.error(e); alert('Could not save — ' + (e.message || '')) }
+    try { await cmdb.saveTarget({ ...s, ...targetFields(s.target), clubId: ctx.club.id, courseId }); setDraft(null); await load() } catch (e) { console.error(e); alert('Could not save — ' + (e.message || '')) }
   }
   const delSeason = async (id) => { if (!window.confirm('Delete this season?')) return; try { await cmdb.deleteTarget(id); await load() } catch (e) { console.error(e) } }
-  const saveEx = async (e2) => { try { await cmdb.saveException({ ...e2, clubId: ctx.club.id }); setExDraft(null); await load() } catch (e) { console.error(e) } }
+  const saveEx = async (e2) => { try { await cmdb.saveException({ areaId: e2.areaId, targetId: e2.targetId, reason: e2.reason, ...(e2.target !== '' && e2.target != null ? targetFields(e2.target) : {}), clubId: ctx.club.id }); setExDraft(null); await load() } catch (e) { console.error(e) } }
   const delEx = async (id) => { try { await cmdb.deleteException(id); await load() } catch (e) { console.error(e) } }
 
   if (loading) return <p className="font-body text-[13px]" style={{ color: INK_2 }}>Loading…</p>
@@ -587,7 +590,7 @@ export function MoistureTargets({ ctx, courseId, manage }) {
         <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Year · Nov → Oct</p>
         <div className="flex rounded-lg overflow-hidden" style={{ height: 30 }}>
           {months.map((m, i) => (
-            <div key={i} className="flex-1 flex items-center justify-center" style={{ backgroundColor: m.target ? colorOf(m.target.id) : '#E2E0DB' }} title={m.target ? `${m.target.name}: ${m.target.lo}-${m.target.hi}%` : 'No season'}>
+            <div key={i} className="flex-1 flex items-center justify-center" style={{ backgroundColor: m.target ? colorOf(m.target.id) : '#E2E0DB' }} title={m.target ? `${m.target.name}: target ${m.target.aim}%` : 'No season'}>
               <span className="font-body text-[9px] font-bold" style={{ color: m.target ? 'white' : INK_3 }}>{MONTH_LABEL[m.month]}</span>
             </div>
           ))}
@@ -598,25 +601,23 @@ export function MoistureTargets({ ctx, courseId, manage }) {
       {/* Seasons */}
       <div className="flex items-center justify-between mb-2">
         <p className="font-body text-[12px] font-bold" style={{ color: FOREST }}>Seasons</p>
-        {manage && <button onClick={() => setDraft({ name: '', startMd: '', endMd: '', vwcLo: 20, vwcHi: 30, aim: '', salinityMax: '' })} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FOREST }}>+ Add season</button>}
+        {manage && <button onClick={() => setDraft({ name: '', startMd: '', endMd: '', target: 25, salinityMax: '' })} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full text-white" style={{ backgroundColor: FOREST }}>+ Add season</button>}
       </div>
       <div className="rounded-2xl border overflow-x-auto mb-2" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
-        <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: 640 }}>
-          <thead><tr style={{ backgroundColor: PAPER }}>{['Season', 'Start', 'End', 'Low', 'High', 'Aim', 'Max salt', ''].map((h) => <th key={h} className="font-body text-[10px] font-bold uppercase px-2 py-2 text-left" style={{ color: INK_3 }}>{h}</th>)}</tr></thead>
+        <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: 560 }}>
+          <thead><tr style={{ backgroundColor: PAPER }}>{['Season', 'Start', 'End', 'Target %', 'Max salt', ''].map((h) => <th key={h} className="font-body text-[10px] font-bold uppercase px-2 py-2 text-left" style={{ color: INK_3 }}>{h}</th>)}</tr></thead>
           <tbody>
             {targets.map((t) => (
               <tr key={t.id} className="border-t" style={{ borderColor: HAIR }}>
                 <td className="px-2 py-1.5 font-body text-[12px] font-semibold" style={{ color: INK }}><span className="inline-block w-2.5 h-2.5 rounded-sm mr-1.5" style={{ backgroundColor: colorOf(t.id) }} />{t.name || '—'}</td>
                 <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK_2 }}>{t.startMd}</td>
                 <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK_2 }}>{t.endMd}</td>
-                <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{t.vwcLo}%</td>
-                <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{t.vwcHi}%</td>
-                <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{t.aim ?? ((Number(t.vwcLo) + Number(t.vwcHi)) / 2)}</td>
+                <td className="px-2 py-1.5 font-body text-[12px] font-bold" style={{ color: INK }}>{targetAvg(t)}%</td>
                 <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK_2 }}>{t.salinityMax ?? '—'}</td>
-                <td className="px-2 py-1.5 text-right whitespace-nowrap">{manage && <><button onClick={() => setDraft({ ...t })} className="font-body text-[11px] font-bold px-2" style={{ color: FERN }}>Edit</button><button onClick={() => delSeason(t.id)} className="font-body text-[11px] font-bold px-2" style={{ color: '#B23A2E' }}>Delete</button></>}</td>
+                <td className="px-2 py-1.5 text-right whitespace-nowrap">{manage && <><button onClick={() => setDraft({ ...t, target: targetAvg(t) })} className="font-body text-[11px] font-bold px-2" style={{ color: FERN }}>Edit</button><button onClick={() => delSeason(t.id)} className="font-body text-[11px] font-bold px-2" style={{ color: '#B23A2E' }}>Delete</button></>}</td>
               </tr>
             ))}
-            {targets.length === 0 && <tr><td colSpan={8} className="px-2 py-4 text-center font-body text-[12px]" style={{ color: INK_3 }}>No seasons yet.</td></tr>}
+            {targets.length === 0 && <tr><td colSpan={6} className="px-2 py-4 text-center font-body text-[12px]" style={{ color: INK_3 }}>No seasons yet.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -625,11 +626,11 @@ export function MoistureTargets({ ctx, courseId, manage }) {
       {/* Green exceptions */}
       <div className="flex items-center justify-between mb-2 mt-5">
         <p className="font-body text-[12px] font-bold" style={{ color: FOREST }}>Green exceptions</p>
-        {manage && greens.length > 0 && <button onClick={() => setExDraft({ areaId: greens[0].id, targetId: '', vwcLo: '', vwcHi: '', aim: '', reason: '' })} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>+ Add exception</button>}
+        {manage && greens.length > 0 && <button onClick={() => setExDraft({ areaId: greens[0].id, targetId: '', target: '', reason: '' })} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>+ Add exception</button>}
       </div>
       <div className="rounded-2xl border overflow-x-auto" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
-        <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: 560 }}>
-          <thead><tr style={{ backgroundColor: PAPER }}>{['Green', 'Season', 'Low', 'High', 'Aim', 'Reason', ''].map((h) => <th key={h} className="font-body text-[10px] font-bold uppercase px-2 py-2 text-left" style={{ color: INK_3 }}>{h}</th>)}</tr></thead>
+        <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: 520 }}>
+          <thead><tr style={{ backgroundColor: PAPER }}>{['Green', 'Season', 'Target %', 'Reason', ''].map((h) => <th key={h} className="font-body text-[10px] font-bold uppercase px-2 py-2 text-left" style={{ color: INK_3 }}>{h}</th>)}</tr></thead>
           <tbody>
             {exceptions.map((e) => {
               const g = greens.find((x) => x.id === e.areaId)
@@ -637,15 +638,13 @@ export function MoistureTargets({ ctx, courseId, manage }) {
                 <tr key={e.id} className="border-t" style={{ borderColor: HAIR }}>
                   <td className="px-2 py-1.5 font-body text-[12px] font-semibold" style={{ color: INK }}>{g ? (g.name || `Green ${g.hole || ''}`) : '—'}</td>
                   <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK_2 }}>{e.targetId ? (targets.find((t) => t.id === e.targetId)?.name || '—') : 'All'}</td>
-                  <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{e.vwcLo ?? '—'}</td>
-                  <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{e.vwcHi ?? '—'}</td>
-                  <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK }}>{e.aim ?? '—'}</td>
+                  <td className="px-2 py-1.5 font-body text-[12px] font-bold" style={{ color: INK }}>{targetAvg(e) ?? '—'}%</td>
                   <td className="px-2 py-1.5 font-body text-[12px]" style={{ color: INK_2 }}>{e.reason || '—'}</td>
                   <td className="px-2 py-1.5 text-right">{manage && <button onClick={() => delEx(e.id)} className="font-body text-[11px] font-bold px-2" style={{ color: '#B23A2E' }}>Delete</button>}</td>
                 </tr>
               )
             })}
-            {exceptions.length === 0 && <tr><td colSpan={7} className="px-2 py-4 text-center font-body text-[12px]" style={{ color: INK_3 }}>No exceptions. Greens follow the season range.</td></tr>}
+            {exceptions.length === 0 && <tr><td colSpan={5} className="px-2 py-4 text-center font-body text-[12px]" style={{ color: INK_3 }}>No exceptions. Greens follow the season target.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -660,12 +659,12 @@ function SeasonForm({ value, onChange, onSave, onCancel }) {
     <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>{label}</label>
       <input value={value[k] ?? ''} onChange={(e) => set(k, e.target.value)} placeholder={ph} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
   )
-  const valid = value.name && /^\d{2}-\d{2}$/.test(value.startMd) && /^\d{2}-\d{2}$/.test(value.endMd) && value.vwcLo !== '' && value.vwcHi !== ''
+  const valid = value.name && /^\d{2}-\d{2}$/.test(value.startMd) && /^\d{2}-\d{2}$/.test(value.endMd) && value.target !== '' && value.target != null
   return (
     <div className="rounded-2xl border p-3 mb-2" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {field('name', 'Name', 'Winter')}{field('startMd', 'Start MM-DD', '11-01')}{field('endMd', 'End MM-DD', '03-31')}{field('salinityMax', 'Max salt', 'optional')}
-        {field('vwcLo', 'Low %', '18')}{field('vwcHi', 'High %', '26')}{field('aim', 'Aim', 'optional')}
+        {field('name', 'Name', 'Winter')}{field('startMd', 'Start MM-DD', '11-01')}{field('endMd', 'End MM-DD', '03-31')}
+        {field('target', 'Target %', '24')}{field('salinityMax', 'Max salt', 'optional')}
       </div>
       <div className="flex justify-end gap-2 mt-2"><button onClick={onCancel} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button><button onClick={onSave} disabled={!valid} className="font-body text-[12px] font-bold px-4 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Save season</button></div>
     </div>
@@ -681,10 +680,8 @@ function ExceptionForm({ value, greens, targets, onChange, onSave, onCancel }) {
           <select value={value.areaId} onChange={(e) => set('areaId', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5 bg-white" style={{ border: `1px solid ${HAIR}` }}>{greens.map((g) => <option key={g.id} value={g.id}>{g.name || `Green ${g.hole || ''}`}</option>)}</select></div>
         <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Season</label>
           <select value={value.targetId} onChange={(e) => set('targetId', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5 bg-white" style={{ border: `1px solid ${HAIR}` }}><option value="">All seasons</option>{targets.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
-        <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Reason</label><input value={value.reason} onChange={(e) => set('reason', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
-        <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Low %</label><input value={value.vwcLo} onChange={(e) => set('vwcLo', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
-        <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>High %</label><input value={value.vwcHi} onChange={(e) => set('vwcHi', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
-        <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Aim</label><input value={value.aim} onChange={(e) => set('aim', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
+        <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Target %</label><input value={value.target} onChange={(e) => set('target', e.target.value)} placeholder="e.g. 22" className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
+        <div className="sm:col-span-2"><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Reason</label><input value={value.reason} onChange={(e) => set('reason', e.target.value)} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} /></div>
       </div>
       <div className="flex justify-end gap-2 mt-2"><button onClick={onCancel} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button><button onClick={onSave} className="font-body text-[12px] font-bold px-4 py-1.5 rounded-lg text-white" style={{ backgroundColor: FOREST }}>Save</button></div>
     </div>
