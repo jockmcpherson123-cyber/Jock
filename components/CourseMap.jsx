@@ -201,6 +201,8 @@ export default function CourseMap({ user, manage }) {
   // Drawn shapes (surfaces + pipe lines you add) + the edit tools
   const [shapes, setShapes] = useState([])
   const [showShapes, setShowShapes] = useState(true)
+  const [showAerial, setShowAerial] = useState(true)   // the uploaded course aerial
+  const [showAsBuilt, setShowAsBuilt] = useState(true) // master toggle for pipes + surfaces + wires
   const [drawOpen, setDrawOpen] = useState(false)      // the draw toolbar is open
   const [draw, setDraw] = useState(null)               // active drawing {shape,kind,color,pts:[]}
   const [eraser, setEraser] = useState(false)          // tap a pipe to delete it
@@ -456,7 +458,7 @@ export default function CourseMap({ user, manage }) {
     let live = true
     ;(async () => {
       if (aerialRef.current) { aerialRef.current.remove(); aerialRef.current = null }
-      if (!aerial || !aerial.filePath || typeof L.imageOverlay?.rotated !== 'function') return
+      if (!showAerial || !aerial || !aerial.filePath || typeof L.imageOverlay?.rotated !== 'function') return
       const url = await cmdb.signedUrl(aerial.filePath)
       if (!live || !url) return
       const c = worldFileCorners({ A: aerial.pxSizeX, D: 0, B: 0, E: aerial.pxSizeY, C: aerial.ulX, F: aerial.ulY }, aerial.widthPx, aerial.heightPx, aerial.crs || 'EPSG:3857')
@@ -466,7 +468,7 @@ export default function CourseMap({ user, manage }) {
       } catch (e) { console.error('aerial place', e) }
     })()
     return () => { live = false }
-  }, [aerial, mode, mapTick])
+  }, [aerial, mode, mapTick, showAerial])
 
   // Live location marker — a blue dot with a direction arrow (phone compass) so
   // you can tell which way you're facing and walk the right way.
@@ -525,7 +527,7 @@ export default function CourseMap({ user, manage }) {
     const L = LRef.current, map = mainMap.current
     if (!L || !map || mode !== 'map') return
     if (pipeLayerRef.current) { pipeLayerRef.current.remove(); pipeLayerRef.current = null }
-    if (!transform || !pipes?.lines?.length || !showPipes) return
+    if (!transform || !pipes?.lines?.length || !showPipes || !showAsBuilt) return
     const H = pipes.imageH || IMAGE_H
     const group = L.layerGroup()
     try {
@@ -554,7 +556,7 @@ export default function CourseMap({ user, manage }) {
       pipeLayerRef.current = group
     } catch (e) { console.error('pipe render failed', e) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pipes, transform, mode, mapTick, showPipes, removedPipes])
+  }, [pipes, transform, mode, mapTick, showPipes, removedPipes, showAsBuilt])
 
   // Draw the control-wire loops as small color dots (reproduces the dotted
   // wire paths), one color per satellite/controller. Canvas keeps ~19k dots fast.
@@ -562,7 +564,7 @@ export default function CourseMap({ user, manage }) {
     const L = LRef.current, map = mainMap.current
     if (!L || !map || mode !== 'map') return
     if (wireLayerRef.current) { wireLayerRef.current.remove(); wireLayerRef.current = null }
-    if (!transform || !wires?.colors || !showWires) return
+    if (!transform || !wires?.colors || !showWires || !showAsBuilt) return
     const H = wires.imageH || IMAGE_H
     const group = L.layerGroup()
     try {
@@ -577,7 +579,7 @@ export default function CourseMap({ user, manage }) {
       wireLayerRef.current = group
     } catch (e) { console.error('wire render failed', e) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wires, transform, mode, mapTick, showWires])
+  }, [wires, transform, mode, mapTick, showWires, showAsBuilt])
 
   // Render the drawn shapes — surfaces (filled polygons) under the pipes, and
   // any pipe lines you've added, on top. Tap one to select/edit/delete.
@@ -585,7 +587,7 @@ export default function CourseMap({ user, manage }) {
     const L = LRef.current, map = mainMap.current
     if (!L || !map || mode !== 'map') return
     if (shapesLayerRef.current) { shapesLayerRef.current.remove(); shapesLayerRef.current = null }
-    if (!showShapes || shapes.length === 0) return
+    if (!showShapes || !showAsBuilt || shapes.length === 0) return
     const group = L.layerGroup()
     try {
       // Areas first (underneath), then lines.
@@ -608,7 +610,7 @@ export default function CourseMap({ user, manage }) {
       shapesLayerRef.current = group
     } catch (e) { console.error('shapes render failed', e) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shapes, showShapes, selShape, mode, mapTick])
+  }, [shapes, showShapes, selShape, mode, mapTick, showAsBuilt])
 
   // Live preview of the shape you're currently drawing (vertices + rubber line).
   useEffect(() => {
@@ -1103,6 +1105,10 @@ export default function CourseMap({ user, manage }) {
               <button onClick={recenter} title={locate ? 'Center on me' : 'Show my location'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: locate ? FOREST : '#94A3B8' }}><Navigation size={17} /></button>
               <button onClick={() => setShowFeatures((v) => !v)} title={showFeatures ? 'Hide heads' : 'Show heads'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showFeatures ? FERN : '#94A3B8' }}>{showFeatures ? <Eye size={17} /> : <EyeOff size={17} />}</button>
               <button onClick={() => setLabelsOn((v) => !v)} title={labelsOn ? 'Hide head numbers' : 'Show head numbers'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center font-body text-[11px] font-bold" style={{ color: labelsOn ? FERN : '#94A3B8' }}>R#</button>
+              {aerial && (
+                <button onClick={() => setShowAerial((v) => !v)} title={showAerial ? 'Hide aerial photo' : 'Show aerial photo'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center" style={{ color: showAerial ? FERN : '#94A3B8' }}><Camera size={17} /></button>
+              )}
+              <button onClick={() => setShowAsBuilt((v) => !v)} title={showAsBuilt ? 'Hide as-built (pipes, surfaces, wires)' : 'Show as-built'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center font-body text-[11px] font-extrabold" style={{ color: showAsBuilt ? '#2563EB' : '#94A3B8' }}>AB</button>
               {shapes.length > 0 && (
                 <button onClick={() => setShowShapes((v) => !v)} title={showShapes ? 'Hide surfaces' : 'Show surfaces'} className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center font-body text-[14px] font-bold" style={{ color: showShapes ? '#3f9b47' : '#94A3B8' }}>▦</button>
               )}
