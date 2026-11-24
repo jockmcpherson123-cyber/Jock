@@ -129,11 +129,18 @@ export default function GreensMap({ user }) {
           { opacity, interactive: false },
         )
         ov.addTo(map); overlayRef.current = ov
-        // Show ONLY the photo: fit to it and lock pan/zoom to its bounds.
+        // Show ONLY the photo: re-measure the box (it may have just been laid
+        // out), fit tightly to the photo, and lock pan/zoom to its bounds.
         const bounds = L.latLngBounds([[c.topLeft.lat, c.topLeft.lon], [c.topRight.lat, c.topRight.lon], [c.bottomLeft.lat, c.bottomLeft.lon], [c.bottomRight.lat, c.bottomRight.lon]])
-        map.fitBounds(bounds, { padding: [8, 8] })
-        map.setMaxBounds(bounds.pad(0.02))
-        map.setMinZoom(map.getBoundsZoom(bounds))
+        const fit = () => {
+          map.invalidateSize()
+          map.setMinZoom(0); map.setMaxBounds(null)
+          map.fitBounds(bounds, { padding: [6, 6] })
+          map.setMinZoom(map.getBoundsZoom(bounds)) // can't zoom out past the photo
+          map.setMaxBounds(bounds.pad(0.02))        // can't pan off it
+        }
+        fit()
+        setTimeout(fit, 200) // once more after layout settles
       }
     })()
     return () => { live = false }
@@ -197,7 +204,7 @@ export default function GreensMap({ user }) {
             />
           )}
 
-          <div ref={elRef} style={{ height: '62vh', minHeight: 420, borderRadius: 16, overflow: 'hidden', border: `1px solid ${HAIR}`, backgroundColor: '#0e1f16' }} />
+          <div ref={elRef} style={{ height: '80vh', minHeight: 520, borderRadius: 16, overflow: 'hidden', border: `1px solid ${HAIR}`, backgroundColor: '#0e1f16' }} />
           {imagery.length === 0 && (
             <p className="font-body text-[12px] mt-2" style={{ color: INK_3 }}>No photo yet — the satellite basemap is shown. {manage ? 'Tap “Add photo” to place your aerial.' : ''}</p>
           )}
