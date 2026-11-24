@@ -42,6 +42,7 @@ export default function GreensMap({ user }) {
   const mapRef = useRef(null)
   const elRef = useRef(null)
   const overlayRef = useRef(null)
+  const basemapRef = useRef(null)
 
   // Load club context + imagery.
   useEffect(() => {
@@ -83,8 +84,7 @@ export default function GreensMap({ user }) {
       const L = LRef.current
       if (!L || !elRef.current || mapRef.current) { if (++tries > 50) clearInterval(t); return }
       clearInterval(t)
-      const map = L.map(elRef.current, { center: CONGRESSIONAL, zoom: 16, zoomControl: true, preferCanvas: true })
-      L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, attribution: SAT_ATTR, crossOrigin: true }).addTo(map)
+      const map = L.map(elRef.current, { center: CONGRESSIONAL, zoom: 16, zoomControl: true, preferCanvas: true, maxBoundsViscosity: 1.0, attributionControl: false })
       mapRef.current = map
       setTimeout(() => map.invalidateSize(), 150)
     }, 60)
@@ -97,9 +97,17 @@ export default function GreensMap({ user }) {
     if (!L || !map || tab !== 'map') return
     let live = true
     ;(async () => {
+      // clear layers + any previous lock
       if (overlayRef.current) { map.removeLayer(overlayRef.current); overlayRef.current = null }
+      if (basemapRef.current) { map.removeLayer(basemapRef.current); basemapRef.current = null }
+      map.setMaxBounds(null); map.setMinZoom(0)
+
       const img = imagery.find((i) => i.id === selId)
-      if (!img || !img.filePath) return
+      if (!img || !img.filePath) {
+        // No photo yet → satellite basemap so the box isn't empty.
+        basemapRef.current = L.tileLayer(SAT_URL, { maxZoom: 22, maxNativeZoom: 19, attribution: SAT_ATTR, crossOrigin: true }).addTo(map)
+        return
+      }
       const url = await cmdb.signedUrl(img.filePath)
       if (!live || !url) return
       const c = worldFileCorners(
@@ -112,7 +120,11 @@ export default function GreensMap({ user }) {
           { opacity, interactive: false },
         )
         ov.addTo(map); overlayRef.current = ov
-        map.fitBounds([[c.topLeft.lat, c.topLeft.lon], [c.topRight.lat, c.topRight.lon], [c.bottomLeft.lat, c.bottomLeft.lon], [c.bottomRight.lat, c.bottomRight.lon]], { padding: [20, 20] })
+        // Show ONLY the photo: fit to it and lock pan/zoom to its bounds.
+        const bounds = L.latLngBounds([[c.topLeft.lat, c.topLeft.lon], [c.topRight.lat, c.topRight.lon], [c.bottomLeft.lat, c.bottomLeft.lon], [c.bottomRight.lat, c.bottomRight.lon]])
+        map.fitBounds(bounds, { padding: [8, 8] })
+        map.setMaxBounds(bounds.pad(0.02))
+        map.setMinZoom(map.getBoundsZoom(bounds))
       }
     })()
     return () => { live = false }
@@ -176,7 +188,7 @@ export default function GreensMap({ user }) {
             />
           )}
 
-          <div ref={elRef} style={{ height: '62vh', minHeight: 420, borderRadius: 16, overflow: 'hidden', border: `1px solid ${HAIR}` }} />
+          <div ref={elRef} style={{ height: '62vh', minHeight: 420, borderRadius: 16, overflow: 'hidden', border: `1px solid ${HAIR}`, backgroundColor: '#0e1f16' }} />
           {imagery.length === 0 && (
             <p className="font-body text-[12px] mt-2" style={{ color: INK_3 }}>No photo yet — the satellite basemap is shown. {manage ? 'Tap “Add photo” to place your aerial.' : ''}</p>
           )}
