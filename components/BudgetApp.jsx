@@ -53,6 +53,10 @@ export default function BudgetApp({ user }) {
   const [batches, setBatches] = useState([])
   const [uploadOpen, setUploadOpen] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [profiles, setProfiles] = useState({})
+  const [activity, setActivity] = useState([])
+  const reload = () => setRefreshKey((k) => k + 1)
+  const myId = user?.id || null
 
   // Load the list of years once.
   useEffect(() => {
@@ -74,9 +78,11 @@ export default function BudgetApp({ user }) {
     setLoading(true); setErr('')
     ;(async () => {
       try {
-        const [d, b] = await Promise.all([bdb.fetchBudgetData(yearId), bdb.fetchImportBatches(20)])
+        const [d, b, profs, act] = await Promise.all([
+          bdb.fetchBudgetData(yearId), bdb.fetchImportBatches(20), bdb.fetchProfilesMap(), bdb.fetchActivity(120),
+        ])
         if (!live) return
-        setData(d); setBatches(b)
+        setData(d); setBatches(b); setProfiles(profs); setActivity(act)
       } catch (e) {
         if (live) setErr('Could not load the budget — check your connection.')
         console.error(e)
@@ -140,6 +146,14 @@ export default function BudgetApp({ user }) {
   }
   const shownOperating = visibleOperating.filter((x) => filter === 'all' || x.c.status === filter)
 
+  const unreadByLine = {}
+  let unreadTotal = 0
+  for (const [lid, notes] of Object.entries(data.notesByLine || {})) {
+    const u = notes.filter((n) => !(n.readBy || []).includes(myId)).length
+    if (u) { unreadByLine[lid] = u; unreadTotal += u }
+  }
+  const pendingCount = data.transfers.filter((t) => t.status === 'pending').length
+
   const selected = selLineId ? computed.operating.concat(computed.payroll).find((x) => x.line.id === selLineId) : null
 
   const exportCsv = () => downloadCsv(year, through, computed)
@@ -173,27 +187,29 @@ export default function BudgetApp({ user }) {
 
       {tab === 'expenses' && !selected && (
         <>
-          <SummaryTiles computed={computed} year={year} through={through} />
+          <SummaryTiles computed={computed} year={year} through={through} pending={pendingCount} unread={unreadTotal} />
           <YearProgress year={year} operatingAgg={computed.operatingAgg} />
           <FilterBar
             filter={filter} counts={filterCounts} onFilter={setFilter}
             view={view} onView={setView} showEmpty={showEmpty} onShowEmpty={setShowEmpty}
           />
           {view === 'cards'
-            ? <Cards groups={groupOperating(shownOperating)} onOpen={setSelLineId} />
+            ? <Cards groups={groupOperating(shownOperating)} onOpen={setSelLineId} unreadByLine={unreadByLine} />
             : <ExpenseTable rows={shownOperating} sort={sort} onSort={setSort} onOpen={setSelLineId} grand={aggregate(shownOperating.map((x) => x.c))} />}
         </>
       )}
 
       {tab === 'expenses' && selected && (
-        <LineDetail key={selected.line.id} item={selected} data={data} through={through} onBack={() => setSelLineId(null)} />
+        <LineDetail key={selected.line.id} item={selected} data={data} year={year} through={through}
+          isAdmin={isAdmin} myId={myId} profiles={profiles} lines={computed.operating.concat(computed.payroll)}
+          onBack={() => setSelLineId(null)} reload={reload} />
       )}
 
       {tab === 'payroll' && <PayrollTab payroll={computed.payroll} agg={computed.payrollAgg} />}
 
-      {tab === 'requests' && <Placeholder phase={3} title="Transfer requests" note="Request, approve and track moves between lines." />}
+      {tab === 'requests' && <RequestsTab transfers={data.transfers} lineById={lineNameMap(data.lines)} profiles={profiles} isAdmin={isAdmin} year={year} reload={reload} />}
       {tab === 'build' && <Placeholder phase={4} title={`Build FY${year.fiscalYear + 1} budget`} note="Start from this year or last year's actuals, spread across months, submit and approve." />}
-      {tab === 'activity' && <Placeholder phase={3} title="Activity" note="A feed of uploads, approvals, forecast changes, notes and edits." />}
+      {tab === 'activity' && <ActivityTab activity={activity} profiles={profiles} />}
     </div>
   )
 }
@@ -262,9 +278,9 @@ function Tabs({ tab, onTab, requests, nextYear }) {
 }
 
 // ── Summary tiles ────────────────────────────────────────────────────────────
-function SummaryTiles({ computed, through }) {
+function SummaryTiles({ computed, through, pending = 0, unread = 0 }) {
   const op = computed.operatingAgg, pay = computed.payrollAgg, tot = computed.totalAgg
-  const attention = computed.operating.filter((x) => x.c.status === 'over' || x.c.status === 'watch').length
+  const attention = computed.operating.filter((x) => x.c.status === 'over' || x.c.status === 'watch').length + pending + unread
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
       <Tile title="Operating budget (year)">
@@ -288,7 +304,7 @@ function SummaryTiles({ computed, through }) {
       <Tile title="Needs attention">
         <Big>{attention}</Big>
         <Sub>{computed.operating.filter((x) => x.c.status === 'over').length} over · {computed.operating.filter((x) => x.c.status === 'watch').length} watch</Sub>
-        <Sub>0 open requests · 0 unread notes</Sub>
+        <Sub>{pending} open request{pending === 1 ? '' : 's'} · {unread} unread note{unread === 1 ? '' : 's'}</Sub>
       </Tile>
     </div>
   )
@@ -357,7 +373,7 @@ function groupOperating(rows) {
     .map((k) => ({ key: k, label: GROUP_LABELS[k] || k, rows: by[k], agg: aggregate(by[k].map((x) => x.c)) }))
 }
 
-function Cards({ groups, onOpen }) {
+function Cards({ groups, onOpen, unreadByLine = {} }) {
   if (!groups.length) return <Empty>No lines match this filter.</Empty>
   return (
     <div className="space-y-5">
@@ -371,7 +387,7 @@ function Cards({ groups, onOpen }) {
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {g.rows.map((r) => <LineCard key={r.line.id} item={r} onOpen={onOpen} />)}
+            {g.rows.map((r) => <LineCard key={r.line.id} item={r} onOpen={onOpen} unread={unreadByLine[r.line.id] || 0} />)}
           </div>
         </div>
       ))}
@@ -388,7 +404,7 @@ function Bar({ actual, budget, color }) {
   )
 }
 
-function LineCard({ item, onOpen }) {
+function LineCard({ item, onOpen, unread = 0 }) {
   const { line, c } = item
   const st = statusOf(c.status)
   return (
@@ -407,7 +423,12 @@ function LineCard({ item, onOpen }) {
         <span>Left {formatMoneyCents(c.left)}</span>
         <span style={{ color: c.forecast - c.yearBudget > 0 ? RED : INK_2 }}>Fcst {formatMoneyCents(c.forecast)}</span>
       </div>
-      {c.committed > 0 && <p className="font-body text-[10.5px] mt-1" style={{ color: FERN }}>Committed {formatMoneyCents(c.committed)}</p>}
+      {(c.committed > 0 || unread > 0) && (
+        <div className="flex items-center gap-3 mt-1">
+          {c.committed > 0 && <span className="font-body text-[10.5px]" style={{ color: FERN }}>Committed {formatMoneyCents(c.committed)}</span>}
+          {unread > 0 && <span className="font-body text-[10.5px] font-bold" style={{ color: GOLD }}>{unread} unread note{unread === 1 ? '' : 's'}</span>}
+        </div>
+      )}
     </button>
   )
 }
@@ -557,13 +578,36 @@ function PayrollTab({ payroll, agg }) {
 }
 
 // ── Line detail ────────────────────────────────────────────────────────────
-function LineDetail({ item, data, through, onBack }) {
+function LineDetail({ item, data, year, through, isAdmin, myId, profiles, lines, onBack, reload }) {
   const { line, c } = item
   const [monthPick, setMonthPick] = useState(through)
+  const [panel, setPanel] = useState(null) // 'note' | 'forecast' | 'transfer'
+  const [noteText, setNoteText] = useState('')
+  const [fcVal, setFcVal] = useState('')
+  const [fcNote, setFcNote] = useState('')
+  const [xfTo, setXfTo] = useState('')
+  const [xfAmt, setXfAmt] = useState('')
+  const [xfReason, setXfReason] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const notes = data.notesByLine[line.id] || []
+  // Mark this line's notes read for me, once, when the detail opens.
+  useEffect(() => {
+    const unread = notes.filter((n) => !(n.readBy || []).includes(myId))
+    if (unread.length) bdb.markNotesRead(unread).then(reload).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const run = async (fn) => { setBusy(true); try { await fn(); setPanel(null); setNoteText(''); setFcVal(''); setFcNote(''); setXfTo(''); setXfAmt(''); setXfReason(''); reload() } catch (e) { console.error(e) } setBusy(false) }
+  const saveNote = () => noteText.trim() && run(() => bdb.addNote(line.id, noteText.trim()))
+  const saveForecast = () => fcVal !== '' && run(() => bdb.addForecast(line.id, Math.round(Number(fcVal) * 100), fcNote.trim()))
+  const saveTransfer = () => xfTo && Number(xfAmt) > 0 && run(() => bdb.requestTransfer({ yearId: year.id, fromLineId: line.id, toLineId: xfTo, amountCents: Math.round(Number(xfAmt) * 100), reason: xfReason.trim() }))
+
   const st = statusOf(c.status)
   const budgetMonths = data.monthsByLine[line.id] || Array(12).fill(0)
   const actuals = data.actualsByLine[line.id] || []
-  const net = data.approvedTransfers // calc already applied; chart shows plan
+  const myTransfers = data.transfers.filter((t) => t.fromLineId === line.id || t.toLineId === line.id)
+  const toLine = lines.find((x) => x.line.id === xfTo)
   const invoices = actuals.filter((a) => a.monthIndex === monthPick)
   const invTotal = invoices.reduce((s, a) => s + a.amountCents, 0)
   const maxBar = Math.max(1, ...budgetMonths, ...FY_MONTHS.map((_, i) => actualOf(actuals, i + 1)))
@@ -583,12 +627,50 @@ function LineDetail({ item, data, through, onBack }) {
           <p className="font-body text-[11.5px] mt-0.5" style={{ color: INK_3 }}>{line.glCode}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {['Add note', 'Update forecast', 'Request transfer'].map((b) => (
-            <button key={b} disabled title="Available in Phase 3"
-              className="font-body text-[12px] font-bold px-3 py-2 rounded-xl opacity-50 cursor-not-allowed" style={{ border: `1px solid ${HAIR}`, color: INK_2 }}>{b}</button>
+          {[['note', 'Add note'], ['forecast', 'Update forecast'], ['transfer', 'Request transfer']].map(([k, b]) => (
+            <button key={k} onClick={() => setPanel(panel === k ? null : k)}
+              className="font-body text-[12px] font-bold px-3 py-2 rounded-xl" style={panel === k ? { backgroundColor: FOREST, color: 'white' } : { border: `1px solid ${HAIR}`, color: FOREST }}>{b}</button>
           ))}
         </div>
       </div>
+
+      {panel === 'note' && (
+        <Panel>
+          <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={3} placeholder="Add a note for the other side…" className="w-full border rounded-xl px-3 py-2 font-body text-[13px]" style={{ borderColor: HAIR }} />
+          <PanelActions onCancel={() => setPanel(null)} onSave={saveNote} busy={busy} saveLabel="Post note" disabled={!noteText.trim()} />
+        </Panel>
+      )}
+      {panel === 'forecast' && (
+        <Panel>
+          <div className="flex items-center gap-2">
+            <span className="font-body text-[12px]" style={{ color: INK_2 }}>Forecast year-end $</span>
+            <input type="number" value={fcVal} onChange={(e) => setFcVal(e.target.value)} placeholder={(c.forecast / 100).toFixed(0)} className="w-32 border rounded-lg px-2 py-1.5 font-body text-[13px] text-right" style={{ borderColor: HAIR }} />
+            <input value={fcNote} onChange={(e) => setFcNote(e.target.value)} placeholder="Why (optional)" className="flex-1 border rounded-lg px-2 py-1.5 font-body text-[13px]" style={{ borderColor: HAIR }} />
+          </div>
+          <PanelActions onCancel={() => setPanel(null)} onSave={saveForecast} busy={busy} saveLabel="Save forecast" disabled={fcVal === ''} />
+        </Panel>
+      )}
+      {panel === 'transfer' && (
+        <Panel>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-body text-[12px]" style={{ color: INK_2 }}>Move $</span>
+            <input type="number" value={xfAmt} onChange={(e) => setXfAmt(e.target.value)} placeholder="0" className="w-28 border rounded-lg px-2 py-1.5 font-body text-[13px] text-right" style={{ borderColor: HAIR }} />
+            <span className="font-body text-[12px]" style={{ color: INK_2 }}>from <b>{line.description}</b> to</span>
+            <select value={xfTo} onChange={(e) => setXfTo(e.target.value)} className="border rounded-lg px-2 py-1.5 font-body text-[13px] bg-white" style={{ borderColor: HAIR, minWidth: 200 }}>
+              <option value="">Choose a line…</option>
+              {lines.filter((x) => x.line.id !== line.id && x.line.section === line.section).map((x) => <option key={x.line.id} value={x.line.id}>{x.line.description}</option>)}
+            </select>
+          </div>
+          <input value={xfReason} onChange={(e) => setXfReason(e.target.value)} placeholder="Reason" className="w-full border rounded-lg px-2 py-1.5 mt-2 font-body text-[13px]" style={{ borderColor: HAIR }} />
+          {xfTo && Number(xfAmt) > 0 && (
+            <p className="font-body text-[11.5px] mt-2" style={{ color: INK_2 }}>
+              After: <b>{line.description}</b> {formatMoneyCents(c.yearBudget - Math.round(Number(xfAmt) * 100))} ·
+              <b> {toLine?.line.description}</b> {formatMoneyCents((toLine?.c.yearBudget || 0) + Math.round(Number(xfAmt) * 100))} — total unchanged.
+            </p>
+          )}
+          <PanelActions onCancel={() => setPanel(null)} onSave={saveTransfer} busy={busy} saveLabel="Request transfer" disabled={!xfTo || !(Number(xfAmt) > 0)} />
+        </Panel>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <Tile title="Year budget"><Big>{formatMoneyCents(c.yearBudget)}</Big></Tile>
@@ -653,12 +735,53 @@ function LineDetail({ item, data, through, onBack }) {
           <span style={{ color: INK_2 }}>Original approved budget</span>
           <span className="font-bold" style={{ color: INK }}>{formatMoneyCents(c.yearBudget)}</span>
         </div>
-        {data.forecastByLine[line.id]
-          ? <div className="flex items-center justify-between font-body text-[12px] py-1 border-t" style={{ borderColor: HAIR }}><span style={{ color: INK_2 }}>Latest forecast</span><span className="font-bold" style={{ color: INK }}>{formatMoneyCents(data.forecastByLine[line.id].yearEndCents)}</span></div>
-          : <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>No forecast updates yet (Phase 3).</p>}
+        {(data.forecastsByLine[line.id] || []).map((f, i) => (
+          <div key={i} className="flex items-center justify-between font-body text-[12px] py-1 border-t" style={{ borderColor: HAIR }}>
+            <span style={{ color: INK_2 }}>{formatDate(f.createdAt, 'list')} · {profiles[f.createdBy]?.name || 'Someone'}{f.note ? ` — ${f.note}` : ''}</span>
+            <span className="font-bold" style={{ color: INK }}>{formatMoneyCents(f.yearEndCents)}</span>
+          </div>
+        ))}
+        {!(data.forecastsByLine[line.id] || []).length && <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>No forecast updates yet — the forecast defaults to YTD + remaining budget.</p>}
       </div>
 
-      <Placeholder phase={3} title="Notes & transfers" note="The notes thread and transfer request panel for this line arrive in Phase 3." />
+      {/* Notes thread */}
+      <div className="rounded-2xl border p-4 mb-4" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
+        <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Notes</p>
+        {notes.length === 0 ? <p className="font-body text-[12px]" style={{ color: INK_3 }}>No notes yet.</p> : (
+          <div className="space-y-2">
+            {notes.map((n) => (
+              <div key={n.id} className="rounded-xl p-2.5" style={{ backgroundColor: PAPER }}>
+                <p className="font-body text-[10.5px] mb-0.5" style={{ color: INK_3 }}>{profiles[n.authorId]?.name || 'Someone'} · {formatDate(n.createdAt, 'list')}</p>
+                <p className="font-body text-[12.5px]" style={{ color: INK }}>{n.body}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Transfers involving this line */}
+      {myTransfers.length > 0 && (
+        <div className="rounded-2xl border p-4 mb-4" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
+          <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Transfers</p>
+          <div className="space-y-2">
+            {myTransfers.map((t) => (
+              <TransferRow key={t.id} t={t} lineById={lineNameMap(data.lines)} profiles={profiles} isAdmin={isAdmin} year={year} reload={reload} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Panel({ children }) {
+  return <div className="rounded-2xl border p-3 mb-4" style={{ borderColor: HAIR, backgroundColor: PAPER }}>{children}</div>
+}
+function PanelActions({ onCancel, onSave, busy, saveLabel, disabled }) {
+  return (
+    <div className="flex justify-end gap-2 mt-2">
+      <button onClick={onCancel} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button>
+      <button onClick={onSave} disabled={busy || disabled} className="font-body text-[12px] font-bold px-3.5 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : saveLabel}</button>
     </div>
   )
 }
@@ -667,6 +790,83 @@ function actualOf(actuals, mi) {
   let t = 0
   for (const a of actuals) if (a.monthIndex === mi) t += a.amountCents
   return t
+}
+
+function lineNameMap(lines) {
+  const m = {}
+  for (const l of lines) m[l.id] = { glCode: l.glCode, description: l.description }
+  return m
+}
+
+// ── Transfers: one row, with approve/decline for finance ───────────────────────
+function TransferRow({ t, lineById, profiles, isAdmin, year, reload }) {
+  const [note, setNote] = useState('')
+  const [month, setMonth] = useState(fiscalMonthIndex(new Date(), year.startsOn) || 12)
+  const [busy, setBusy] = useState(false)
+  const from = lineById[t.fromLineId]?.description || '—'
+  const to = lineById[t.toLineId]?.description || '—'
+  const stColor = t.status === 'approved' ? GREEN : t.status === 'declined' ? RED : AMBER
+  const decide = async (status) => { setBusy(true); try { await bdb.decideTransfer({ id: t.id, status, decisionNote: note.trim(), effectiveMonth: month }); reload() } catch (e) { console.error(e) } setBusy(false) }
+  return (
+    <div className="rounded-xl border p-3" style={{ borderColor: HAIR }}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="font-body text-[13px]" style={{ color: INK }}>
+          <b>{formatMoneyCents(t.amountCents)}</b> · {from} → {to}
+        </div>
+        <span className="font-body text-[10px] font-bold px-2 py-0.5 rounded-full capitalize" style={{ color: stColor, backgroundColor: stColor === AMBER ? '#FBF2E0' : stColor === GREEN ? '#E7F3EC' : '#F6E5E2' }}>{t.status}</span>
+      </div>
+      <p className="font-body text-[11.5px] mt-1" style={{ color: INK_2 }}>
+        {t.reason || 'No reason given'} · requested by {profiles[t.requestedBy]?.name || '—'} {formatDate(t.requestedAt, 'list')}
+        {t.status !== 'pending' && t.decidedBy && ` · ${t.status} by ${profiles[t.decidedBy]?.name || '—'}${t.effectiveMonth ? ` (lands ${monthLabel(t.effectiveMonth)})` : ''}`}
+        {t.decisionNote ? ` — ${t.decisionNote}` : ''}
+      </p>
+      {isAdmin && t.status === 'pending' && (
+        <div className="flex flex-wrap items-center gap-2 mt-2">
+          <span className="font-body text-[11px]" style={{ color: INK_2 }}>Lands in</span>
+          <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="border rounded-lg px-2 py-1 font-body text-[12px] bg-white" style={{ borderColor: HAIR }}>
+            {FY_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Decision note (optional)" className="flex-1 border rounded-lg px-2 py-1 font-body text-[12px]" style={{ borderColor: HAIR, minWidth: 140 }} />
+          <button onClick={() => decide('approved')} disabled={busy} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ backgroundColor: GREEN }}>Approve</button>
+          <button onClick={() => decide('declined')} disabled={busy} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: RED, border: `1px solid ${HAIR}` }}>Decline</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RequestsTab({ transfers, lineById, profiles, isAdmin, year, reload }) {
+  const ordered = [...transfers].sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || String(b.requestedAt).localeCompare(String(a.requestedAt)))
+  if (!ordered.length) return <Empty>No transfer requests yet. Open a line and choose “Request transfer”.</Empty>
+  return (
+    <div className="space-y-2">
+      {!isAdmin && <p className="font-body text-[11.5px] mb-1" style={{ color: INK_3 }}>Only the CFO / Accounting can approve or decline.</p>}
+      {ordered.map((t) => <TransferRow key={t.id} t={t} lineById={lineById} profiles={profiles} isAdmin={isAdmin} year={year} reload={reload} />)}
+    </div>
+  )
+}
+
+function ActivityTab({ activity, profiles }) {
+  if (!activity.length) return <Empty>No activity yet. Uploads, approvals, forecasts, notes and edits show here.</Empty>
+  const verb = (a) => {
+    if (a.table === 'import_batches') return a.newValue || 'uploaded a file'
+    if (a.table === 'forecasts') return `updated a forecast → ${formatMoneyCents(Number(a.newValue))}`
+    if (a.table === 'transfers' && a.field === 'request') return a.newValue
+    if (a.table === 'transfers' && a.field === 'decision') return `${a.newValue} a transfer`
+    if (a.table === 'line_notes') return `added a note: “${a.newValue}”`
+    if (a.table === 'budget_lines' || a.table === 'budget_months') return `edited ${a.field} (${a.oldValue} → ${a.newValue})`
+    return `${a.field}: ${a.newValue}`
+  }
+  return (
+    <div className="rounded-2xl border divide-y" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
+      {activity.map((a) => (
+        <div key={a.id} className="px-4 py-2.5 flex items-start justify-between gap-3" style={{ borderColor: HAIR }}>
+          <p className="font-body text-[12.5px]" style={{ color: INK }}><b>{profiles[a.userId]?.name || 'Someone'}</b> {verb(a)}</p>
+          <span className="font-body text-[11px] shrink-0" style={{ color: INK_3 }}>{formatDate(a.at, 'list')}</span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 // ── Small shared bits ─────────────────────────────────────────────────────────
