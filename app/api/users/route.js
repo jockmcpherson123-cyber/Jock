@@ -21,7 +21,7 @@ function siteUrl(request) {
 
 export const dynamic = 'force-dynamic'
 
-const ROLES = ['operator', 'assistant', 'superintendent', 'director']
+const ROLES = ['operator', 'assistant', 'superintendent', 'director', 'finance']
 // Roles that can manage the app and its logins (everyone but plain operators).
 const MANAGE_ROLES = ['assistant', 'superintendent', 'director']
 

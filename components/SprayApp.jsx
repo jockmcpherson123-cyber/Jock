@@ -99,6 +99,7 @@ import ProgramAdvice from '@/components/ProgramAdvice'
 import StimpCam from '@/components/StimpCam'
 import GpsCoverage from '@/components/GpsCoverage'
 import ProductPerformance from '@/components/ProductPerformance'
+import BudgetApp from '@/components/BudgetApp'
 import { libraryComplianceGaps } from '@/lib/compliance'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
@@ -131,6 +132,10 @@ const canManage = (role) => role === 'assistant' || role === 'superintendent' ||
 const canApprove = (role) => role === 'director'
 // Who can open Settings → Users & Logins and create/change accounts.
 const canManageUsers = (role) => canManage(role)
+// Budget section: superintendent, director and finance (CFO/Accounting) can see
+// it; a finance user sees ONLY Budget and no other part of the app.
+const canBudget = (role) => role === 'superintendent' || role === 'director' || role === 'finance'
+const isFinanceOnly = (role) => role === 'finance'
 
 // Standard PPE options and common field instructions (quick-insert on a sheet).
 const PPE_OPTIONS = ['Gloves', 'Long Sleeves', 'Eye Protection', 'Respirator', 'Coveralls', 'Chemical Boots']
@@ -330,6 +335,11 @@ const NAV_MANAGER = [
 ]
 const NAV_MANAGER_BOTTOM = [{ id: 'settings', label: 'Settings', m: 'spray', r: 'settings' }]
 
+// Finance group — appended for managers who hold the budget permission, and the
+// whole rail for a finance-only (CFO/Accounting) user.
+const FINANCE_GROUP = { title: 'Finance', items: [{ id: 'budget', label: 'Budget', m: 'budget', r: null }] }
+const NAV_BUDGET_ONLY = [FINANCE_GROUP]
+
 const NAV_CREW = [
   { items: [{ id: 'tospray', label: 'To Spray', m: 'spray', r: 'tospray', icon: Droplet }] },
   { title: 'Spraying', items: [
@@ -357,8 +367,13 @@ function flattenNav(groups, bottom = []) {
 // ── ROOT ────────────────────────────────────────────────────────────────────
 export default function SprayApp({ user }) {
   const manage = canManage(user.role)
-  const groups = manage ? NAV_MANAGER : NAV_CREW
-  const bottom = manage ? NAV_MANAGER_BOTTOM : []
+  const budgetOnly = isFinanceOnly(user.role)
+  const groups = budgetOnly
+    ? NAV_BUDGET_ONLY
+    : manage
+      ? (canBudget(user.role) ? [...NAV_MANAGER, FINANCE_GROUP] : NAV_MANAGER)
+      : NAV_CREW
+  const bottom = budgetOnly ? [] : manage ? NAV_MANAGER_BOTTOM : []
   const allItems = flattenNav(groups, bottom)
   const initial = allItems[0]
 
@@ -453,7 +468,8 @@ export default function SprayApp({ user }) {
           )}
 
           <div className="flex-1 min-w-0">
-            {sel.m === 'spray' ? <SprayOpsModule user={user} nav={nav} hideChrome homeMode={!!sel.home} course={sel.follow ? course : ''} />
+            {sel.m === 'budget' ? <BudgetApp user={user} />
+              : sel.m === 'spray' ? <SprayOpsModule user={user} nav={nav} hideChrome homeMode={!!sel.home} course={sel.follow ? course : ''} />
               : sel.m === 'turf' ? <TurfPerformanceModule user={user} nav={nav} hideChrome course={sel.follow ? course : ''} />
               : sel.m === 'playbook' ? <PlaybookModule user={user} manage={manage} hideChrome />
               : sel.m === 'tournament' ? <Tournament />
@@ -553,6 +569,7 @@ function roleLabel(role) {
   return role === 'director' ? 'Director of Grounds'
     : role === 'superintendent' ? 'Superintendent'
     : role === 'assistant' ? 'Assistant Superintendent'
+    : role === 'finance' ? 'Finance (CFO / Accounting)'
     : 'Operator'
 }
 
@@ -7446,11 +7463,12 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
 // Create logins, set roles, reset passwords and remove users without leaving
 // the app. All the real work happens server-side in /api/users with the
 // service-role key; this screen only calls it.
-const ROLE_LABEL = { operator: 'Operator', assistant: 'Assistant Supt.', superintendent: 'Superintendent', director: 'Director' }
+const ROLE_LABEL = { operator: 'Operator', assistant: 'Assistant Supt.', superintendent: 'Superintendent', director: 'Director', finance: 'Finance' }
 const ROLE_STYLE = {
   director: { backgroundColor: '#FBF4DF', color: '#886717', border: '1px solid #E7D9A8' },
   superintendent: { backgroundColor: '#EAF2EC', color: '#2F5A3D', border: '1px solid #D5E5DA' },
   assistant: { backgroundColor: '#EAF2EC', color: '#2F5A3D', border: '1px solid #D5E5DA' },
+  finance: { backgroundColor: '#EAF0F6', color: '#2D4A73', border: '1px solid #CFDDF0' },
   operator: { backgroundColor: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0' },
 }
 function UsersSettings() {
@@ -7527,6 +7545,7 @@ function UsersSettings() {
                 <option value="assistant">Assistant Superintendent — manage the plan</option>
                 <option value="superintendent">Superintendent — manage the plan</option>
                 <option value="director">Director — manage + approve</option>
+                <option value="finance">Finance — Budget only (CFO / Accounting)</option>
               </select>
             </div>
           </div>
