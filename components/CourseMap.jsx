@@ -202,7 +202,7 @@ export default function CourseMap({ user, manage }) {
   const [shapes, setShapes] = useState([])
   const [showShapes, setShowShapes] = useState(true)
   const [showAerial, setShowAerial] = useState(true)   // the uploaded course aerial
-  const [showAsBuilt, setShowAsBuilt] = useState(true) // master toggle for pipes + surfaces + wires
+  const [showAsBuilt, setShowAsBuilt] = useState(false) // master toggle for pipes + surfaces + wires (off = just the aerial)
   const [drawOpen, setDrawOpen] = useState(false)      // the draw toolbar is open
   const [draw, setDraw] = useState(null)               // active drawing {shape,kind,color,pts:[]}
   const [eraser, setEraser] = useState(false)          // tap a pipe to delete it
@@ -251,6 +251,7 @@ export default function CourseMap({ user, manage }) {
   const addModeRef = useRef(false)
   useEffect(() => { addModeRef.current = addMode }, [addMode])
   const mainRef = useRef(null), mainMap = useRef(null), overlayRef = useRef(null), locRef = useRef(null), accRef = useRef(null)
+  const satRef = useRef(null)
   const drawRef = useRef(null), drawMap = useRef(null), drawPinRef = useRef(null), drawGcpRef = useRef(null)
   // Satellite pairing map (photo calibration) + a ref so its click handler reads
   // the live pending pixel without re-creating the map.
@@ -397,6 +398,7 @@ export default function CourseMap({ user, manage }) {
     tl.on('tileerror', () => { errs += 1; setDiag((d) => ({ ...d, err: errs, tiles: 'error' }))
       if (errs === 6 && !loaded) { try { map.removeLayer(tl); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map); setDiag((d) => ({ ...d, tiles: 'osm-fallback' })) } catch { /* ignore */ } } })
     tl.addTo(map)
+    satRef.current = tl
     mainMap.current = map
     // Repeatedly re-measure the container and resize the map — and report the live
     // size in the diagnostic badge so we can see it settle.
@@ -427,7 +429,7 @@ export default function CourseMap({ user, manage }) {
         overlayRef.current = ov
       } catch (e) { console.error('overlay place failed', e) }
     }
-    try { map.fitBounds([c.topLeft, c.topRight, c.bottomLeft, bottomRight], { padding: [20, 20] }) } catch { /* ignore */ }
+    try { if (!aerial) map.fitBounds([c.topLeft, c.topRight, c.bottomLeft, bottomRight], { padding: [20, 20] }) } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transform, mode, mapTick])
 
@@ -458,13 +460,24 @@ export default function CourseMap({ user, manage }) {
     let live = true
     ;(async () => {
       if (aerialRef.current) { aerialRef.current.remove(); aerialRef.current = null }
-      if (!showAerial || !aerial || !aerial.filePath || typeof L.imageOverlay?.rotated !== 'function') return
+      const on = showAerial && aerial && aerial.filePath && typeof L.imageOverlay?.rotated === 'function'
+      if (!on) {
+        // No aerial → show the satellite basemap and unlock the view.
+        if (satRef.current && !map.hasLayer(satRef.current)) satRef.current.addTo(map)
+        map.setMaxBounds(null); map.setMinZoom(0)
+        return
+      }
       const url = await cmdb.signedUrl(aerial.filePath)
       if (!live || !url) return
       const c = worldFileCorners({ A: aerial.pxSizeX, D: 0, B: 0, E: aerial.pxSizeY, C: aerial.ulX, F: aerial.ulY }, aerial.widthPx, aerial.heightPx, aerial.crs || 'EPSG:3857')
       try {
         const ov = L.imageOverlay.rotated(url, L.latLng(c.topLeft.lat, c.topLeft.lon), L.latLng(c.topRight.lat, c.topRight.lon), L.latLng(c.bottomLeft.lat, c.bottomLeft.lon), { opacity: 1, interactive: false })
         ov.addTo(map); ov.bringToBack(); aerialRef.current = ov
+        // Show ONLY the aerial: drop the satellite and lock pan/zoom to the photo.
+        if (satRef.current && map.hasLayer(satRef.current)) map.removeLayer(satRef.current)
+        const bounds = L.latLngBounds([[c.topLeft.lat, c.topLeft.lon], [c.topRight.lat, c.topRight.lon], [c.bottomLeft.lat, c.bottomLeft.lon], [c.bottomRight.lat, c.bottomRight.lon]])
+        const fit = () => { map.invalidateSize(); map.setMinZoom(0); map.setMaxBounds(null); map.setView(bounds.getCenter(), map.getBoundsZoom(bounds, true), { animate: false }); map.setMinZoom(map.getBoundsZoom(bounds, true)); map.setMaxBounds(bounds) }
+        fit(); setTimeout(fit, 250)
       } catch (e) { console.error('aerial place', e) }
     })()
     return () => { live = false }
