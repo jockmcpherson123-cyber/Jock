@@ -25,6 +25,7 @@ import {
 import { uid } from '@/lib/calc'
 import { localDateISO } from '@/lib/dates'
 import { gddSince, projectGddReachDate } from '@/lib/weather'
+import { fetchCourseContext as cmCourseContext, fetchGreens as cmFetchGreens, fetchMoistureForGreens as cmFetchMoistureForGreens, importReadings as cmImportReadings, countMigratedRounds as cmCountMigrated } from '@/lib/coursemap/db'
 
 import { FOREST, FERN, GOLD, PAPER, HAIR, INK, INK_2, INK_3, RED, AMBER, BAND } from '@/lib/theme'
 
@@ -148,15 +149,75 @@ const STATUS_STYLE = {
   none: { label: 'No application', color: INK_3 },
 }
 
-export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, location = {}, onSaveCourse, initialView, courseFilter }) {
+export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, location = {}, onSaveCourse, initialView, courseFilter, onAppNav }) {
   const wetting = courseInfo.wetting || {}
   const cTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
   const greens = (wetting.greens || []).filter((g) => !courseFilter || cTok(g.course) === cTok(courseFilter))
   const courses = (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).filter((c) => c && c.name)
   const products = { ...DEFAULT_PRODUCTS, ...(wetting.products || {}) }
 
-  const [view, setView] = useState(initialView || 'overview')
+  // 'read' (Take readings) is gone — moisture is now entered in one place,
+  // Greens Today. An old deep-link to it lands on the overview.
+  const [view, setView] = useState(initialView && initialView !== 'read' ? initialView : 'overview')
   const [logOpen, setLogOpen] = useState(false)
+
+  // The one readings table. Indicator greens linked to a course-map green read
+  // their rounds from moisture_rounds/_readings; unlinked greens keep showing
+  // their older stored history until they're linked and imported.
+  const [mapGreens, setMapGreens] = useState([])
+  const [unifiedByGreen, setUnifiedByGreen] = useState({})
+  const [migrated, setMigrated] = useState({})
+  const [reloadTick, setReloadTick] = useState(0)
+  const ctxRef = useRef(null)
+
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      try {
+        const ctx = await cmCourseContext()
+        if (!live) return
+        ctxRef.current = ctx
+        const courseId = ctx.courses?.[0]?.id
+        setMapGreens(courseId ? await cmFetchGreens(courseId) : [])
+        const linked = (courseInfo.wetting?.greens || []).filter((g) => g.areaId)
+        const areaIds = [...new Set(linked.map((g) => g.areaId))]
+        const rounds = areaIds.length ? await cmFetchMoistureForGreens(areaIds) : []
+        if (!live) return
+        const byArea = {}
+        for (const r of rounds) { const s = stats(r.values); (byArea[r.areaId] ||= []).push({ date: r.date, values: r.values, avg: s.avg, cv: s.cv }) }
+        const byGreen = {}
+        for (const g of linked) {
+          const list = (byArea[g.areaId] || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)))
+          if (list.length) byGreen[g.id] = list.map((x, i) => ({ id: `u-${g.id}-${i}`, greenId: g.id, ...x }))
+        }
+        setUnifiedByGreen(byGreen)
+        const mig = {}
+        for (const g of linked) { try { mig[g.id] = await cmCountMigrated(g.areaId) } catch { mig[g.id] = 0 } }
+        if (live) setMigrated(mig)
+      } catch { /* ignore — unlinked greens fall back to stored readings */ }
+    })()
+    return () => { live = false }
+  }, [courseInfo.wetting?.greens, reloadTick])
+
+  // Effective readings: unified where a green is linked (and has rounds), else
+  // the older stored readings. greenModel consumes this exactly as before.
+  const effWetting = useMemo(() => {
+    const out = []
+    for (const g of (wetting.greens || [])) {
+      const old = (wetting.readings || []).filter((r) => r.greenId === g.id)
+      const uni = (g.areaId && unifiedByGreen[g.id]) ? unifiedByGreen[g.id] : []
+      if (uni.length) {
+        // Unified is the source of truth; fold in any older stored reading whose
+        // date isn't already on the map (e.g. a fresh crew-QR entry), deduped by
+        // date so a migrated day isn't counted twice.
+        const dates = new Set(uni.map((r) => r.date))
+        out.push(...uni, ...old.filter((r) => !dates.has(r.date)))
+      } else {
+        out.push(...old)
+      }
+    }
+    return { ...wetting, readings: out }
+  }, [wetting, unifiedByGreen])
 
   // Persist a patch onto courseInfo.wetting.
   const save = (patch) => {
@@ -166,16 +227,42 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
 
   const models = useMemo(() => {
     const m = {}
-    for (const g of greens) m[g.id] = greenModel(g, wetting, daily)
+    for (const g of greens) m[g.id] = greenModel(g, effWetting, daily)
     return m
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [greens, wetting, daily])
+  }, [greens, effWetting, daily])
 
-  // Calibrate: lock a product's GDD lifespan to what it actually reached when a
-  // green started fading — turns the guess into your course's real number.
   const setLifespan = (product, gdd) => {
     const cur = (wetting.products || {})[product] || products[product] || FALLBACK_PROD
     save({ products: { ...(wetting.products || {}), [product]: { ...cur, gddLife: Math.round(gdd) } } })
+  }
+
+  // Link an indicator green to a course-map green (its area).
+  const linkGreen = (greenId, areaId) => save({ greens: (wetting.greens || []).map((g) => (g.id === greenId ? { ...g, areaId: areaId || null } : g)) })
+
+  // One-time import of a green's older stored readings into the moisture table.
+  // Idempotent (skips if any migrated rows already exist) and non-destructive —
+  // the old history stays in settings. Each value becomes a reading; GPS comes
+  // from the green's saved points by position, so placed spots draw on the map.
+  const migrateGreen = async (green) => {
+    if (!green.areaId) return
+    const ctx = ctxRef.current
+    if (!ctx?.club?.id) return
+    try {
+      if (await cmCountMigrated(green.areaId) > 0) { setReloadTick((t) => t + 1); return }
+      const courseId = ctx.courses?.[0]?.id
+      const pts = green.points || []
+      const placed = []
+      ;(wetting.readings || []).filter((r) => r.greenId === green.id).forEach((r) => {
+        ;(r.values || []).forEach((v, i) => {
+          const p = pts[i] || {}
+          if (v == null || v === '' || isNaN(Number(v))) return
+          placed.push({ areaId: green.areaId, vwcPct: Number(v), lat: p.lat ?? null, lon: (p.lng ?? p.lon) ?? null, spot: p.label || `Spot ${i + 1}`, takenAt: `${r.date}T12:00:00`, source: 'migrated' })
+        })
+      })
+      if (placed.length) await cmImportReadings({ clubId: ctx.club.id, courseId, placed, source: 'migrated' })
+      setReloadTick((t) => t + 1)
+    } catch (e) { console.error('migrate readings', e) }
   }
 
   return (
@@ -191,23 +278,20 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
 
       {/* sub-nav */}
       <div className="flex gap-1.5 mb-5 flex-wrap">
-        {[['overview', 'Overview'], ['read', 'Take readings'], ['history', 'History'], ['setup', 'Setup']].map(([k, lab]) => (
+        {[['overview', 'Overview'], ['history', 'History'], ['setup', 'Setup']].map(([k, lab]) => (
           <button key={k} onClick={() => setView(k)} className="font-body text-sm font-bold px-4 py-2 rounded-full transition"
             style={view === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{lab}</button>
         ))}
       </div>
 
       {view === 'overview' && (
-        <Overview greens={greens} models={models} courses={courses} onLog={() => setLogOpen(true)} onSetup={() => setView('setup')} onRead={() => setView('read')} onCalibrate={setLifespan} />
-      )}
-      {view === 'read' && (
-        <TakeReadings greens={greens} models={models} products={products} location={location} onSave={save} wetting={wetting} />
+        <Overview greens={greens} models={models} courses={courses} onLog={() => setLogOpen(true)} onSetup={() => setView('setup')} onRead={() => (onAppNav ? onAppNav('greenstoday') : setView('setup'))} onCalibrate={setLifespan} />
       )}
       {view === 'history' && (
-        <History greens={greens} wetting={wetting} onSave={save} />
+        <History greens={greens} wetting={effWetting} onSave={save} />
       )}
       {view === 'setup' && (
-        <Setup greens={greens} products={products} courses={courses} onSave={save} wetting={wetting} />
+        <Setup greens={greens} products={products} courses={courses} onSave={save} wetting={wetting} mapGreens={mapGreens} migrated={migrated} onLink={linkGreen} onMigrate={migrateGreen} />
       )}
 
       {logOpen && (
@@ -250,7 +334,7 @@ function Overview({ greens, models, courses, onLog, onSetup, onRead, onCalibrate
           <Plus size={13} /> Log application
         </button>
         <button onClick={onRead} className="font-body text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1.5" style={{ backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>
-          <Droplet size={13} /> Take readings
+          <Droplet size={13} /> Add readings ›
         </button>
       </div>
 
@@ -735,7 +819,7 @@ function ReadingSheet({ green, model, location, wetting, onSave }) {
 }
 
 // ── SETUP ───────────────────────────────────────────────────────────────────
-function Setup({ greens, products, courses, onSave, wetting }) {
+function Setup({ greens, products, courses, onSave, wetting, mapGreens = [], migrated = {}, onLink, onMigrate }) {
   const [name, setName] = useState('')
   const [course, setCourse] = useState(courses[0]?.name || '')
   const [micro, setMicro] = useState(MICRO[0])
@@ -780,15 +864,33 @@ function Setup({ greens, products, courses, onSave, wetting }) {
         <p className="font-body text-[12.5px] mb-3" style={{ color: INK_3 }}>3–4 per nine — a spread of microclimates. The rest of the nine is read off these.</p>
 
         <div className="space-y-1.5 mb-4">
-          {(greens || []).map((g) => (
-            <div key={g.id} className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ backgroundColor: PAPER, border: `1px solid ${HAIR}` }}>
-              <span className="font-body text-sm font-semibold" style={{ color: INK }}>{g.name}</span>
-              {g.course && <span className="font-body text-[11px]" style={{ color: INK_3 }}>· {g.course}</span>}
-              <span className="font-body text-[10.5px] font-semibold px-2 py-0.5 rounded-full" style={{ color: INK_2, backgroundColor: BAND }}>{g.micro}</span>
-              <span className="font-body text-[11px] tnum" style={{ color: INK_3 }}>{(g.points?.length || g.nPoints || 12)} pts</span>
-              <button onClick={() => delGreen(g.id)} className="ml-auto" title="Remove"><Trash2 size={15} style={{ color: INK_3 }} /></button>
-            </div>
-          ))}
+          {(greens || []).map((g) => {
+            const migCount = migrated[g.id] || 0
+            const oldCount = (wetting.readings || []).filter((r) => r.greenId === g.id).length
+            return (
+              <div key={g.id} className="px-3 py-2 rounded-lg" style={{ backgroundColor: PAPER, border: `1px solid ${HAIR}` }}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-body text-sm font-semibold" style={{ color: INK }}>{g.name}</span>
+                  {g.course && <span className="font-body text-[11px]" style={{ color: INK_3 }}>· {g.course}</span>}
+                  <span className="font-body text-[10.5px] font-semibold px-2 py-0.5 rounded-full" style={{ color: INK_2, backgroundColor: BAND }}>{g.micro}</span>
+                  <span className="font-body text-[11px] tnum" style={{ color: INK_3 }}>{(g.points?.length || g.nPoints || 12)} pts</span>
+                  <button onClick={() => delGreen(g.id)} className="ml-auto" title="Remove"><Trash2 size={15} style={{ color: INK_3 }} /></button>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap mt-2">
+                  <span className="font-body text-[11px]" style={{ color: INK_3 }}>Map green</span>
+                  <select value={g.areaId || ''} onChange={(e) => onLink && onLink(g.id, e.target.value)} className="font-body text-[12px] px-2 py-1.5 rounded-lg bg-white" style={{ border: `1px solid ${HAIR}`, color: INK }}>
+                    <option value="">— not linked —</option>
+                    {mapGreens.map((mg) => <option key={mg.id} value={mg.id}>{mg.name || `Green ${mg.hole || ''}`}</option>)}
+                  </select>
+                  {g.areaId && migCount > 0 && <span className="font-body text-[11px] font-semibold" style={{ color: FERN }}>✓ history on the moisture map</span>}
+                  {g.areaId && migCount === 0 && oldCount > 0 && (
+                    <button onClick={() => onMigrate && onMigrate(g)} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>Import {oldCount} past reading{oldCount !== 1 ? 's' : ''}</button>
+                  )}
+                  {!g.areaId && <span className="font-body text-[11px]" style={{ color: INK_3 }}>link it to feed wear-off from the moisture map</span>}
+                </div>
+              </div>
+            )
+          })}
           {!greens.length && <p className="font-body text-[12.5px]" style={{ color: INK_3 }}>None yet.</p>}
         </div>
 
@@ -803,7 +905,7 @@ function Setup({ greens, products, courses, onSave, wetting }) {
           <input type="number" min="3" max="20" value={nPoints} onChange={(e) => setNPoints(e.target.value)} placeholder="Points" className="rounded-lg px-3 py-2.5 text-sm font-body tnum" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }} />
           <button onClick={addGreen} className="font-body text-xs font-bold px-4 py-2.5 rounded-lg text-white flex items-center justify-center gap-1.5" style={{ backgroundColor: FOREST }}><Plus size={14} /> Add</button>
         </div>
-        <p className="font-body text-[11.5px] mt-2" style={{ color: INK_3 }}>Set the actual GPS spots on the green from <b>Take readings</b> — stand on each point and tap “Set”.</p>
+        <p className="font-body text-[11.5px] mt-2" style={{ color: INK_3 }}>Readings are taken in one place now — <b>Greens Today › Add readings</b>. Link each indicator green to its green on the course map so its rounds feed the wear-off tracking, then import any older history.</p>
       </div>
 
       {/* Satellite map (Mapbox) */}

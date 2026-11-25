@@ -468,7 +468,121 @@ const Mini = ({ label, v, warn }) => (
   <div className="rounded-xl border p-2.5" style={{ borderColor: HAIR }}><p className="font-body text-[9.5px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>{label}</p><p className="font-display text-[15px] font-bold" style={{ color: warn ? '#B7791F' : FOREST }}>{v}</p></div>
 )
 
+// Manual moisture entry — the single hand-entry path for readings. Pick a green,
+// type a %VWC for each test spot (temp/salinity optional), optionally capture the
+// phone's GPS per spot, and it writes to the same moisture tables a DEACON import
+// does — so both build the same heatmap.
+function ManualReadings({ ctx, courseId, greens, onDone }) {
+  const [greenId, setGreenId] = useState(greens[0]?.id || '')
+  const [date, setDate] = useState(todayISO())
+  const [time, setTime] = useState(() => { const d = new Date(); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` })
+  const [nSpots, setNSpots] = useState(12)
+  const [showExtra, setShowExtra] = useState(false)
+  const [spots, setSpots] = useState(() => Array.from({ length: 12 }, (_, i) => ({ label: `Spot ${i + 1}`, v: '', temp: '', sal: '', lat: null, lon: null })))
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [geoMsg, setGeoMsg] = useState('')
+
+  useEffect(() => {
+    setSpots((prev) => {
+      if (nSpots === prev.length) return prev
+      const next = prev.slice(0, nSpots)
+      for (let i = prev.length; i < nSpots; i++) next.push({ label: `Spot ${i + 1}`, v: '', temp: '', sal: '', lat: null, lon: null })
+      return next
+    })
+  }, [nSpots])
+
+  const green = greens.find((g) => g.id === greenId) || null
+  const setSpot = (i, patch) => setSpots((s) => s.map((x, j) => (j === i ? { ...x, ...patch } : x)))
+  const captureGps = (i) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) { setGeoMsg('No GPS on this device — readings still save without it.'); return }
+    navigator.geolocation.getCurrentPosition(
+      (p) => setSpot(i, { lat: p.coords.latitude, lon: p.coords.longitude }),
+      () => setGeoMsg('Location unavailable — readings still save without GPS.'),
+      { enableHighAccuracy: true, timeout: 10000 },
+    )
+  }
+  const entered = spots.filter((s) => s.v !== '' && !isNaN(Number(s.v)))
+  const avg = entered.length ? Math.round((entered.reduce((a, s) => a + Number(s.v), 0) / entered.length) * 10) / 10 : null
+
+  const save = async () => {
+    if (!green || busy) return
+    const takenAt = `${date}T${time || '12:00'}:00`
+    const placed = entered.map((s) => ({
+      areaId: green.id, vwcPct: Number(s.v), lat: s.lat, lon: s.lon,
+      soilTempF: s.temp !== '' && !isNaN(Number(s.temp)) ? Number(s.temp) : null,
+      salinityDsm: s.sal !== '' && !isNaN(Number(s.sal)) ? Number(s.sal) : null,
+      spot: s.label, takenAt, source: 'manual',
+    }))
+    if (!placed.length) { setErr('Enter at least one reading.'); return }
+    setBusy(true); setErr('')
+    try {
+      const res = await cmdb.importReadings({ clubId: ctx.club.id, courseId, placed, source: 'manual' })
+      onDone(`Saved ${res.readingsInserted} reading${res.readingsInserted !== 1 ? 's' : ''} on ${green.name || 'the green'}.`)
+    } catch (e) { setErr('Save failed — ' + (e.message || '')); setBusy(false) }
+  }
+
+  if (!greens.length) return <p className="font-body text-[13px] py-6 text-center" style={{ color: INK_3 }}>No greens on the course map yet. Draw your greens on the Course Map first, then enter readings here.</p>
+
+  return (
+    <div>
+      {err && <div className="mb-3 rounded-xl px-3 py-2 font-body text-[12px]" style={{ backgroundColor: '#F6E5E2', color: RED }}>{err}</div>}
+      <div className="flex flex-wrap items-end gap-2 mb-3">
+        <div className="flex-1 min-w-[140px]">
+          <label className="block font-body text-[11px] font-semibold mb-1" style={{ color: INK_2 }}>Green</label>
+          <select value={greenId} onChange={(e) => setGreenId(e.target.value)} className="w-full rounded-lg px-2.5 py-2 text-[13px] bg-white" style={{ border: `1px solid ${HAIR}`, color: INK }}>
+            {greens.map((g) => <option key={g.id} value={g.id}>{g.name || `Green ${g.hole || ''}`}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block font-body text-[11px] font-semibold mb-1" style={{ color: INK_2 }}>Date</label>
+          <input type="date" value={date} max={todayISO()} onChange={(e) => e.target.value && setDate(e.target.value)} className="rounded-lg px-2.5 py-2 text-[13px] bg-white" style={{ border: `1px solid ${HAIR}`, color: INK }} />
+        </div>
+        <div>
+          <label className="block font-body text-[11px] font-semibold mb-1" style={{ color: INK_2 }}>Time</label>
+          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="rounded-lg px-2.5 py-2 text-[13px] bg-white" style={{ border: `1px solid ${HAIR}`, color: INK }} />
+        </div>
+        <div>
+          <label className="block font-body text-[11px] font-semibold mb-1" style={{ color: INK_2 }}>Spots</label>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setNSpots((n) => Math.max(1, n - 1))} className="w-7 h-8 rounded-lg font-bold" style={{ border: `1px solid ${HAIR}`, color: INK_2 }}>−</button>
+            <span className="w-7 text-center font-display font-bold tnum" style={{ color: INK }}>{nSpots}</span>
+            <button onClick={() => setNSpots((n) => Math.min(24, n + 1))} className="w-7 h-8 rounded-lg font-bold" style={{ border: `1px solid ${HAIR}`, color: INK_2 }}>+</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-2">
+        <p className="font-body text-[11px]" style={{ color: INK_3 }}>Type each spot's moisture %. Tap <b>GPS</b> to pin a spot so it draws on the heatmap (optional).</p>
+        <label className="flex items-center gap-1.5 font-body text-[11px] font-semibold" style={{ color: INK_2 }}>
+          <input type="checkbox" checked={showExtra} onChange={(e) => setShowExtra(e.target.checked)} /> Temp / salinity
+        </label>
+      </div>
+      {geoMsg && <p className="font-body text-[11px] mb-2" style={{ color: '#B7791F' }}>{geoMsg}</p>}
+
+      <div className="space-y-1.5 max-h-[46vh] overflow-y-auto pr-1">
+        {spots.map((s, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span className="font-body text-[12px] font-semibold w-16 shrink-0" style={{ color: INK }}>{s.label}</span>
+            <input inputMode="decimal" value={s.v} onChange={(e) => setSpot(i, { v: e.target.value })} placeholder="%VWC" className="w-20 rounded-lg px-2 py-1.5 text-[13px] text-right bg-white" style={{ border: `1px solid ${HAIR}`, color: INK }} />
+            {showExtra && <input inputMode="decimal" value={s.temp} onChange={(e) => setSpot(i, { temp: e.target.value })} placeholder="°F" className="w-16 rounded-lg px-2 py-1.5 text-[13px] text-right bg-white" style={{ border: `1px solid ${HAIR}`, color: INK }} />}
+            {showExtra && <input inputMode="decimal" value={s.sal} onChange={(e) => setSpot(i, { sal: e.target.value })} placeholder="dS/m" className="w-16 rounded-lg px-2 py-1.5 text-[13px] text-right bg-white" style={{ border: `1px solid ${HAIR}`, color: INK }} />}
+            <button onClick={() => captureGps(i)} className="font-body text-[10.5px] font-bold px-2 py-1.5 rounded-full shrink-0" style={s.lat != null ? { backgroundColor: FERN, color: 'white' } : { border: `1px solid ${HAIR}`, color: INK_2 }}>{s.lat != null ? 'GPS ✓' : 'GPS'}</button>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-4 mt-4 pt-3 flex-wrap" style={{ borderTop: `1px solid ${HAIR}` }}>
+        <div><span className="font-body text-[10px] font-bold uppercase tracking-widest block" style={{ color: INK_3 }}>Avg</span><span className="font-display text-lg font-semibold" style={{ color: INK }}>{avg != null ? `${avg}%` : '—'}</span></div>
+        <div><span className="font-body text-[10px] font-bold uppercase tracking-widest block" style={{ color: INK_3 }}>Entered</span><span className="font-display text-lg font-semibold" style={{ color: INK }}>{entered.length}/{spots.length}</span></div>
+        <button onClick={save} disabled={!entered.length || busy} className="ml-auto font-body text-sm font-bold px-5 py-2.5 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save readings'}</button>
+      </div>
+    </div>
+  )
+}
+
 export function AddReadings({ ctx, courseId, greens, onClose, onDone }) {
+  const [mode, setMode] = useState('manual')
   const [stage, setStage] = useState('file')
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState([])
@@ -520,18 +634,25 @@ export function AddReadings({ ctx, courseId, greens, onClose, onDone }) {
     <div className="fixed inset-0 z-[80] flex items-start justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(10,20,14,0.5)' }} onClick={onClose}>
       <div className="relative w-full max-w-2xl my-8 rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3"><h3 className="font-display text-lg font-bold" style={{ color: FOREST }}>Add readings</h3><button onClick={onClose} className="font-body text-xl px-2" style={{ color: INK_3 }}>×</button></div>
+        <div className="flex gap-1.5 mb-4">
+          {[['manual', 'Manual'], ['file', 'DEACON file']].map(([k, lab]) => (
+            <button key={k} onClick={() => setMode(k)} className="font-body text-[12px] font-bold px-3.5 py-1.5 rounded-full transition"
+              style={mode === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{lab}</button>
+          ))}
+        </div>
         {error && <div className="mb-3 rounded-xl px-3 py-2 font-body text-[12px]" style={{ backgroundColor: '#F6E5E2', color: RED }}>{error}</div>}
-        {stage === 'file' && (
+        {mode === 'manual' && <ManualReadings ctx={ctx} courseId={courseId} greens={greens} onDone={onDone} />}
+        {mode === 'file' && stage === 'file' && (
           <label className="block rounded-2xl border-2 border-dashed p-8 text-center cursor-pointer" style={{ borderColor: HAIR, color: FERN }}><Upload size={22} className="inline" /><p className="font-body text-[13px] font-bold mt-1">Choose a DEACON CSV or Excel file</p><input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} /></label>
         )}
-        {stage === 'map' && (
+        {mode === 'file' && stage === 'map' && (
           <div>
             <p className="font-body text-[12px] mb-2" style={{ color: INK_2 }}><b>{fileName}</b> · {rows.length} rows. Map the columns:</p>
             <div className="rounded-xl border p-3" style={{ borderColor: HAIR }}>{READING_FIELDS.map(([f, label, req]) => colSel(f, label, req))}</div>
             <div className="flex justify-between mt-4"><button onClick={() => setStage('file')} className="font-body text-[12px] font-bold px-3 py-2 rounded-xl" style={{ color: INK_2, border: `1px solid ${HAIR}` }}>Back</button><button onClick={() => setStage('review')} disabled={!mapping.time || !mapping.lat || !mapping.lon || !mapping.moisture} className="font-body text-[12px] font-bold px-4 py-2 rounded-xl text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Preview →</button></div>
           </div>
         )}
-        {stage === 'review' && (
+        {mode === 'file' && stage === 'review' && (
           <div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3"><Mini label="Rows" v={plan.total} /><Mini label="Placed" v={plan.placedCount} /><Mini label="Unplaced" v={plan.unplacedCount} warn={plan.unplacedCount > 0} /><Mini label="Duplicates" v={plan.duplicates} /></div>
             <p className="font-body text-[12px] mb-2" style={{ color: INK_2 }}>{plan.rounds.length} round(s): {plan.rounds.map((r) => `${(greens.find((g) => g.id === r.areaId)?.name) || 'green'} ${r.slot} avg ${r.avg}%`).join(' · ') || '—'}</p>

@@ -517,7 +517,7 @@ export default function SprayApp({ user }) {
               : sel.m === 'land' ? <LandingModule nav={nav} sections={sections} onPickId={pickId} onGo={gotoFocus} clubName={clubName || user.clubName} course={sel.follow ? course : ''} courses={courses} user={user} />
               : sel.m === 'greensmap' ? <GreensMap user={user} nav={nav} />
               : sel.m === 'spray' ? <SprayOpsModule user={user} nav={nav} hideChrome homeMode={!!sel.home} course={sel.follow ? course : ''} />
-              : sel.m === 'turf' ? <TurfPerformanceModule user={user} nav={nav} hideChrome course={sel.follow ? course : ''} />
+              : sel.m === 'turf' ? <TurfPerformanceModule user={user} nav={nav} hideChrome course={sel.follow ? course : ''} onAppNav={pickId} />
               : sel.m === 'playbook' ? <PlaybookModule user={user} manage={manage} hideChrome />
               : sel.m === 'tournament' ? <Tournament />
               : sel.m === 'map' ? <IrrigationModule user={user} manage={manage} nav={nav} hideChrome />
@@ -855,8 +855,8 @@ function ForecastWeek({ days = [], total = 0 }) {
   return (
     <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
       <div className="flex items-center justify-between mb-2">
-        <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>This week's forecast</p>
-        <p className="font-body text-[11px]" style={{ color: '#3A6187' }}>{total.toFixed(2)}" rain expected this week</p>
+        <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>7-day forecast</p>
+        <p className="font-body text-[11px]" style={{ color: '#3A6187' }}>{total.toFixed(2)}" rain expected (next 7 days)</p>
       </div>
       {days.length === 0 ? (
         <p className="font-body text-[12px] py-3 text-center" style={{ color: INK_3 }}>Set your location in Settings to see the forecast.</p>
@@ -11330,7 +11330,7 @@ function FieldDataHub({ clippings, speeds, firmness = [], practices = [], scouti
   )
 }
 
-function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
+function TurfPerformanceModule({ user, nav, hideChrome, course = '', onAppNav }) {
   const [route, setRoute] = useState(nav?.route || 'dashboard')
   useEffect(() => { if (nav?.route) setRoute(nav.route) }, [nav])
   // Scope the areas passed to each tab to the selected course, so the course bar
@@ -11460,7 +11460,7 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
         )}
         {route === 'wetting' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
-          : <WettingAgent daily={daily} areas={scopeAreas(turf.areas)} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} courseFilter={course} />
+          : <WettingAgent daily={daily} areas={scopeAreas(turf.areas)} courseInfo={turf.courseInfo} location={turf.location} onSaveCourse={saveTurfCourse} courseFilter={course} onAppNav={onAppNav} />
         )}
         {route === 'data' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
