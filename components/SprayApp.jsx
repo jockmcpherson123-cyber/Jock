@@ -298,54 +298,77 @@ class ErrorBoundary extends React.Component {
 // One grouped left rail drives the whole app. Every screen is a sidebar item that
 // maps to a module (m) and the route/section within it (r). This replaced the old
 // top module-switcher + per-module tab strips.
-const NAV_MANAGER = [
-  { items: [{ id: 'home', label: 'Home', m: 'spray', r: 'dashboard', home: true, icon: BarChart3, follow: true }] },
-  { title: 'Spray Program', items: [
-    { id: 'program', label: 'Annual Program', m: 'spray', r: 'program', follow: true, noAll: true },
-    { id: 'sheets', label: 'Spray Sheets', m: 'spray', r: 'list', follow: true },
-    { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert', follow: true },
-    { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
-    { id: 'invcount', label: 'Inventory Count', m: 'spray', r: 'invcount' },
-    { id: 'chemguide', label: 'Chemistry Guide', m: 'spray', r: 'chemguide' },
-  ] },
-  { title: 'Agronomy', items: [
-    { id: 'data', label: 'Field Data', m: 'turf', r: 'data', follow: true, noAll: true },
-    { id: 'gdd', label: 'GDD & Growth', m: 'turf', r: 'gdd', follow: true, noAll: true },
-    { id: 'wetting', label: 'Wetting Agents', m: 'turf', r: 'wetting', follow: true, noAll: true },
-    { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
-    { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true, noAll: true },
-    { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc', follow: true },
-    { id: 'reference', label: 'Reference', m: 'turf', r: 'knowledge' },
-  ] },
-  { title: 'Course & Crew', items: [
-    { id: 'irrmap', label: 'Irrigation Map', m: 'map', r: 'map' },
-    { id: 'coursemap', label: 'Course Map', m: 'greensmap', r: null },
-    { id: 'parts', label: 'Parts', m: 'map', r: 'parts' },
-    { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
-    { id: 'training', label: 'Training', m: 'spray', r: 'training' },
-    { id: 'playbook', label: 'Playbook', m: 'playbook', r: null },
-    { id: 'tournament', label: 'Tournament', m: 'tournament', r: null },
-  ] },
-  { title: 'Reports', items: [
-    // Parked for now — "Weekly AI Reports" (the Grounds Dispatch) is hidden from
-    // the menu. The TurfBrief component, the 'brief' route and /api/turf-brief
-    // all remain, so restoring it is just uncommenting this line.
-    // { id: 'aibrief', label: 'Weekly AI Reports', m: 'turf', r: 'brief', follow: true },
-    { id: 'weekly', label: 'Weekly Report', m: 'turf', r: 'report', follow: true },
-    { id: 'season', label: 'Season Reports', m: 'spray', r: 'reports' },
-    { id: 'weather', label: 'Weather', m: 'spray', r: 'weather' },
-  ] },
+// Each manager section has a clickable landing page plus its drop-down pages.
+// Tapping the section label opens that section's landing and expands its pages;
+// only the current section stays expanded. Every page maps to a module (m) and a
+// route (r) within it, exactly as before — this is a re-grouping, not a rewrite.
+const SECTIONS_MANAGER = [
+  { key: 'home', title: 'Home',
+    landing: { id: 'home', label: 'Home', m: 'spray', r: 'dashboard', home: true, follow: true },
+    items: [
+      { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
+      { id: 'weekly', label: 'Weekly Report', m: 'turf', r: 'report', follow: true },
+      { id: 'weather', label: 'Weather', m: 'spray', r: 'weather' },
+      { id: 'season', label: 'Season Reports', m: 'spray', r: 'reports' },
+    ] },
+  { key: 'spray', title: 'Spray Program',
+    landing: { id: 'spray-home', label: 'Spray Program', m: 'land', r: 'spray' },
+    items: [
+      { id: 'program', label: 'Annual Program', m: 'spray', r: 'program', follow: true, noAll: true },
+      { id: 'sheets', label: 'Spray Sheets', m: 'spray', r: 'list', follow: true },
+      { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert', follow: true },
+      { id: 'invcount', label: 'Inventory', m: 'spray', r: 'invcount' },
+      { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
+    ] },
+  { key: 'data', title: 'Data',
+    landing: { id: 'data-home', label: 'Data', m: 'land', r: 'data' },
+    items: [
+      { id: 'wetting', label: 'Moisture & Wetting Agents', m: 'turf', r: 'wetting', follow: true, noAll: true },
+      { id: 'speed', label: 'Green Speeds', m: 'turf', r: 'speed', follow: true, noAll: true },
+      { id: 'clippings', label: 'Clipping Yields', m: 'turf', r: 'clippings', follow: true, noAll: true },
+      { id: 'firmness', label: 'Firmness', m: 'turf', r: 'firmness', follow: true, noAll: true },
+      { id: 'scouting', label: 'Scouting', m: 'turf', r: 'scouting', follow: true, noAll: true },
+      { id: 'gdd', label: 'GDD & Growth', m: 'turf', r: 'gdd', follow: true, noAll: true },
+      { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true, noAll: true },
+    ] },
+  { key: 'irrigation', title: 'Irrigation',
+    landing: { id: 'irr-home', label: 'Irrigation', m: 'land', r: 'irrigation' },
+    items: [
+      { id: 'greenstoday', label: 'Greens Today', m: 'greensmap', r: 'today', follow: true, noAll: true },
+      { id: 'irrmap', label: 'Irrigation Map', m: 'map', r: 'map' },
+      { id: 'parts', label: 'Parts', m: 'map', r: 'parts' },
+    ] },
+  { key: 'resources', title: 'Resources',
+    landing: { id: 'res-home', label: 'Resources', m: 'land', r: 'resources' },
+    items: [
+      { id: 'reference', label: 'Reference', m: 'turf', r: 'knowledge' },
+      { id: 'training', label: 'Training', m: 'spray', r: 'training' },
+      { id: 'playbook', label: 'Playbook', m: 'playbook', r: null },
+      { id: 'coursemap', label: 'Course Map', m: 'greensmap', r: 'map' },
+      { id: 'chemguide', label: 'Chemistry Guide', m: 'spray', r: 'chemguide' },
+      { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
+    ] },
+  { key: 'mechanical', title: 'Mechanical',
+    landing: { id: 'mech-home', label: 'Mechanical', m: 'land', r: 'mechanical' },
+    items: [
+      { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc', follow: true },
+    ] },
+  { key: 'tournament', title: 'Tournament',
+    landing: { id: 'tournament', label: 'Tournament', m: 'tournament', r: null },
+    items: [] },
 ]
 const NAV_MANAGER_BOTTOM = [{ id: 'settings', label: 'Settings', m: 'spray', r: 'settings' }]
 
-// Finance group — appended for managers who hold the budget permission, and the
-// whole rail for a finance-only (CFO/Accounting) user.
-const FINANCE_GROUP = { title: 'Finance', items: [{ id: 'budget', label: 'Budget', m: 'budget', r: null }] }
-const NAV_BUDGET_ONLY = [FINANCE_GROUP]
+// Finance section — appended for managers who hold the budget permission, and the
+// whole rail for a finance-only (CFO/Accounting) user. Budget is unchanged.
+const FINANCE_SECTION = { key: 'finance', title: 'Finance', landing: { id: 'budget', label: 'Budget', m: 'budget', r: null }, items: [] }
+const SECTIONS_BUDGET_ONLY = [FINANCE_SECTION]
 
-const NAV_CREW = [
-  { items: [{ id: 'tospray', label: 'To Spray', m: 'spray', r: 'tospray', icon: Droplet }] },
-  { title: 'Spraying', items: [
+// Operators keep their short rail. No landings — these are plain groups, always
+// expanded, exactly as before.
+const SECTIONS_CREW = [
+  { key: 'tospray', items: [{ id: 'tospray', label: 'To Spray', m: 'spray', r: 'tospray', icon: Droplet }] },
+  { key: 'spraying', title: 'Spraying', items: [
     { id: 'records', label: 'Records', m: 'spray', r: 'records' },
     { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert' },
     { id: 'inventory', label: 'Inventory', m: 'spray', r: 'inventory' },
@@ -353,31 +376,44 @@ const NAV_CREW = [
     { id: 'chemguide', label: 'Chemistry Guide', m: 'spray', r: 'chemguide' },
     { id: 'weather', label: 'Weather', m: 'spray', r: 'weather' },
   ] },
-  { title: 'Course', items: [
+  { key: 'course', title: 'Course', items: [
     { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
     { id: 'playbook', label: 'Playbook', m: 'playbook', r: null },
   ] },
 ]
 
-// Flatten the groups (plus the pinned-bottom items) into one lookup list.
-function flattenNav(groups, bottom = []) {
+// Flatten the sections (landing + its pages, plus the pinned-bottom items) into
+// one lookup list used for the initial screen and global-search jumps.
+function flattenNav(sections, bottom = []) {
   const out = []
-  for (const g of groups) for (const it of g.items) out.push(it)
+  for (const s of sections) {
+    if (s.landing) out.push(s.landing)
+    for (const it of (s.items || [])) out.push(it)
+  }
   for (const it of bottom) out.push(it)
   return out
+}
+
+// Which section key owns a given nav-item id (its landing or any of its pages).
+function sectionKeyOf(sections, id) {
+  for (const s of sections) {
+    if (s.landing?.id === id) return s.key
+    if ((s.items || []).some((it) => it.id === id)) return s.key
+  }
+  return null
 }
 
 // ── ROOT ────────────────────────────────────────────────────────────────────
 export default function SprayApp({ user }) {
   const manage = canManage(user.role)
   const budgetOnly = isFinanceOnly(user.role)
-  const groups = budgetOnly
-    ? NAV_BUDGET_ONLY
+  const sections = budgetOnly
+    ? SECTIONS_BUDGET_ONLY
     : manage
-      ? (canBudget(user.role) ? [...NAV_MANAGER, FINANCE_GROUP] : NAV_MANAGER)
-      : NAV_CREW
+      ? (canBudget(user.role) ? [...SECTIONS_MANAGER, FINANCE_SECTION] : SECTIONS_MANAGER)
+      : SECTIONS_CREW
   const bottom = budgetOnly ? [] : manage ? NAV_MANAGER_BOTTOM : []
-  const allItems = flattenNav(groups, bottom)
+  const allItems = flattenNav(sections, bottom)
   const initial = allItems[0]
 
   const [sel, setSel] = useState(initial)
@@ -404,6 +440,9 @@ export default function SprayApp({ user }) {
   const nav = React.useMemo(() => ({ route: sel.r, seq, focus }), [sel.r, seq, focus])
 
   const pick = (item) => { setFocus(null); setSel(item); setSeq((s) => s + 1); setDrawer(false) }
+  // Navigate to a sibling screen by its nav-item id — used by the landing-page
+  // cards to open one of a section's pages.
+  const pickId = (id) => { const it = allItems.find((x) => x.id === id); if (it) pick(it) }
   // Jump to a specific screen (by module + route), optionally deep-opening an
   // item there — used by global search results.
   const gotoFocus = (m, r, f = null) => {
@@ -411,6 +450,7 @@ export default function SprayApp({ user }) {
     if (!it) return
     setFocus(f); setSel(it); setSeq((s) => s + 1); setDrawer(false); setSearchOpen(false)
   }
+  const activeSectionKey = sectionKeyOf(sections, sel.id)
   const showCourseBar = !!sel.follow && courses.length >= 2
   // Screens flagged noAll always show one course — never the mixed "All" view.
   // If we land on one while "All" is active, snap to the first course.
@@ -420,7 +460,7 @@ export default function SprayApp({ user }) {
 
   const Rail = ({ onPick }) => (
     <SidebarRail
-      groups={groups} bottom={bottom} activeId={sel.id} onPick={onPick}
+      sections={sections} bottom={bottom} activeId={sel.id} activeSectionKey={activeSectionKey} onPick={onPick}
       clubName={clubName || user.clubName} user={user}
     />
   )
@@ -472,7 +512,8 @@ export default function SprayApp({ user }) {
 
           <div className="flex-1 min-w-0">
             {sel.m === 'budget' ? <BudgetApp user={user} />
-              : sel.m === 'greensmap' ? <GreensMap user={user} />
+              : sel.m === 'land' ? <LandingModule nav={nav} sections={sections} onPickId={pickId} clubName={clubName || user.clubName} />
+              : sel.m === 'greensmap' ? <GreensMap user={user} nav={nav} />
               : sel.m === 'spray' ? <SprayOpsModule user={user} nav={nav} hideChrome homeMode={!!sel.home} course={sel.follow ? course : ''} />
               : sel.m === 'turf' ? <TurfPerformanceModule user={user} nav={nav} hideChrome course={sel.follow ? course : ''} />
               : sel.m === 'playbook' ? <PlaybookModule user={user} manage={manage} hideChrome />
@@ -500,9 +541,11 @@ function CourseTab({ label, color, on, onClick }) {
   )
 }
 
-// The grouped dark rail. Gold uppercase group labels, gold active left-bar.
-function SidebarRail({ groups, bottom, activeId, onPick, clubName, user }) {
-  const itemBtn = (it) => {
+// The grouped dark rail. Each section label is a link to that section's landing
+// page; only the current section is expanded. Gold uppercase labels, gold active
+// left-bar on the current page — the same highlight style as before.
+function SidebarRail({ sections, bottom, activeId, activeSectionKey, onPick, clubName, user }) {
+  const itemBtn = (it, indent = false) => {
     const on = it.id === activeId
     return (
       <button
@@ -510,7 +553,7 @@ function SidebarRail({ groups, bottom, activeId, onPick, clubName, user }) {
         onClick={() => onPick(it)}
         className="w-full text-left font-body text-[13px] transition"
         style={{
-          padding: '7px 16px 7px 17px',
+          padding: indent ? '6px 16px 6px 26px' : '7px 16px 7px 17px',
           borderLeft: `3px solid ${on ? GOLD : 'transparent'}`,
           backgroundColor: on ? 'rgba(201,168,76,0.13)' : 'transparent',
           color: on ? '#FFFFFF' : 'rgba(255,255,255,0.62)',
@@ -521,6 +564,39 @@ function SidebarRail({ groups, bottom, activeId, onPick, clubName, user }) {
       </button>
     )
   }
+
+  // One section: a clickable label (opens its landing) plus its pages, shown only
+  // while this section is the current one. A plain group (no landing, operators'
+  // rail) keeps the old static label and always shows its pages.
+  const sectionBlock = (s) => {
+    const landing = s.landing
+    const expanded = landing ? s.key === activeSectionKey : true
+    const hasItems = (s.items || []).length > 0
+    const onLanding = landing && landing.id === activeId
+    return (
+      <div key={s.key} className="mb-0.5">
+        {landing ? (
+          <button
+            onClick={() => onPick(landing)}
+            className="w-full flex items-center justify-between font-body text-[11px] font-bold uppercase tracking-[0.1em] transition"
+            style={{
+              padding: '9px 14px',
+              borderLeft: `3px solid ${onLanding ? GOLD : 'transparent'}`,
+              backgroundColor: onLanding ? 'rgba(201,168,76,0.13)' : 'transparent',
+              color: expanded || onLanding ? '#FFFFFF' : 'rgba(201,168,76,0.85)',
+            }}
+          >
+            <span>{s.title}</span>
+            {hasItems && <ChevronDown size={13} style={{ transform: expanded ? 'none' : 'rotate(-90deg)', transition: 'transform .15s', opacity: 0.6 }} />}
+          </button>
+        ) : (
+          s.title && <p className="font-body text-[9.5px] font-bold uppercase tracking-[0.12em] px-4 pt-3 pb-1" style={{ color: 'rgba(201,168,76,0.85)' }}>{s.title}</p>
+        )}
+        {expanded && (s.items || []).map((it) => itemBtn(it, !!landing))}
+      </div>
+    )
+  }
+
   return (
     <>
       {/* Brand */}
@@ -529,21 +605,14 @@ function SidebarRail({ groups, bottom, activeId, onPick, clubName, user }) {
         <p className="font-display text-[17px] font-semibold text-white leading-tight mt-0.5">Grounds</p>
       </div>
 
-      {/* Groups */}
-      <nav className="flex-1 overflow-y-auto no-scrollbar pb-3">
-        {groups.map((g, i) => (
-          <div key={g.title || `g${i}`} className="mb-1.5">
-            {g.title && (
-              <p className="font-body text-[9.5px] font-bold uppercase tracking-[0.12em] px-4 pt-3 pb-1" style={{ color: 'rgba(201,168,76,0.85)' }}>{g.title}</p>
-            )}
-            {g.items.map(itemBtn)}
-          </div>
-        ))}
+      {/* Sections */}
+      <nav className="flex-1 overflow-y-auto no-scrollbar pb-3 pt-1">
+        {sections.map(sectionBlock)}
       </nav>
 
       {/* Pinned bottom: settings + user + sign out */}
       <div className="shrink-0 border-t" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-        {(bottom || []).map(itemBtn)}
+        {(bottom || []).map((it) => itemBtn(it))}
         <div className="px-4 py-3 flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-body text-[10px] font-extrabold" style={{ backgroundColor: GOLD, color: FOREST }}>
             {initials(user.fullName)}
@@ -575,6 +644,77 @@ function roleLabel(role) {
     : role === 'assistant' ? 'Assistant Superintendent'
     : role === 'finance' ? 'Finance (CFO / Accounting)'
     : 'Operator'
+}
+
+// ── SECTION LANDING PAGES ───────────────────────────────────────────────────
+// Each section (except Home, which lands on the dashboard) opens a landing page:
+// a short intro plus a card per page in the section, so the section reads as a
+// hub. Phase 2 layers live data (weather, rain totals, moisture chips…) on top.
+const LANDING_INTRO = {
+  spray: 'Your spray program across both courses — the annual plan, sheets, fert and inventory, all in one place.',
+  data: 'Everything the crew records on morning rounds — moisture, green speeds, clipping yields, firmness and scouting — plus growth and soil tests.',
+  irrigation: 'Tonight’s water and live greens moisture, the irrigation map and the parts stockroom.',
+  resources: 'Guides and references for the whole operation.',
+  mechanical: 'Heights of cut and mechanical setup, by surface.',
+}
+const PAGE_DESC = {
+  jobboard: 'Crew assignments and time off',
+  weekly: 'The week’s turf report',
+  weather: 'Forecast, wind and spray windows',
+  season: 'End-of-season summaries',
+  program: 'The year’s spray plan by area',
+  sheets: 'Build and track spray sheets',
+  fert: 'Fertilizer sheets and rates',
+  invcount: 'Current stock on hand',
+  chemicals: 'Products, labels and rates',
+  wetting: 'Moisture rounds and wetting-agent tracking',
+  speed: 'Stimp readings over the season',
+  clippings: 'Clipping yields per 1,000 sqft',
+  firmness: 'Surface firmness (Gravities)',
+  scouting: 'Disease, weed and insect observations',
+  gdd: 'Growing degree days and growth',
+  soil: 'Soil tests and organic matter',
+  greenstoday: 'Live greens moisture and tonight’s water',
+  irrmap: 'Heads, pipe and as-built',
+  parts: 'Irrigation parts stockroom',
+  reference: 'The agronomy reference guide',
+  training: 'Crew training materials',
+  playbook: 'Course setup playbook',
+  coursemap: 'Aerial, areas and square footage',
+  chemguide: 'Tank-mix and chemistry guide',
+  timing: 'Soil-temperature application windows',
+  hoc: 'Height of cut by surface',
+}
+
+function LandingModule({ nav, sections, onPickId, clubName }) {
+  const section = (sections || []).find((s) => s.landing && s.landing.m === 'land' && s.landing.r === nav?.route)
+  if (!section) return null
+  const pages = section.items || []
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
+      <div className={`${PAGE} py-6`}>
+        <div className="mb-5">
+          <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{clubName || 'Grounds'}</p>
+          <h1 className="font-display text-2xl font-semibold mt-0.5" style={{ color: FOREST }}>{section.title}</h1>
+          <div className="mt-1.5 h-px" style={{ width: 30, backgroundColor: GOLD }} />
+          {LANDING_INTRO[nav?.route] && <p className="font-body text-[13px] mt-2 max-w-xl" style={{ color: INK_2 }}>{LANDING_INTRO[nav?.route]}</p>}
+        </div>
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
+          {pages.map((p) => (
+            <button key={p.id} onClick={() => onPickId(p.id)}
+              className="text-left bg-white rounded-2xl border p-4 shadow-sm transition hover:shadow-md flex items-start justify-between gap-2"
+              style={{ borderColor: HAIR }}>
+              <div className="min-w-0">
+                <p className="font-display text-[15px] font-semibold" style={{ color: INK }}>{p.label}</p>
+                {PAGE_DESC[p.id] && <p className="font-body text-[12px] mt-0.5" style={{ color: INK_3 }}>{PAGE_DESC[p.id]}</p>}
+              </div>
+              <ChevronRight size={16} className="shrink-0 mt-0.5" style={{ color: INK_3 }} />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ── IRRIGATION MODULE ─────────────────────────────────────────────────────
@@ -1521,11 +1661,11 @@ function GlobalSearch({ onGo, onClose }) {
       .sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 6)
       .forEach((s) => out.push({ key: 'sh' + s.id, kind: 'Spray sheet', label: s.area || 'Spray', sub: `${fmtDate(s.date)} · ${(s.products || []).filter((p) => p.product).map((p) => p.product).join(', ') || 'no products'}`, Icon: ClipboardList, go: () => onGo('spray', 'list', { type: 'sheet', id: s.id }) }))
     data.speeds.filter((r) => has(r.area)).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 4)
-      .forEach((r) => out.push({ key: 'sp' + r.id, kind: 'Greens speed', label: r.area, sub: `${fmtDate(r.date)} · ${fmtStimp(r.speed)}`, Icon: Gauge, go: () => onGo('turf', 'data') }))
+      .forEach((r) => out.push({ key: 'sp' + r.id, kind: 'Greens speed', label: r.area, sub: `${fmtDate(r.date)} · ${fmtStimp(r.speed)}`, Icon: Gauge, go: () => onGo('turf', 'speed') }))
     data.soilTests.filter((r) => has(r.area) || has(r.lab)).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 4)
       .forEach((r) => out.push({ key: 'so' + r.id, kind: 'Soil test', label: r.area || 'Soil test', sub: `${fmtDate(r.date)}${r.lab ? ' · ' + r.lab : ''}`, Icon: Sprout, go: () => onGo('turf', 'soil') }))
     data.scouting.filter((r) => has(r.area) || has(r.target) || has(r.kind)).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 4)
-      .forEach((r) => out.push({ key: 'sc' + r.id, kind: 'Scouting', label: `${r.area || ''} — ${r.target || r.kind || ''}`.trim(), sub: `${fmtDate(r.date)}${r.severity ? ' · ' + r.severity : ''}`, Icon: Bug, go: () => onGo('turf', 'data') }))
+      .forEach((r) => out.push({ key: 'sc' + r.id, kind: 'Scouting', label: `${r.area || ''} — ${r.target || r.kind || ''}`.trim(), sub: `${fmtDate(r.date)}${r.severity ? ' · ' + r.severity : ''}`, Icon: Bug, go: () => onGo('turf', 'scouting') }))
     data.practices.filter((r) => has(r.area) || has(r.practice)).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 4)
       .forEach((r) => out.push({ key: 'pc' + r.id, kind: 'Practice', label: `${r.practice || 'Practice'}${r.area ? ' — ' + r.area : ''}`, sub: fmtDate(r.date), Icon: Scissors, go: () => onGo('turf', 'practices') }))
     return out
@@ -10342,6 +10482,67 @@ function taskErrorText(e) {
 // One place for everything the crew collects on morning maintenance — moisture,
 // clipping yields, greens speed, scouting. This is also what the crew's no-login
 // QR page mirrors. Managers get a "Crew QR" button to print/share the link.
+// ── FIRMNESS ────────────────────────────────────────────────────────────────
+// Surface firmness (Gravities), recorded by the crew via the field QR and the
+// DEACON / sensor feed. Read-only here, exactly as it was inside Field Data —
+// now its own Data page: latest reading, a season trend and the full history.
+function FirmnessPage({ firmness = [], courseInfo = {}, courseFilter = '' }) {
+  const [histOpen, setHistOpen] = useState(false)
+  const tok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+  const fmtD = (d) => { const p = String(d || '').split('-'); return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : String(d || '') }
+  const scoped = courseFilter ? (firmness || []).filter((f) => tok(f.area) === tok(courseFilter)) : (firmness || [])
+  const rows = scoped.filter((f) => f.firmness != null && f.firmness !== '' && !isNaN(Number(f.firmness)))
+  const unit = (scoped.find((f) => f.unit) || {}).unit || 'Gravities'
+  const latestDate = rows.length ? rows.map((f) => f.date).sort().pop() : null
+  const lNums = latestDate ? rows.filter((f) => f.date === latestDate).map((f) => Number(f.firmness)) : []
+  const avg = lNums.length ? Math.round((lNums.reduce((a, b) => a + b, 0) / lNums.length) * 10) / 10 : null
+  const chartPts = [...rows].sort((a, b) => String(a.date).localeCompare(String(b.date))).map((f) => ({ date: f.date, value: Number(f.firmness), rec: f }))
+  const byDateSorted = [...rows].sort((a, b) => String(b.date).localeCompare(String(a.date)))
+
+  return (
+    <div className="max-w-3xl">
+      <h2 className="font-display text-lg font-semibold mb-1" style={{ color: INK }}>Firmness</h2>
+      <p className="font-body text-xs mb-4" style={{ color: INK_3 }}>Surface firmness in {unit}, from the crew’s field readings and the DEACON / sensor feed.</p>
+      {rows.length === 0 ? (
+        <div className="bg-white rounded-2xl border p-8 text-center" style={{ borderColor: HAIR }}>
+          <p className="font-body text-sm" style={{ color: INK_2 }}>No firmness readings yet. They arrive from Greens Today → Add readings and the DEACON / sensor feed.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="rounded-2xl p-4 text-white shadow-sm" style={{ backgroundColor: FOREST }}>
+            <p className="font-body text-[11px] font-bold uppercase tracking-wide opacity-70">Average firmness · {fmtD(latestDate)}</p>
+            <p className="font-display text-3xl font-bold mt-0.5">{avg} <span className="text-lg font-semibold opacity-80">{unit}</span></p>
+            <p className="font-body text-[10px] opacity-70">avg of {lNums.length} green{lNums.length !== 1 ? 's' : ''}</p>
+          </div>
+          {chartPts.length >= 2 && (
+            <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+              <p className="font-display text-base font-semibold mb-2" style={{ color: INK }}>Firmness trend</p>
+              <TrailingOverlayChart points={chartPts} unit={unit} guides={guidesFor(courseInfo, 'firmness')} />
+            </div>
+          )}
+          <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+            <button onClick={() => setHistOpen((o) => !o)} className="w-full flex items-center justify-between px-4 py-3 text-left">
+              <span className="font-body text-sm font-semibold" style={{ color: FOREST }}>All readings · {rows.length}</span>
+              <span className="flex items-center gap-1.5 font-body text-[11px] font-semibold" style={{ color: INK_3 }}>{histOpen ? 'Hide' : 'View'} <ChevronDown size={15} style={{ transform: histOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} /></span>
+            </button>
+            {histOpen && (
+              <div className="px-4 pb-4 pt-1 border-t border-black/5 space-y-0">
+                {byDateSorted.map((f, i) => (
+                  <div key={f.id || i} className="flex items-center justify-between py-1.5 border-b last:border-0" style={{ borderColor: 'rgba(0,0,0,0.05)' }}>
+                    <span className="font-body text-[13px] flex-1 min-w-0 truncate" style={{ color: INK }}>{f.area}</span>
+                    <span className="font-body text-[12px] w-16 text-right shrink-0" style={{ color: INK_3 }}>{fmtD(f.date)}</span>
+                    <span className="font-body text-[13px] font-semibold tnum w-24 text-right shrink-0" style={{ color: FOREST }}>{Number(f.firmness)} {unit}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FieldDataHub({ clippings, speeds, firmness = [], practices = [], scouting, daily, turf, saveTurfCourse, course = '', onClip, onClipDel, onSpeed, onSpeedUpd, onSpeedDel, onScout, onScoutUpd, onScoutDel }) {
   const [tab, setTab] = useState('moisture')
   const [qrOpen, setQrOpen] = useState(false)
@@ -10558,6 +10759,10 @@ function TurfPerformanceModule({ user, nav, hideChrome, course = '' }) {
               onAddMany={async (list) => { await db.addGreensSpeeds(list); await reloadSpeeds() }}
               onUpdate={async (id, patch) => { await db.updateGreensSpeed(id, patch); await reloadSpeeds() }}
               onDelete={async (id) => { await db.deleteGreensSpeed(id); await reloadSpeeds() }} />
+        )}
+        {route === 'firmness' && (
+          loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+          : <FirmnessPage firmness={firmness} courseInfo={turf.courseInfo} courseFilter={course} />
         )}
         {route === 'scouting' && (
           loadingTurf ? <div className="pt-10 flex justify-center"><Loader2 className="animate-spin text-slate-300" size={26} /></div>

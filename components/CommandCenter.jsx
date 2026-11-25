@@ -1,6 +1,6 @@
 'use client'
 
-// ── Command Centre ────────────────────────────────────────────────────────────
+// ── Command Center ────────────────────────────────────────────────────────────
 // A wall-TV / landscape-iPad overview for a multi-course property. The top strip
 // is shared across the whole property (sprays this week, open jobs, 7-day rain,
 // season GDD, live weather); below it each course gets its own card in its own
@@ -128,7 +128,7 @@ export default function CommandCentre() {
       <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
         <div>
           <p className="font-display text-[11px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{courseInfo.clubName || 'Golf Club'}</p>
-          <h1 className="font-display text-3xl sm:text-4xl font-semibold" style={{ color: FOREST }}>Command Centre</h1>
+          <h1 className="font-display text-3xl sm:text-4xl font-semibold" style={{ color: FOREST }}>Command Center</h1>
           <p className="font-body text-sm text-slate-500 mt-1">
             {fmtLongDate(new Date())}
             {wx.current?.temp ? <> · <span className="font-semibold" style={{ color: FOREST }}>{wx.current.temp}°F</span>{cond ? `, ${cond.label}` : ''}</> : ''}

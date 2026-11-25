@@ -32,9 +32,12 @@ const CONGRESSIONAL = [38.9966, -77.1803]
 
 const canManage = (role) => role === 'assistant' || role === 'superintendent' || role === 'director'
 
-export default function GreensMap({ user }) {
+export default function GreensMap({ user, nav }) {
+  // Driven by the menu: Resources → Course Map opens the map; Irrigation → Greens
+  // Today opens the greens view (with a Targets sub-tab). One loader, two homes.
+  const view = nav?.route === 'map' ? 'map' : 'today'
   const manage = canManage(user?.role)
-  const [tab, setTab] = useState('map') // Phase A ships the Map tab
+  const [tab, setTab] = useState(nav?.route === 'map' ? 'map' : 'greens')
   const [ctx, setCtx] = useState(null)
   const [targetTxt, setTargetTxt] = useState('—')
   const [courseId, setCourseId] = useState('')
@@ -69,6 +72,10 @@ export default function GreensMap({ user }) {
   const editLayerRef = useRef(null)
   const editRingRef = useRef(null)
   const editPolyRef = useRef(null)
+
+  // When the menu switches between Irrigation → Greens Today and Resources →
+  // Course Map, re-sync the active tab (this component stays mounted across both).
+  useEffect(() => { setTab(nav?.route === 'map' ? 'map' : 'greens') }, [nav])
 
   // Load club context + imagery.
   useEffect(() => {
@@ -304,17 +311,23 @@ export default function GreensMap({ user }) {
   return (
     <div className={`${PAGE} py-5`}>
       <div className="mb-3">
-        <h1 className="font-display text-2xl font-bold" style={{ color: FOREST }}>Course Map</h1>
+        <h1 className="font-display text-2xl font-bold" style={{ color: FOREST }}>{view === 'map' ? 'Course Map' : 'Greens Today'}</h1>
         <div className="mt-1 h-px" style={{ width: 30, backgroundColor: GOLD }} />
-        <p className="font-body text-[13px] mt-1.5" style={{ color: INK_2 }}>{ctx?.club?.name || 'Your club'} · {ctx?.courses?.[0]?.name || 'Blue'} · from DEACON · target {targetTxt}</p>
+        <p className="font-body text-[13px] mt-1.5" style={{ color: INK_2 }}>
+          {view === 'map'
+            ? `${ctx?.club?.name || 'Your club'} · ${ctx?.courses?.[0]?.name || 'Blue'} · aerial, areas & square footage`
+            : `${ctx?.club?.name || 'Your club'} · ${ctx?.courses?.[0]?.name || 'Blue'} · from DEACON · target ${targetTxt}`}
+        </p>
       </div>
 
-      <div className="flex gap-1.5 border-b mb-4" style={{ borderColor: HAIR }}>
-        {[['greens', 'Greens today'], ['map', 'Map'], ['targets', 'Targets']].map(([k, label]) => (
-          <button key={k} onClick={() => setTab(k)} className="font-body text-[13px] font-bold px-3.5 py-2 transition"
-            style={tab === k ? { color: FOREST, borderBottom: `2.5px solid ${GOLD}` } : { color: INK_3, borderBottom: '2.5px solid transparent' }}>{label}</button>
-        ))}
-      </div>
+      {view === 'today' && (
+        <div className="flex gap-1.5 border-b mb-4" style={{ borderColor: HAIR }}>
+          {[['greens', 'Greens today'], ['targets', 'Targets']].map(([k, label]) => (
+            <button key={k} onClick={() => setTab(k)} className="font-body text-[13px] font-bold px-3.5 py-2 transition"
+              style={tab === k ? { color: FOREST, borderBottom: `2.5px solid ${GOLD}` } : { color: INK_3, borderBottom: '2.5px solid transparent' }}>{label}</button>
+          ))}
+        </div>
+      )}
 
       {notice && <div className="mb-3 rounded-xl px-3 py-2 font-body text-[12px] flex items-center justify-between" style={{ backgroundColor: '#FBF2E0', color: '#B7791F' }}><span>{notice}</span><button onClick={() => setNotice('')} className="font-bold px-2">×</button></div>}
 
