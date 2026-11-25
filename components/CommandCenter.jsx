@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { CloudRain, Gauge, Sprout, Thermometer, RefreshCw, Plus, X, ClipboardList, Sun, CloudSun, Cloud, CloudDrizzle, CloudSnow, CloudFog, CloudLightning } from 'lucide-react'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, gddSince, weatherCodeInfo } from '@/lib/weather'
+import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, gddSince, weatherCodeInfo, fetchNbmForecast, overlayForecastTemps } from '@/lib/weather'
 import { sheetApplied } from '@/lib/applied'
 import { localDateISO } from '@/lib/dates'
 import { fmtStimp } from '@/lib/greenspeed'
@@ -60,7 +60,7 @@ export default function CommandCentre() {
       const loc = settings.location
       if (loc?.lat != null) {
         ;(async () => { try { const c = await fetchCurrent(loc.lat, loc.lng); setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ } })()
-        ;(async () => { try { const d = await fetchWeather(loc.lat, loc.lng); setWx((w) => ({ ...w, forecast: dailyFromForecastBlock(d) })) } catch { /* ignore */ } })()
+        ;(async () => { try { const d = await fetchWeather(loc.lat, loc.lng); let fc = dailyFromForecastBlock(d); try { const nbm = await fetchNbmForecast(loc.lat, loc.lng); fc = overlayForecastTemps(fc, nbm) } catch { /* keep base */ } setWx((w) => ({ ...w, forecast: fc })) } catch { /* ignore */ } })()
         ;(async () => { try { const s = await fetchSeasonDaily(loc.lat, loc.lng); setWx((w) => ({ ...w, season: s })) } catch { /* ignore */ } })()
       }
     } catch (e) { console.error(e) }
@@ -145,7 +145,7 @@ export default function CommandCentre() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <PropTile icon={ClipboardList} label="This week · sprays" value={spraysThisWeek} />
         <PropTile icon={ClipboardList} label="Open jobs" value={openJobs} accent={openJobs ? '#B45309' : FERN} />
-        <PropTile icon={CloudRain} label="Rain · 7-day" value={`${rain7.toFixed(2)}"`} />
+        <PropTile icon={CloudRain} label="Rain · last 7 days" value={`${rain7.toFixed(2)}"`} />
         <PropTile icon={Thermometer} label="GDD to date" value={seasonGdd != null ? seasonGdd.toLocaleString() : '—'} sub="base 50°F · since Jan 1" />
       </div>
       <p className="font-body text-[11px] text-slate-400 mb-4 flex items-center gap-1.5">

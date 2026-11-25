@@ -16,7 +16,10 @@ import { useEffect, useRef, useState } from 'react'
 import { Upload, Layers } from 'lucide-react'
 import { FOREST, FERN, GOLD, HAIR, INK, INK_2, INK_3, PAPER } from '@/lib/theme'
 import * as cmdb from '@/lib/coursemap/db'
+import * as db from '@/lib/db'
 import GreensToday, { MoistureTargets } from '@/components/GreensToday'
+import WettingAgent from '@/components/WettingAgent'
+import { fetchWeather, fetchSeasonDaily, dailyFromForecastBlock, mergeDaily } from '@/lib/weather'
 import { resolveTarget } from '@/lib/coursemap/targets'
 import { parseWorldFile, parseNearmapName, upperLeftFromCenter, worldFileCorners, geodesicAreaSqft, perimeterFt } from '@/lib/coursemap/geo'
 import { formatDate, formatNumber } from '@/lib/format'
@@ -37,7 +40,8 @@ export default function GreensMap({ user, nav }) {
   // Today opens the greens view (with a Targets sub-tab). One loader, two homes.
   const view = nav?.route === 'map' ? 'map' : 'today'
   const manage = canManage(user?.role)
-  const [tab, setTab] = useState(nav?.route === 'map' ? 'map' : 'greens')
+  const initialTab = nav?.route === 'map' ? 'map' : nav?.route === 'moisture' ? 'wetting' : 'greens'
+  const [tab, setTab] = useState(initialTab)
   const [ctx, setCtx] = useState(null)
   const [targetTxt, setTargetTxt] = useState('—')
   const [courseId, setCourseId] = useState('')
@@ -75,7 +79,7 @@ export default function GreensMap({ user, nav }) {
 
   // When the menu switches between Irrigation → Greens Today and Resources →
   // Course Map, re-sync the active tab (this component stays mounted across both).
-  useEffect(() => { setTab(nav?.route === 'map' ? 'map' : 'greens') }, [nav])
+  useEffect(() => { setTab(nav?.route === 'map' ? 'map' : nav?.route === 'moisture' ? 'wetting' : 'greens') }, [nav])
 
   // Load club context + imagery.
   useEffect(() => {
@@ -311,18 +315,18 @@ export default function GreensMap({ user, nav }) {
   return (
     <div className={`${PAGE} py-5`}>
       <div className="mb-3">
-        <h1 className="font-display text-2xl font-bold" style={{ color: FOREST }}>{view === 'map' ? 'Course Map' : 'Greens Today'}</h1>
+        <h1 className="font-display text-2xl font-bold" style={{ color: FOREST }}>{view === 'map' ? 'Course Map' : nav?.route === 'moisture' ? 'Moisture & Wetting Agents' : 'Greens Today'}</h1>
         <div className="mt-1 h-px" style={{ width: 30, backgroundColor: GOLD }} />
         <p className="font-body text-[13px] mt-1.5" style={{ color: INK_2 }}>
           {view === 'map'
             ? `${ctx?.club?.name || 'Your club'} · ${ctx?.courses?.[0]?.name || 'Blue'} · aerial, areas & square footage`
-            : `${ctx?.club?.name || 'Your club'} · ${ctx?.courses?.[0]?.name || 'Blue'} · from DEACON · target ${targetTxt}`}
+            : `${ctx?.club?.name || 'Your club'} · ${ctx?.courses?.[0]?.name || 'Blue'} · moisture, targets & wetting-agent wear-off · target ${targetTxt}`}
         </p>
       </div>
 
       {view === 'today' && (
         <div className="flex gap-1.5 border-b mb-4" style={{ borderColor: HAIR }}>
-          {[['greens', 'Greens today'], ['targets', 'Targets']].map(([k, label]) => (
+          {[['greens', 'Greens today'], ['targets', 'Targets'], ['wetting', 'Wetting agents']].map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)} className="font-body text-[13px] font-bold px-3.5 py-2 transition"
               style={tab === k ? { color: FOREST, borderBottom: `2.5px solid ${GOLD}` } : { color: INK_3, borderBottom: '2.5px solid transparent' }}>{label}</button>
           ))}
@@ -395,8 +399,42 @@ export default function GreensMap({ user, nav }) {
 
       {tab === 'greens' && <GreensToday ctx={ctx} courseId={courseId} manage={manage} user={user} activeImagery={imagery.find((i) => i.id === selId) || null} />}
       {tab === 'targets' && <MoistureTargets ctx={ctx} courseId={courseId} manage={manage} />}
+      {tab === 'wetting' && <WettingAgentPane onGoGreens={() => setTab('greens')} />}
     </div>
   )
+}
+
+// The wetting-agent wear-off tracker, now a tab of the moisture screen. It loads
+// its own settings + weather so it stands alone here. "Add readings" sends the
+// user to the Greens today tab, where readings are entered.
+function WettingAgentPane({ onGoGreens }) {
+  const [state, setState] = useState(null)
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      try {
+        const s = await db.fetchSettings()
+        let daily = []
+        if (s.location?.lat != null) {
+          try {
+            const [season, wxData] = await Promise.all([
+              fetchSeasonDaily(s.location.lat, s.location.lng).catch(() => []),
+              fetchWeather(s.location.lat, s.location.lng).catch(() => null),
+            ])
+            daily = mergeDaily(season || [], wxData ? dailyFromForecastBlock(wxData) : [])
+          } catch { /* ignore */ }
+        }
+        if (live) setState({ courseInfo: s.courseInfo || {}, areas: s.areas || {}, location: s.location, daily })
+      } catch { if (live) setState({ courseInfo: {}, areas: {}, location: null, daily: [] }) }
+    })()
+    return () => { live = false }
+  }, [])
+  const saveCourse = async (patch) => {
+    setState((st) => (st ? { ...st, courseInfo: { ...(st.courseInfo || {}), ...patch } } : st))
+    try { const s = await db.fetchSettings(); await db.saveSettings({ courseInfo: { ...(s.courseInfo || {}), ...patch } }) } catch (e) { console.error(e) }
+  }
+  if (!state) return <p className="font-body text-[13px] py-10 text-center" style={{ color: INK_3 }}>Loading…</p>
+  return <WettingAgent daily={state.daily} areas={state.areas} courseInfo={state.courseInfo} location={state.location} onSaveCourse={saveCourse} onAppNav={() => onGoGreens && onGoGreens()} />
 }
 
 // ── Add photo ──────────────────────────────────────────────────────────────

@@ -325,7 +325,7 @@ const SECTIONS_MANAGER = [
   { key: 'data', title: 'Data',
     landing: { id: 'data-home', label: 'Data', m: 'land', r: 'data', follow: true, noAll: true },
     items: [
-      { id: 'wetting', label: 'Moisture & Wetting Agents', m: 'turf', r: 'wetting', follow: true, noAll: true },
+      { id: 'wetting', label: 'Moisture & Wetting Agents', m: 'greensmap', r: 'moisture', follow: true, noAll: true },
       { id: 'speed', label: 'Green Speeds', m: 'turf', r: 'speed', follow: true, noAll: true },
       { id: 'clippings', label: 'Clipping Yields', m: 'turf', r: 'clippings', follow: true, noAll: true },
       { id: 'firmness', label: 'Firmness', m: 'turf', r: 'firmness', follow: true, noAll: true },
@@ -791,7 +791,7 @@ function HomeLanding({ clubName, onPickId }) {
       const loc = settings.location
       if (loc?.lat != null) {
         ;(async () => { try { const c = await fetchCurrent(loc.lat, loc.lng); if (live) setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ } })()
-        ;(async () => { try { const d = await fetchWeather(loc.lat, loc.lng); if (live) setWx((w) => ({ ...w, forecast: dailyFromForecastBlock(d), today: dailyFromHourly(d).find((x) => x.date === today) || null })) } catch { /* ignore */ } })()
+        ;(async () => { try { const d = await fetchWeather(loc.lat, loc.lng); let fc = dailyFromForecastBlock(d); try { const nbm = await fetchNbmForecast(loc.lat, loc.lng); fc = overlayForecastTemps(fc, nbm) } catch { /* keep base */ } if (live) setWx((w) => ({ ...w, forecast: fc, today: dailyFromHourly(d).find((x) => x.date === today) || null })) } catch { /* ignore */ } })()
         ;(async () => { try { const s = await fetchSeasonDaily(loc.lat, loc.lng); if (live) setWx((w) => ({ ...w, season: s })) } catch { /* ignore */ } })()
         ;(async () => { try { const bt = await fetchBreakdownTemps(loc.lat, loc.lng); if (live) setWx((w) => ({ ...w, breakdownTemps: bt })) } catch { /* ignore */ } })()
       }

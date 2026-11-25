@@ -214,18 +214,57 @@ export async function POST(request) {
       const values = (body.values || []).map(Number).filter(Number.isFinite)
       if (!greenId || !values.length) return Response.json({ error: 'no_values' }, { status: 400 })
       const { avg, cv } = stats(values)
-      // read-modify-write the settings JSON (no dedicated table)
       const { data } = await supabase.from('app_settings').select('course_info').eq('id', 1).maybeSingle()
       const ci = data?.course_info || {}
       const wetting = ci.wetting || {}
-      const reading = { id: newId(), greenId, date, values, avg, cv }
+      const green = (wetting.greens || []).find((g) => g.id === greenId) || null
+      const points = Array.isArray(body.points) ? body.points : (green?.points || [])
+
+      // Keep the green's saved GPS spots current either way.
       let greens = wetting.greens || []
-      if (Array.isArray(body.points)) {
-        greens = greens.map((g) => (g.id === greenId ? { ...g, points: body.points } : g))
+      if (Array.isArray(body.points)) greens = greens.map((g) => (g.id === greenId ? { ...g, points: body.points } : g))
+
+      // One moisture system: if this indicator green is linked to a course-map
+      // green, write the unified moisture tables (so the reading shows on the
+      // merged moisture screen and the heatmap). The area row gives us the right
+      // club/course without a login. Otherwise fall back to the settings store.
+      let wroteUnified = false
+      if (green?.areaId) {
+        try {
+          const { data: area } = await supabase.from('areas').select('club_id, course_id').eq('id', green.areaId).maybeSingle()
+          if (area?.club_id) {
+            const takenAt = `${date}T12:00:00`
+            const { data: round } = await supabase.from('moisture_rounds').insert({
+              club_id: area.club_id, area_id: green.areaId, started_at: takenAt, ended_at: takenAt,
+              n_readings: values.length, avg_vwc: avg, min_vwc: Math.min(...values), max_vwc: Math.max(...values),
+            }).select('id').single()
+            if (round?.id) {
+              const rows = values.map((v, i) => {
+                const p = points[i] || {}
+                return {
+                  club_id: area.club_id, course_id: area.course_id || null, taken_at: takenAt,
+                  lat: p.lat ?? null, lon: (p.lng ?? p.lon) ?? null, vwc_pct: v, source: 'manual',
+                  spot: p.label || `Spot ${i + 1}`, area_id: green.areaId, round_id: round.id,
+                }
+              })
+              const { error: rErr } = await supabase.from('moisture_readings').insert(rows)
+              if (!rErr) wroteUnified = true
+            }
+          }
+        } catch (e) { /* fall back to the settings store below */ }
       }
-      const nextCi = { ...ci, wetting: { ...wetting, greens, readings: [...(wetting.readings || []), reading] } }
-      const { error } = await supabase.from('app_settings').update({ course_info: nextCi }).eq('id', 1)
-      if (error) throw error
+
+      if (wroteUnified) {
+        // Persist only the updated spots — not a duplicate reading in the old store.
+        if (Array.isArray(body.points)) {
+          await supabase.from('app_settings').update({ course_info: { ...ci, wetting: { ...wetting, greens } } }).eq('id', 1)
+        }
+      } else {
+        const reading = { id: newId(), greenId, date, values, avg, cv }
+        const nextCi = { ...ci, wetting: { ...wetting, greens, readings: [...(wetting.readings || []), reading] } }
+        const { error } = await supabase.from('app_settings').update({ course_info: nextCi }).eq('id', 1)
+        if (error) throw error
+      }
       return Response.json({ ok: true, avg, cv })
     }
     return Response.json({ error: 'unknown_action' }, { status: 400 })
