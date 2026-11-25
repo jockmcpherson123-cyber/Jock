@@ -25,7 +25,7 @@ import {
 import { uid } from '@/lib/calc'
 import { localDateISO } from '@/lib/dates'
 import { gddSince, projectGddReachDate } from '@/lib/weather'
-import { fetchCourseContext as cmCourseContext, fetchGreens as cmFetchGreens, fetchMoistureForGreens as cmFetchMoistureForGreens, importReadings as cmImportReadings, countMigratedRounds as cmCountMigrated } from '@/lib/coursemap/db'
+import { fetchCourseContext as cmCourseContext, fetchGreens as cmFetchGreens, fetchMoistureForGreens as cmFetchMoistureForGreens, importReadings as cmImportReadings, countMigratedRounds as cmCountMigrated, deleteEmptyRounds as cmDeleteEmptyRounds } from '@/lib/coursemap/db'
 
 import { FOREST, FERN, GOLD, PAPER, HAIR, INK, INK_2, INK_3, RED, AMBER, BAND } from '@/lib/theme'
 
@@ -184,7 +184,9 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
         const rounds = areaIds.length ? await cmFetchMoistureForGreens(areaIds) : []
         if (!live) return
         const byArea = {}
-        for (const r of rounds) { const s = stats(r.values); (byArea[r.areaId] ||= []).push({ date: r.date, values: r.values, avg: s.avg, cv: s.cv }) }
+        // Skip empty rounds (no readings) — the shells a failed import can leave;
+        // a green with only empties then falls back to its stored history below.
+        for (const r of rounds) { if (!r.values?.length) continue; const s = stats(r.values); (byArea[r.areaId] ||= []).push({ date: r.date, values: r.values, avg: s.avg, cv: s.cv }) }
         const byGreen = {}
         for (const g of linked) {
           const list = (byArea[g.areaId] || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)))
@@ -250,6 +252,9 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
     if (!ctx?.club?.id) return
     try {
       if (await cmCountMigrated(green.areaId) > 0) { setReloadTick((t) => t + 1); return }
+      // Clear any empty rounds a previous failed import left behind, so dates
+      // aren't duplicated. Real readings (manual/DEACON) are never touched.
+      await cmDeleteEmptyRounds(green.areaId)
       const courseId = ctx.courses?.[0]?.id
       const pts = green.points || []
       const placed = []
@@ -257,10 +262,11 @@ export default function WettingAgent({ daily = [], areas = {}, courseInfo = {}, 
         ;(r.values || []).forEach((v, i) => {
           const p = pts[i] || {}
           if (v == null || v === '' || isNaN(Number(v))) return
-          placed.push({ areaId: green.areaId, vwcPct: Number(v), lat: p.lat ?? null, lon: (p.lng ?? p.lon) ?? null, spot: p.label || `Spot ${i + 1}`, takenAt: `${r.date}T12:00:00`, source: 'migrated' })
+          // source stays within the DB's allowed set; the migration marker is on device.
+          placed.push({ areaId: green.areaId, vwcPct: Number(v), lat: p.lat ?? null, lon: (p.lng ?? p.lon) ?? null, spot: p.label || `Spot ${i + 1}`, takenAt: `${r.date}T12:00:00`, source: 'manual', device: 'migrated' })
         })
       })
-      if (placed.length) await cmImportReadings({ clubId: ctx.club.id, courseId, placed, source: 'migrated' })
+      if (placed.length) await cmImportReadings({ clubId: ctx.club.id, courseId, placed, source: 'manual' })
       setReloadTick((t) => t + 1)
     } catch (e) { console.error('migrate readings', e) }
   }

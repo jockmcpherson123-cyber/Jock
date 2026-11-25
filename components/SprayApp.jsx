@@ -68,7 +68,7 @@ import {
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { duplicateCandidates } from '@/lib/products'
-import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, fetchNbmForecast, overlayForecastTemps, projectGddReachDate, buildRainYear, weatherCodeInfo } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, fetchNbmForecast, overlayForecastTemps, projectGddReachDate, buildRainYear, weatherCodeInfo, seasonGddToDate } from '@/lib/weather'
 import { fungicideLogByArea } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, soilRate, projectWindow, TIMING_WINDOWS } from '@/lib/soiltiming'
@@ -692,6 +692,8 @@ const PAGE_DESC = {
 const addDaysISO = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
 const landTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
 const courseColorOf = (courses, name) => ((courses || []).find((c) => landTok(c.name) === landTok(name)) || {}).color || FERN
+// How much of a product you're short of its reorder point, with its unit.
+const shortfallText = (p) => { const s = Math.max(0, (Number(p.lowStockThreshold) || 0) - (Number(p.stock) || 0)); return s > 0 ? `short ${Math.round(s).toLocaleString()} ${p.unit || ''}`.trim() : 'low on stock' }
 const LAND_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const landMD = (iso) => { const p = String(iso || '').split('-'); return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : String(iso || '') }
@@ -782,7 +784,7 @@ function HomeLanding({ clubName, onPickId }) {
         db.fetchSettings(),
         db.fetchProducts().catch(() => []),
         db.fetchSheets().catch(() => []),
-        db.fetchCrewTasks(addDaysISO(today, -1), addDaysISO(today, 90)).catch(() => []),
+        db.fetchCrewTasks(addDaysISO(today, -120), addDaysISO(today, 180)).catch(() => []),
       ])
       if (!live) return
       ciRef.current = settings.courseInfo || {}
@@ -843,7 +845,7 @@ function HomeLanding({ clubName, onPickId }) {
         <div className="space-y-4">
           <SoilTempCard soilNow={soilNow} openWins={openWins} onPickId={onPickId} />
           <RainTotalsCard week={rainWeek} month={rainMonth} year={rain.ytd} />
-          <NeedsAttention lowStock={lowStock} licAlerts={licAlerts} compGaps={compGaps} openJobs={openJobs} onPickId={onPickId} />
+          <NeedsAttention lowStock={lowStock} licAlerts={licAlerts} comp={compGaps} openJobs={openJobs} onPickId={onPickId} />
         </div>
       </div>
       {addOpen && <EventModal onClose={() => setAddOpen(false)} onSave={(ev) => { saveEvents([...events, ev]); setAddOpen(false) }} />}
@@ -862,11 +864,11 @@ function ForecastWeek({ days = [], total = 0 }) {
         <p className="font-body text-[12px] py-3 text-center" style={{ color: INK_3 }}>Set your location in Settings to see the forecast.</p>
       ) : (
         <div className="flex justify-between gap-1">
-          {days.map((d) => {
+          {days.map((d, i) => {
             const info = weatherCodeInfo(d.code); const wi = WX_ICON[info.key] || WX_ICON.cloud; const WI = wi.Icon
             return (
               <div key={d.date} className="flex-1 text-center min-w-0">
-                <p className="font-body text-[11px] font-bold uppercase" style={{ color: INK_3 }}>{new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}</p>
+                <p className="font-body text-[11px] font-bold uppercase" style={{ color: i === 0 ? FOREST : INK_3 }}>{i === 0 ? 'Today' : new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}</p>
                 <WI size={22} className="mx-auto my-1" style={{ color: wi.color }} />
                 <p className="font-display text-base font-bold" style={{ color: FOREST }}>{Math.round(d.tMax)}°</p>
                 <p className="font-body text-[11px]" style={{ color: INK_3 }}>{Math.round(d.tMin)}°</p>
@@ -1010,11 +1012,12 @@ function RainTotalsCard({ week = 0, month = 0, year = 0 }) {
   )
 }
 
-function NeedsAttention({ lowStock = [], licAlerts = [], compGaps = [], openJobs = 0, onPickId }) {
+function NeedsAttention({ lowStock = [], licAlerts = [], comp = null, openJobs = 0, onPickId }) {
   const items = []
-  if (lowStock.length) items.push({ key: 'stock', tone: 'bad', label: `${lowStock.length} product${lowStock.length !== 1 ? 's' : ''} low on stock`, sub: lowStock.slice(0, 3).map((p) => p.name).join(', ') + (lowStock.length > 3 ? '…' : ''), cta: 'Order', go: () => onPickId('chemicals') })
+  lowStock.slice(0, 4).forEach((p) => items.push({ key: 'ls' + p.name, tone: 'bad', label: `${p.name} · ${shortfallText(p)}`, cta: 'Order', go: () => onPickId('chemicals') }))
+  if (lowStock.length > 4) items.push({ key: 'lsmore', tone: 'bad', label: `+${lowStock.length - 4} more low on stock`, cta: 'Order', go: () => onPickId('chemicals') })
   licAlerts.forEach((a, i) => items.push({ key: 'lic' + i, tone: a.level === 'expired' ? 'bad' : 'warn', label: `${a.name} — ${a.type} license ${a.label.toLowerCase()}`, cta: 'Update', go: () => onPickId('settings') }))
-  if (compGaps.length) items.push({ key: 'comp', tone: 'warn', label: `${compGaps.length} compliance record${compGaps.length !== 1 ? 's' : ''} missing`, sub: compGaps.slice(0, 2).map((g) => g.label || g.name || g).join(', '), cta: 'Fix', go: () => onPickId('settings') })
+  if (comp && comp.total) items.push({ key: 'comp', tone: 'warn', label: `${comp.total} compliance record${comp.total !== 1 ? 's' : ''} missing`, sub: [...(comp.productGaps || []).slice(0, 2).map((g) => g.name), ...(comp.peopleGaps || []).slice(0, 1).map((g) => g.name)].filter(Boolean).join(', '), cta: 'Fix', go: () => onPickId('settings') })
   if (openJobs) items.push({ key: 'jobs', tone: 'info', label: `${openJobs} open job${openJobs !== 1 ? 's' : ''}`, cta: 'Board', go: () => onPickId('jobboard') })
   const tone = { bad: '#B23A2E', warn: '#92660D', info: FERN }
   return (
@@ -1124,7 +1127,7 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
         </div>
         <div className="space-y-4">
           <SprayLowStock lowStock={lowStock} onPickId={onPickId} />
-          <SprayAlerts licAlerts={licAlerts} openWins={openWins} compGaps={compGaps} onPickId={onPickId} />
+          <SprayAlerts licAlerts={licAlerts} openWins={openWins} comp={compGaps} onPickId={onPickId} />
         </div>
       </div>
     </LandingShell>
@@ -1139,7 +1142,7 @@ function SprayLowStock({ lowStock = [], onPickId }) {
         <div className="space-y-1.5">
           {lowStock.map((p) => (
             <div key={p.name} className="flex items-center justify-between gap-2 rounded-xl px-3 py-2" style={{ backgroundColor: '#F6F5F1' }}>
-              <span className="font-body text-[12.5px] font-semibold truncate" style={{ color: INK }}>{p.name}</span>
+              <span className="font-body text-[12.5px] font-semibold truncate" style={{ color: INK }}>{p.name} · <span style={{ color: '#B23A2E', fontWeight: 700 }}>{shortfallText(p)}</span></span>
               <button onClick={() => onPickId('chemicals')} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>Order</button>
             </div>
           ))}
@@ -1149,11 +1152,11 @@ function SprayLowStock({ lowStock = [], onPickId }) {
   )
 }
 
-function SprayAlerts({ licAlerts = [], openWins = [], compGaps = [], onPickId }) {
+function SprayAlerts({ licAlerts = [], openWins = [], comp = null, onPickId }) {
   const items = []
   licAlerts.forEach((a, i) => items.push({ key: 'l' + i, label: `${a.name} — ${a.type} license ${a.label.toLowerCase()}`, go: () => onPickId('settings') }))
   openWins.forEach((w, i) => items.push({ key: 'w' + i, label: `Soil-temp window open: ${w.label}`, go: () => onPickId('timing') }))
-  if (compGaps.length) items.push({ key: 'c', label: `${compGaps.length} compliance record${compGaps.length !== 1 ? 's' : ''} missing`, go: () => onPickId('settings') })
+  if (comp && comp.total) items.push({ key: 'c', label: `${comp.total} compliance record${comp.total !== 1 ? 's' : ''} missing`, go: () => onPickId('settings') })
   return (
     <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
       <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Alerts</p>
@@ -1183,8 +1186,11 @@ function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
         db.fetchClippings().catch(() => []),
         db.fetchSoilTests().catch(() => []),
       ])
-      let season = []
-      if (settings.location?.lat != null) { try { season = await fetchSeasonDaily(settings.location.lat, settings.location.lng) } catch { /* ignore */ } }
+      let season = [], forecast = []
+      if (settings.location?.lat != null) {
+        try { season = await fetchSeasonDaily(settings.location.lat, settings.location.lng) } catch { /* ignore */ }
+        try { const data = await fetchWeather(settings.location.lat, settings.location.lng); let fc = dailyFromForecastBlock(data); try { const nbm = await fetchNbmForecast(settings.location.lat, settings.location.lng); fc = overlayForecastTemps(fc, nbm) } catch { /* keep base */ } forecast = fc } catch { /* ignore */ }
+      }
       let moist = []
       try {
         const ctx = await cmCourseContext()
@@ -1194,7 +1200,7 @@ function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
         const co = (ctx.courses || []).find((c) => landTok(c.name) === landTok(course)) || (course ? null : ctx.courses?.[0])
         if (co) { const greens = await cmFetchGreens(co.id); const rounds = await cmFetchRounds(co.id, greens.map((g) => g.id)); moist = rounds }
       } catch { /* ignore */ }
-      if (live) setD({ settings, speeds, clippings, soilTests, season, moist })
+      if (live) setD({ settings, speeds, clippings, soilTests, season, forecast, moist })
     })()
     return () => { live = false }
   }, [course])
@@ -1203,29 +1209,26 @@ function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
 
   const inC = (area) => !course || landTok(area) === landTok(course)
   const today = localDateISO()
-  const cutoff = addDaysISO(today, -20) // ~3 weeks
-  // Keep the recent window (~3 weeks); if that's too thin, fall back to the most
-  // recent handful of points so the chart still reads.
-  const windowed = (series) => { const recent = series.filter((p) => p.date >= cutoff); return recent.length >= 2 ? recent : series.slice(-14) }
   const byDateAvg = (rows, dateOf, valOf) => {
     const m = {}
     rows.forEach((r) => { const dt = dateOf(r); const v = Number(valOf(r)); if (dt && !isNaN(v)) (m[dt] ||= []).push(v) })
     return Object.keys(m).sort().map((dt) => ({ date: dt, value: m[dt].reduce((a, b) => a + b, 0) / m[dt].length }))
   }
+  // Whole season (Apr–Oct) — the graphs show every reading day, not just recent.
   // Greens speed (daily averages)
-  const spdSeries = byDateAvg((d.speeds || []).filter((s) => inC(s.area) && s.speed != null), (s) => s.date, (s) => s.speed)
-  const spdData = windowed(spdSeries)
-  const spdLatest = spdSeries.length ? spdSeries[spdSeries.length - 1].value : null
-  // Clipping yields
-  const clpSeries = byDateAvg((d.clippings || []).filter((c) => inC(c.area) && (c.volume != null || c.value != null)), (c) => c.date, (c) => (c.volume != null ? c.volume : c.value))
-  const clpData = windowed(clpSeries)
-  const clpLatest = clpSeries.length ? clpSeries[clpSeries.length - 1].value : null
+  const spdData = byDateAvg((d.speeds || []).filter((s) => inC(s.area) && s.speed != null), (s) => s.date, (s) => s.speed)
+  const spdLatest = spdData.length ? spdData[spdData.length - 1].value : null
+  // Clipping yields — logged in litres (the page's unit). The headline is the
+  // latest reading's volume; the chart is the per-day average.
+  const clpRows = (d.clippings || []).filter((c) => inC(c.area) && c.volume != null && !isNaN(Number(c.volume)))
+  const clpData = byDateAvg(clpRows, (c) => c.date, (c) => c.volume)
+  const clpLatestRec = clpRows.length ? [...clpRows].sort((a, b) => String(a.date).localeCompare(String(b.date)))[clpRows.length - 1] : null
+  const clpLatest = clpLatestRec ? Number(clpLatestRec.volume) : null
   // Moisture (round averages)
-  const moistSeries = [...(d.moist || [])].filter((r) => r.avg != null).sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))).map((r) => ({ date: String(r.startedAt).slice(0, 10), value: Number(r.avg) }))
-  const moistData = windowed(moistSeries)
-  const moistLatest = moistSeries.length ? moistSeries[moistSeries.length - 1].value : null
-  // GDD / Soil
-  const gdd = (d.season || []).length ? gddSince(d.season, `${today.slice(0, 4)}-01-01`, 50) : null
+  const moistData = [...(d.moist || [])].filter((r) => r.avg != null).sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))).map((r) => ({ date: String(r.startedAt).slice(0, 10), value: Number(r.avg) }))
+  const moistLatest = moistData.length ? moistData[moistData.length - 1].value : null
+  // GDD — one shared value (base 50, from Jan 1, season+forecast), as on Weather.
+  const gdd = (d.season?.length || d.forecast?.length) ? seasonGddToDate(d.season, d.forecast) : null
   const soilLatest = (d.soilTests || []).filter((t) => inC(t.area)).map((t) => t.date).sort().pop() || null
   const soilLab = soilLatest ? ((d.soilTests || []).find((t) => t.date === soilLatest)?.lab || '') : ''
   const rangeLabel = (data) => (data.length >= 2 ? `${landMD(data[0].date)} – ${landMD(data[data.length - 1].date)}` : data.length === 1 ? landMD(data[0].date) : '')
@@ -1235,7 +1238,7 @@ function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
       <div className="grid gap-4 mb-4 grid-cols-1 md:grid-cols-3">
         <DataGraphCard label="Greens moisture & wetting agent" latest={moistLatest != null ? `${Math.round(moistLatest * 10) / 10}%` : '—'} sub="avg %VWC per round" data={moistData} range={rangeLabel(moistData)} color="#3A6187" onClick={() => onPickId('wetting')} />
         <DataGraphCard label="Green speeds" latest={spdLatest != null ? fmtStimp(spdLatest) : '—'} sub="stimp" data={spdData} range={rangeLabel(spdData)} color={FOREST} onClick={() => onPickId('speed')} />
-        <DataGraphCard label="Clipping yields" latest={clpLatest != null ? `${Math.round(clpLatest)}` : '—'} sub="mL per 1,000 sqft" data={clpData} range={rangeLabel(clpData)} color={FERN} onClick={() => onPickId('clippings')} />
+        <DataGraphCard label="Clipping yields" latest={clpLatest != null ? clpLatest.toLocaleString() : '—'} sub="litres · latest reading" data={clpData} range={rangeLabel(clpData)} color={FERN} onClick={() => onPickId('clippings')} />
       </div>
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2" style={{ maxWidth: 680 }}>
         <button onClick={() => onPickId('gdd')} className="text-left bg-white rounded-2xl border p-4 shadow-sm hover:shadow-md transition" style={{ borderColor: HAIR }}>
@@ -1297,7 +1300,13 @@ function IrrigationLanding({ clubName, onPickId, course = '', courses = [] }) {
       const out = { et: [], rainTom: null, greens: [], plan: null, heads: null, pipes: null, partsLow: null }
       const settings = await db.fetchSettings().catch(() => ({}))
       if (settings.location?.lat != null) {
-        try { const data = await fetchWeather(settings.location.lat, settings.location.lng); out.et = dailyFromHourly(data); const fc = dailyFromForecastBlock(data); out.rainTom = fc.find((x) => x.date === addDaysISO(today, 1)) || null } catch { /* ignore */ }
+        try {
+          const data = await fetchWeather(settings.location.lat, settings.location.lng)
+          out.et = dailyFromHourly(data)
+          let fc = dailyFromForecastBlock(data)
+          try { const nbm = await fetchNbmForecast(settings.location.lat, settings.location.lng); fc = overlayForecastTemps(fc, nbm) } catch { /* keep base */ }
+          out.rainTom = fc.find((x) => x.date === addDaysISO(today, 1)) || null
+        } catch { /* ignore */ }
       }
       try {
         const ctx = await cmCourseContext()
@@ -1320,7 +1329,8 @@ function IrrigationLanding({ clubName, onPickId, course = '', courses = [] }) {
           out.plan = plan
         }
       } catch { /* ignore */ }
-      try { const feats = await db.fetchIrrigation(); out.heads = feats.filter((f) => f.kind === 'head').length; out.pipes = feats.filter((f) => f.kind === 'pipe' || f.kind === 'lateral' || f.kind === 'mainline').length } catch { /* ignore */ }
+      try { const feats = await db.fetchIrrigation(); out.heads = feats.filter((f) => f.kind === 'head').length } catch { /* ignore */ }
+      try { const res = await fetch('/api/course-pipes', { cache: 'no-store' }); if (res.ok) { const j = await res.json(); out.pipes = j?.lines?.length ?? null } } catch { /* ignore */ }
       try { const parts = await db.fetchParts(); out.partsLow = parts.filter((p) => p.lowStock > 0 && p.stock <= p.lowStock).length } catch { /* ignore */ }
       if (live) setD(out)
     })()
@@ -3072,12 +3082,16 @@ function SprayWindowStrip({ current, today, hasLocation, attention = [], onGoWea
                 {current?.temp ? `${current.temp}°` : hasLocation ? '—' : 'Set location'}
               </span>
             </div>
-            {current && (current.wind || current.humidity) && (
-              <span className="font-body text-[11px] opacity-70 flex items-center gap-2 min-w-0 truncate">
-                {current.wind && <span className="flex items-center gap-1 tnum"><Wind size={11} />{current.wind} mph</span>}
-                {current.humidity && <span className="tnum">{current.humidity}% RH</span>}
-              </span>
-            )}
+            {current && (current.wind || current.humidity) && (() => {
+              const sky = today?.code != null ? (weatherCodeInfo(today.code)?.label || '') : ''
+              return (
+                <span className="font-body text-[11px] opacity-70 flex items-center gap-2 min-w-0 truncate">
+                  {sky && <span>{sky}</span>}
+                  {current.wind && <span className="flex items-center gap-1 tnum"><Wind size={11} />{current.wind} mph{current.windDir ? ` ${current.windDir}` : ''}</span>}
+                  {current.humidity && <span className="tnum">{current.humidity}% RH</span>}
+                </span>
+              )
+            })()}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {win ? (

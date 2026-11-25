@@ -1296,7 +1296,7 @@ export default function CourseMap({ user, manage }) {
             </div>
             {/* Status readout — shows what actually loaded onto the map. */}
             <div className="absolute z-[600] top-2 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-md font-body text-[11px] font-bold tabular-nums whitespace-nowrap shadow" style={{ backgroundColor: 'rgba(255,255,255,0.95)', color: '#334155', border: '1px solid #E2E8E4' }}>
-              Pipes {pipes == null ? 'Loading…' : (pipes.lines?.length ?? 0)} · Heads {featuresLoaded ? features.length : 'Loading…'} · Wires {wires == null ? 'Loading…' : (wires.colors ? Object.values(wires.colors).reduce((n, a) => n + a.length, 0) : 0)} · Map {transform ? 'set' : 'not set'}
+              Pipes {pipes == null ? 'Loading…' : (pipes.lines?.length ?? 0)} · Heads {featuresLoaded ? features.filter((f) => f.kind === 'head').length : 'Loading…'} · Wires {wires == null ? 'Loading…' : (wires.colors ? Object.values(wires.colors).reduce((n, a) => n + a.length, 0) : 0)} · Map {transform ? 'set' : 'not set'}
             </div>
             {/* Add-head controls (managers) */}
             {manage && (

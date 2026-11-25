@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { CloudRain, Gauge, Sprout, Thermometer, RefreshCw, Plus, X, ClipboardList, Sun, CloudSun, Cloud, CloudDrizzle, CloudSnow, CloudFog, CloudLightning } from 'lucide-react'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, gddSince, weatherCodeInfo, fetchNbmForecast, overlayForecastTemps } from '@/lib/weather'
+import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, weatherCodeInfo, fetchNbmForecast, overlayForecastTemps, seasonGddToDate } from '@/lib/weather'
 import { sheetApplied } from '@/lib/applied'
 import { localDateISO } from '@/lib/dates'
 import { fmtStimp } from '@/lib/greenspeed'
@@ -97,7 +97,7 @@ export default function CommandCentre() {
   const spraysThisWeek = (sheets || []).filter((s) => sheetApplied(s) && s.date && s.date >= weekAgo && s.date <= today).length
   const openJobs = (tasks || []).filter((t) => (t.status || 'todo') !== 'done').length
   const rain7 = (wx.season || []).filter((d) => d.date >= weekAgo && d.date <= today).reduce((s, d) => s + (Number(d.precip) || 0), 0)
-  const seasonGdd = wx.season.length ? gddSince(wx.season, `${year}-01-01`, 50) : null
+  const seasonGdd = (wx.season.length || wx.forecast.length) ? seasonGddToDate(wx.season, wx.forecast) : null
 
   const forecast7 = (wx.forecast || []).filter((d) => d.date >= today)
   const todayCode = forecast7[0]?.code
@@ -179,7 +179,7 @@ export default function CommandCentre() {
                   <WI size={24} className="mx-auto my-1" style={{ color: wi.color }} />
                   <p className="font-display text-lg font-bold" style={{ color: FOREST }}>{Math.round(d.tMax)}°</p>
                   <p className="font-body text-[11px] text-slate-400">{Math.round(d.tMin)}°</p>
-                  <p className="font-body text-[10px] mt-0.5" style={{ color: '#3A6187' }}>{d.precip}"</p>
+                  <p className="font-body text-[10px] mt-0.5" style={{ color: '#3A6187' }}>{(Number(d.precip) || 0).toFixed(2)}"</p>
                 </div>
               )
             })}
