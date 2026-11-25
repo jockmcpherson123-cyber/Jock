@@ -491,8 +491,14 @@ export default function CourseMap({ user, manage }) {
         map.setMaxBounds(null); map.setMinZoom(0)
         return
       }
+      const restoreSat = () => { if (satRef.current && !map.hasLayer(satRef.current)) satRef.current.addTo(map); map.setMaxBounds(null); map.setMinZoom(0) }
       const url = await cmdb.signedUrl(aerial.filePath)
-      if (!live || !url) return
+      if (!live || !url) { restoreSat(); return }
+      // Confirm the image actually loads before hiding the satellite, so a failed
+      // or expired signed URL leaves the satellite basemap up — never a dark map.
+      const ok = await new Promise((res) => { const im = new window.Image(); im.onload = () => res(true); im.onerror = () => res(false); im.src = url })
+      if (!live) return
+      if (!ok) { console.error('aerial image failed to load'); restoreSat(); return }
       const c = worldFileCorners({ A: aerial.pxSizeX, D: 0, B: 0, E: aerial.pxSizeY, C: aerial.ulX, F: aerial.ulY }, aerial.widthPx, aerial.heightPx, aerial.crs || 'EPSG:3857')
       try {
         const ov = L.imageOverlay.rotated(url, L.latLng(c.topLeft.lat, c.topLeft.lon), L.latLng(c.topRight.lat, c.topRight.lon), L.latLng(c.bottomLeft.lat, c.bottomLeft.lon), { opacity: 1, interactive: false })
@@ -502,7 +508,7 @@ export default function CourseMap({ user, manage }) {
         const bounds = L.latLngBounds([[c.topLeft.lat, c.topLeft.lon], [c.topRight.lat, c.topRight.lon], [c.bottomLeft.lat, c.bottomLeft.lon], [c.bottomRight.lat, c.bottomRight.lon]])
         const fit = () => { map.invalidateSize(); map.setMinZoom(0); map.setMaxBounds(null); map.setView(bounds.getCenter(), map.getBoundsZoom(bounds, true), { animate: false }); map.setMinZoom(map.getBoundsZoom(bounds, true)); map.setMaxBounds(bounds) }
         fit(); setTimeout(fit, 250)
-      } catch (e) { console.error('aerial place', e) }
+      } catch (e) { console.error('aerial place', e); restoreSat() }
     })()
     return () => { live = false }
   }, [aerial, mode, mapTick, showAerial])

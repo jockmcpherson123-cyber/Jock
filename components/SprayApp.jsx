@@ -691,7 +691,11 @@ const PAGE_DESC = {
 // ── Phase 2 landing helpers ──────────────────────────────────────────────────
 const addDaysISO = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
 const landTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
-const courseColorOf = (courses, name) => ((courses || []).find((c) => landTok(c.name) === landTok(name)) || {}).color || FERN
+// The Driving Range belongs to the Blue course, so colour it Blue.
+const courseColorOf = (courses, name) => {
+  const key = /driving|range/i.test(name || '') ? 'blue' : landTok(name)
+  return ((courses || []).find((c) => landTok(c.name) === key) || {}).color || FERN
+}
 // How much of a product you're short of its reorder point, with its unit.
 const shortfallText = (p) => { const s = Math.max(0, (Number(p.lowStockThreshold) || 0) - (Number(p.stock) || 0)); return s > 0 ? `short ${Math.round(s).toLocaleString()} ${p.unit || ''}`.trim() : 'low on stock' }
 const LAND_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
