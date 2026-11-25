@@ -1499,12 +1499,17 @@ function ResourcesLanding({ clubName, onPickId, pages = [] }) {
     })
     if (rotFlags.length) items.push({ key: 'rot', label: 'Rotation', text: rotFlags.map((r) => `${r.area}: MOA ${r.g} ${N}×+ in a row`).join(' · '), go: () => onPickId('chemguide') })
     else items.push({ key: 'rot', label: 'Rotation', text: 'No mode-of-action runs flagged in recent sprays.', go: () => onPickId('chemguide') })
-    // Yearly max — needs a per-product label yearly-max field in the Chemical Library.
+    // Yearly max — this calendar year's total as a % of the product's label
+    // yearly maximum (set per product in the Chemical Library).
     const withMax = (d.products || []).filter((p) => Number(p.labelYearlyMax) > 0)
     if (withMax.length) {
-      const usage = productUsage(d.sheets, d.products, d.settings.areas || {})
+      const yr = String(new Date().getFullYear())
+      const yearSheets = (d.sheets || []).filter((s) => s.date && s.date.startsWith(yr))
+      const usage = productUsage(yearSheets, d.products, d.settings.areas || {})
       const flags = withMax.map((p) => { const used = usage[p.name]?.total || 0; const pct = Math.round((used / Number(p.labelYearlyMax)) * 100); return { name: p.name, pct } }).filter((x) => x.pct >= 60).sort((a, b) => b.pct - a.pct)
       if (flags.length) items.push({ key: 'max', label: 'Yearly max', text: flags.map((f) => `${f.name} at ${f.pct}% of label max`).join(' · '), go: () => onPickId('chemicals') })
+    } else {
+      items.push({ key: 'max', label: 'Yearly max', text: 'Add a label yearly-max to products in the Chemical Library to track this.', go: () => onPickId('chemicals') })
     }
   }
 
@@ -6433,7 +6438,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
   const startNew = () => {
     setOneAiMsg(null)
     setEditing('new')
-    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '', eiq: '', company: '', caseSize: '', ozPerCase: '', costPerCase: '', moaGroup: '', rotationDays: '', sprayInterval: '' })
+    setDraft({ name: '', type: 'Fungicide', rate: '', basis: 'oz / M', unit: 'oz', labelMaxM: '', labelMaxA: '', labelMinM: '', labelMinA: '', labelYearlyMax: '', stock: '', lowStockThreshold: '', fertForm: 'granular', n: '', p: '', k: '', nPerGal: '', pPerGal: '', kPerGal: '', avoidGrasses: [], labelUrl: '', sdsUrl: '', activeIngredient: '', activePct: '', eiq: '', company: '', caseSize: '', ozPerCase: '', costPerCase: '', moaGroup: '', rotationDays: '', sprayInterval: '' })
   }
   const cancelEdit = () => { setOneAiMsg(null); setEditing(null); setDraft(null) }
 
@@ -6462,6 +6467,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
       moaGroup: (draft.moaGroup || '').trim(),
       rotationDays: draft.rotationDays === '' || draft.rotationDays == null ? null : parseInt(draft.rotationDays, 10),
       sprayInterval: draft.sprayInterval === '' || draft.sprayInterval == null ? null : parseInt(draft.sprayInterval, 10),
+      labelYearlyMax: draft.labelYearlyMax === '' || draft.labelYearlyMax == null ? null : parseFloat(draft.labelYearlyMax),
       // Active ingredients: clean the list, and derive the combined name +
       // total % so display / EIQ / converter keep working off one product.
       ...(() => {
@@ -6975,6 +6981,13 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 )
               })()}
             </div>
+            {['Fungicide', 'Herbicide', 'Insecticide', 'Growth Reg'].includes(draft.type) && (
+              <div className="rounded-xl p-3" style={{ backgroundColor: '#F6F5F1' }}>
+                <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: INK_2 }}>Label yearly maximum</p>
+                <p className="font-body text-[10px] text-slate-500 mb-2">The label's maximum total you may apply per year, in the product's unit (optional). Resources flags when this season's total nears it.</p>
+                <input type="number" step="any" value={draft.labelYearlyMax ?? ''} onChange={(e) => setField('labelYearlyMax', e.target.value)} className="w-48 rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: '1px solid #E2E8F0' }} placeholder={`e.g. 3200 ${draft.unit || 'oz'}/yr`} />
+              </div>
+            )}
             {draft.type === 'Fungicide' && (
               <div className="rounded-xl p-3" style={{ backgroundColor: '#EAF3EE' }}>
                 <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: FERN }}>Disease Protection</p>
