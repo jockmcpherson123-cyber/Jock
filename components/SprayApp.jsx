@@ -1056,14 +1056,21 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
   useEffect(() => {
     let live = true
     ;(async () => {
-      const [settings, sheets, fertSheets, products] = await Promise.all([
+      const [settings, sheets, fertSheets, products, programs] = await Promise.all([
         db.fetchSettings(),
         db.fetchSheets().catch(() => []),
         db.fetchFertSheets().catch(() => []),
         db.fetchProducts().catch(() => []),
+        db.fetchPrograms().catch(() => []),
       ])
+      let programApps = []
+      if (programs.length) {
+        const curYear = new Date().getFullYear()
+        const prog = programs.find((p) => Number(p.year) === curYear) || programs[0]
+        try { programApps = await db.fetchApplications(prog.id) } catch { programApps = [] }
+      }
       if (!live) return
-      setData({ settings, sheets, fertSheets, products })
+      setData({ settings, sheets, fertSheets, products, programApps })
       const loc = settings.location
       if (loc?.lat != null) { try { const bt = await fetchBreakdownTemps(loc.lat, loc.lng); if (live) setWx({ breakdownTemps: bt }) } catch { /* ignore */ } }
     })()
@@ -1072,12 +1079,22 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
 
   if (!data) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: CREAM }}><Loader2 className="animate-spin text-slate-300" size={26} /></div>
 
-  const { settings, sheets, fertSheets, products } = data
+  const { settings, sheets, fertSheets, products, programApps } = data
   const today = localDateISO()
   const sun = sundayOf(today), sat = addDaysISO(sun, 6)
   const rows = []
   ;(sheets || []).forEach((s) => { if (s.date && s.date >= sun && s.date <= sat) rows.push({ id: s.id, date: s.date, area: s.area || '', products: (s.products || []).map((p) => p.product).filter(Boolean), status: sheetStatusLabel(s), kind: 'spray' }) })
   ;(fertSheets || []).forEach((f) => { if (f.date && f.date >= sun && f.date <= sat) rows.push({ id: f.id, date: f.date, area: f.area || '', products: (f.products || []).map((p) => p.product || p.name).filter(Boolean), status: sheetStatusLabel(f), kind: 'fert' }) })
+  // Planned applications from the program covering this week (not yet turned into
+  // a sheet), grouped per area + day, shown as status Planned.
+  const plannedMap = {}
+  ;(programApps || []).forEach((a) => {
+    if (!a.plannedDate || a.linkedSheetId || a.plannedDate < sun || a.plannedDate > sat) return
+    const key = `${a.plannedDate}|${a.area}`
+    ;(plannedMap[key] ||= { id: key, date: a.plannedDate, area: a.area || '', products: [], status: 'Planned', kind: 'planned' })
+    if (a.product) plannedMap[key].products.push(a.product)
+  })
+  Object.values(plannedMap).forEach((r) => rows.push(r))
   rows.sort((a, b) => a.date.localeCompare(b.date) || landTok(a.area).localeCompare(landTok(b.area)))
 
   const lowStock = (products || []).filter((p) => (Number(p.stock) || 0) < 0 || (p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold))
@@ -1107,7 +1124,7 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
                   {rows.map((r) => {
                     const color = courseColorOf(courses, r.area); const pill = SHEET_PILL[r.status]
                     return (
-                      <tr key={r.kind + r.id} onClick={() => r.kind === 'spray' ? (onGo && onGo('spray', 'list', { type: 'sheet', id: r.id })) : onPickId('fert')} className="cursor-pointer transition hover:bg-black/[0.02] border-t" style={{ borderColor: 'rgba(0,0,0,0.05)', borderLeft: `3px solid ${color}` }}>
+                      <tr key={r.kind + r.id} onClick={() => r.kind === 'spray' ? (onGo && onGo('spray', 'list', { type: 'sheet', id: r.id })) : r.kind === 'fert' ? onPickId('fert') : onPickId('program')} className="cursor-pointer transition hover:bg-black/[0.02] border-t" style={{ borderColor: 'rgba(0,0,0,0.05)', borderLeft: `3px solid ${color}` }}>
                         <td className="px-3 py-2.5 font-body text-[12.5px] font-semibold" style={{ color: INK }}>{dowName(r.date)} <span className="font-normal" style={{ color: INK_3 }}>{landMD(r.date)}</span></td>
                         <td className="px-3 py-2.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: color }} /></td>
                         <td className="px-3 py-2.5 font-body text-[12.5px]" style={{ color: INK }}>{r.area}{r.kind === 'fert' ? ' · fert' : ''}</td>
@@ -1122,7 +1139,7 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
           </div>
           <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
             <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Spray calendar · both courses</p>
-            <SprayCalendar sheets={sheets} products={products} onOpenSheet={(s) => onGo && onGo('spray', 'list', { type: 'sheet', id: s.id })} />
+            <SprayCalendar sheets={sheets} products={products} programApps={programApps} onOpenSheet={(s) => onGo && onGo('spray', 'list', { type: 'sheet', id: s.id })} onCreateFromProgram={() => onPickId('program')} />
           </div>
         </div>
         <div className="space-y-4">
@@ -1324,7 +1341,7 @@ function IrrigationLanding({ clubName, onPickId, course = '', courses = [] }) {
           const tgt = cmResolveTarget(targets, today)
           const latestByGreen = {}
           ;[...rounds].sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))).forEach((r) => { latestByGreen[r.areaId] = r })
-          out.greens = greens.map((g) => ({ name: g.name, hole: g.hole, avg: latestByGreen[g.id]?.avg != null ? Math.round(Number(latestByGreen[g.id].avg) * 10) / 10 : null }))
+          out.greens = greens.map((g) => { const r = latestByGreen[g.id]; return { name: g.name, hole: g.hole, avg: r?.avg != null ? Math.round(Number(r.avg) * 10) / 10 : null, date: r?.startedAt ? String(r.startedAt).slice(0, 10) : null } })
           out.target = tgt
           out.plan = plan
         }
@@ -1345,10 +1362,13 @@ function IrrigationLanding({ clubName, onPickId, course = '', courses = [] }) {
   const rainTom = d.rainTom?.precip != null ? Number(d.rainTom.precip) : null
   const skip = rainTom != null && rainTom >= 0.25
   const tgt = d.target
+  const staleCutoff = addDaysISO(today, -3) // a reading older than 3 days is stale
   const greensWithData = (d.greens || []).filter((g) => g.avg != null)
+  const isFresh = (g) => g.date && g.date >= staleCutoff
   const bucket = (avg) => { if (!tgt) return 'none'; if (avg < tgt.vwcLo) return 'below'; if (avg > tgt.vwcHi) return 'above'; return 'in' }
   const counts = { below: 0, in: 0, above: 0 }
-  greensWithData.forEach((g) => { const b = bucket(g.avg); if (counts[b] != null) counts[b]++ })
+  greensWithData.filter(isFresh).forEach((g) => { const b = bucket(g.avg); if (counts[b] != null) counts[b]++ })
+  const staleCount = greensWithData.filter((g) => !isFresh(g)).length
   const chipColor = { below: { bg: '#E8EEF6', fg: '#3A6187' }, in: { bg: '#E8F3EC', fg: FERN }, above: { bg: '#FBEAE6', fg: '#B23A2E' }, none: { bg: '#F1F5F9', fg: '#64748B' } }
   const planApproved = d.plan && (d.plan.approved || d.plan.approvedAt)
 
@@ -1375,11 +1395,12 @@ function IrrigationLanding({ clubName, onPickId, course = '', courses = [] }) {
               <>
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {[...greensWithData].sort((a, b) => (a.hole || 0) - (b.hole || 0)).map((g, i) => {
-                    const c = chipColor[bucket(g.avg)]
-                    return <span key={i} className="font-body text-[11px] font-bold px-2 py-1 rounded-lg" style={{ backgroundColor: c.bg, color: c.fg }} title={g.name}>{g.hole || g.name} · {g.avg}%</span>
+                    const fresh = isFresh(g)
+                    const c = fresh ? chipColor[bucket(g.avg)] : { bg: '#F1F3F4', fg: '#94A3A0' }
+                    return <span key={i} className="font-body text-[11px] font-bold px-2 py-1 rounded-lg" style={{ backgroundColor: c.bg, color: c.fg }} title={g.name}>{g.hole || g.name} · {g.avg}% · {fresh ? landMD(g.date) : `last read ${g.date ? landMD(g.date) : '—'}`}</span>
                   })}
                 </div>
-                <p className="font-body text-[11.5px]" style={{ color: INK_2 }}>{counts.below} below · {counts.in} in range · {counts.above} above</p>
+                <p className="font-body text-[11.5px]" style={{ color: INK_2 }}>{counts.below} below · {counts.in} in range · {counts.above} above{staleCount ? ` · ${staleCount} stale` : ''}</p>
               </>
             )}
           </div>
@@ -2020,35 +2041,8 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
 
       {!hideChrome && <TopNav route={route} setRoute={setRoute} onNew={newSheet} courseInfo={courseInfo} manage={manage} />}
 
-      {(() => {
-        if (dismissLic) return null
-        const alerts = computeLicenseAlerts(applicatorLicenses)
-        if (alerts.length === 0) return null
-        const anyExpired = alerts.some((a) => a.level === 'expired')
-        return (
-          <div className={`${PAGE} pt-4`}>
-            <div className="rounded-2xl border-2 p-3" style={anyExpired ? { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' } : { backgroundColor: '#FEF3DD', borderColor: '#FDE9C8' }}>
-              <div className="flex items-start gap-2">
-                <AlertTriangle size={18} className="shrink-0 mt-0.5" style={{ color: anyExpired ? '#B91C1C' : '#92660D' }} />
-                <div className="flex-1 min-w-0">
-                  <p className="font-body text-sm font-bold" style={{ color: anyExpired ? '#B91C1C' : '#92660D' }}>
-                    {anyExpired ? 'License expired' : 'License expiring soon'}
-                  </p>
-                  <div className="mt-1 space-y-0.5">
-                    {alerts.map((a) => (
-                      <p key={`${a.name}-${a.type}`} className="font-body text-[12px]" style={{ color: a.level === 'expired' ? '#B91C1C' : '#92660D' }}>
-                        <b>{a.name}</b> — {a.type} license {a.label.toLowerCase()}
-                      </p>
-                    ))}
-                  </div>
-                  {manage && <p className="font-body text-[11px] text-slate-500 mt-1">Update dates in Settings → People.</p>}
-                </div>
-                <button onClick={() => setDismissLic(true)} className="font-body text-[11px] font-bold text-slate-400 shrink-0">Dismiss</button>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
+      {/* License expiry now lives in Home › Needs attention and Spray Program ›
+          Alerts, so the old banner is no longer shown on every page. */}
 
       <div className={`${PAGE} pb-24`}>
         {route === 'dashboard' && (

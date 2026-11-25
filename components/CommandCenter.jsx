@@ -47,16 +47,20 @@ export default function CommandCentre() {
   const load = useCallback(async () => {
     try {
       const today = localDateISO()
-      const [settings, sheets, speeds, tasks] = await Promise.all([
+      const [settings, sheets, speeds, tasks, fertSheets, programs] = await Promise.all([
         db.fetchSettings(),
         db.fetchSheets().catch(() => []),
         db.fetchGreensSpeeds().catch(() => []),
         db.fetchCrewTasks(addDaysISO(today, -6), addDaysISO(today, 7)).catch(() => []),
+        db.fetchFertSheets().catch(() => []),
+        db.fetchPrograms().catch(() => []),
       ])
+      let programApps = []
+      if (programs.length) { const cur = new Date().getFullYear(); const prog = programs.find((p) => Number(p.year) === cur) || programs[0]; try { programApps = await db.fetchApplications(prog.id) } catch { programApps = [] } }
       const courseInfo = settings.courseInfo || {}
       ciRef.current = courseInfo
       if (!cmdInit.current) { setCommand(courseInfo.command || {}); cmdInit.current = true }
-      setLive({ areas: settings.areas || {}, courseInfo, sheets, speeds, tasks })
+      setLive({ areas: settings.areas || {}, courseInfo, sheets, speeds, tasks, fertSheets, programApps })
       const loc = settings.location
       if (loc?.lat != null) {
         ;(async () => { try { const c = await fetchCurrent(loc.lat, loc.lng); setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ } })()
@@ -83,9 +87,11 @@ export default function CommandCentre() {
 
   if (loading || !live) return <div style={{ minHeight: '100vh', backgroundColor: BG }} className="flex items-center justify-center"><RefreshCw className="animate-spin text-slate-300" size={30} /></div>
 
-  const { areas, courseInfo, sheets, speeds, tasks } = live
+  const { areas, courseInfo, sheets, speeds, tasks, fertSheets = [], programApps = [] } = live
   const today = localDateISO()
   const year = today.slice(0, 4)
+  const weekSun = (() => { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0, 10) })()
+  const weekSat = addDaysISO(weekSun, 6)
 
   // Courses (name + color). Fall back to a single property-wide card.
   let courses = Array.isArray(courseInfo.courses) ? courseInfo.courses.filter((c) => c && c.name) : []
@@ -94,7 +100,13 @@ export default function CommandCentre() {
 
   // ── Shared property metrics ──
   const weekAgo = addDaysISO(today, -6)
-  const spraysThisWeek = (sheets || []).filter((s) => sheetApplied(s) && s.date && s.date >= weekAgo && s.date <= today).length
+  // This week's sprays — the same set the Spray Program lists: every spray sheet
+  // and fert sheet dated this week (Sun–Sat), plus planned program days not yet
+  // turned into a sheet.
+  const inWk = (dt) => dt && dt >= weekSun && dt <= weekSat
+  const plannedWk = new Set()
+  ;(programApps || []).forEach((a) => { if (a.plannedDate && !a.linkedSheetId && inWk(a.plannedDate)) plannedWk.add(`${a.plannedDate}|${a.area}`) })
+  const spraysThisWeek = (sheets || []).filter((s) => inWk(s.date)).length + (fertSheets || []).filter((f) => inWk(f.date)).length + plannedWk.size
   const openJobs = (tasks || []).filter((t) => (t.status || 'todo') !== 'done').length
   const rain7 = (wx.season || []).filter((d) => d.date >= weekAgo && d.date <= today).reduce((s, d) => s + (Number(d.precip) || 0), 0)
   const seasonGdd = (wx.season.length || wx.forecast.length) ? seasonGddToDate(wx.season, wx.forecast) : null

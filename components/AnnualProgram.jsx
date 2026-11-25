@@ -691,8 +691,12 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
       const list = await db.fetchPrograms()
       setPrograms(list)
       if (list.length > 0) {
-        setActiveProgram(list[0])
-        setAllApps(await db.fetchApplications(list[0].id))
+        // Open the plan that covers today (the current year), not the newest
+        // rolled-forward plan — otherwise it lands on an empty future year.
+        const curYear = new Date().getFullYear()
+        const prog = list.find((p) => Number(p.year) === curYear) || list[0]
+        setActiveProgram(prog)
+        setAllApps(await db.fetchApplications(prog.id))
       }
     } catch (e) {
       console.error(e)
