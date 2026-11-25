@@ -1200,33 +1200,41 @@ function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
 
   const inC = (area) => !course || landTok(area) === landTok(course)
   const today = localDateISO()
-  // Greens speed series (daily averages)
-  const spd = (d.speeds || []).filter((s) => inC(s.area) && s.speed != null)
-  const spdByDate = {}; spd.forEach((s) => { (spdByDate[s.date] ||= []).push(Number(s.speed)) })
-  const spdSeries = Object.keys(spdByDate).sort().map((dt) => spdByDate[dt].reduce((a, b) => a + b, 0) / spdByDate[dt].length)
-  const spdLatest = spdSeries.length ? spdSeries[spdSeries.length - 1] : null
+  const cutoff = addDaysISO(today, -20) // ~3 weeks
+  // Keep the recent window (~3 weeks); if that's too thin, fall back to the most
+  // recent handful of points so the chart still reads.
+  const windowed = (series) => { const recent = series.filter((p) => p.date >= cutoff); return recent.length >= 2 ? recent : series.slice(-14) }
+  const byDateAvg = (rows, dateOf, valOf) => {
+    const m = {}
+    rows.forEach((r) => { const dt = dateOf(r); const v = Number(valOf(r)); if (dt && !isNaN(v)) (m[dt] ||= []).push(v) })
+    return Object.keys(m).sort().map((dt) => ({ date: dt, value: m[dt].reduce((a, b) => a + b, 0) / m[dt].length }))
+  }
+  // Greens speed (daily averages)
+  const spdSeries = byDateAvg((d.speeds || []).filter((s) => inC(s.area) && s.speed != null), (s) => s.date, (s) => s.speed)
+  const spdData = windowed(spdSeries)
+  const spdLatest = spdSeries.length ? spdSeries[spdSeries.length - 1].value : null
   // Clipping yields
-  const clp = (d.clippings || []).filter((c) => inC(c.area) && (c.volume != null || c.value != null))
-  const clpByDate = {}; clp.forEach((c) => { const v = Number(c.volume != null ? c.volume : c.value); if (!isNaN(v)) (clpByDate[c.date] ||= []).push(v) })
-  const clpSeries = Object.keys(clpByDate).sort().map((dt) => clpByDate[dt].reduce((a, b) => a + b, 0) / clpByDate[dt].length)
-  const clpLatest = clpSeries.length ? clpSeries[clpSeries.length - 1] : null
+  const clpSeries = byDateAvg((d.clippings || []).filter((c) => inC(c.area) && (c.volume != null || c.value != null)), (c) => c.date, (c) => (c.volume != null ? c.volume : c.value))
+  const clpData = windowed(clpSeries)
+  const clpLatest = clpSeries.length ? clpSeries[clpSeries.length - 1].value : null
   // Moisture (round averages)
-  const moistSeries = [...(d.moist || [])].filter((r) => r.avg != null).sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))).map((r) => Number(r.avg))
-  const moistLatest = moistSeries.length ? moistSeries[moistSeries.length - 1] : null
-  // GDD
+  const moistSeries = [...(d.moist || [])].filter((r) => r.avg != null).sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))).map((r) => ({ date: String(r.startedAt).slice(0, 10), value: Number(r.avg) }))
+  const moistData = windowed(moistSeries)
+  const moistLatest = moistSeries.length ? moistSeries[moistSeries.length - 1].value : null
+  // GDD / Soil
   const gdd = (d.season || []).length ? gddSince(d.season, `${today.slice(0, 4)}-01-01`, 50) : null
-  // Soil test latest
   const soilLatest = (d.soilTests || []).filter((t) => inC(t.area)).map((t) => t.date).sort().pop() || null
   const soilLab = soilLatest ? ((d.soilTests || []).find((t) => t.date === soilLatest)?.lab || '') : ''
+  const rangeLabel = (data) => (data.length >= 2 ? `${landMD(data[0].date)} – ${landMD(data[data.length - 1].date)}` : data.length === 1 ? landMD(data[0].date) : '')
 
   return (
     <LandingShell clubName={clubName} title="Data" intro={LANDING_INTRO.data}>
-      <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
-        <DataGraphCard label="Greens moisture & wetting agent" latest={moistLatest != null ? `${Math.round(moistLatest * 10) / 10}%` : '—'} sub="avg %VWC per round" values={moistSeries} color="#3A6187" onClick={() => onPickId('wetting')} />
-        <DataGraphCard label="Green speeds" latest={spdLatest != null ? fmtStimp(spdLatest) : '—'} sub="stimp, season" values={spdSeries} color={FOREST} onClick={() => onPickId('speed')} />
-        <DataGraphCard label="Clipping yields" latest={clpLatest != null ? `${Math.round(clpLatest)}` : '—'} sub="mL per 1,000 sqft" values={clpSeries} color={FERN} onClick={() => onPickId('clippings')} />
+      <div className="grid gap-4 mb-4 grid-cols-1 md:grid-cols-3">
+        <DataGraphCard label="Greens moisture & wetting agent" latest={moistLatest != null ? `${Math.round(moistLatest * 10) / 10}%` : '—'} sub="avg %VWC per round" data={moistData} range={rangeLabel(moistData)} color="#3A6187" onClick={() => onPickId('wetting')} />
+        <DataGraphCard label="Green speeds" latest={spdLatest != null ? fmtStimp(spdLatest) : '—'} sub="stimp" data={spdData} range={rangeLabel(spdData)} color={FOREST} onClick={() => onPickId('speed')} />
+        <DataGraphCard label="Clipping yields" latest={clpLatest != null ? `${Math.round(clpLatest)}` : '—'} sub="mL per 1,000 sqft" data={clpData} range={rangeLabel(clpData)} color={FERN} onClick={() => onPickId('clippings')} />
       </div>
-      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))' }}>
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2" style={{ maxWidth: 680 }}>
         <button onClick={() => onPickId('gdd')} className="text-left bg-white rounded-2xl border p-4 shadow-sm hover:shadow-md transition" style={{ borderColor: HAIR }}>
           <div className="flex items-center gap-1.5 mb-1"><TrendingUp size={13} style={{ color: '#94A3A0' }} /><p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>GDD &amp; Growth</p></div>
           <p className="font-display text-2xl font-bold" style={{ color: FOREST }}>{gdd != null ? gdd.toLocaleString() : '—'}</p>
@@ -1242,18 +1250,36 @@ function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
   )
 }
 
-function DataGraphCard({ label, latest, sub, values = [], color, onClick }) {
+// A filled area chart that fills the card width (non-scaling stroke keeps the
+// line crisp when the viewBox stretches). Used by the Data graph cards.
+function LandAreaChart({ data = [], color = FERN, height = 110 }) {
+  const pts = data.map((p) => Number(p.value)).filter((n) => !isNaN(n))
+  if (pts.length < 2) return <div className="flex items-center justify-center rounded-lg" style={{ height, backgroundColor: '#FAFAF8' }}><span className="font-body text-[11px]" style={{ color: INK_3 }}>Not enough data yet</span></div>
+  const W = 300, H = height, padT = 10, padB = 10
+  const min = Math.min(...pts), max = Math.max(...pts), span = (max - min) || 1
+  const stepX = W / (pts.length - 1)
+  const y = (v) => H - padB - ((v - min) / span) * (H - padT - padB)
+  const line = pts.map((v, i) => `${(i * stepX).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
   return (
-    <button onClick={onClick} className="text-left bg-white rounded-2xl border p-4 shadow-sm hover:shadow-md transition flex flex-col gap-2" style={{ borderColor: HAIR }}>
-      <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>{label}</p>
-      <div className="flex items-end justify-between gap-2">
-        <div>
-          <p className="font-display text-3xl font-bold leading-none" style={{ color: FOREST }}>{latest}</p>
-          <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>{sub}</p>
-        </div>
-        <LandMiniSpark values={values} color={color} />
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" style={{ display: 'block' }}>
+      <polygon points={`0,${H} ${line} ${W},${H}`} fill={color} opacity="0.12" />
+      <polyline points={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      <circle cx={W} cy={y(pts[pts.length - 1])} r="3" fill={color} vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
+function DataGraphCard({ label, latest, sub, data = [], range, color, onClick }) {
+  return (
+    <button onClick={onClick} className="text-left bg-white rounded-2xl border p-5 shadow-sm hover:shadow-md transition flex flex-col" style={{ borderColor: HAIR }}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>{label}</p>
+        <span className="font-body text-[11px] font-bold inline-flex items-center gap-1 shrink-0" style={{ color: FOREST }}>Open <ChevronRight size={12} /></span>
       </div>
-      <span className="font-body text-[11px] font-bold inline-flex items-center gap-1" style={{ color: FOREST }}>Open <ChevronRight size={12} /></span>
+      <p className="font-display text-4xl font-bold leading-none mt-2" style={{ color: FOREST }}>{latest}</p>
+      <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>{sub}</p>
+      <div className="mt-4"><LandAreaChart data={data} color={color} height={110} /></div>
+      {range && <p className="font-body text-[10px] mt-1.5 text-right" style={{ color: INK_3 }}>{range}</p>}
     </button>
   )
 }
