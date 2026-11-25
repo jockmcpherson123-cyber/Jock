@@ -492,6 +492,22 @@ function ManualReadings({ ctx, courseId, greens, onDone }) {
     })
   }, [nSpots])
 
+  // Reuse the green's saved spots (label + GPS from its last round), so the crew
+  // reads the same spots each day instead of re-placing them.
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      if (!greenId) return
+      try {
+        const saved = await cmdb.fetchLatestSpots(greenId)
+        if (!live || !saved.length) return
+        setSpots(saved.map((s, i) => ({ label: s.label || `Spot ${i + 1}`, v: '', temp: '', sal: '', lat: s.lat ?? null, lon: s.lon ?? null })))
+        setNSpots(saved.length)
+      } catch { /* ignore */ }
+    })()
+    return () => { live = false }
+  }, [greenId])
+
   const green = greens.find((g) => g.id === greenId) || null
   const setSpot = (i, patch) => setSpots((s) => s.map((x, j) => (j === i ? { ...x, ...patch } : x)))
   const captureGps = (i) => {
