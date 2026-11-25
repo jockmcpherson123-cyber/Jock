@@ -103,6 +103,8 @@ import BudgetApp from '@/components/BudgetApp'
 import GreensMap from '@/components/GreensMap'
 import AerialSettings from '@/components/AerialSettings'
 import { libraryComplianceGaps } from '@/lib/compliance'
+import { fetchCourseContext as cmCourseContext, fetchGreens as cmFetchGreens, fetchRounds as cmFetchRounds, fetchTargets as cmFetchTargets, fetchWateringPlan as cmFetchWateringPlan } from '@/lib/coursemap/db'
+import { resolveTarget as cmResolveTarget } from '@/lib/coursemap/targets'
 import HocEditor from '@/components/HocEditor'
 import WettingAgent from '@/components/WettingAgent'
 import Growth from '@/components/Growth'
@@ -304,7 +306,7 @@ class ErrorBoundary extends React.Component {
 // route (r) within it, exactly as before — this is a re-grouping, not a rewrite.
 const SECTIONS_MANAGER = [
   { key: 'home', title: 'Home',
-    landing: { id: 'home', label: 'Home', m: 'spray', r: 'dashboard', home: true, follow: true },
+    landing: { id: 'home', label: 'Home', m: 'land', r: 'home' },
     items: [
       { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
       { id: 'weekly', label: 'Weekly Report', m: 'turf', r: 'report', follow: true },
@@ -321,7 +323,7 @@ const SECTIONS_MANAGER = [
       { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
     ] },
   { key: 'data', title: 'Data',
-    landing: { id: 'data-home', label: 'Data', m: 'land', r: 'data' },
+    landing: { id: 'data-home', label: 'Data', m: 'land', r: 'data', follow: true, noAll: true },
     items: [
       { id: 'wetting', label: 'Moisture & Wetting Agents', m: 'turf', r: 'wetting', follow: true, noAll: true },
       { id: 'speed', label: 'Green Speeds', m: 'turf', r: 'speed', follow: true, noAll: true },
@@ -332,7 +334,7 @@ const SECTIONS_MANAGER = [
       { id: 'soil', label: 'Soil Tests', m: 'turf', r: 'soil', follow: true, noAll: true },
     ] },
   { key: 'irrigation', title: 'Irrigation',
-    landing: { id: 'irr-home', label: 'Irrigation', m: 'land', r: 'irrigation' },
+    landing: { id: 'irr-home', label: 'Irrigation', m: 'land', r: 'irrigation', follow: true, noAll: true },
     items: [
       { id: 'greenstoday', label: 'Greens Today', m: 'greensmap', r: 'today', follow: true, noAll: true },
       { id: 'irrmap', label: 'Irrigation Map', m: 'map', r: 'map' },
@@ -349,7 +351,7 @@ const SECTIONS_MANAGER = [
       { id: 'timing', label: 'Soil-Temp Timing', m: 'turf', r: 'timing' },
     ] },
   { key: 'mechanical', title: 'Mechanical',
-    landing: { id: 'mech-home', label: 'Mechanical', m: 'land', r: 'mechanical' },
+    landing: { id: 'mech-home', label: 'Mechanical', m: 'land', r: 'mechanical', follow: true, noAll: true },
     items: [
       { id: 'hoc', label: 'Height of Cut', m: 'turf', r: 'hoc', follow: true },
     ] },
@@ -512,7 +514,7 @@ export default function SprayApp({ user }) {
 
           <div className="flex-1 min-w-0">
             {sel.m === 'budget' ? <BudgetApp user={user} />
-              : sel.m === 'land' ? <LandingModule nav={nav} sections={sections} onPickId={pickId} clubName={clubName || user.clubName} />
+              : sel.m === 'land' ? <LandingModule nav={nav} sections={sections} onPickId={pickId} onGo={gotoFocus} clubName={clubName || user.clubName} course={sel.follow ? course : ''} courses={courses} user={user} />
               : sel.m === 'greensmap' ? <GreensMap user={user} nav={nav} />
               : sel.m === 'spray' ? <SprayOpsModule user={user} nav={nav} hideChrome homeMode={!!sel.home} course={sel.follow ? course : ''} />
               : sel.m === 'turf' ? <TurfPerformanceModule user={user} nav={nav} hideChrome course={sel.follow ? course : ''} />
@@ -686,34 +688,781 @@ const PAGE_DESC = {
   hoc: 'Height of cut by surface',
 }
 
-function LandingModule({ nav, sections, onPickId, clubName }) {
-  const section = (sections || []).find((s) => s.landing && s.landing.m === 'land' && s.landing.r === nav?.route)
-  if (!section) return null
-  const pages = section.items || []
+// ── Phase 2 landing helpers ──────────────────────────────────────────────────
+const addDaysISO = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
+const landTok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
+const courseColorOf = (courses, name) => ((courses || []).find((c) => landTok(c.name) === landTok(name)) || {}).color || FERN
+const LAND_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const landMD = (iso) => { const p = String(iso || '').split('-'); return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : String(iso || '') }
+const sundayOf = (iso) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0, 10) }
+
+function LandingShell({ clubName, title, intro, right, children }) {
   return (
     <div className="min-h-screen" style={{ backgroundColor: CREAM }}>
       <div className={`${PAGE} py-6`}>
-        <div className="mb-5">
-          <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{clubName || 'Grounds'}</p>
-          <h1 className="font-display text-2xl font-semibold mt-0.5" style={{ color: FOREST }}>{section.title}</h1>
-          <div className="mt-1.5 h-px" style={{ width: 30, backgroundColor: GOLD }} />
-          {LANDING_INTRO[nav?.route] && <p className="font-body text-[13px] mt-2 max-w-xl" style={{ color: INK_2 }}>{LANDING_INTRO[nav?.route]}</p>}
+        <div className="flex items-start justify-between gap-3 mb-5 flex-wrap">
+          <div>
+            <p className="font-display text-[10px] tracking-[0.25em] uppercase" style={{ color: GOLD }}>{clubName || 'Grounds'}</p>
+            <h1 className="font-display text-2xl font-semibold mt-0.5" style={{ color: FOREST }}>{title}</h1>
+            <div className="mt-1.5 h-px" style={{ width: 30, backgroundColor: GOLD }} />
+            {intro && <p className="font-body text-[13px] mt-2 max-w-xl" style={{ color: INK_2 }}>{intro}</p>}
+          </div>
+          {right && <div className="shrink-0">{right}</div>}
         </div>
-        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
-          {pages.map((p) => (
-            <button key={p.id} onClick={() => onPickId(p.id)}
-              className="text-left bg-white rounded-2xl border p-4 shadow-sm transition hover:shadow-md flex items-start justify-between gap-2"
-              style={{ borderColor: HAIR }}>
-              <div className="min-w-0">
-                <p className="font-display text-[15px] font-semibold" style={{ color: INK }}>{p.label}</p>
-                {PAGE_DESC[p.id] && <p className="font-body text-[12px] mt-0.5" style={{ color: INK_3 }}>{PAGE_DESC[p.id]}</p>}
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function LandingCardGrid({ pages, onPickId }) {
+  return (
+    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
+      {pages.map((p) => (
+        <button key={p.id} onClick={() => onPickId(p.id)}
+          className="text-left bg-white rounded-2xl border p-4 shadow-sm transition hover:shadow-md flex items-start justify-between gap-2"
+          style={{ borderColor: HAIR }}>
+          <div className="min-w-0">
+            <p className="font-display text-[15px] font-semibold" style={{ color: INK }}>{p.label}</p>
+            {PAGE_DESC[p.id] && <p className="font-body text-[12px] mt-0.5" style={{ color: INK_3 }}>{PAGE_DESC[p.id]}</p>}
+          </div>
+          <ChevronRight size={16} className="shrink-0 mt-0.5" style={{ color: INK_3 }} />
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// A tiny inline sparkline for the Data cards.
+function LandMiniSpark({ values = [], color = FERN, width = 128, height = 34 }) {
+  const nums = values.map(Number).filter((n) => !isNaN(n))
+  if (nums.length < 2) return <div style={{ height }} />
+  const min = Math.min(...nums), max = Math.max(...nums), span = max - min || 1
+  const step = width / (nums.length - 1)
+  const pts = nums.map((v, i) => `${(i * step).toFixed(1)},${(height - 3 - ((v - min) / span) * (height - 6)).toFixed(1)}`).join(' ')
+  return (
+    <svg width={width} height={height} className="overflow-visible">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={(width).toFixed(1)} cy={(height - 3 - ((nums[nums.length - 1] - min) / span) * (height - 6)).toFixed(1)} r="2.5" fill={color} />
+    </svg>
+  )
+}
+
+function LandingModule({ nav, sections, onPickId, onGo, clubName, course = '', courses = [], user }) {
+  const route = nav?.route
+  if (route === 'home') return <HomeLanding clubName={clubName} onPickId={onPickId} />
+  if (route === 'spray') return <SprayProgramLanding clubName={clubName} onPickId={onPickId} onGo={onGo} courses={courses} />
+  if (route === 'data') return <DataLanding clubName={clubName} onPickId={onPickId} course={course} courses={courses} />
+  if (route === 'irrigation') return <IrrigationLanding clubName={clubName} onPickId={onPickId} course={course} courses={courses} />
+  if (route === 'mechanical') return <MechanicalLanding clubName={clubName} onPickId={onPickId} course={course} />
+  const section = (sections || []).find((s) => s.landing && s.landing.m === 'land' && s.landing.r === route)
+  if (route === 'resources') return <ResourcesLanding clubName={clubName} onPickId={onPickId} pages={section?.items || []} />
+  if (!section) return null
+  return (
+    <LandingShell clubName={clubName} title={section.title} intro={LANDING_INTRO[route]}>
+      <LandingCardGrid pages={section.items || []} onPickId={onPickId} />
+    </LandingShell>
+  )
+}
+
+// ── HOME ──────────────────────────────────────────────────────────────────
+function HomeLanding({ clubName, onPickId }) {
+  const [data, setData] = useState(null)
+  const [wx, setWx] = useState({ current: null, today: null, forecast: [], season: [], breakdownTemps: [] })
+  const [events, setEvents] = useState([])
+  const [addOpen, setAddOpen] = useState(false)
+  const ciRef = useRef(null)
+
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      const today = localDateISO()
+      const [settings, products, sheets, tasks] = await Promise.all([
+        db.fetchSettings(),
+        db.fetchProducts().catch(() => []),
+        db.fetchSheets().catch(() => []),
+        db.fetchCrewTasks(addDaysISO(today, -1), addDaysISO(today, 90)).catch(() => []),
+      ])
+      if (!live) return
+      ciRef.current = settings.courseInfo || {}
+      setEvents(Array.isArray(ciRef.current.events) ? ciRef.current.events : [])
+      setData({ settings, products, sheets, tasks })
+      const loc = settings.location
+      if (loc?.lat != null) {
+        ;(async () => { try { const c = await fetchCurrent(loc.lat, loc.lng); if (live) setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ } })()
+        ;(async () => { try { const d = await fetchWeather(loc.lat, loc.lng); if (live) setWx((w) => ({ ...w, forecast: dailyFromForecastBlock(d), today: dailyFromHourly(d).find((x) => x.date === today) || null })) } catch { /* ignore */ } })()
+        ;(async () => { try { const s = await fetchSeasonDaily(loc.lat, loc.lng); if (live) setWx((w) => ({ ...w, season: s })) } catch { /* ignore */ } })()
+        ;(async () => { try { const bt = await fetchBreakdownTemps(loc.lat, loc.lng); if (live) setWx((w) => ({ ...w, breakdownTemps: bt })) } catch { /* ignore */ } })()
+      }
+    })()
+    return () => { live = false }
+  }, [])
+
+  const saveEvents = async (next) => {
+    setEvents(next)
+    let ci = ciRef.current || {}
+    try { const fresh = await db.fetchSettings(); ci = fresh.courseInfo || ci } catch { /* ignore */ }
+    ci = { ...ci, events: next }
+    ciRef.current = ci
+    try { await db.saveSettings({ courseInfo: ci }) } catch (e) { console.error(e) }
+  }
+
+  if (!data) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: CREAM }}><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+
+  const { settings, products, sheets, tasks } = data
+  const courseInfo = settings.courseInfo || {}
+  const today = localDateISO()
+  const hasLocation = settings.location?.lat != null
+  const band = wx.today ? { ...wx.today, spray: sprayWindow(wx.today) } : null
+  const forecast7 = (wx.forecast || []).filter((d) => d.date >= today).slice(0, 7)
+  const rainWeekFc = forecast7.reduce((s, d) => s + (Number(d.precip) || 0), 0)
+  const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today)
+  const sun = sundayOf(today)
+  const rainWeek = (rain.days || []).filter((d) => d.date >= sun && d.date <= today).reduce((s, d) => s + d.precip, 0)
+  const rainMonth = rain.byMonth?.[today.slice(0, 7)] || 0
+  const soilNow = currentSoilTemp(wx.breakdownTemps)
+  const soilDir = soilTrend(wx.breakdownTemps)
+  const openWins = soilNow != null ? openWindows(soilNow, soilDir) : []
+  const lowStock = (products || []).filter((p) => (Number(p.stock) || 0) < 0 || (p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold))
+  const licAlerts = computeLicenseAlerts(settings.applicatorLicenses || {})
+  const compGaps = libraryComplianceGaps(products, sheets, settings.applicatorLicenses || {})
+  const openJobs = (tasks || []).filter((t) => (t.status || 'todo') !== 'done').length
+  const timeoff = Array.isArray(courseInfo.timeoff) ? courseInfo.timeoff : []
+
+  return (
+    <LandingShell clubName={clubName} title="Home"
+      right={<a href="/command" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: HAIR, backgroundColor: 'white' }} title="Open the wide Command Center on a monitor or shop TV"><BarChart3 size={13} /> Command Center ↗</a>}>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2 space-y-4">
+          <SprayWindowStrip current={wx.current} today={band} hasLocation={hasLocation} onGoWeather={() => onPickId('weather')} />
+          <ForecastWeek days={forecast7} total={rainWeekFc} />
+          <HomeCalendar events={events} timeoff={timeoff} today={today} onAdd={() => setAddOpen(true)}
+            onDeleteEvent={(id) => saveEvents(events.filter((e) => e.id !== id))} />
+        </div>
+        <div className="space-y-4">
+          <SoilTempCard soilNow={soilNow} openWins={openWins} onPickId={onPickId} />
+          <RainTotalsCard week={rainWeek} month={rainMonth} year={rain.ytd} />
+          <NeedsAttention lowStock={lowStock} licAlerts={licAlerts} compGaps={compGaps} openJobs={openJobs} onPickId={onPickId} />
+        </div>
+      </div>
+      {addOpen && <EventModal onClose={() => setAddOpen(false)} onSave={(ev) => { saveEvents([...events, ev]); setAddOpen(false) }} />}
+    </LandingShell>
+  )
+}
+
+function ForecastWeek({ days = [], total = 0 }) {
+  return (
+    <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
+      <div className="flex items-center justify-between mb-2">
+        <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>This week's forecast</p>
+        <p className="font-body text-[11px]" style={{ color: '#3A6187' }}>{total.toFixed(2)}" rain expected this week</p>
+      </div>
+      {days.length === 0 ? (
+        <p className="font-body text-[12px] py-3 text-center" style={{ color: INK_3 }}>Set your location in Settings to see the forecast.</p>
+      ) : (
+        <div className="flex justify-between gap-1">
+          {days.map((d) => {
+            const info = weatherCodeInfo(d.code); const wi = WX_ICON[info.key] || WX_ICON.cloud; const WI = wi.Icon
+            return (
+              <div key={d.date} className="flex-1 text-center min-w-0">
+                <p className="font-body text-[11px] font-bold uppercase" style={{ color: INK_3 }}>{new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}</p>
+                <WI size={22} className="mx-auto my-1" style={{ color: wi.color }} />
+                <p className="font-display text-base font-bold" style={{ color: FOREST }}>{Math.round(d.tMax)}°</p>
+                <p className="font-body text-[11px]" style={{ color: INK_3 }}>{Math.round(d.tMin)}°</p>
+                <p className="font-body text-[10px] mt-0.5" style={{ color: '#3A6187' }}>{(Number(d.precip) || 0).toFixed(2)}"</p>
               </div>
-              <ChevronRight size={16} className="shrink-0 mt-0.5" style={{ color: INK_3 }} />
-            </button>
-          ))}
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Month calendar: app events (green) + Job Board time off (gold). No sprays.
+function HomeCalendar({ events = [], timeoff = [], today, onAdd, onDeleteEvent }) {
+  const [offset, setOffset] = useState(0)
+  const base = new Date(today + 'T00:00:00')
+  const view = new Date(base.getFullYear(), base.getMonth() + offset, 1)
+  const y = view.getFullYear(), m = view.getMonth()
+  const first = new Date(y, m, 1)
+  const startPad = first.getDay()
+  const daysInMonth = new Date(y, m + 1, 0).getDate()
+  const cells = []
+  for (let i = 0; i < startPad; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(`${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`)
+  const offOn = (iso) => (timeoff || []).filter((e) => e && e.person && e.start && e.end && e.start <= iso && iso <= e.end)
+  const evOn = (iso) => (events || []).filter((e) => e && e.date === iso)
+
+  return (
+    <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setOffset((o) => o - 1)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: INK_2 }} aria-label="Previous month"><ChevronRight size={15} style={{ transform: 'rotate(180deg)' }} /></button>
+          <p className="font-display text-[15px] font-semibold" style={{ color: FOREST }}>{MONTHS[m]} {y}</p>
+          <button onClick={() => setOffset((o) => o + 1)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: INK_2 }} aria-label="Next month"><ChevronRight size={15} /></button>
+        </div>
+        <button onClick={onAdd} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 text-white" style={{ backgroundColor: FOREST }}><Plus size={13} /> Add event</button>
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {LAND_DOW.map((d) => <div key={d} className="text-center font-body text-[10px] font-bold uppercase pb-1" style={{ color: INK_3 }}>{d}</div>)}
+        {cells.map((iso, i) => {
+          if (!iso) return <div key={`p${i}`} />
+          const evs = evOn(iso); const offs = offOn(iso); const isToday = iso === today
+          return (
+            <div key={iso} className="rounded-lg p-1 min-h-[58px] text-left" style={{ border: `1px solid ${isToday ? GOLD : 'rgba(0,0,0,0.05)'}`, backgroundColor: isToday ? '#FBF6E6' : '#FCFCFB' }}>
+              <p className="font-body text-[10px] font-bold" style={{ color: isToday ? '#886717' : INK_3 }}>{Number(iso.slice(8))}</p>
+              <div className="space-y-0.5 mt-0.5">
+                {evs.map((e) => (
+                  <button key={e.id} onClick={() => onDeleteEvent && window.confirm(`Delete event "${e.title}"?`) && onDeleteEvent(e.id)} title={`${e.title}${e.notes ? ' — ' + e.notes : ''} (tap to delete)`}
+                    className="block w-full text-left truncate font-body text-[9.5px] font-semibold px-1 py-0.5 rounded" style={{ backgroundColor: '#E6F2EA', color: '#2F5A3D' }}>
+                    {!e.allDay && e.time ? `${e.time} ` : ''}{e.title}
+                  </button>
+                ))}
+                {offs.map((o, j) => (
+                  <div key={`o${j}`} className="truncate font-body text-[9.5px] font-semibold px-1 py-0.5 rounded" style={{ backgroundColor: '#FBF1D6', color: '#886717' }} title={`${o.person} — time off`}>{o.person} off</div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <p className="font-body text-[10px] mt-2 flex items-center gap-3" style={{ color: INK_3 }}>
+        <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#8CC2A0' }} /> Event</span>
+        <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#E3C977' }} /> Time off (Job Board)</span>
+      </p>
+    </div>
+  )
+}
+
+function EventModal({ onClose, onSave }) {
+  const [title, setTitle] = useState('')
+  const [date, setDate] = useState(localDateISO())
+  const [allDay, setAllDay] = useState(true)
+  const [time, setTime] = useState('')
+  const [notes, setNotes] = useState('')
+  const save = () => { if (!title.trim() || !date) return; onSave({ id: uid(), title: title.trim(), date, allDay, time: allDay ? '' : time, notes: notes.trim() }) }
+  return (
+    <div className="fixed inset-0 z-[2100] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(10,20,14,0.5)' }} onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-display text-lg font-semibold" style={{ color: FOREST }}>Add event</h3>
+          <button onClick={onClose} className="text-slate-400"><X size={18} /></button>
+        </div>
+        <label className="block font-body text-[12px] font-semibold mb-1" style={{ color: INK_2 }}>Title</label>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus className="w-full rounded-lg px-3 py-2.5 text-base mb-3" style={{ border: `1px solid ${HAIR}`, color: INK }} placeholder="e.g. Aerate greens" />
+        <div className="flex gap-2 mb-3">
+          <div className="flex-1">
+            <label className="block font-body text-[12px] font-semibold mb-1" style={{ color: INK_2 }}>Date</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-base" style={{ border: `1px solid ${HAIR}`, color: INK }} />
+          </div>
+          <div className="w-28">
+            <label className="block font-body text-[12px] font-semibold mb-1" style={{ color: INK_2 }}>Time</label>
+            <input type="time" value={time} disabled={allDay} onChange={(e) => setTime(e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-base disabled:opacity-40" style={{ border: `1px solid ${HAIR}`, color: INK }} />
+          </div>
+        </div>
+        <label className="flex items-center gap-2 mb-3 font-body text-[13px]" style={{ color: INK_2 }}>
+          <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} /> All day
+        </label>
+        <label className="block font-body text-[12px] font-semibold mb-1" style={{ color: INK_2 }}>Notes</label>
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full rounded-lg px-3 py-2.5 text-base mb-4" style={{ border: `1px solid ${HAIR}`, color: INK }} />
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-body text-sm font-bold" style={{ border: `1px solid ${HAIR}`, color: INK_2 }}>Cancel</button>
+          <button onClick={save} disabled={!title.trim()} className="flex-1 py-2.5 rounded-xl font-body text-sm font-bold text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Add</button>
         </div>
       </div>
     </div>
+  )
+}
+
+function SoilTempCard({ soilNow, openWins = [], onPickId }) {
+  return (
+    <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
+      <div className="flex items-center gap-1.5 mb-1"><Thermometer size={13} style={{ color: '#94A3A0' }} /><p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>Soil temp · 2"</p></div>
+      <p className="font-display font-bold leading-none" style={{ fontSize: 30, color: FOREST }}>{soilNow != null ? `${Math.round(soilNow)}°` : '—'}</p>
+      {openWins.length > 0 ? (
+        <button onClick={() => onPickId && onPickId('timing')} className="mt-2 w-full text-left rounded-lg px-3 py-2 font-body text-[12px] font-semibold" style={{ backgroundColor: '#E8F3EC', color: FERN }}>
+          {openWins.length} application window{openWins.length !== 1 ? 's' : ''} open: {openWins.map((w) => w.label).join(', ')}
+        </button>
+      ) : (
+        <p className="mt-2 font-body text-[12px]" style={{ color: INK_3 }}>{soilNow != null ? 'No soil-temp windows open right now.' : 'Set your location to track soil temperature.'}</p>
+      )}
+    </div>
+  )
+}
+
+function RainTotalsCard({ week = 0, month = 0, year = 0 }) {
+  const monthName = MONTHS[new Date().getMonth()]
+  const row = (label, val) => (
+    <div className="flex items-baseline justify-between py-1.5 border-b last:border-0" style={{ borderColor: 'rgba(0,0,0,0.05)' }}>
+      <span className="font-body text-[12px]" style={{ color: INK_2 }}>{label}</span>
+      <span className="font-display text-base font-bold tnum" style={{ color: '#3A6187' }}>{(Number(val) || 0).toFixed(2)}"</span>
+    </div>
+  )
+  return (
+    <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
+      <div className="flex items-center gap-1.5 mb-1.5"><CloudRain size={13} style={{ color: '#94A3A0' }} /><p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>Rain totals</p></div>
+      {row('This week (Sun–today)', week)}
+      {row(`This month (${monthName} 1–today)`, month)}
+      {row('This year (Jan 1–today)', year)}
+    </div>
+  )
+}
+
+function NeedsAttention({ lowStock = [], licAlerts = [], compGaps = [], openJobs = 0, onPickId }) {
+  const items = []
+  if (lowStock.length) items.push({ key: 'stock', tone: 'bad', label: `${lowStock.length} product${lowStock.length !== 1 ? 's' : ''} low on stock`, sub: lowStock.slice(0, 3).map((p) => p.name).join(', ') + (lowStock.length > 3 ? '…' : ''), cta: 'Order', go: () => onPickId('chemicals') })
+  licAlerts.forEach((a, i) => items.push({ key: 'lic' + i, tone: a.level === 'expired' ? 'bad' : 'warn', label: `${a.name} — ${a.type} license ${a.label.toLowerCase()}`, cta: 'Update', go: () => onPickId('settings') }))
+  if (compGaps.length) items.push({ key: 'comp', tone: 'warn', label: `${compGaps.length} compliance record${compGaps.length !== 1 ? 's' : ''} missing`, sub: compGaps.slice(0, 2).map((g) => g.label || g.name || g).join(', '), cta: 'Fix', go: () => onPickId('settings') })
+  if (openJobs) items.push({ key: 'jobs', tone: 'info', label: `${openJobs} open job${openJobs !== 1 ? 's' : ''}`, cta: 'Board', go: () => onPickId('jobboard') })
+  const tone = { bad: '#B23A2E', warn: '#92660D', info: FERN }
+  return (
+    <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
+      <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Needs attention</p>
+      {items.length === 0 ? (
+        <p className="font-body text-[13px] py-2" style={{ color: FERN }}>All clear — nothing needs you right now.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map((it) => (
+            <div key={it.key} className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ backgroundColor: '#F6F5F1' }}>
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: tone[it.tone] }} />
+              <div className="min-w-0 flex-1">
+                <p className="font-body text-[12.5px] font-semibold truncate" style={{ color: INK }}>{it.label}</p>
+                {it.sub && <p className="font-body text-[11px] truncate" style={{ color: INK_3 }}>{it.sub}</p>}
+              </div>
+              {it.cta && <button onClick={it.go} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>{it.cta}</button>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── SPRAY PROGRAM ───────────────────────────────────────────────────────────
+const SHEET_PILL = {
+  Sprayed: { bg: '#E8F3EC', fg: FERN }, Approved: { bg: '#E8EEF6', fg: '#3A6187' },
+  Pending: { bg: '#FEF3DD', fg: '#92660D' }, Planned: { bg: '#F1F5F9', fg: '#64748B' },
+}
+const sheetStatusLabel = (s) => (sheetApplied(s) ? 'Sprayed' : s.status === 'approved' ? 'Approved' : s.status === 'pending' ? 'Pending' : 'Planned')
+
+function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
+  const [data, setData] = useState(null)
+  const [wx, setWx] = useState({ breakdownTemps: [] })
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      const [settings, sheets, fertSheets, products] = await Promise.all([
+        db.fetchSettings(),
+        db.fetchSheets().catch(() => []),
+        db.fetchFertSheets().catch(() => []),
+        db.fetchProducts().catch(() => []),
+      ])
+      if (!live) return
+      setData({ settings, sheets, fertSheets, products })
+      const loc = settings.location
+      if (loc?.lat != null) { try { const bt = await fetchBreakdownTemps(loc.lat, loc.lng); if (live) setWx({ breakdownTemps: bt }) } catch { /* ignore */ } }
+    })()
+    return () => { live = false }
+  }, [])
+
+  if (!data) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: CREAM }}><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+
+  const { settings, sheets, fertSheets, products } = data
+  const today = localDateISO()
+  const sun = sundayOf(today), sat = addDaysISO(sun, 6)
+  const rows = []
+  ;(sheets || []).forEach((s) => { if (s.date && s.date >= sun && s.date <= sat) rows.push({ id: s.id, date: s.date, area: s.area || '', products: (s.products || []).map((p) => p.product).filter(Boolean), status: sheetStatusLabel(s), kind: 'spray' }) })
+  ;(fertSheets || []).forEach((f) => { if (f.date && f.date >= sun && f.date <= sat) rows.push({ id: f.id, date: f.date, area: f.area || '', products: (f.products || []).map((p) => p.product || p.name).filter(Boolean), status: sheetStatusLabel(f), kind: 'fert' }) })
+  rows.sort((a, b) => a.date.localeCompare(b.date) || landTok(a.area).localeCompare(landTok(b.area)))
+
+  const lowStock = (products || []).filter((p) => (Number(p.stock) || 0) < 0 || (p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold))
+  const licAlerts = computeLicenseAlerts(settings.applicatorLicenses || {})
+  const compGaps = libraryComplianceGaps(products, sheets, settings.applicatorLicenses || {})
+  const soilNow = currentSoilTemp(wx.breakdownTemps)
+  const openWins = soilNow != null ? openWindows(soilNow, soilTrend(wx.breakdownTemps)) : []
+  const dowName = (iso) => LAND_DOW[new Date(iso + 'T00:00:00').getDay()]
+
+  return (
+    <LandingShell clubName={clubName} title="This week's sprays"
+      intro={`Both courses · ${landMD(sun)} – ${landMD(sat)} · every spray, any area`}
+      right={<button onClick={() => onGo && onGo('spray', 'list', { type: 'new' })} className="font-body text-xs font-bold px-3.5 py-2 rounded-full inline-flex items-center gap-1.5 text-white" style={{ backgroundColor: FOREST }}><Plus size={14} /> New spray sheet</button>}>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2 space-y-4">
+          <div className="bg-white rounded-2xl border shadow-sm overflow-hidden" style={{ borderColor: HAIR }}>
+            {rows.length === 0 ? (
+              <p className="font-body text-[13px] p-6 text-center" style={{ color: INK_3 }}>No sprays or fert sheets dated this week yet.</p>
+            ) : (
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr style={{ backgroundColor: '#F6F5F1' }}>
+                    {['Day', 'Course', 'Area', 'Products', 'Status'].map((h) => <th key={h} className="text-left font-body text-[10px] font-bold uppercase tracking-wide px-3 py-2" style={{ color: INK_3 }}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const color = courseColorOf(courses, r.area); const pill = SHEET_PILL[r.status]
+                    return (
+                      <tr key={r.kind + r.id} onClick={() => r.kind === 'spray' ? (onGo && onGo('spray', 'list', { type: 'sheet', id: r.id })) : onPickId('fert')} className="cursor-pointer transition hover:bg-black/[0.02] border-t" style={{ borderColor: 'rgba(0,0,0,0.05)', borderLeft: `3px solid ${color}` }}>
+                        <td className="px-3 py-2.5 font-body text-[12.5px] font-semibold" style={{ color: INK }}>{dowName(r.date)} <span className="font-normal" style={{ color: INK_3 }}>{landMD(r.date)}</span></td>
+                        <td className="px-3 py-2.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: color }} /></td>
+                        <td className="px-3 py-2.5 font-body text-[12.5px]" style={{ color: INK }}>{r.area}{r.kind === 'fert' ? ' · fert' : ''}</td>
+                        <td className="px-3 py-2.5 font-body text-[12px]" style={{ color: INK_2 }}>{r.products.join(', ') || '—'}</td>
+                        <td className="px-3 py-2.5"><span className="font-body text-[10.5px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: pill.bg, color: pill.fg }}>{r.status}</span></td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
+            <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Spray calendar · both courses</p>
+            <SprayCalendar sheets={sheets} products={products} onOpenSheet={(s) => onGo && onGo('spray', 'list', { type: 'sheet', id: s.id })} />
+          </div>
+        </div>
+        <div className="space-y-4">
+          <SprayLowStock lowStock={lowStock} onPickId={onPickId} />
+          <SprayAlerts licAlerts={licAlerts} openWins={openWins} compGaps={compGaps} onPickId={onPickId} />
+        </div>
+      </div>
+    </LandingShell>
+  )
+}
+
+function SprayLowStock({ lowStock = [], onPickId }) {
+  return (
+    <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
+      <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Low stock</p>
+      {lowStock.length === 0 ? <p className="font-body text-[13px]" style={{ color: FERN }}>Everything's stocked.</p> : (
+        <div className="space-y-1.5">
+          {lowStock.map((p) => (
+            <div key={p.name} className="flex items-center justify-between gap-2 rounded-xl px-3 py-2" style={{ backgroundColor: '#F6F5F1' }}>
+              <span className="font-body text-[12.5px] font-semibold truncate" style={{ color: INK }}>{p.name}</span>
+              <button onClick={() => onPickId('chemicals')} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>Order</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SprayAlerts({ licAlerts = [], openWins = [], compGaps = [], onPickId }) {
+  const items = []
+  licAlerts.forEach((a, i) => items.push({ key: 'l' + i, label: `${a.name} — ${a.type} license ${a.label.toLowerCase()}`, go: () => onPickId('settings') }))
+  openWins.forEach((w, i) => items.push({ key: 'w' + i, label: `Soil-temp window open: ${w.label}`, go: () => onPickId('timing') }))
+  if (compGaps.length) items.push({ key: 'c', label: `${compGaps.length} compliance record${compGaps.length !== 1 ? 's' : ''} missing`, go: () => onPickId('settings') })
+  return (
+    <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
+      <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Alerts</p>
+      {items.length === 0 ? <p className="font-body text-[13px]" style={{ color: FERN }}>No alerts.</p> : (
+        <div className="space-y-1.5">
+          {items.map((it) => (
+            <button key={it.key} onClick={it.go} className="w-full text-left flex items-center gap-2 rounded-xl px-3 py-2" style={{ backgroundColor: '#F6F5F1' }}>
+              <AlertTriangle size={13} className="shrink-0" style={{ color: '#92660D' }} />
+              <span className="font-body text-[12.5px] truncate" style={{ color: INK }}>{it.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── DATA ──────────────────────────────────────────────────────────────────
+function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
+  const [d, setD] = useState(null)
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      const [settings, speeds, clippings, soilTests] = await Promise.all([
+        db.fetchSettings(),
+        db.fetchGreensSpeeds().catch(() => []),
+        db.fetchClippings().catch(() => []),
+        db.fetchSoilTests().catch(() => []),
+      ])
+      let season = []
+      if (settings.location?.lat != null) { try { season = await fetchSeasonDaily(settings.location.lat, settings.location.lng) } catch { /* ignore */ } }
+      let moist = []
+      try {
+        const ctx = await cmCourseContext()
+        const co = (ctx.courses || []).find((c) => landTok(c.name) === landTok(course)) || ctx.courses?.[0]
+        if (co) { const greens = await cmFetchGreens(co.id); const rounds = await cmFetchRounds(co.id, greens.map((g) => g.id)); moist = rounds }
+      } catch { /* ignore */ }
+      if (live) setD({ settings, speeds, clippings, soilTests, season, moist })
+    })()
+    return () => { live = false }
+  }, [course])
+
+  if (!d) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: CREAM }}><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+
+  const inC = (area) => !course || landTok(area) === landTok(course)
+  const today = localDateISO()
+  // Greens speed series (daily averages)
+  const spd = (d.speeds || []).filter((s) => inC(s.area) && s.speed != null)
+  const spdByDate = {}; spd.forEach((s) => { (spdByDate[s.date] ||= []).push(Number(s.speed)) })
+  const spdSeries = Object.keys(spdByDate).sort().map((dt) => spdByDate[dt].reduce((a, b) => a + b, 0) / spdByDate[dt].length)
+  const spdLatest = spdSeries.length ? spdSeries[spdSeries.length - 1] : null
+  // Clipping yields
+  const clp = (d.clippings || []).filter((c) => inC(c.area) && (c.volume != null || c.value != null))
+  const clpByDate = {}; clp.forEach((c) => { const v = Number(c.volume != null ? c.volume : c.value); if (!isNaN(v)) (clpByDate[c.date] ||= []).push(v) })
+  const clpSeries = Object.keys(clpByDate).sort().map((dt) => clpByDate[dt].reduce((a, b) => a + b, 0) / clpByDate[dt].length)
+  const clpLatest = clpSeries.length ? clpSeries[clpSeries.length - 1] : null
+  // Moisture (round averages)
+  const moistSeries = [...(d.moist || [])].filter((r) => r.avg != null).sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))).map((r) => Number(r.avg))
+  const moistLatest = moistSeries.length ? moistSeries[moistSeries.length - 1] : null
+  // GDD
+  const gdd = (d.season || []).length ? gddSince(d.season, `${today.slice(0, 4)}-01-01`, 50) : null
+  // Soil test latest
+  const soilLatest = (d.soilTests || []).filter((t) => inC(t.area)).map((t) => t.date).sort().pop() || null
+  const soilLab = soilLatest ? ((d.soilTests || []).find((t) => t.date === soilLatest)?.lab || '') : ''
+
+  return (
+    <LandingShell clubName={clubName} title="Data" intro={LANDING_INTRO.data}>
+      <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }}>
+        <DataGraphCard label="Greens moisture & wetting agent" latest={moistLatest != null ? `${Math.round(moistLatest * 10) / 10}%` : '—'} sub="avg %VWC per round" values={moistSeries} color="#3A6187" onClick={() => onPickId('wetting')} />
+        <DataGraphCard label="Green speeds" latest={spdLatest != null ? fmtStimp(spdLatest) : '—'} sub="stimp, season" values={spdSeries} color={FOREST} onClick={() => onPickId('speed')} />
+        <DataGraphCard label="Clipping yields" latest={clpLatest != null ? `${Math.round(clpLatest)}` : '—'} sub="mL per 1,000 sqft" values={clpSeries} color={FERN} onClick={() => onPickId('clippings')} />
+      </div>
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))' }}>
+        <button onClick={() => onPickId('gdd')} className="text-left bg-white rounded-2xl border p-4 shadow-sm hover:shadow-md transition" style={{ borderColor: HAIR }}>
+          <div className="flex items-center gap-1.5 mb-1"><TrendingUp size={13} style={{ color: '#94A3A0' }} /><p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>GDD &amp; Growth</p></div>
+          <p className="font-display text-2xl font-bold" style={{ color: FOREST }}>{gdd != null ? gdd.toLocaleString() : '—'}</p>
+          <p className="font-body text-[11px]" style={{ color: INK_3 }}>GDD to date · base 50°F</p>
+        </button>
+        <button onClick={() => onPickId('soil')} className="text-left bg-white rounded-2xl border p-4 shadow-sm hover:shadow-md transition" style={{ borderColor: HAIR }}>
+          <div className="flex items-center gap-1.5 mb-1"><Sprout size={13} style={{ color: '#94A3A0' }} /><p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>Soil Tests</p></div>
+          <p className="font-display text-2xl font-bold" style={{ color: FOREST }}>{soilLatest ? landMD(soilLatest) : '—'}</p>
+          <p className="font-body text-[11px]" style={{ color: INK_3 }}>{soilLatest ? `latest test${soilLab ? ' · ' + soilLab : ''}` : 'no tests yet'}</p>
+        </button>
+      </div>
+    </LandingShell>
+  )
+}
+
+function DataGraphCard({ label, latest, sub, values = [], color, onClick }) {
+  return (
+    <button onClick={onClick} className="text-left bg-white rounded-2xl border p-4 shadow-sm hover:shadow-md transition flex flex-col gap-2" style={{ borderColor: HAIR }}>
+      <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>{label}</p>
+      <div className="flex items-end justify-between gap-2">
+        <div>
+          <p className="font-display text-3xl font-bold leading-none" style={{ color: FOREST }}>{latest}</p>
+          <p className="font-body text-[11px] mt-1" style={{ color: INK_3 }}>{sub}</p>
+        </div>
+        <LandMiniSpark values={values} color={color} />
+      </div>
+      <span className="font-body text-[11px] font-bold inline-flex items-center gap-1" style={{ color: FOREST }}>Open <ChevronRight size={12} /></span>
+    </button>
+  )
+}
+
+// ── IRRIGATION ──────────────────────────────────────────────────────────────
+function IrrigationLanding({ clubName, onPickId, course = '', courses = [] }) {
+  const [d, setD] = useState(null)
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      const today = localDateISO()
+      const out = { et: [], rainTom: null, greens: [], plan: null, heads: null, pipes: null, partsLow: null }
+      const settings = await db.fetchSettings().catch(() => ({}))
+      if (settings.location?.lat != null) {
+        try { const data = await fetchWeather(settings.location.lat, settings.location.lng); out.et = dailyFromHourly(data); const fc = dailyFromForecastBlock(data); out.rainTom = fc.find((x) => x.date === addDaysISO(today, 1)) || null } catch { /* ignore */ }
+      }
+      try {
+        const ctx = await cmCourseContext()
+        const co = (ctx.courses || []).find((c) => landTok(c.name) === landTok(course)) || ctx.courses?.[0]
+        if (co) {
+          const greens = await cmFetchGreens(co.id)
+          const [rounds, targets, plan] = await Promise.all([
+            cmFetchRounds(co.id, greens.map((g) => g.id)).catch(() => []),
+            cmFetchTargets(co.id).catch(() => []),
+            cmFetchWateringPlan(co.id, today).catch(() => null),
+          ])
+          const tgt = cmResolveTarget(targets, today)
+          const latestByGreen = {}
+          ;[...rounds].sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))).forEach((r) => { latestByGreen[r.areaId] = r })
+          out.greens = greens.map((g) => ({ name: g.name, hole: g.hole, avg: latestByGreen[g.id]?.avg != null ? Math.round(Number(latestByGreen[g.id].avg) * 10) / 10 : null }))
+          out.target = tgt
+          out.plan = plan
+        }
+      } catch { /* ignore */ }
+      try { const feats = await db.fetchIrrigation(); out.heads = feats.filter((f) => f.kind === 'head').length; out.pipes = feats.filter((f) => f.kind === 'pipe' || f.kind === 'lateral' || f.kind === 'mainline').length } catch { /* ignore */ }
+      try { const parts = await db.fetchParts(); out.partsLow = parts.filter((p) => p.lowStock > 0 && p.stock <= p.lowStock).length } catch { /* ignore */ }
+      if (live) setD(out)
+    })()
+    return () => { live = false }
+  }, [course])
+
+  if (!d) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: CREAM }}><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+
+  const today = localDateISO()
+  const etToday = d.et.find((x) => x.date === today)?.et
+  const etTom = d.et.find((x) => x.date === addDaysISO(today, 1))?.et
+  const rainTom = d.rainTom?.precip != null ? Number(d.rainTom.precip) : null
+  const skip = rainTom != null && rainTom >= 0.25
+  const tgt = d.target
+  const greensWithData = (d.greens || []).filter((g) => g.avg != null)
+  const bucket = (avg) => { if (!tgt) return 'none'; if (avg < tgt.vwcLo) return 'below'; if (avg > tgt.vwcHi) return 'above'; return 'in' }
+  const counts = { below: 0, in: 0, above: 0 }
+  greensWithData.forEach((g) => { const b = bucket(g.avg); if (counts[b] != null) counts[b]++ })
+  const chipColor = { below: { bg: '#E8EEF6', fg: '#3A6187' }, in: { bg: '#E8F3EC', fg: FERN }, above: { bg: '#FBEAE6', fg: '#B23A2E' }, none: { bg: '#F1F5F9', fg: '#64748B' } }
+  const planApproved = d.plan && (d.plan.approved || d.plan.approvedAt)
+
+  return (
+    <LandingShell clubName={clubName} title="Irrigation" intro={LANDING_INTRO.irrigation}>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2 space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <ETTile label="ET today" value={etToday != null ? `${(Math.round(etToday * 100) / 100).toFixed(2)}"` : '—'} />
+            <ETTile label="ET tomorrow" value={etTom != null ? `${(Math.round(etTom * 100) / 100).toFixed(2)}"` : '—'} />
+            <ETTile label="Rain tomorrow" value={rainTom != null ? `${rainTom.toFixed(2)}"` : '—'} note={skip ? 'consider skipping tonight' : ''} />
+          </div>
+          <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>Live moisture · greens{tgt ? ` · target ${tgt.aim}%` : ''}</p>
+              <div className="flex gap-1.5">
+                <button onClick={() => onPickId('greenstoday')} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>+ Add readings</button>
+                <button onClick={() => onPickId('greenstoday')} className="font-body text-[11px] font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>Greens Today <ChevronRight size={11} /></button>
+              </div>
+            </div>
+            {greensWithData.length === 0 ? (
+              <p className="font-body text-[12px] py-2" style={{ color: INK_3 }}>No readings yet. Add readings in Greens Today to see each green here.</p>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {[...greensWithData].sort((a, b) => (a.hole || 0) - (b.hole || 0)).map((g, i) => {
+                    const c = chipColor[bucket(g.avg)]
+                    return <span key={i} className="font-body text-[11px] font-bold px-2 py-1 rounded-lg" style={{ backgroundColor: c.bg, color: c.fg }} title={g.name}>{g.hole || g.name} · {g.avg}%</span>
+                  })}
+                </div>
+                <p className="font-body text-[11.5px]" style={{ color: INK_2 }}>{counts.below} below · {counts.in} in range · {counts.above} above</p>
+              </>
+            )}
+          </div>
+          <div className="rounded-2xl px-4 py-3 flex items-center justify-between gap-2" style={{ backgroundColor: planApproved ? '#E8F3EC' : '#FEF3DD' }}>
+            <span className="font-body text-[12.5px] font-semibold" style={{ color: planApproved ? FERN : '#92660D' }}>Tonight's plan: {planApproved ? 'approved' : 'not approved yet'}</span>
+            <button onClick={() => onPickId('greenstoday')} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full inline-flex items-center gap-1 bg-white" style={{ color: FOREST, border: `1px solid ${HAIR}` }}>Set tonight's water <ChevronRight size={11} /></button>
+          </div>
+        </div>
+        <div className="space-y-4">
+          <button onClick={() => onPickId('irrmap')} className="w-full text-left bg-white rounded-2xl border p-4 shadow-sm hover:shadow-md transition" style={{ borderColor: HAIR }}>
+            <div className="flex items-center gap-1.5 mb-1"><MapPin size={13} style={{ color: '#94A3A0' }} /><p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>Irrigation Map</p></div>
+            <p className="font-display text-2xl font-bold" style={{ color: FOREST }}>{d.heads != null ? d.heads.toLocaleString() : '—'} <span className="text-sm font-semibold" style={{ color: INK_3 }}>heads</span></p>
+            {d.pipes ? <p className="font-body text-[11px]" style={{ color: INK_3 }}>{d.pipes.toLocaleString()} pipe segments mapped</p> : <p className="font-body text-[11px]" style={{ color: INK_3 }}>open the map ›</p>}
+          </button>
+          <button onClick={() => onPickId('parts')} className="w-full text-left bg-white rounded-2xl border p-4 shadow-sm hover:shadow-md transition" style={{ borderColor: HAIR }}>
+            <div className="flex items-center gap-1.5 mb-1"><Package size={13} style={{ color: '#94A3A0' }} /><p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>Parts</p></div>
+            <p className="font-display text-2xl font-bold" style={{ color: d.partsLow ? '#B23A2E' : FOREST }}>{d.partsLow != null ? d.partsLow : '—'} <span className="text-sm font-semibold" style={{ color: INK_3 }}>low</span></p>
+            <p className="font-body text-[11px]" style={{ color: INK_3 }}>parts stockroom</p>
+          </button>
+        </div>
+      </div>
+    </LandingShell>
+  )
+}
+
+function ETTile({ label, value, note }) {
+  return (
+    <div className="bg-white rounded-2xl border shadow-sm p-3" style={{ borderColor: HAIR }}>
+      <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: INK_3 }}>{label}</p>
+      <p className="font-display text-xl font-bold" style={{ color: '#3A6187' }}>{value}</p>
+      {note && <p className="font-body text-[10.5px] font-semibold mt-0.5" style={{ color: '#92660D' }}>{note}</p>}
+    </div>
+  )
+}
+
+// ── MECHANICAL ──────────────────────────────────────────────────────────────
+const HOC_SURFACES = ['Greens', 'Tees', 'Approaches', 'Fairways', 'Rough']
+function MechanicalLanding({ clubName, onPickId, course = '' }) {
+  const [areas, setAreas] = useState(null)
+  useEffect(() => { let live = true; (async () => { try { const s = await db.fetchSettings(); if (live) setAreas(s.areas || {}) } catch { if (live) setAreas({}) } })(); return () => { live = false } }, [])
+  if (!areas) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: CREAM }}><Loader2 className="animate-spin text-slate-300" size={26} /></div>
+  const hocFor = (surface) => {
+    const key = Object.keys(areas).find((k) => (!course || landTok(k) === landTok(course)) && new RegExp(surface.replace(/s$/, ''), 'i').test(k) && areas[k]?.hoc)
+    return key ? String(areas[key].hoc).replace(/\s*in$/i, '') : null
+  }
+  return (
+    <LandingShell clubName={clubName} title="Mechanical" intro={LANDING_INTRO.mechanical}>
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))' }}>
+        {HOC_SURFACES.map((s) => {
+          const h = hocFor(s)
+          return (
+            <button key={s} onClick={() => onPickId('hoc')} className="text-left bg-white rounded-2xl border p-4 shadow-sm hover:shadow-md transition" style={{ borderColor: HAIR }}>
+              <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: INK_3 }}>{s}</p>
+              <p className="font-display text-2xl font-bold" style={{ color: h ? FOREST : INK_3 }}>{h || '—'}{h && <span className="text-sm font-semibold" style={{ color: INK_3 }}> in</span>}</p>
+              {!h && <p className="font-body text-[11px] mt-0.5" style={{ color: INK_3 }}>Set in Height of Cut</p>}
+            </button>
+          )
+        })}
+      </div>
+    </LandingShell>
+  )
+}
+
+// ── RESOURCES ─────────────────────────────────────────────────────────────
+function ResourcesLanding({ clubName, onPickId, pages = [] }) {
+  const [d, setD] = useState(null)
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      const [settings, sheets, products] = await Promise.all([db.fetchSettings(), db.fetchSheets().catch(() => []), db.fetchProducts().catch(() => [])])
+      let bt = []
+      if (settings.location?.lat != null) { try { bt = await fetchBreakdownTemps(settings.location.lat, settings.location.lng) } catch { /* ignore */ } }
+      if (live) setD({ settings, sheets, products, bt })
+    })()
+    return () => { live = false }
+  }, [])
+
+  const items = []
+  if (d) {
+    const soilNow = currentSoilTemp(d.bt)
+    const openWins = soilNow != null ? openWindows(soilNow, soilTrend(d.bt)) : []
+    if (openWins.length) items.push({ key: 'soil', label: 'Soil temp', text: `${openWins.map((w) => w.label).join(', ')} window${openWins.length !== 1 ? 's' : ''} open${soilNow != null ? ` · ${Math.round(soilNow)}°F at 2"` : ''}`, go: () => onPickId('timing') })
+    else if (soilNow != null) items.push({ key: 'soil', label: 'Soil temp', text: `${Math.round(soilNow)}°F at 2" — no application windows open`, go: () => onPickId('timing') })
+    // Rotation: same MOA group N times in a row on one area (N = 3), from approved sprays.
+    const N = 3
+    const groupOf = {}; (d.products || []).forEach((p) => { groupOf[p.name] = (p.moaGroup || '').trim() })
+    const byArea = {}
+    ;(d.sheets || []).filter((s) => sheetApplied(s) && s.area && s.date).sort((a, b) => a.date.localeCompare(b.date)).forEach((s) => {
+      const groups = [...new Set((s.products || []).map((p) => groupOf[p.product]).filter(Boolean))]
+      ;(byArea[s.area] ||= []).push(...groups.map((g) => ({ g, date: s.date })))
+    })
+    const rotFlags = []
+    Object.entries(byArea).forEach(([area, seq]) => {
+      let run = 1
+      for (let i = 1; i < seq.length; i++) { if (seq[i].g && seq[i].g === seq[i - 1].g) { run++; if (run >= N) { rotFlags.push({ area, g: seq[i].g }); break } } else run = 1 }
+    })
+    if (rotFlags.length) items.push({ key: 'rot', label: 'Rotation', text: rotFlags.map((r) => `${r.area}: MOA ${r.g} ${N}×+ in a row`).join(' · '), go: () => onPickId('chemguide') })
+    else items.push({ key: 'rot', label: 'Rotation', text: 'No mode-of-action runs flagged in recent sprays.', go: () => onPickId('chemguide') })
+    // Yearly max — needs a per-product label yearly-max field in the Chemical Library.
+    const withMax = (d.products || []).filter((p) => Number(p.labelYearlyMax) > 0)
+    if (withMax.length) {
+      const usage = productUsage(d.sheets, d.products, d.settings.areas || {})
+      const flags = withMax.map((p) => { const used = usage[p.name]?.total || 0; const pct = Math.round((used / Number(p.labelYearlyMax)) * 100); return { name: p.name, pct } }).filter((x) => x.pct >= 60).sort((a, b) => b.pct - a.pct)
+      if (flags.length) items.push({ key: 'max', label: 'Yearly max', text: flags.map((f) => `${f.name} at ${f.pct}% of label max`).join(' · '), go: () => onPickId('chemicals') })
+    }
+  }
+
+  return (
+    <LandingShell clubName={clubName} title="Resources" intro={LANDING_INTRO.resources}>
+      <div className="bg-white rounded-2xl border shadow-sm p-4 mb-4" style={{ borderColor: HAIR }}>
+        <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>From the reference guide this week</p>
+        {!d ? <p className="font-body text-[12px]" style={{ color: INK_3 }}>Loading…</p> : items.length === 0 ? <p className="font-body text-[13px]" style={{ color: INK_3 }}>Nothing to flag this week.</p> : (
+          <div className="space-y-1.5">
+            {items.map((it) => (
+              <button key={it.key} onClick={it.go} className="w-full text-left flex items-start gap-2 rounded-xl px-3 py-2" style={{ backgroundColor: '#F6F5F1' }}>
+                <span className="font-body text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0 mt-0.5" style={{ backgroundColor: '#EDEAE1', color: '#886717' }}>{it.label}</span>
+                <span className="font-body text-[12.5px] flex-1" style={{ color: INK }}>{it.text}</span>
+                <ChevronRight size={14} className="shrink-0 mt-0.5" style={{ color: INK_3 }} />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <LandingCardGrid pages={pages} onPickId={onPickId} />
+    </LandingShell>
   )
 }
 
