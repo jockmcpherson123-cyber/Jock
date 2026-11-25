@@ -1188,7 +1188,10 @@ function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
       let moist = []
       try {
         const ctx = await cmCourseContext()
-        const co = (ctx.courses || []).find((c) => landTok(c.name) === landTok(course)) || ctx.courses?.[0]
+        // Match the selected course to a course-map course by first word. Only
+        // fall back to the first course when no course is selected — never show
+        // one course's moisture under another (e.g. Blue data on the Gold tab).
+        const co = (ctx.courses || []).find((c) => landTok(c.name) === landTok(course)) || (course ? null : ctx.courses?.[0])
         if (co) { const greens = await cmFetchGreens(co.id); const rounds = await cmFetchRounds(co.id, greens.map((g) => g.id)); moist = rounds }
       } catch { /* ignore */ }
       if (live) setD({ settings, speeds, clippings, soilTests, season, moist })
@@ -1298,7 +1301,10 @@ function IrrigationLanding({ clubName, onPickId, course = '', courses = [] }) {
       }
       try {
         const ctx = await cmCourseContext()
-        const co = (ctx.courses || []).find((c) => landTok(c.name) === landTok(course)) || ctx.courses?.[0]
+        // Match the selected course to a course-map course by first word. Only
+        // fall back to the first course when no course is selected — never show
+        // one course's moisture under another (e.g. Blue data on the Gold tab).
+        const co = (ctx.courses || []).find((c) => landTok(c.name) === landTok(course)) || (course ? null : ctx.courses?.[0])
         if (co) {
           const greens = await cmFetchGreens(co.id)
           const [rounds, targets, plan] = await Promise.all([
