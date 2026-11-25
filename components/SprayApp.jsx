@@ -384,6 +384,20 @@ const SECTIONS_CREW = [
   ] },
 ]
 
+// Each page's own URL, so pages can be bookmarked and a refresh lands on the
+// same page. The crew's Field Data QR lives at /data (public), so the manager
+// Data section is rooted at /agronomy to avoid colliding with it.
+const NAV_PATHS = {
+  home: '/', jobboard: '/home/job-board', weekly: '/home/weekly-report', weather: '/home/weather', season: '/home/season-reports',
+  'spray-home': '/spray', program: '/spray/annual-program', sheets: '/spray/sheets', fert: '/spray/fert-sheets', invcount: '/spray/inventory', chemicals: '/spray/chemical-library',
+  'data-home': '/agronomy', wetting: '/agronomy/moisture', speed: '/agronomy/green-speeds', clippings: '/agronomy/clipping-yields', firmness: '/agronomy/firmness', scouting: '/agronomy/scouting', gdd: '/agronomy/gdd', soil: '/agronomy/soil-tests',
+  'irr-home': '/irrigation', greenstoday: '/irrigation/greens-today', irrmap: '/irrigation/map', parts: '/irrigation/parts',
+  'res-home': '/resources', reference: '/resources/reference', training: '/resources/training', playbook: '/resources/playbook', coursemap: '/resources/course-map', chemguide: '/resources/chemistry-guide', timing: '/resources/soil-temp-timing',
+  'mech-home': '/mechanical', hoc: '/mechanical/height-of-cut',
+  tournament: '/tournament', budget: '/finance', settings: '/settings',
+}
+const idByPath = (p) => Object.keys(NAV_PATHS).find((k) => NAV_PATHS[k] === p)
+
 // Flatten the sections (landing + its pages, plus the pinned-bottom items) into
 // one lookup list used for the initial screen and global-search jumps.
 function flattenNav(sections, bottom = []) {
@@ -406,7 +420,7 @@ function sectionKeyOf(sections, id) {
 }
 
 // ── ROOT ────────────────────────────────────────────────────────────────────
-export default function SprayApp({ user }) {
+export default function SprayApp({ user, initialPath = '/' }) {
   const manage = canManage(user.role)
   const budgetOnly = isFinanceOnly(user.role)
   const sections = budgetOnly
@@ -416,7 +430,8 @@ export default function SprayApp({ user }) {
       : SECTIONS_CREW
   const bottom = budgetOnly ? [] : manage ? NAV_MANAGER_BOTTOM : []
   const allItems = flattenNav(sections, bottom)
-  const initial = allItems[0]
+  // Open the page named by the URL (so a refresh/bookmark lands here), else Home.
+  const initial = allItems.find((it) => NAV_PATHS[it.id] === initialPath) || allItems[0]
 
   const [sel, setSel] = useState(initial)
   const [seq, setSeq] = useState(0)
@@ -441,7 +456,10 @@ export default function SprayApp({ user }) {
   // on every incidental re-render (which would clobber in-module navigation).
   const nav = React.useMemo(() => ({ route: sel.r, seq, focus }), [sel.r, seq, focus])
 
-  const pick = (item) => { setFocus(null); setSel(item); setSeq((s) => s + 1); setDrawer(false) }
+  // Reflect the chosen page in the URL so it can be bookmarked / survive a
+  // refresh. pushState only — no server round-trip, so in-module state is kept.
+  const syncUrl = (item) => { try { const p = NAV_PATHS[item?.id]; if (p && typeof window !== 'undefined' && window.location.pathname !== p) window.history.pushState({}, '', p) } catch { /* ignore */ } }
+  const pick = (item) => { setFocus(null); setSel(item); setSeq((s) => s + 1); setDrawer(false); syncUrl(item) }
   // Navigate to a sibling screen by its nav-item id — used by the landing-page
   // cards to open one of a section's pages.
   const pickId = (id) => { const it = allItems.find((x) => x.id === id); if (it) pick(it) }
@@ -450,8 +468,15 @@ export default function SprayApp({ user }) {
   const gotoFocus = (m, r, f = null) => {
     const it = allItems.find((x) => x.m === m && x.r === r)
     if (!it) return
-    setFocus(f); setSel(it); setSeq((s) => s + 1); setDrawer(false); setSearchOpen(false)
+    setFocus(f); setSel(it); setSeq((s) => s + 1); setDrawer(false); setSearchOpen(false); syncUrl(it)
   }
+  // Back/forward buttons: move to the page the URL now names.
+  useEffect(() => {
+    const onPop = () => { const it = allItems.find((x) => NAV_PATHS[x.id] === window.location.pathname); if (it) { setFocus(null); setSel(it); setSeq((s) => s + 1) } }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const activeSectionKey = sectionKeyOf(sections, sel.id)
   const showCourseBar = !!sel.follow && courses.length >= 2
   // Screens flagged noAll always show one course — never the mixed "All" view.
