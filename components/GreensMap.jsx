@@ -12,7 +12,7 @@
 //  No React hook is placed after an early return.
 // ============================================================================
 import 'leaflet/dist/leaflet.css'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Upload, Layers } from 'lucide-react'
 import { FOREST, FERN, GOLD, HAIR, INK, INK_2, INK_3, PAPER } from '@/lib/theme'
 import * as cmdb from '@/lib/coursemap/db'
@@ -30,6 +30,48 @@ const typeColor = (t) => (AREA_TYPES.find((x) => x[0] === t) || [])[2] || '#9AA6
 const typeLabel = (t) => { const f = AREA_TYPES.find((x) => x[0] === t); return f ? f[1] : (t || 'Area') }
 // A palette for recolouring any shape.
 const SWATCHES = ['#22C55E', '#4AD07D', '#5E8C4E', '#A3E635', '#14B8A6', '#B59A6B', '#E8D8A0', '#3B82C4', '#C9A84C', '#E0714E', '#9333EA', '#9AA6B2']
+
+// Point-in-polygon (ray cast). ring: [[lon,lat],…]; pt tested as (lon,lat).
+function ptInRing(x, y, ring) {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1]
+    const hit = ((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-12) + xi)
+    if (hit) inside = !inside
+  }
+  return inside
+}
+// True when every vertex of `inner` sits inside `outer` (full containment).
+function ringInside(inner, outer) {
+  if (!inner?.length || !outer?.length) return false
+  for (const [x, y] of inner) if (!ptInRing(x, y, outer)) return false
+  return true
+}
+// For a set of areas, work out which areas are fully contained in which, so a
+// containing shape can be drawn with a hole (and its net sqft exclude the hole).
+// Each area's parent is the SMALLEST shape that fully contains it.
+function computeNesting(areas) {
+  const gross = new Map()
+  for (const a of areas) gross.set(a.id, a.sqft ?? geodesicAreaSqft(a.ring))
+  const parentOf = new Map()
+  for (const b of areas) {
+    let best = null, bestArea = Infinity
+    for (const a of areas) {
+      if (a.id === b.id || !a.ring || !b.ring) continue
+      if (ringInside(b.ring, a.ring)) { const ga = gross.get(a.id) || 0; if (ga < bestArea) { bestArea = ga; best = a.id } }
+    }
+    if (best) parentOf.set(b.id, best)
+  }
+  const holesById = new Map() // parentId -> [childId,…]
+  for (const [childId, parentId] of parentOf) { if (!holesById.has(parentId)) holesById.set(parentId, []); holesById.get(parentId).push(childId) }
+  const netById = new Map()
+  for (const a of areas) {
+    const holes = holesById.get(a.id) || []
+    const sub = holes.reduce((s, id) => s + (gross.get(id) || 0), 0)
+    netById.set(a.id, Math.max(0, (gross.get(a.id) || 0) - sub))
+  }
+  return { holesById, netById, parentOf }
+}
 
 const PAGE = 'max-w-[1200px] mx-auto px-4 sm:px-6'
 const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -267,24 +309,30 @@ export default function GreensMap({ user, nav }) {
     return () => { live = false }
   }, [courseId])
   const reloadAreas = async () => { if (courseId) setAreas(await cmdb.fetchAreas(courseId)) }
+  // Which areas sit fully inside which (for hole-cutting + net square footage).
+  const nesting = useMemo(() => computeNesting(areas), [areas])
+  const areaById = useMemo(() => { const m = new Map(); for (const a of areas) m.set(a.id, a); return m }, [areas])
 
-  // Render existing area polygons.
+  // Render existing area polygons, cutting a hole for any area fully inside.
   useEffect(() => {
     const L = LRef.current, map = mapRef.current
     if (!L || !map || !mapReady || tab !== 'map') return
     if (areasLayerRef.current) { map.removeLayer(areasLayerRef.current); areasLayerRef.current = null }
     if (!showAreas) return
     const grp = L.layerGroup().addTo(map)
+    const toLL = (ring) => ring.map(([lon, lat]) => [lat, lon])
     for (const a of areas) {
       if (editing && a.id === selAreaId) continue // edit overlay draws this one
       const sel = a.id === selAreaId
       const col = colorOf(a)
-      const poly = L.polygon(a.ring.map(([lon, lat]) => [lat, lon]), { color: col, fillColor: col, weight: sel ? 3 : 1.5, opacity: 0.95, fillOpacity: sel ? 0.35 : 0.15 })
+      const holes = (nesting.holesById.get(a.id) || []).map((id) => areaById.get(id)?.ring).filter(Boolean)
+      const latlngs = [toLL(a.ring), ...holes.map(toLL)] // first ring outer, rest are holes
+      const poly = L.polygon(latlngs, { color: col, fillColor: col, weight: sel ? 3 : 1.5, opacity: 0.95, fillOpacity: sel ? 0.35 : 0.15 })
       poly.on('click', (e) => { L.DomEvent.stop(e); if (!drawing) { setSelAreaId(a.id); setEditing(false) } })
       poly.addTo(grp)
     }
     areasLayerRef.current = grp
-  }, [mapReady, tab, areas, selAreaId, showAreas, editing, drawing, areaColors, typeColors])
+  }, [mapReady, tab, areas, selAreaId, showAreas, editing, drawing, areaColors, typeColors, nesting, areaById])
 
   // Draw mode (tap): each tap drops one corner. Off while the pen is active.
   useEffect(() => {
@@ -678,11 +726,12 @@ export default function GreensMap({ user, nav }) {
           {selArea && (
             <AreaPanel
               area={selArea} editing={editing} liveSqft={liveSqft} manage={manage} busy={savingArea} color={colorOf(selArea)}
+              netSqft={nesting.netById.get(selArea.id)} holeNames={(nesting.holesById.get(selArea.id) || []).map((id) => areaById.get(id)).filter(Boolean).map((h) => h.name || typeLabel(h.type))}
               onEdit={startEdit} onSave={saveEdit} onCancelEdit={cancelEdit} onDelete={removeArea} onClose={() => { setSelAreaId(null); cancelEdit() }} onSaveDetails={saveAreaDetails} onSnapNeighbours={snapNeighbours} defColor={defColor}
             />
           )}
 
-          {showTotals && <CourseTotals areas={areas} />}
+          {showTotals && <CourseTotals areas={areas} netById={nesting.netById} />}
         </div>
       )}
 
@@ -864,13 +913,15 @@ function NewAreaForm({ value, onChange, sqft, busy, onSave, onCancel, defColor }
   )
 }
 
-function AreaPanel({ area, editing, liveSqft, manage, busy, color, onEdit, onSave, onCancelEdit, onDelete, onClose, onSaveDetails, onSnapNeighbours, defColor }) {
+function AreaPanel({ area, editing, liveSqft, manage, busy, color, netSqft, holeNames = [], onEdit, onSave, onCancelEdit, onDelete, onClose, onSaveDetails, onSnapNeighbours, defColor }) {
   const dc = defColor || typeColor
   const [hist, setHist] = useState([])
   const [details, setDetails] = useState(null) // {type,name,color} while renaming/recolouring
   useEffect(() => { setDetails(null) }, [area.id])
   useEffect(() => { let live = true; cmdb.fetchAreaHistory(area.id).then((h) => { if (live) setHist(h) }); return () => { live = false } }, [area.id])
-  const sqft = editing && liveSqft != null ? liveSqft : (area.sqft ?? geodesicAreaSqft(area.ring))
+  const gross = editing && liveSqft != null ? liveSqft : (area.sqft ?? geodesicAreaSqft(area.ring))
+  const hasHoles = !editing && holeNames.length > 0 && netSqft != null
+  const sqft = hasHoles ? netSqft : gross // show net (excludes areas inside) when not editing
   const acres = sqft / 43560
   const perim = perimeterFt(area.ring)
   const prev = hist[0]
@@ -903,10 +954,15 @@ function AreaPanel({ area, editing, liveSqft, manage, busy, color, onEdit, onSav
       )}
       <div className="flex items-end gap-4 mt-2">
         <div>
-          <p className="font-display text-2xl font-bold" style={{ color: INK }}>{formatNumber(Math.round(sqft))}<span className="font-body text-[13px] font-normal" style={{ color: INK_3 }}> sqft</span></p>
+          <p className="font-display text-2xl font-bold" style={{ color: INK }}>{formatNumber(Math.round(sqft))}<span className="font-body text-[13px] font-normal" style={{ color: INK_3 }}> sqft{hasHoles ? ' net' : ''}</span></p>
           <p className="font-body text-[11.5px]" style={{ color: INK_2 }}>{acres.toFixed(2)} acres · {formatNumber(Math.round(perim))} ft perimeter</p>
         </div>
       </div>
+      {hasHoles && (
+        <p className="font-body text-[11.5px] mt-1" style={{ color: INK_3 }}>
+          Cut out {holeNames.length} inner {holeNames.length > 1 ? 'areas' : 'area'} ({holeNames.join(', ')}) · {formatNumber(Math.round(gross))} sqft before cut-outs
+        </p>
+      )}
       {prev && prev.sqft != null && (
         <p className="font-body text-[11.5px] mt-1" style={{ color: INK_3 }}>
           Was {formatNumber(Math.round(prev.sqft))} sqft (traced {formatDate(prev.changedAt, 'header')}) · {sqft - prev.sqft >= 0 ? '+' : '−'}{formatNumber(Math.abs(Math.round(sqft - prev.sqft)))}
@@ -978,10 +1034,11 @@ function TypeDefaults({ typeColors, onPick, onClose }) {
   )
 }
 
-function CourseTotals({ areas }) {
+function CourseTotals({ areas, netById }) {
+  const netOf = (a) => (netById?.get(a.id) ?? (a.sqft ?? geodesicAreaSqft(a.ring)))
   const rows = AREA_TYPES.map(([k, label, color]) => {
     const list = areas.filter((a) => a.type === k)
-    const sqft = list.reduce((s, a) => s + (a.sqft ?? geodesicAreaSqft(a.ring)), 0)
+    const sqft = list.reduce((s, a) => s + netOf(a), 0)
     return { k, label, color, count: list.length, sqft, acres: sqft / 43560, avg: list.length ? sqft / list.length : 0 }
   }).filter((r) => r.count > 0)
   const total = rows.reduce((a, r) => ({ count: a.count + r.count, sqft: a.sqft + r.sqft }), { count: 0, sqft: 0 })
