@@ -449,19 +449,8 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
 
       {toast && <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 text-white px-4 py-2.5 rounded-full shadow-xl text-sm font-body" style={{ backgroundColor: '#1A1A16' }}>{toast}</div>}
 
-      {/* Course selector (never printed) */}
-      {hasCourses && (
-        <div className="no-print mb-3 flex flex-wrap gap-2">
-          {courseNames.map((c) => {
-            const on = course === c
-            return (
-              <button key={c} onClick={() => setCourse(c)} className="font-body text-xs font-bold px-3.5 py-1.5 rounded-full transition" style={on ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
-                {courseLabel(c)}
-              </button>
-            )
-          })}
-        </div>
-      )}
+      {/* Course is chosen from the global course bar at the top of the page, so
+          no second selector here. */}
 
       {/* Controls (never printed) */}
       <div className="no-print mb-4 flex flex-wrap items-end gap-2">

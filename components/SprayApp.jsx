@@ -309,7 +309,7 @@ const SECTIONS_MANAGER = [
     landing: { id: 'home', label: 'Home', m: 'land', r: 'home' },
     items: [
       { id: 'jobboard', label: 'Job Board', m: 'board', r: 'workboard' },
-      { id: 'weekly', label: 'Weekly Report', m: 'turf', r: 'report', follow: true },
+      { id: 'weekly', label: 'Weekly Report', m: 'turf', r: 'report', follow: true, noAll: true },
       { id: 'weather', label: 'Weather', m: 'spray', r: 'weather' },
       { id: 'season', label: 'Season Reports', m: 'spray', r: 'reports' },
     ] },
