@@ -158,7 +158,13 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     (async () => {
       try {
         const progs = await db.fetchPrograms()
-        const active = progs.find((p) => p.status === 'active') || progs[0]
+        // Pick the same program the rest of the app shows: an explicitly active
+        // one, else this calendar year's, else the newest — so a spray planned
+        // for next week on the Spray Program calendar also lands on this report.
+        const curYear = new Date().getFullYear()
+        const active = progs.find((p) => p.status === 'active')
+          || progs.find((p) => Number(p.year) === curYear)
+          || [...progs].sort((a, b) => Number(b.year || 0) - Number(a.year || 0))[0]
         if (active) { setProgram(active); setApps(await db.fetchApplications(active.id)) }
       } catch (e) { console.error(e) }
       try { setFertSheets(await db.fetchFertSheets()) } catch (e) { console.error(e) }

@@ -1183,6 +1183,13 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
   const soilNow = currentSoilTemp(wx.breakdownTemps)
   const openWins = soilNow != null ? openWindows(soilNow, soilTrend(wx.breakdownTemps)) : []
   const dowName = (iso) => LAND_DOW[new Date(iso + 'T00:00:00').getDay()]
+  // Open a planned (program) row as an editable spray sheet, same as the
+  // calendar — gather its program applications and hand them to the spray module.
+  const openPlanned = (r) => {
+    const items = (programApps || []).filter((a) => a.plannedDate === r.date && (a.area || '') === r.area && !a.linkedSheetId)
+    if (items.length && onGo) onGo('spray', 'list', { type: 'fromProgram', items })
+    else onPickId('program')
+  }
 
   return (
     <LandingShell clubName={clubName} title="This week's sprays"
@@ -1201,7 +1208,7 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
                   {rows.map((r) => {
                     const color = courseColorOf(courses, r.area); const pill = SHEET_PILL[r.status]
                     return (
-                      <button key={r.kind + r.id} onClick={() => r.kind === 'spray' ? (onGo && onGo('spray', 'list', { type: 'sheet', id: r.id })) : r.kind === 'fert' ? onPickId('fert') : onPickId('program')}
+                      <button key={r.kind + r.id} onClick={() => r.kind === 'spray' ? (onGo && onGo('spray', 'list', { type: 'sheet', id: r.id })) : r.kind === 'fert' ? onPickId('fert') : openPlanned(r)}
                         className="w-full text-left px-3 py-3 border-t first:border-t-0" style={{ borderColor: 'rgba(0,0,0,0.06)', borderLeft: `3px solid ${color}` }}>
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-body text-[13px] font-semibold" style={{ color: INK }}>{dowName(r.date)} <span className="font-normal" style={{ color: INK_3 }}>{landMD(r.date)}</span></span>
@@ -1223,7 +1230,7 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
                     {rows.map((r) => {
                       const color = courseColorOf(courses, r.area); const pill = SHEET_PILL[r.status]
                       return (
-                        <tr key={r.kind + r.id} onClick={() => r.kind === 'spray' ? (onGo && onGo('spray', 'list', { type: 'sheet', id: r.id })) : r.kind === 'fert' ? onPickId('fert') : onPickId('program')} className="cursor-pointer transition hover:bg-black/[0.02] border-t" style={{ borderColor: 'rgba(0,0,0,0.05)', borderLeft: `3px solid ${color}` }}>
+                        <tr key={r.kind + r.id} onClick={() => r.kind === 'spray' ? (onGo && onGo('spray', 'list', { type: 'sheet', id: r.id })) : r.kind === 'fert' ? onPickId('fert') : openPlanned(r)} className="cursor-pointer transition hover:bg-black/[0.02] border-t" style={{ borderColor: 'rgba(0,0,0,0.05)', borderLeft: `3px solid ${color}` }}>
                           <td className="px-3 py-2.5 font-body text-[12.5px] font-semibold" style={{ color: INK }}>{dowName(r.date)} <span className="font-normal" style={{ color: INK_3 }}>{landMD(r.date)}</span></td>
                           <td className="px-3 py-2.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: color }} /></td>
                           <td className="px-3 py-2.5 font-body text-[12.5px]" style={{ color: INK }}>{r.area}{r.kind === 'fert' ? ' · fert' : ''}</td>
@@ -1239,7 +1246,7 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
           </div>
           <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
             <p className="font-body text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: INK_3 }}>Spray calendar · both courses</p>
-            <SprayCalendar sheets={sheets} products={products} programApps={programApps} onOpenSheet={(s) => onGo && onGo('spray', 'list', { type: 'sheet', id: s.id })} onCreateFromProgram={() => onPickId('program')} />
+            <SprayCalendar sheets={sheets} products={products} programApps={programApps} onOpenSheet={(s) => onGo && onGo('spray', 'list', { type: 'sheet', id: s.id })} onCreateFromProgram={(items) => onGo && onGo('spray', 'list', { type: 'fromProgram', items })} />
           </div>
         </div>
         <div className="space-y-4">
@@ -1681,7 +1688,13 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
       const s = sheets.find((x) => x.id === f.id)
       if (s) { setActiveSheet(s); setRoute('view'); focusHandled.current = `${nav.seq}:${f.id}` }
     }
-  }, [nav, sheets]) // eslint-disable-line react-hooks/exhaustive-deps
+    // Opening a planned program spray from another page (e.g. the Spray Program
+    // calendar) hands us its planned applications; turn them into an editable
+    // sheet right here instead of just landing on the Annual Program.
+    if (f?.type === 'fromProgram' && Array.isArray(f.items) && f.items.length && !loading && focusHandled.current !== `${nav.seq}:fp`) {
+      createSheetFromProgram(f.items); focusHandled.current = `${nav.seq}:fp`
+    }
+  }, [nav, sheets, loading]) // eslint-disable-line react-hooks/exhaustive-deps
   const [deliveries, setDeliveries] = useState([])
   const [programApps, setProgramApps] = useState([]) // applications of the current program
   const [areas, setAreas] = useState({})
