@@ -1139,8 +1139,8 @@ export default function CourseMap({ user, manage }) {
         </div>
         {manage && (
           <div className="flex items-center gap-1.5">
-            <button onClick={() => { setMode('map'); setMsg(null) }} className="font-body text-xs font-bold px-3 py-1.5 rounded-full" style={mode === 'map' ? { backgroundColor: FOREST, color: '#fff' } : { color: FOREST, border: '1px solid #E2E8F0' }}>Map</button>
-            <button onClick={() => { setMode('calibrate'); setMsg(null) }} className="font-body text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={mode === 'calibrate' ? { backgroundColor: FOREST, color: '#fff' } : { color: FOREST, border: '1px solid #E2E8F0' }}><Crosshair size={13} /> Calibrate</button>
+            <button onClick={() => { setMode('map'); setMsg(null) }} className="font-body text-xs font-bold px-3.5 py-2.5 rounded-full" style={mode === 'map' ? { backgroundColor: FOREST, color: '#fff' } : { color: FOREST, border: '1px solid #E2E8F0' }}>Map</button>
+            <button onClick={() => { setMode('calibrate'); setMsg(null) }} className="font-body text-xs font-bold px-3.5 py-2.5 rounded-full flex items-center gap-1.5" style={mode === 'calibrate' ? { backgroundColor: FOREST, color: '#fff' } : { color: FOREST, border: '1px solid #E2E8F0' }}><Crosshair size={13} /> Calibrate</button>
           </div>
         )}
       </div>
@@ -1334,8 +1334,8 @@ export default function CourseMap({ user, manage }) {
         <div className="space-y-3">
           {/* Method: line up on the photo (inch-accurate, no GPS) vs walk with GPS */}
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => { setCalMode('photo'); setPending(null) }} className="font-body text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={calMode === 'photo' ? { backgroundColor: FOREST, color: '#fff' } : { color: FOREST, border: '1px solid #E2E8F0' }}><MapPin size={13} /> Line up on photo</button>
-            <button onClick={() => { setCalMode('gps'); setPending(null) }} className="font-body text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={calMode === 'gps' ? { backgroundColor: FOREST, color: '#fff' } : { color: FOREST, border: '1px solid #E2E8F0' }}><Crosshair size={13} /> Walk with GPS</button>
+            <button onClick={() => { setCalMode('photo'); setPending(null) }} className="font-body text-xs font-bold px-3.5 py-2.5 rounded-full flex items-center gap-1.5" style={calMode === 'photo' ? { backgroundColor: FOREST, color: '#fff' } : { color: FOREST, border: '1px solid #E2E8F0' }}><MapPin size={13} /> Line up on photo</button>
+            <button onClick={() => { setCalMode('gps'); setPending(null) }} className="font-body text-xs font-bold px-3.5 py-2.5 rounded-full flex items-center gap-1.5" style={calMode === 'gps' ? { backgroundColor: FOREST, color: '#fff' } : { color: FOREST, border: '1px solid #E2E8F0' }}><Crosshair size={13} /> Walk with GPS</button>
             <span className="font-body text-[11px] text-slate-400">{calMode === 'photo' ? 'Most accurate — line the drawing up on the aerial, no GPS needed.' : 'Stand on each head and capture GPS (±10–15 ft on an iPad).'}</span>
           </div>
 
@@ -1519,8 +1519,8 @@ export default function CourseMap({ user, manage }) {
                       <span dangerouslySetInnerHTML={{ __html: symbolSvg(symbolById(selected.symbol), 22, selected.arcStart || 0) }} />
                       <span className="font-body text-[12px]" style={{ color: FOREST }}>Facing <b>{Math.round(selected.arcStart || 0)}°</b></span>
                       <div className="ml-auto flex items-center gap-1">
-                        <button onClick={() => rotateSelected(-15)} className="w-8 h-8 rounded-full border border-slate-200 font-body font-bold" style={{ color: FOREST }}>↺</button>
-                        <button onClick={() => rotateSelected(15)} className="w-8 h-8 rounded-full border border-slate-200 font-body font-bold" style={{ color: FOREST }}>↻</button>
+                        <button onClick={() => rotateSelected(-15)} className="w-11 h-11 rounded-full border border-slate-200 font-body font-bold text-lg" style={{ color: FOREST }}>↺</button>
+                        <button onClick={() => rotateSelected(15)} className="w-11 h-11 rounded-full border border-slate-200 font-body font-bold text-lg" style={{ color: FOREST }}>↻</button>
                       </div>
                     </div>
                   )}

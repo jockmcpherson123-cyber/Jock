@@ -1330,7 +1330,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
             </div>
             <div>
               <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Oz / case</label>
-              <input type="number" step="any" value={orderEdit.ozPerCase} onChange={(e) => setOrderEdit({ ...orderEdit, ozPerCase: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="512" />
+              <input type="number" inputMode="decimal" step="any" value={orderEdit.ozPerCase} onChange={(e) => setOrderEdit({ ...orderEdit, ozPerCase: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" placeholder="512" />
             </div>
             <div className="col-span-2 flex gap-2">
               <button onClick={() => setOrderEdit(null)} className="flex-1 py-2 rounded-lg text-[12px] font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
@@ -1565,7 +1565,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                   </div>
                   <div>
                     <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Year</label>
-                    <input type="number" value={imp.year} onChange={(e) => setImp({ ...imp, year: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+                    <input type="number" inputMode="decimal" value={imp.year} onChange={(e) => setImp({ ...imp, year: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
                   </div>
                 </div>
               )}
@@ -1686,7 +1686,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                     <div className="flex items-end gap-2">
                       <div className="flex-1">
                         <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">GDD target</label>
-                        <input type="number" step="any" value={trig.target} onChange={(e) => setTrig({ target: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+                        <input type="number" inputMode="decimal" step="any" value={trig.target} onChange={(e) => setTrig({ target: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
                       </div>
                       <div className="flex-1">
                         <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Base °F</label>
@@ -1697,14 +1697,14 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                   {trig.mode === 'interval' && (
                     <div>
                       <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Days between sprays</label>
-                      <input type="number" value={trig.days} onChange={(e) => setTrig({ days: e.target.value })} className="w-28 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+                      <input type="number" inputMode="decimal" value={trig.days} onChange={(e) => setTrig({ days: e.target.value })} className="w-28 border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
                     </div>
                   )}
                   {trig.mode === 'soil' && (
                     <div className="flex items-end gap-2">
                       <div className="flex-1">
                         <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Soil temp °F</label>
-                        <input type="number" step="any" value={trig.temp} onChange={(e) => setTrig({ temp: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+                        <input type="number" inputMode="decimal" step="any" value={trig.temp} onChange={(e) => setTrig({ temp: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
                       </div>
                       <div className="flex-1">
                         <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Direction</label>
@@ -1747,11 +1747,11 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Rate oz/M</label>
-                        <input type="number" step="any" value={r.rateOzM} onChange={(e) => updateRow(r.key, { rateOzM: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+                        <input type="number" inputMode="decimal" step="any" value={r.rateOzM} onChange={(e) => updateRow(r.key, { rateOzM: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
                       </div>
                       <div>
                         <label className="font-body text-[10px] font-bold text-slate-400 uppercase block mb-1">Rate oz/A</label>
-                        <input type="number" step="any" value={r.rateOzA} onChange={(e) => updateRow(r.key, { rateOzA: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
+                        <input type="number" inputMode="decimal" step="any" value={r.rateOzA} onChange={(e) => updateRow(r.key, { rateOzA: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm font-body bg-white" />
                       </div>
                     </div>
                     {/* Spraying for — multi-select. Set here on the plan and it rolls
@@ -1796,7 +1796,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
             <div className="grid grid-cols-3 gap-3 mb-3">
               <div>
                 <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Year</label>
-                <input type="number" value={editProgForm.year} onChange={(e) => setEditProgForm({ ...editProgForm, year: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+                <input type="number" inputMode="decimal" value={editProgForm.year} onChange={(e) => setEditProgForm({ ...editProgForm, year: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
               </div>
               <div className="col-span-2">
                 <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Name</label>
@@ -1826,7 +1826,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                 </div>
                 <div>
                   <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Draft for</label>
-                  <input type="number" value={buildPrev.targetYear} onChange={(e) => rebuild({ targetYear: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+                  <input type="number" inputMode="decimal" value={buildPrev.targetYear} onChange={(e) => rebuild({ targetYear: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
                 </div>
               </div>
             </div>
@@ -1898,7 +1898,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
           <div className="grid grid-cols-3 gap-3 mb-3">
             <div>
               <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Year</label>
-              <input type="number" value={newForm.year} onChange={(e) => setNewForm({ ...newForm, year: e.target.value, name: `${e.target.value} Pesticide Plan` })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+              <input type="number" inputMode="decimal" value={newForm.year} onChange={(e) => setNewForm({ ...newForm, year: e.target.value, name: `${e.target.value} Pesticide Plan` })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
             </div>
             <div className="col-span-2">
               <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Name</label>
@@ -1922,7 +1922,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
           <div className="grid grid-cols-3 gap-3 mb-3">
             <div>
               <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">New year</label>
-              <input type="number" value={copyForm.year} onChange={(e) => setCopyForm({ ...copyForm, year: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+              <input type="number" inputMode="decimal" value={copyForm.year} onChange={(e) => setCopyForm({ ...copyForm, year: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
             </div>
             <div className="col-span-2">
               <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Name</label>
@@ -2080,7 +2080,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                 return (
                   <div className={`flex items-center gap-2 ${pad} border-t border-black/5`} style={{ borderLeft: `4px solid ${tc}`, backgroundColor: '#FFF9E8' }}>
                     <div className="w-44 shrink-0"><SearchSelect value={inlineEdit.product} options={products.map((p) => p.name)} onPick={swapInline} placeholder="Search product…" /></div>
-                    <input type="number" step="any" value={inlineEdit.rateOzM} onChange={(e) => setInlineEdit((p) => ({ ...p, rateOzM: e.target.value }))} className="w-16 text-right border rounded-lg px-2 py-1.5 text-[12px] font-bold font-body shrink-0" style={{ borderColor: GOLD, backgroundColor: '#fff' }} />
+                    <input type="number" inputMode="decimal" step="any" value={inlineEdit.rateOzM} onChange={(e) => setInlineEdit((p) => ({ ...p, rateOzM: e.target.value }))} className="w-16 text-right border rounded-lg px-2 py-1.5 text-[12px] font-bold font-body shrink-0" style={{ borderColor: GOLD, backgroundColor: '#fff' }} />
                     <span className="font-body text-[9px] text-slate-400 shrink-0">oz/M</span>
                     <input value={inlineEdit.notes || ''} autoFocus={inlineEdit.focusNotes} onChange={(e) => setInlineEdit((p) => ({ ...p, notes: e.target.value }))} placeholder="Notes — e.g. 2nd app of Dimension, water in 5 min" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] font-body bg-white" />
                     <button onClick={saveInline} disabled={busy} className="font-body text-[11px] font-bold text-white px-3 py-1.5 rounded-lg shrink-0 disabled:opacity-50" style={{ backgroundColor: FOREST }}>{busy ? '…' : 'Save'}</button>

@@ -628,8 +628,8 @@ function ManualReadings({ ctx, courseId, greens, onDone }) {
       <div className="space-y-1.5 max-h-[46vh] overflow-y-auto pr-1">
         {spots.map((s, i) => (
           <div key={i} className="flex items-center gap-2">
-            <span className="font-body text-[12px] font-semibold w-16 shrink-0" style={{ color: INK }}>{s.label}</span>
-            <input inputMode="decimal" value={s.v} onChange={(e) => setSpot(i, { v: e.target.value })} placeholder="%VWC" className="w-20 rounded-lg px-2 py-1.5 text-[13px] text-right bg-white" style={{ border: `1px solid ${HAIR}`, color: INK }} />
+            <span className="font-body text-[13px] font-semibold w-16 shrink-0" style={{ color: INK }}>{s.label}</span>
+            <input inputMode="decimal" value={s.v} onChange={(e) => setSpot(i, { v: e.target.value })} placeholder="%VWC" className="w-20 rounded-lg px-2 py-2 text-base text-right bg-white" style={{ border: `1px solid ${HAIR}`, color: INK }} />
             {showExtra && <input inputMode="decimal" value={s.temp} onChange={(e) => setSpot(i, { temp: e.target.value })} placeholder="°F" className="w-16 rounded-lg px-2 py-1.5 text-[13px] text-right bg-white" style={{ border: `1px solid ${HAIR}`, color: INK }} />}
             {showExtra && <input inputMode="decimal" value={s.sal} onChange={(e) => setSpot(i, { sal: e.target.value })} placeholder="dS/m" className="w-16 rounded-lg px-2 py-1.5 text-[13px] text-right bg-white" style={{ border: `1px solid ${HAIR}`, color: INK }} />}
             <button onClick={() => captureGps(i)} className="font-body text-[10.5px] font-bold px-2 py-1.5 rounded-full shrink-0" style={s.lat != null ? { backgroundColor: FERN, color: 'white' } : { border: `1px solid ${HAIR}`, color: INK_2 }}>{s.lat != null ? 'GPS ✓' : 'GPS'}</button>
@@ -637,10 +637,10 @@ function ManualReadings({ ctx, courseId, greens, onDone }) {
         ))}
       </div>
 
-      <div className="flex items-center gap-4 mt-4 pt-3 flex-wrap" style={{ borderTop: `1px solid ${HAIR}` }}>
+      <div className="flex items-center gap-4 mt-4 pt-3 flex-wrap sticky bottom-0 bg-white" style={{ borderTop: `1px solid ${HAIR}` }}>
         <div><span className="font-body text-[10px] font-bold uppercase tracking-widest block" style={{ color: INK_3 }}>Avg</span><span className="font-display text-lg font-semibold" style={{ color: INK }}>{avg != null ? `${avg}%` : '—'}</span></div>
         <div><span className="font-body text-[10px] font-bold uppercase tracking-widest block" style={{ color: INK_3 }}>Entered</span><span className="font-display text-lg font-semibold" style={{ color: INK }}>{entered.length}/{spots.length}</span></div>
-        <button onClick={save} disabled={!entered.length || busy} className="ml-auto font-body text-sm font-bold px-5 py-2.5 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save readings'}</button>
+        <button onClick={save} disabled={!entered.length || busy} className="ml-auto font-body text-sm font-bold px-5 py-3 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save readings'}</button>
       </div>
     </div>
   )
@@ -751,9 +751,11 @@ export function AddReadings({ ctx, courseId, greens, onClose, onDone }) {
   )
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-start justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(10,20,14,0.5)' }} onClick={onClose}>
-      <div className="relative w-full max-w-2xl my-8 rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3"><h3 className="font-display text-lg font-bold" style={{ color: FOREST }}>Add readings</h3><button onClick={onClose} className="font-body text-xl px-2" style={{ color: INK_3 }}>×</button></div>
+    <div className="fixed inset-0 z-[80] flex items-start justify-center p-0 sm:p-4 sm:overflow-y-auto" style={{ backgroundColor: 'rgba(10,20,14,0.5)' }} onClick={onClose}>
+      {/* Full-screen on phones (no wasted margins, big keypad), a centred card on
+          wider screens. */}
+      <div className="relative w-full max-w-2xl min-h-full sm:min-h-0 sm:my-8 rounded-none sm:rounded-2xl bg-white p-4 sm:p-5 shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3"><h3 className="font-display text-lg font-bold" style={{ color: FOREST }}>Add readings</h3><button onClick={onClose} className="font-body px-2 -mr-1 w-10 h-10 flex items-center justify-center" style={{ color: INK_3, fontSize: 24 }} aria-label="Close">×</button></div>
         <div className="flex gap-1.5 mb-4">
           {[['manual', 'Manual'], ['file', 'DEACON file']].map(([k, lab]) => (
             <button key={k} onClick={() => setMode(k)} className="font-body text-[12px] font-bold px-3.5 py-1.5 rounded-full transition"

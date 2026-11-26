@@ -367,7 +367,7 @@ export default function GpsCoverage() {
           {widthOpen && (
             <div className="absolute left-0 right-0 bottom-full mb-2 z-[60] rounded-xl p-2 flex items-center gap-2 justify-center" style={{ backgroundColor: PAPER, border: `1px solid ${HAIR}`, boxShadow: '0 8px 24px -8px rgba(21,29,20,.4)' }}>
               <button onClick={() => { setWidthFt((w) => Math.max(1, w - 1)); recompute(); render() }} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: FOREST }}><Minus size={15} /></button>
-              <input type="number" min="1" value={widthFt} onChange={(e) => { setWidthFt(Math.max(1, Number(e.target.value) || 1)); recompute(); render() }} className="w-14 text-center font-display text-lg font-bold bg-transparent outline-none" style={{ color: FOREST }} />
+              <input type="number" inputMode="decimal" min="1" value={widthFt} onChange={(e) => { setWidthFt(Math.max(1, Number(e.target.value) || 1)); recompute(); render() }} className="w-14 text-center font-display text-lg font-bold bg-transparent outline-none" style={{ color: FOREST }} />
               <button onClick={() => { setWidthFt((w) => w + 1); recompute(); render() }} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: FOREST }}><Plus size={15} /></button>
             </div>
           )}

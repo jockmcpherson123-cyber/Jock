@@ -271,16 +271,21 @@ function Tabs({ tab, onTab, requests, nextYear }) {
     ['activity', 'Activity'],
   ]
   return (
-    <div className="flex gap-1.5 overflow-x-auto pb-1 mb-4 border-b" style={{ borderColor: HAIR }}>
-      {items.map(([key, label]) => (
-        <button key={key} onClick={() => onTab(key)}
-          className="font-body text-[13px] font-bold px-3.5 py-2 whitespace-nowrap transition"
-          style={tab === key
-            ? { color: FOREST, borderBottom: `2.5px solid ${GOLD}` }
-            : { color: INK_3, borderBottom: '2.5px solid transparent' }}>
-          {label}
-        </button>
-      ))}
+    // Tabs scroll sideways on narrow screens; a right-edge fade hints there's
+    // more to swipe to. Layout is otherwise unchanged.
+    <div className="relative mb-4">
+      <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1 border-b" style={{ borderColor: HAIR }}>
+        {items.map(([key, label]) => (
+          <button key={key} onClick={() => onTab(key)}
+            className="font-body text-[13px] font-bold px-3.5 py-2 whitespace-nowrap transition"
+            style={tab === key
+              ? { color: FOREST, borderBottom: `2.5px solid ${GOLD}` }
+              : { color: INK_3, borderBottom: '2.5px solid transparent' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="pointer-events-none absolute top-0 right-0 bottom-1 w-8 sm:hidden" style={{ background: `linear-gradient(to right, transparent, ${PAGE})` }} />
     </div>
   )
 }
@@ -652,7 +657,7 @@ function LineDetail({ item, data, year, through, isAdmin, myId, profiles, lines,
         <Panel>
           <div className="flex items-center gap-2">
             <span className="font-body text-[12px]" style={{ color: INK_2 }}>Forecast year-end $</span>
-            <input type="number" value={fcVal} onChange={(e) => setFcVal(e.target.value)} placeholder={(c.forecast / 100).toFixed(0)} className="w-32 border rounded-lg px-2 py-1.5 font-body text-[13px] text-right" style={{ borderColor: HAIR }} />
+            <input type="number" inputMode="decimal" value={fcVal} onChange={(e) => setFcVal(e.target.value)} placeholder={(c.forecast / 100).toFixed(0)} className="w-32 border rounded-lg px-2 py-1.5 font-body text-[13px] text-right" style={{ borderColor: HAIR }} />
             <input value={fcNote} onChange={(e) => setFcNote(e.target.value)} placeholder="Why (optional)" className="flex-1 border rounded-lg px-2 py-1.5 font-body text-[13px]" style={{ borderColor: HAIR }} />
           </div>
           <PanelActions onCancel={() => setPanel(null)} onSave={saveForecast} busy={busy} saveLabel="Save forecast" disabled={fcVal === ''} />
@@ -662,7 +667,7 @@ function LineDetail({ item, data, year, through, isAdmin, myId, profiles, lines,
         <Panel>
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-body text-[12px]" style={{ color: INK_2 }}>Move $</span>
-            <input type="number" value={xfAmt} onChange={(e) => setXfAmt(e.target.value)} placeholder="0" className="w-28 border rounded-lg px-2 py-1.5 font-body text-[13px] text-right" style={{ borderColor: HAIR }} />
+            <input type="number" inputMode="decimal" value={xfAmt} onChange={(e) => setXfAmt(e.target.value)} placeholder="0" className="w-28 border rounded-lg px-2 py-1.5 font-body text-[13px] text-right" style={{ borderColor: HAIR }} />
             <span className="font-body text-[12px]" style={{ color: INK_2 }}>from <b>{line.description}</b> to</span>
             <select value={xfTo} onChange={(e) => setXfTo(e.target.value)} className="border rounded-lg px-2 py-1.5 font-body text-[13px] bg-white" style={{ borderColor: HAIR, minWidth: 200 }}>
               <option value="">Choose a line…</option>

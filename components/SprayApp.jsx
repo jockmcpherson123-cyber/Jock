@@ -916,11 +916,14 @@ function ForecastWeek({ days = [], total = 0 }) {
       {days.length === 0 ? (
         <p className="font-body text-[12px] py-3 text-center" style={{ color: INK_3 }}>Set your location in Settings to see the forecast.</p>
       ) : (
-        <div className="flex justify-between gap-1">
+        // On a phone 7 columns won't fit, so the row scrolls sideways with fixed
+        // day widths rather than squeezing off-screen; on wider screens they
+        // spread to fill. (sm: lifts the min width so the flex-1 can expand.)
+        <div className="flex gap-1 overflow-x-auto no-scrollbar -mx-1 px-1">
           {days.map((d, i) => {
             const info = weatherCodeInfo(d.code); const wi = WX_ICON[info.key] || WX_ICON.cloud; const WI = wi.Icon
             return (
-              <div key={d.date} className="flex-1 text-center min-w-0">
+              <div key={d.date} className="flex-1 text-center shrink-0 min-w-[46px]">
                 <p className="font-body text-[11px] font-bold uppercase" style={{ color: i === 0 ? FOREST : INK_3 }}>{i === 0 ? 'Today' : new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}</p>
                 <WI size={22} className="mx-auto my-1" style={{ color: wi.color }} />
                 <p className="font-display text-base font-bold" style={{ color: FOREST }}>{Math.round(d.tMax)}°</p>
@@ -952,15 +955,17 @@ function HomeCalendar({ events = [], timeoff = [], today, onAdd, onDeleteEvent }
 
   return (
     <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
         <div className="flex items-center gap-2">
-          <button onClick={() => setOffset((o) => o - 1)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: INK_2 }} aria-label="Previous month"><ChevronRight size={15} style={{ transform: 'rotate(180deg)' }} /></button>
+          <button onClick={() => setOffset((o) => o - 1)} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: INK_2 }} aria-label="Previous month"><ChevronRight size={15} style={{ transform: 'rotate(180deg)' }} /></button>
           <p className="font-display text-[15px] font-semibold" style={{ color: FOREST }}>{MONTHS[m]} {y}</p>
-          <button onClick={() => setOffset((o) => o + 1)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: INK_2 }} aria-label="Next month"><ChevronRight size={15} /></button>
+          <button onClick={() => setOffset((o) => o + 1)} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${HAIR}`, color: INK_2 }} aria-label="Next month"><ChevronRight size={15} /></button>
         </div>
-        <button onClick={onAdd} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 text-white" style={{ backgroundColor: FOREST }}><Plus size={13} /> Add event</button>
+        <button onClick={onAdd} className="font-body text-[12px] font-bold px-3 py-2 rounded-full inline-flex items-center gap-1.5 text-white shrink-0" style={{ backgroundColor: FOREST }}><Plus size={13} /> Add event</button>
       </div>
-      <div className="grid grid-cols-7 gap-1">
+      {/* Month grid on tablet/desktop; on a phone the squeezed 7-column grid is
+          unreadable, so below sm we show a scrollable agenda list instead. */}
+      <div className="hidden sm:grid grid-cols-7 gap-1">
         {LAND_DOW.map((d) => <div key={d} className="text-center font-body text-[10px] font-bold uppercase pb-1" style={{ color: INK_3 }}>{d}</div>)}
         {cells.map((iso, i) => {
           if (!iso) return <div key={`p${i}`} />
@@ -983,7 +988,40 @@ function HomeCalendar({ events = [], timeoff = [], today, onAdd, onDeleteEvent }
           )
         })}
       </div>
-      <p className="font-body text-[10px] mt-2 flex items-center gap-3" style={{ color: INK_3 }}>
+      <div className="sm:hidden">
+        {(() => {
+          const rows = cells.filter(Boolean).map((iso) => ({ iso, evs: evOn(iso), offs: offOn(iso) })).filter((r) => r.evs.length || r.offs.length)
+          if (!rows.length) return <p className="font-body text-[13px] py-6 text-center" style={{ color: INK_3 }}>No events or time off this month.</p>
+          return (
+            <ul className="space-y-1.5">
+              {rows.map(({ iso, evs, offs }) => {
+                const isToday = iso === today
+                const dd = new Date(iso + 'T00:00:00')
+                return (
+                  <li key={iso} className="flex gap-3 rounded-xl p-2.5" style={{ border: `1px solid ${isToday ? GOLD : HAIR}`, backgroundColor: isToday ? '#FBF6E6' : '#FCFCFB' }}>
+                    <div className="shrink-0 text-center w-11">
+                      <p className="font-body text-[10px] font-bold uppercase" style={{ color: INK_3 }}>{dd.toLocaleDateString('en-US', { weekday: 'short' })}</p>
+                      <p className="font-display text-lg font-bold leading-tight" style={{ color: isToday ? '#886717' : FOREST }}>{Number(iso.slice(8))}</p>
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      {evs.map((e) => (
+                        <button key={e.id} onClick={() => onDeleteEvent && window.confirm(`Delete event "${e.title}"?`) && onDeleteEvent(e.id)}
+                          className="block w-full text-left font-body text-[13px] font-semibold px-2 py-1.5 rounded-lg" style={{ backgroundColor: '#E6F2EA', color: '#2F5A3D' }}>
+                          {!e.allDay && e.time ? `${e.time} · ` : ''}{e.title}
+                        </button>
+                      ))}
+                      {offs.map((o, j) => (
+                        <div key={`o${j}`} className="font-body text-[13px] font-semibold px-2 py-1.5 rounded-lg" style={{ backgroundColor: '#FBF1D6', color: '#886717' }}>{o.person} — time off</div>
+                      ))}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )
+        })()}
+      </div>
+      <p className="font-body text-[10px] mt-2 flex flex-wrap items-center gap-3" style={{ color: INK_3 }}>
         <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#8CC2A0' }} /> Event</span>
         <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#E3C977' }} /> Time off (Job Board)</span>
       </p>
@@ -1167,27 +1205,47 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
             {rows.length === 0 ? (
               <p className="font-body text-[13px] p-6 text-center" style={{ color: INK_3 }}>No sprays or fert sheets dated this week yet.</p>
             ) : (
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr style={{ backgroundColor: '#F6F5F1' }}>
-                    {['Day', 'Course', 'Area', 'Products', 'Status'].map((h) => <th key={h} className="text-left font-body text-[10px] font-bold uppercase tracking-wide px-3 py-2" style={{ color: INK_3 }}>{h}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
+              <>
+                {/* Phones: one tappable card per spray (the 5-column table forced a
+                    sideways scroll); tablet/desktop keep the table. */}
+                <div className="sm:hidden">
                   {rows.map((r) => {
                     const color = courseColorOf(courses, r.area); const pill = SHEET_PILL[r.status]
                     return (
-                      <tr key={r.kind + r.id} onClick={() => r.kind === 'spray' ? (onGo && onGo('spray', 'list', { type: 'sheet', id: r.id })) : r.kind === 'fert' ? onPickId('fert') : onPickId('program')} className="cursor-pointer transition hover:bg-black/[0.02] border-t" style={{ borderColor: 'rgba(0,0,0,0.05)', borderLeft: `3px solid ${color}` }}>
-                        <td className="px-3 py-2.5 font-body text-[12.5px] font-semibold" style={{ color: INK }}>{dowName(r.date)} <span className="font-normal" style={{ color: INK_3 }}>{landMD(r.date)}</span></td>
-                        <td className="px-3 py-2.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: color }} /></td>
-                        <td className="px-3 py-2.5 font-body text-[12.5px]" style={{ color: INK }}>{r.area}{r.kind === 'fert' ? ' · fert' : ''}</td>
-                        <td className="px-3 py-2.5 font-body text-[12px]" style={{ color: INK_2 }}>{r.products.join(', ') || '—'}</td>
-                        <td className="px-3 py-2.5"><span className="font-body text-[10.5px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: pill.bg, color: pill.fg }}>{r.status}</span></td>
-                      </tr>
+                      <button key={r.kind + r.id} onClick={() => r.kind === 'spray' ? (onGo && onGo('spray', 'list', { type: 'sheet', id: r.id })) : r.kind === 'fert' ? onPickId('fert') : onPickId('program')}
+                        className="w-full text-left px-3 py-3 border-t first:border-t-0" style={{ borderColor: 'rgba(0,0,0,0.06)', borderLeft: `3px solid ${color}` }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-body text-[13px] font-semibold" style={{ color: INK }}>{dowName(r.date)} <span className="font-normal" style={{ color: INK_3 }}>{landMD(r.date)}</span></span>
+                          <span className="font-body text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: pill.bg, color: pill.fg }}>{r.status}</span>
+                        </div>
+                        <p className="font-body text-[13px] mt-0.5" style={{ color: INK }}>{r.area}{r.kind === 'fert' ? ' · fert' : ''}</p>
+                        <p className="font-body text-[12px] mt-0.5" style={{ color: INK_2 }}>{r.products.join(', ') || '—'}</p>
+                      </button>
                     )
                   })}
-                </tbody>
-              </table>
+                </div>
+                <table className="w-full border-collapse hidden sm:table">
+                  <thead>
+                    <tr style={{ backgroundColor: '#F6F5F1' }}>
+                      {['Day', 'Course', 'Area', 'Products', 'Status'].map((h) => <th key={h} className="text-left font-body text-[10px] font-bold uppercase tracking-wide px-3 py-2" style={{ color: INK_3 }}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => {
+                      const color = courseColorOf(courses, r.area); const pill = SHEET_PILL[r.status]
+                      return (
+                        <tr key={r.kind + r.id} onClick={() => r.kind === 'spray' ? (onGo && onGo('spray', 'list', { type: 'sheet', id: r.id })) : r.kind === 'fert' ? onPickId('fert') : onPickId('program')} className="cursor-pointer transition hover:bg-black/[0.02] border-t" style={{ borderColor: 'rgba(0,0,0,0.05)', borderLeft: `3px solid ${color}` }}>
+                          <td className="px-3 py-2.5 font-body text-[12.5px] font-semibold" style={{ color: INK }}>{dowName(r.date)} <span className="font-normal" style={{ color: INK_3 }}>{landMD(r.date)}</span></td>
+                          <td className="px-3 py-2.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: color }} /></td>
+                          <td className="px-3 py-2.5 font-body text-[12.5px]" style={{ color: INK }}>{r.area}{r.kind === 'fert' ? ' · fert' : ''}</td>
+                          <td className="px-3 py-2.5 font-body text-[12px]" style={{ color: INK_2 }}>{r.products.join(', ') || '—'}</td>
+                          <td className="px-3 py-2.5"><span className="font-body text-[10.5px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: pill.bg, color: pill.fg }}>{r.status}</span></td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </>
             )}
           </div>
           <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
@@ -3127,7 +3185,7 @@ function SprayWindowStrip({ current, today, hasLocation, attention = [], onGoWea
       {/* Clubhouse identity band — dark forest with a gold hairline beneath */}
       <button onClick={onGoWeather} className="w-full text-left" style={{ backgroundColor: FOREST, borderBottom: `2px solid ${GOLD_SOFT}` }}>
         <div className="px-4 py-3.5 flex items-center justify-between gap-3 text-white">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className="flex items-center gap-1.5 shrink-0">
               <Thermometer size={16} style={{ color: GOLD }} />
               <span className="font-display text-xl font-semibold tnum">
@@ -3939,7 +3997,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                               <button type="button" onClick={toggleOpen} className="text-slate-400 shrink-0 p-0.5">{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>
                             </div>
                             <div className="flex items-center gap-2 mt-2">
-                              <input type="number" step="any" placeholder={p.defaultRate ? String(p.defaultRate) : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="w-20 border rounded-lg px-2 py-1.5 text-sm font-semibold font-body tabular-nums" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
+                              <input type="number" inputMode="decimal" step="any" placeholder={p.defaultRate ? String(p.defaultRate) : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="w-20 border rounded-lg px-2 py-1.5 text-sm font-semibold font-body tabular-nums" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
                               <div className="w-24 shrink-0"><SearchSelect value={p.basis} options={BASIS_OPTIONS} onPick={(v) => updateProduct(p.id, { basis: v })} sort={false} placeholder="Unit…" compact /></div>
                               <button type="button" onClick={toggleOpen} className="flex-1 min-w-0 flex flex-wrap items-center gap-1 justify-end">
                                 {sel.length === 0
@@ -3954,7 +4012,7 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                               <span className="font-body text-[13px] font-bold block truncate" style={{ color: FOREST }}>{p.product}</span>
                               <span className="font-body text-[9px] font-semibold text-slate-400">{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>
                             </button>
-                            <input type="number" step="any" placeholder={p.defaultRate ? String(p.defaultRate) : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="w-full border rounded-lg px-2 py-1.5 text-sm font-semibold font-body tabular-nums" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
+                            <input type="number" inputMode="decimal" step="any" placeholder={p.defaultRate ? String(p.defaultRate) : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="w-full border rounded-lg px-2 py-1.5 text-sm font-semibold font-body tabular-nums" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
                             <SearchSelect value={p.basis} options={BASIS_OPTIONS} onPick={(v) => updateProduct(p.id, { basis: v })} sort={false} placeholder="Unit…" compact />
                             <button type="button" onClick={toggleOpen} className="min-w-0 flex flex-wrap items-center gap-1 text-left">
                               {sel.length === 0
@@ -5600,20 +5658,20 @@ function LiquidFertCalculator({ draft, setDraft }) {
     <div className="space-y-3">
       <div>
         <FieldLabel>Density (lbs per gallon)</FieldLabel>
-        <input type="number" step="any" value={draft.density ?? ''} onChange={(e) => setDraft({ ...draft, density: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 10.5 — check the label or SDS" />
+        <input type="number" inputMode="decimal" step="any" value={draft.density ?? ''} onChange={(e) => setDraft({ ...draft, density: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 10.5 — check the label or SDS" />
       </div>
       <div className="grid grid-cols-3 gap-2">
         <div>
           <FieldLabel>N % by weight</FieldLabel>
-          <input type="number" step="any" value={draft.nPctCalc ?? ''} onChange={(e) => setDraft({ ...draft, nPctCalc: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 8" />
+          <input type="number" inputMode="decimal" step="any" value={draft.nPctCalc ?? ''} onChange={(e) => setDraft({ ...draft, nPctCalc: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 8" />
         </div>
         <div>
           <FieldLabel>P % by weight</FieldLabel>
-          <input type="number" step="any" value={draft.pPctCalc ?? ''} onChange={(e) => setDraft({ ...draft, pPctCalc: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 2" />
+          <input type="number" inputMode="decimal" step="any" value={draft.pPctCalc ?? ''} onChange={(e) => setDraft({ ...draft, pPctCalc: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 2" />
         </div>
         <div>
           <FieldLabel>K % by weight</FieldLabel>
-          <input type="number" step="any" value={draft.kPctCalc ?? ''} onChange={(e) => setDraft({ ...draft, kPctCalc: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 2" />
+          <input type="number" inputMode="decimal" step="any" value={draft.kPctCalc ?? ''} onChange={(e) => setDraft({ ...draft, kPctCalc: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 2" />
         </div>
       </div>
 
@@ -6117,9 +6175,9 @@ function ActiveConverter({ products = [], onClose }) {
   const diffActive = fromProd?.activeIngredient && toProd?.activeIngredient && normAi(fromProd.activeIngredient) !== normAi(toProd.activeIngredient)
 
   const strengthField = (meas, pct, setPct, lbGal, setLbGal) => meas === 'weight' ? (
-    <div><FieldLabel>% active (by weight)</FieldLabel><input type="number" step="any" value={pct} onChange={(e) => setPct(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="e.g. 40" /></div>
+    <div><FieldLabel>% active (by weight)</FieldLabel><input type="number" inputMode="decimal" step="any" value={pct} onChange={(e) => setPct(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="e.g. 40" /></div>
   ) : (
-    <div><FieldLabel>lb active / gallon</FieldLabel><input type="number" step="any" value={lbGal} onChange={(e) => setLbGal(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="from label, e.g. 2" /></div>
+    <div><FieldLabel>lb active / gallon</FieldLabel><input type="number" inputMode="decimal" step="any" value={lbGal} onChange={(e) => setLbGal(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="from label, e.g. 2" /></div>
   )
 
   return (
@@ -6141,7 +6199,7 @@ function ActiveConverter({ products = [], onClose }) {
               {list.map((p) => <option key={p.name} value={p.name}>{p.name}{p.activeIngredient ? ` — ${p.activeIngredient}` : ''}</option>)}
             </select>
             <div className="grid grid-cols-2 gap-2 mb-2">
-              <div><FieldLabel>Rate</FieldLabel><input type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="e.g. 10" /></div>
+              <div><FieldLabel>Rate</FieldLabel><input type="number" inputMode="decimal" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder="e.g. 10" /></div>
               <div><FieldLabel>Unit</FieldLabel><select value={fromUnit} onChange={(e) => setFromUnit(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white">{convUnits.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
             </div>
             {strengthField(fromMeas, fromPct, setFromPct, fromLbGal, setFromLbGal)}
@@ -6787,7 +6845,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <FieldLabel>Default Rate</FieldLabel>
-                <input type="number" step="any" value={draft.rate ?? ''} onChange={(e) => setDraft({ ...draft, rate: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 1.8" />
+                <input type="number" inputMode="decimal" step="any" value={draft.rate ?? ''} onChange={(e) => setDraft({ ...draft, rate: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 1.8" />
               </div>
               <div><FieldLabel>Default Basis</FieldLabel><Select value={draft.basis} onChange={(v) => setDraft({ ...draft, basis: v })} options={BASIS_OPTIONS} /></div>
             </div>
@@ -6798,7 +6856,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                   {areaNames.map((a) => (
                     <div key={a}>
                       <FieldLabel>{a}</FieldLabel>
-                      <input type="number" step="any" value={draft.areaRates?.[a] ?? ''}
+                      <input type="number" inputMode="decimal" step="any" value={draft.areaRates?.[a] ?? ''}
                         onChange={(e) => setDraft((d) => { const v = e.target.value; const next = { ...(d.areaRates || {}) }; if (v === '') delete next[a]; else next[a] = Number(v); return { ...d, areaRates: next } })}
                         className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white" placeholder={draft.rate ? `default ${draft.rate}` : 'default'} />
                     </div>
@@ -6809,17 +6867,17 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
             <div className="rounded-xl p-2.5" style={{ backgroundColor: '#FEF2F2' }}>
               <p className="font-body text-[11px] font-bold text-red-500 uppercase tracking-wide mb-1.5">Label Rate Range <span className="font-normal normal-case text-red-300">· outside = red warning on sheets</span></p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-2 gap-y-1">
-                <div><FieldLabel>Min / M {verifyTag('labelMinM')}</FieldLabel><input type="number" step="any" value={draft.labelMinM ?? ''} onChange={(e) => setLabelRate('labelMinM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
-                <div><FieldLabel>Max / M {verifyTag('labelMaxM')}</FieldLabel><input type="number" step="any" value={draft.labelMaxM ?? ''} onChange={(e) => setLabelRate('labelMaxM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
-                <div><FieldLabel>Min / A {verifyTag('labelMinA')}</FieldLabel><input type="number" step="any" value={draft.labelMinA ?? ''} onChange={(e) => setLabelRate('labelMinA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
-                <div><FieldLabel>Max / A {verifyTag('labelMaxA')}</FieldLabel><input type="number" step="any" value={draft.labelMaxA ?? ''} onChange={(e) => setLabelRate('labelMaxA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
+                <div><FieldLabel>Min / M {verifyTag('labelMinM')}</FieldLabel><input type="number" inputMode="decimal" step="any" value={draft.labelMinM ?? ''} onChange={(e) => setLabelRate('labelMinM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
+                <div><FieldLabel>Max / M {verifyTag('labelMaxM')}</FieldLabel><input type="number" inputMode="decimal" step="any" value={draft.labelMaxM ?? ''} onChange={(e) => setLabelRate('labelMaxM', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxM ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
+                <div><FieldLabel>Min / A {verifyTag('labelMinA')}</FieldLabel><input type="number" inputMode="decimal" step="any" value={draft.labelMinA ?? ''} onChange={(e) => setLabelRate('labelMinA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMinA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
+                <div><FieldLabel>Max / A {verifyTag('labelMaxA')}</FieldLabel><input type="number" inputMode="decimal" step="any" value={draft.labelMaxA ?? ''} onChange={(e) => setLabelRate('labelMaxA', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.labelMaxA ? '#EAD6A3' : '#FECACA'}` }} placeholder="Optional" /></div>
               </div>
             </div>
             {/* Container / jug size — drives the "measure out" note on spray sheets. */}
             <div className="rounded-xl p-2.5" style={{ backgroundColor: '#F1F5F3' }}>
               <FieldLabel noMargin>Container / jug size <span className="font-normal normal-case text-slate-400">· for the measure-out note (optional)</span></FieldLabel>
               <div className="grid grid-cols-2 gap-2 mt-1">
-                <input type="number" step="any" value={draft.jugSize ?? ''} onChange={(e) => setDraft({ ...draft, jugSize: e.target.value })} placeholder="e.g. 2.5" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" />
+                <input type="number" inputMode="decimal" step="any" value={draft.jugSize ?? ''} onChange={(e) => setDraft({ ...draft, jugSize: e.target.value })} placeholder="e.g. 2.5" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" />
                 <SearchSelect value={draft.jugUnit || 'gal'} options={['gal', 'oz', 'qt', 'L']} onPick={(v) => setDraft({ ...draft, jugUnit: v })} sort={false} />
               </div>
             </div>
@@ -6849,7 +6907,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                         calculator and direct-entry modes. */}
                     <div className="mb-2">
                       <FieldLabel>Density (lb/gal) — required for liquids</FieldLabel>
-                      <input type="number" step="any" value={draft.density ?? ''} onChange={(e) => setDraft({ ...draft, density: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 11 — from the label / SDS" />
+                      <input type="number" inputMode="decimal" step="any" value={draft.density ?? ''} onChange={(e) => setDraft({ ...draft, density: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 11 — from the label / SDS" />
                       <p className="font-body text-[10px] text-amber-600 mt-1">With the density set, N lb = (gallons applied) × density × N%. Without it, the app can't count this liquid's nutrients.</p>
                     </div>
                     <div className="flex items-center justify-between mb-2">
@@ -6867,15 +6925,15 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                       <div className="grid grid-cols-3 gap-2">
                         <div>
                           <FieldLabel>N lbs/gal</FieldLabel>
-                          <input type="number" step="any" value={draft.nPerGal ?? ''} onChange={(e) => setDraft({ ...draft, nPerGal: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 3" />
+                          <input type="number" inputMode="decimal" step="any" value={draft.nPerGal ?? ''} onChange={(e) => setDraft({ ...draft, nPerGal: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 3" />
                         </div>
                         <div>
                           <FieldLabel>P lbs/gal</FieldLabel>
-                          <input type="number" step="any" value={draft.pPerGal ?? ''} onChange={(e) => setDraft({ ...draft, pPerGal: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 0" />
+                          <input type="number" inputMode="decimal" step="any" value={draft.pPerGal ?? ''} onChange={(e) => setDraft({ ...draft, pPerGal: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 0" />
                         </div>
                         <div>
                           <FieldLabel>K lbs/gal</FieldLabel>
-                          <input type="number" step="any" value={draft.kPerGal ?? ''} onChange={(e) => setDraft({ ...draft, kPerGal: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 0" />
+                          <input type="number" inputMode="decimal" step="any" value={draft.kPerGal ?? ''} onChange={(e) => setDraft({ ...draft, kPerGal: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 0" />
                         </div>
                       </div>
                     )}
@@ -6892,15 +6950,15 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                     <div className="grid grid-cols-3 gap-2">
                       <div>
                         <FieldLabel>N %</FieldLabel>
-                        <input type="number" step="any" value={draft.n ?? ''} onChange={(e) => setDraft({ ...draft, n: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 21" />
+                        <input type="number" inputMode="decimal" step="any" value={draft.n ?? ''} onChange={(e) => setDraft({ ...draft, n: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 21" />
                       </div>
                       <div>
                         <FieldLabel>P %</FieldLabel>
-                        <input type="number" step="any" value={draft.p ?? ''} onChange={(e) => setDraft({ ...draft, p: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 0" />
+                        <input type="number" inputMode="decimal" step="any" value={draft.p ?? ''} onChange={(e) => setDraft({ ...draft, p: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 0" />
                       </div>
                       <div>
                         <FieldLabel>K %</FieldLabel>
-                        <input type="number" step="any" value={draft.k ?? ''} onChange={(e) => setDraft({ ...draft, k: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 0" />
+                        <input type="number" inputMode="decimal" step="any" value={draft.k ?? ''} onChange={(e) => setDraft({ ...draft, k: e.target.value })} className="w-full border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 0" />
                       </div>
                     </div>
                     <p className="font-body text-[10px] text-amber-600 mt-2">From the bag label, e.g. 21-0-0 Urea = N 21, P 0, K 0. Rate must be entered in lbs/M or lbs/A.</p>
@@ -6918,14 +6976,14 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 <div>
                   <FieldLabel>Current Stock ({draft.unit || 'oz'})</FieldLabel>
                   <div className="relative">
-                    <input type="number" step="any" value={draft.stock ?? ''} onChange={(e) => setDraft({ ...draft, stock: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 pr-12 text-sm font-body bg-white" placeholder="0" />
+                    <input type="number" inputMode="decimal" step="any" value={draft.stock ?? ''} onChange={(e) => setDraft({ ...draft, stock: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 pr-12 text-sm font-body bg-white" placeholder="0" />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 font-body text-xs font-semibold text-slate-400">{draft.unit || 'oz'}</span>
                   </div>
                 </div>
                 <div>
                   <FieldLabel>Low Stock Alert Below</FieldLabel>
                   <div className="relative">
-                    <input type="number" step="any" value={draft.lowStockThreshold ?? ''} onChange={(e) => setDraft({ ...draft, lowStockThreshold: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 pr-12 text-sm font-body bg-white" placeholder="0 = no alert" />
+                    <input type="number" inputMode="decimal" step="any" value={draft.lowStockThreshold ?? ''} onChange={(e) => setDraft({ ...draft, lowStockThreshold: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 pr-12 text-sm font-body bg-white" placeholder="0 = no alert" />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 font-body text-xs font-semibold text-slate-400">{draft.unit || 'oz'}</span>
                   </div>
                 </div>
@@ -6948,11 +7006,11 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 </div>
                 <div>
                   <FieldLabel>Oz / case</FieldLabel>
-                  <input type="number" step="any" value={draft.ozPerCase ?? ''} onChange={(e) => setDraft({ ...draft, ozPerCase: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="512" />
+                  <input type="number" inputMode="decimal" step="any" value={draft.ozPerCase ?? ''} onChange={(e) => setDraft({ ...draft, ozPerCase: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="512" />
                 </div>
                 <div>
                   <FieldLabel>Cost / case</FieldLabel>
-                  <input type="number" step="any" value={draft.costPerCase ?? ''} onChange={(e) => setDraft({ ...draft, costPerCase: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="$" />
+                  <input type="number" inputMode="decimal" step="any" value={draft.costPerCase ?? ''} onChange={(e) => setDraft({ ...draft, costPerCase: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="$" />
                 </div>
               </div>
             </div>
@@ -6966,7 +7024,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                       <div key={i} className="grid grid-cols-3 gap-2 items-center">
                         <input value={a.name ?? ''} onChange={(e) => setActive(i, 'name', e.target.value)} className="col-span-2 w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder={i === 0 ? 'e.g. Azoxystrobin' : 'e.g. Difenoconazole'} />
                         <div className="flex items-center gap-1">
-                          <input type="number" step="any" value={a.pct ?? ''} onChange={(e) => setActive(i, 'pct', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="% e.g. 20.3" />
+                          <input type="number" inputMode="decimal" step="any" value={a.pct ?? ''} onChange={(e) => setActive(i, 'pct', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="% e.g. 20.3" />
                           {draftActives.length > 1 && (
                             <button type="button" onClick={() => removeActive(i)} className="text-red-400 p-1 shrink-0" aria-label="Remove active"><X size={15} /></button>
                           )}
@@ -6978,12 +7036,12 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 </div>
                 <div>
                   <FieldLabel>lb active / gallon (liquids)</FieldLabel>
-                  <input type="number" step="any" value={draft.aiLbGal ?? ''} onChange={(e) => setDraft({ ...draft, aiLbGal: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="from the label, e.g. 2" />
+                  <input type="number" inputMode="decimal" step="any" value={draft.aiLbGal ?? ''} onChange={(e) => setDraft({ ...draft, aiLbGal: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="from the label, e.g. 2" />
                   <p className="font-body text-[10px] text-slate-500 mt-1">For liquid products, the pounds of active ingredient per gallon (on the label/SDS). The Active-Ingredient Converter prefills this so liquids match by volume, not weight.</p>
                 </div>
                 <div>
                   <FieldLabel>EIQ value (environmental impact)</FieldLabel>
-                  <input type="number" step="any" value={draft.eiq ?? ''} onChange={(e) => setDraft({ ...draft, eiq: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="Cornell EIQ for the active ingredient" />
+                  <input type="number" inputMode="decimal" step="any" value={draft.eiq ?? ''} onChange={(e) => setDraft({ ...draft, eiq: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="Cornell EIQ for the active ingredient" />
                   <p className="font-body text-[10px] text-slate-500 mt-1">Look up the active ingredient's EIQ at <span className="font-semibold">eiq.cornell-ipm.org</span>. With this + Active %, the Reports → Impact view scores your program's environmental load. Lower is better.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -7012,7 +7070,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 </div>
                 <div>
                   <FieldLabel>Rotate After (days)</FieldLabel>
-                  <input type="number" step="1" value={draft.rotationDays ?? ''} onChange={(e) => setDraft({ ...draft, rotationDays: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="21" />
+                  <input type="number" inputMode="decimal" step="1" value={draft.rotationDays ?? ''} onChange={(e) => setDraft({ ...draft, rotationDays: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="21" />
                 </div>
               </div>
               {(() => {
@@ -7038,7 +7096,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
               <div className="rounded-xl p-3" style={{ backgroundColor: '#F6F5F1' }}>
                 <p className="font-body text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: INK_2 }}>Label yearly maximum</p>
                 <p className="font-body text-[10px] text-slate-500 mb-2">The label's maximum total you may apply per year, in the product's unit (optional). Resources flags when this season's total nears it.</p>
-                <input type="number" step="any" value={draft.labelYearlyMax ?? ''} onChange={(e) => setField('labelYearlyMax', e.target.value)} className="w-48 rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: '1px solid #E2E8F0' }} placeholder={`e.g. 3200 ${draft.unit || 'oz'}/yr`} />
+                <input type="number" inputMode="decimal" step="any" value={draft.labelYearlyMax ?? ''} onChange={(e) => setField('labelYearlyMax', e.target.value)} className="w-48 rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: '1px solid #E2E8F0' }} placeholder={`e.g. 3200 ${draft.unit || 'oz'}/yr`} />
               </div>
             )}
             {draft.type === 'Fungicide' && (
@@ -7048,7 +7106,7 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <FieldLabel>Spray Interval (days) {verifyTag('sprayInterval')}</FieldLabel>
-                    <input type="number" step="1" value={draft.sprayInterval ?? ''} onChange={(e) => setField('sprayInterval', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.sprayInterval ? '#EAD6A3' : '#E2E8F0'}` }} placeholder="14" />
+                    <input type="number" inputMode="decimal" step="1" value={draft.sprayInterval ?? ''} onChange={(e) => setField('sprayInterval', e.target.value)} className="w-full rounded-xl px-3 py-2.5 text-sm font-body bg-white" style={{ border: `1px solid ${draft.aiVerify?.sprayInterval ? '#EAD6A3' : '#E2E8F0'}` }} placeholder="14" />
                   </div>
                 </div>
               </div>
@@ -7205,7 +7263,7 @@ function Inventory({ products, deliveries, onAddDelivery }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <FieldLabel>Quantity Received</FieldLabel>
-                <input type="number" step="any" value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 32" />
+                <input type="number" inputMode="decimal" step="any" value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 32" />
               </div>
               <div>
                 <FieldLabel>Unit</FieldLabel>
@@ -8954,7 +9012,7 @@ function PropertySetup({ courseInfo, areas, grassTypes = [], soilTypes = [], onS
             <div key={i} className="flex items-center gap-2 flex-wrap">
               <input value={c.name} onChange={(e) => setCourse(i, { name: e.target.value })} placeholder="Course name" className="flex-1 min-w-[140px] border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
               <div className="flex items-center gap-1">
-                <input type="number" value={c.holes} onChange={(e) => setCourse(i, { holes: e.target.value })} className="w-16 border border-slate-200 rounded-xl px-2 py-2.5 text-sm font-body tnum text-center" />
+                <input type="number" inputMode="decimal" value={c.holes} onChange={(e) => setCourse(i, { holes: e.target.value })} className="w-16 border border-slate-200 rounded-xl px-2 py-2.5 text-sm font-body tnum text-center" />
                 <span className="font-body text-[11px] text-slate-400">holes</span>
               </div>
               <div className="flex items-center gap-1">
@@ -9018,11 +9076,11 @@ function LocationSettings({ location, onSave }) {
       <div className="grid grid-cols-3 gap-3 mb-3">
         <div>
           <FieldLabel>Latitude</FieldLabel>
-          <input type="number" step="any" value={draft.lat ?? ''} onChange={(e) => setDraft({ ...draft, lat: e.target.value === '' ? null : Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="38.9726" />
+          <input type="number" inputMode="decimal" step="any" value={draft.lat ?? ''} onChange={(e) => setDraft({ ...draft, lat: e.target.value === '' ? null : Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="38.9726" />
         </div>
         <div>
           <FieldLabel>Longitude</FieldLabel>
-          <input type="number" step="any" value={draft.lng ?? ''} onChange={(e) => setDraft({ ...draft, lng: e.target.value === '' ? null : Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="-77.1735" />
+          <input type="number" inputMode="decimal" step="any" value={draft.lng ?? ''} onChange={(e) => setDraft({ ...draft, lng: e.target.value === '' ? null : Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="-77.1735" />
         </div>
         <div>
           <FieldLabel>Time zone</FieldLabel>
@@ -9514,14 +9572,14 @@ function AreasSettings({ areas, grassTypes = [], soilTypes = [], courses = [], o
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div><FieldLabel>Default Tanks</FieldLabel>
-                <input type="number" step="any" value={draft.tanks} onChange={(e) => setDraft({ ...draft, tanks: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+                <input type="number" inputMode="decimal" step="any" value={draft.tanks} onChange={(e) => setDraft({ ...draft, tanks: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
                 <p className="font-body text-[10px] text-slate-400 mt-1">Typical tanks to cover the whole area. Decimals OK (e.g. 1.5).</p></div>
               <div><FieldLabel>Gal / Tank</FieldLabel>
-                <input type="number" value={draft.galTank} onChange={(e) => setDraft({ ...draft, galTank: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" /></div>
+                <input type="number" inputMode="decimal" value={draft.galTank} onChange={(e) => setDraft({ ...draft, galTank: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div><FieldLabel>Area per tank (sq ft)</FieldLabel>
-                <input type="number" value={draft.sqft} onChange={(e) => setDraft({ ...draft, sqft: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="300000" />
+                <input type="number" inputMode="decimal" value={draft.sqft} onChange={(e) => setDraft({ ...draft, sqft: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="300000" />
                 <p className="font-body text-[10px] text-slate-400 mt-1">The area ONE tank covers — product totals use this × tanks.</p></div>
               <div><FieldLabel>Nozzle</FieldLabel>
                 <input value={draft.nozzle} onChange={(e) => setDraft({ ...draft, nozzle: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="White Nozzle" /></div>
@@ -12253,12 +12311,12 @@ function GddPgrTab({ daily, sheets, products, areas, hasLocation, courseInfo = {
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-2">
           <div className="flex items-center gap-1.5">
             <span className="font-body text-[11px] text-slate-400">Target</span>
-            <input type="number" value={target} onChange={(e) => saveTarget2(Number(e.target.value) || 0)} className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
+            <input type="number" inputMode="decimal" value={target} onChange={(e) => saveTarget2(Number(e.target.value) || 0)} className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
             <span className="font-body text-[11px] text-slate-400">GDD °C</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="font-body text-[11px] text-slate-400">Reapply lead</span>
-            <input type="number" value={lead} onChange={(e) => saveLead(Math.max(0, Number(e.target.value) || 0))} className="w-14 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
+            <input type="number" inputMode="decimal" value={lead} onChange={(e) => saveLead(Math.max(0, Number(e.target.value) || 0))} className="w-14 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
             <span className="font-body text-[11px] text-slate-400">GDD early</span>
           </div>
         </div>
@@ -14318,7 +14376,7 @@ function SoilTestsTab({ soilTests, areas, grassTypes = [], soilTypes = [], cours
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div>
               <FieldLabel>Annual N target (lb / M / yr)</FieldLabel>
-              <input type="number" step="any" value={form.annualN ?? ''} onChange={(e) => set('annualN', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 4" />
+              <input type="number" inputMode="decimal" step="any" value={form.annualN ?? ''} onChange={(e) => set('annualN', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="e.g. 4" />
               <p className="font-body text-[10px] text-slate-400 mt-1">{nSuggest.matched ? `Typical for ${(form.grasses || []).join(', ')}: ${nSuggest.n} — adjust as needed.` : 'Set your season N goal for this area.'}</p>
             </div>
             <div>
@@ -14611,7 +14669,7 @@ function PracticesTab({ practices, areas, onAddMany, onDelete }) {
           </div>
           <div>
             <FieldLabel>Amount (opt.)</FieldLabel>
-            <input type="number" step="any" value={value} onChange={(e) => setValue(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 2" />
+            <input type="number" inputMode="decimal" step="any" value={value} onChange={(e) => setValue(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 2" />
           </div>
           <div>
             <FieldLabel>Unit (opt.)</FieldLabel>

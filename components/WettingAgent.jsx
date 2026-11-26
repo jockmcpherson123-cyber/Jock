@@ -908,7 +908,7 @@ function Setup({ greens, products, courses, onSave, wetting, mapGreens = [], mig
           <select value={micro} onChange={(e) => setMicro(e.target.value)} className="rounded-lg px-3 py-2.5 text-sm font-body" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }}>
             {MICRO.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
-          <input type="number" min="3" max="20" value={nPoints} onChange={(e) => setNPoints(e.target.value)} placeholder="Points" className="rounded-lg px-3 py-2.5 text-sm font-body tnum" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }} />
+          <input type="number" inputMode="decimal" min="3" max="20" value={nPoints} onChange={(e) => setNPoints(e.target.value)} placeholder="Points" className="rounded-lg px-3 py-2.5 text-sm font-body tnum" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }} />
           <button onClick={addGreen} className="font-body text-xs font-bold px-4 py-2.5 rounded-lg text-white flex items-center justify-center gap-1.5" style={{ backgroundColor: FOREST }}><Plus size={14} /> Add</button>
         </div>
         <p className="font-body text-[11.5px] mt-2" style={{ color: INK_3 }}>Readings are taken in one place now — <b>Greens Today › Add readings</b>. Link each indicator green to its green on the course map so its rounds feed the wear-off tracking, then import any older history.</p>
@@ -938,8 +938,8 @@ function Setup({ greens, products, courses, onSave, wetting, mapGreens = [], mig
             return (
               <div key={p} className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ backgroundColor: PAPER, border: `1px solid ${HAIR}` }}>
                 <span className="flex-1 font-body text-sm font-semibold" style={{ color: INK }}>{p}</span>
-                <input type="number" defaultValue={cur.gddLife} onBlur={(e) => setProd(p, 'gddLife', e.target.value)} className="w-28 rounded-lg px-2 py-1.5 text-sm font-body tnum text-right" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }} />
-                <input type="number" defaultValue={cur.calDays} onBlur={(e) => setProd(p, 'calDays', e.target.value)} className="w-28 rounded-lg px-2 py-1.5 text-sm font-body tnum text-right" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }} />
+                <input type="number" inputMode="decimal" defaultValue={cur.gddLife} onBlur={(e) => setProd(p, 'gddLife', e.target.value)} className="w-28 rounded-lg px-2 py-1.5 text-sm font-body tnum text-right" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }} />
+                <input type="number" inputMode="decimal" defaultValue={cur.calDays} onBlur={(e) => setProd(p, 'calDays', e.target.value)} className="w-28 rounded-lg px-2 py-1.5 text-sm font-body tnum text-right" style={{ border: `1px solid ${HAIR}`, backgroundColor: 'white', color: INK }} />
               </div>
             )
           })}

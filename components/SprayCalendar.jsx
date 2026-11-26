@@ -138,8 +138,15 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
                   opacity: inMonth ? 1 : 0.4,
                 }}
               >
-                <span className="font-body text-[11px] font-semibold px-0.5 tnum" style={{ color: isSel ? FOREST : INK_2 }}>{c.d}</span>
-                <div className="mt-0.5 space-y-0.5 overflow-hidden">
+                <span className="font-body text-[12px] font-semibold px-0.5 tnum" style={{ color: isSel ? FOREST : INK_2 }}>{c.d}</span>
+                {/* Phones: just coloured dots (the 8px labels were unreadable); the
+                    tapped day's full list shows in the agenda below. */}
+                {labels.length > 0 && (
+                  <div className="sm:hidden flex flex-wrap gap-0.5 mt-1 px-0.5">
+                    {labels.slice(0, 4).map((it, i) => <span key={i} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: it.color }} />)}
+                  </div>
+                )}
+                <div className="hidden sm:block mt-0.5 space-y-0.5 overflow-hidden">
                   {shown.map((it, i) => (
                     <div
                       key={i}
@@ -149,10 +156,10 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
                       title={it.open ? `Open ${it.area}` : it.area}
                     >
                       <span className="w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: it.color }} />
-                      <span className="font-body text-[8px] leading-tight truncate" style={{ color: INK_2 }}>{it.area}</span>
+                      <span className="font-body text-[9px] leading-tight truncate" style={{ color: INK_2 }}>{it.area}</span>
                     </div>
                   ))}
-                  {extra > 0 && <span className="font-body text-[8px] px-0.5" style={{ color: INK_3 }}>+{extra} more</span>}
+                  {extra > 0 && <span className="font-body text-[9px] px-0.5" style={{ color: INK_3 }}>+{extra} more</span>}
                 </div>
               </div>
             )

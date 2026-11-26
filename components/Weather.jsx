@@ -627,7 +627,7 @@ export default function Weather({ location, courseInfo, products = [], manage = 
             <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide">ET &amp; Irrigation</p>
             <div className="flex items-center gap-1.5">
               <span className="font-body text-[11px] text-slate-400">Replace</span>
-              <input type="number" value={etPct} onChange={(e) => setEtPct(Math.max(0, Math.min(150, Number(e.target.value) || 0)))} className="w-14 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
+              <input type="number" inputMode="decimal" value={etPct} onChange={(e) => setEtPct(Math.max(0, Math.min(150, Number(e.target.value) || 0)))} className="w-14 border border-slate-200 rounded-lg px-2 py-1 text-sm font-body text-center" />
               <span className="font-body text-[11px] text-slate-400">% of ET</span>
             </div>
           </div>
