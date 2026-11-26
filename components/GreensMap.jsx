@@ -397,57 +397,97 @@ export default function GreensMap({ user, nav }) {
     setEditEpoch((e) => e + 1)
     setNotice(moved ? `Snapped ${moved} point${moved > 1 ? 's' : ''} onto neighbouring lines.` : 'No neighbouring lines were close enough to snap.')
   }
-  // Close the open side of the shape along a neighbouring area's existing line,
-  // so the two areas share the exact same border instead of hand-tracing it.
+  // Close the open side of the shape by tracing the existing area lines between
+  // its two ends — even when that boundary is stitched from SEVERAL neighbouring
+  // areas. Builds a graph of every area edge (shared corners + T-junctions
+  // merged) and walks the shortest route along it from one end to the other.
   const followLine = () => {
     const map = mapRef.current, L = LRef.current
     const pts = drawPts
     if (!map || !L || pts.length < 2) return
-    const areasList = areasRef.current || []
+    const areasList = (areasRef.current || []).filter((a) => a.ring && a.ring.length >= 3)
+    if (!areasList.length) { setNotice('No existing areas to follow yet.'); return }
+    const toPx = (lon, lat) => map.latLngToContainerPoint({ lat, lng: lon })
     const cpOf = ([lat, lon]) => map.latLngToContainerPoint({ lat, lng: lon })
-    const cp0 = cpOf(pts[0]), cpn = cpOf(pts[pts.length - 1])
-    const projectOnRing = (ringPx, cp) => {
-      let best = null
-      for (let i = 0; i < ringPx.length; i++) {
-        const A = ringPx[i], B = ringPx[(i + 1) % ringPx.length]
+
+    // 1) Nodes = every area vertex (in pixels). Merge coincident corners.
+    const nodes = []        // {x,y,lat,lon}
+    const ringIdx = []      // per area: node index for each ring vertex
+    for (const a of areasList) {
+      const idxs = []
+      for (const [lon, lat] of a.ring) { const p = toPx(lon, lat); idxs.push(nodes.push({ x: p.x, y: p.y, lat, lon }) - 1) }
+      ringIdx.push(idxs)
+    }
+    const MERGE = 12
+    const parent = nodes.map((_, i) => i)
+    const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] } return i }
+    const union = (i, j) => { const a = find(i), b = find(j); if (a !== b) parent[a] = b }
+    for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+      if (Math.abs(nodes[i].x - nodes[j].x) <= MERGE && Math.abs(nodes[i].y - nodes[j].y) <= MERGE && Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y) <= MERGE) union(i, j)
+    }
+    // 2) Graph edges: ring edges, plus bridges where one area's corner sits on another's edge.
+    const adj = new Map()
+    const addEdge = (i, j) => {
+      const ri = find(i), rj = find(j); if (ri === rj) return
+      const w = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y)
+      if (!adj.has(ri)) adj.set(ri, new Map()); if (!adj.has(rj)) adj.set(rj, new Map())
+      const mi = adj.get(ri); if (!mi.has(rj) || mi.get(rj) > w) mi.set(rj, w)
+      const mj = adj.get(rj); if (!mj.has(ri) || mj.get(ri) > w) mj.set(ri, w)
+    }
+    for (let a = 0; a < areasList.length; a++) { const idxs = ringIdx[a], m = idxs.length; for (let k = 0; k < m; k++) addEdge(idxs[k], idxs[(k + 1) % m]) }
+    // project a container point onto one area's ring → nearest edge + foot point
+    const projectRing = (areaI, cp) => {
+      const idxs = ringIdx[areaI], m = idxs.length; let best = null
+      for (let k = 0; k < m; k++) {
+        const I = idxs[k], J = idxs[(k + 1) % m], A = nodes[I], B = nodes[J]
         const dx = B.x - A.x, dy = B.y - A.y, len2 = dx * dx + dy * dy
-        let t = len2 ? ((cp.x - A.x) * dx + (cp.y - A.y) * dy) / len2 : 0
-        t = Math.max(0, Math.min(1, t))
-        const qx = A.x + t * dx, qy = A.y + t * dy
-        const d = Math.hypot(qx - cp.x, qy - cp.y)
-        if (!best || d < best.d) best = { d, seg: i, t, qx, qy }
+        let t = len2 ? ((cp.x - A.x) * dx + (cp.y - A.y) * dy) / len2 : 0; t = Math.max(0, Math.min(1, t))
+        const qx = A.x + t * dx, qy = A.y + t * dy, d = Math.hypot(qx - cp.x, qy - cp.y)
+        if (!best || d < best.d) best = { d, I, J, qx, qy, t }
       }
       return best
     }
-    let chosen = null
-    for (const a of areasList) {
-      if (!a.ring || a.ring.length < 3) continue
-      const ringPx = a.ring.map(([lon, lat]) => map.latLngToContainerPoint({ lat, lng: lon }))
-      const pr0 = projectOnRing(ringPx, cp0), prn = projectOnRing(ringPx, cpn)
-      const score = pr0.d + prn.d
-      if (!chosen || score < chosen.score) chosen = { a, ringPx, pr0, prn, score }
+    // bridge T-junctions: a corner of one area lying mid-edge of another
+    for (let i = 0; i < nodes.length; i++) {
+      for (let a = 0; a < areasList.length; a++) {
+        if (ringIdx[a].includes(i)) continue
+        const pr = projectRing(a, nodes[i])
+        if (pr && pr.d <= MERGE && pr.t > 0.001 && pr.t < 0.999) { addEdge(i, pr.I); addEdge(i, pr.J) }
+      }
     }
-    const TOL = 45 // px: both ends must land reasonably near the same line
-    if (!chosen || chosen.pr0.d > TOL || chosen.prn.d > TOL) {
-      setNotice('Couldn’t find an existing line near both ends. Drop your first and last corners right on the neighbouring edge, then tap Follow line.')
-      return
+    // 3) Attach the two drawn ends to their nearest area edge (across ALL areas).
+    const nearestEdge = (cp) => { let best = null; for (let a = 0; a < areasList.length; a++) { const pr = projectRing(a, cp); if (pr && (!best || pr.d < best.d)) best = pr } return best }
+    const cp0 = cpOf(pts[0]), cpn = cpOf(pts[pts.length - 1])
+    const prn = nearestEdge(cpn), pr0 = nearestEdge(cp0)
+    const TOL = 50
+    if (!prn || !pr0 || prn.d > TOL || pr0.d > TOL) { setNotice('Couldn’t find an existing line near both ends. Drop your first and last corners right on a neighbouring edge, then tap Follow line.'); return }
+    // 4) Shortest path from the LAST end (prn) to the FIRST end (pr0) along the graph.
+    const SKEY = 'S', TKEY = 'T'
+    const sLinks = [[find(prn.I), Math.hypot(nodes[prn.I].x - prn.qx, nodes[prn.I].y - prn.qy)], [find(prn.J), Math.hypot(nodes[prn.J].x - prn.qx, nodes[prn.J].y - prn.qy)]]
+    const tByRoot = new Map(); tByRoot.set(find(pr0.I), Math.hypot(nodes[pr0.I].x - pr0.qx, nodes[pr0.I].y - pr0.qy)); { const rj = find(pr0.J), w = Math.hypot(nodes[pr0.J].x - pr0.qx, nodes[pr0.J].y - pr0.qy); if (!tByRoot.has(rj) || tByRoot.get(rj) > w) tByRoot.set(rj, w) }
+    const neighbors = (x) => {
+      if (x === SKEY) return sLinks
+      if (x === TKEY) return []
+      const out = []; const m = adj.get(x); if (m) for (const [r, w] of m) out.push([r, w]); if (tByRoot.has(x)) out.push([TKEY, tByRoot.get(x)]); return out
     }
-    const ring = chosen.a.ring, n = ring.length
-    const a = chosen.pr0.seg, b = chosen.prn.seg
-    const toLL = (idx) => { const [lon, lat] = ring[((idx % n) + n) % n]; return map.latLngToContainerPoint({ lat, lng: lon }) }
-    const q0 = L.point(chosen.pr0.qx, chosen.pr0.qy), qn = L.point(chosen.prn.qx, chosen.prn.qy)
-    // Walk from Pn's projection (on edge b) to P0's projection (on edge a), both ways.
-    const arcLen = (verts) => { let d = 0, prev = qn; for (const v of verts) { d += Math.hypot(v.x - prev.x, v.y - prev.y); prev = v } d += Math.hypot(q0.x - prev.x, q0.y - prev.y); return d }
-    const fwd = []; for (let i = b + 1; ; i++) { const idx = ((i % n) + n) % n; fwd.push(idx); if (idx === a) break; if (fwd.length > n) break }
-    const bwd = []; for (let i = b; ; i--) { const idx = ((i % n) + n) % n; bwd.push(idx); if (idx === ((a + 1) % n)) break; if (bwd.length > n) break }
-    const fwdPx = fwd.map(toLL), bwdPx = bwd.map(toLL)
-    const useFwd = arcLen(fwdPx) <= arcLen(bwdPx)
-    const arcIdx = useFwd ? fwd : bwd
+    const dist = new Map([[SKEY, 0]]), prev = new Map(), done = new Set()
+    while (true) {
+      let cur = null, cd = Infinity
+      for (const [k, d] of dist) { if (!done.has(k) && d < cd) { cd = d; cur = k } }
+      if (cur === null || cur === TKEY) break
+      done.add(cur)
+      for (const [nb, w] of neighbors(cur)) { const nd = cd + w; if (nd < (dist.has(nb) ? dist.get(nb) : Infinity)) { dist.set(nb, nd); prev.set(nb, cur) } }
+    }
+    if (!prev.has(TKEY)) { setNotice('The lines between your two ends don’t connect. Drop a corner where they meet, or trace that stretch by hand.'); return }
+    const chain = []; let c = TKEY; while (c !== undefined) { chain.push(c); c = prev.get(c) }
+    chain.reverse() // S … T
+    const midRoots = chain.filter((k) => k !== SKEY && k !== TKEY)
+    // 5) Append: foot at last end → chained area corners → foot at first end.
     const add = []
-    const pushLL = (ll) => { const last = add[add.length - 1]; if (last && Math.hypot(map.latLngToContainerPoint(last).x - map.latLngToContainerPoint(ll).x, map.latLngToContainerPoint(last).y - map.latLngToContainerPoint(ll).y) < 1.5) return; add.push(ll) }
-    pushLL(map.containerPointToLatLng(qn))
-    for (const idx of arcIdx) { const [lon, lat] = ring[idx]; pushLL({ lat, lng: lon }) }
-    pushLL(map.containerPointToLatLng(q0))
+    const pushLL = (ll) => { const last = add[add.length - 1]; if (last) { const a = map.latLngToContainerPoint(last), b = map.latLngToContainerPoint(ll); if (Math.hypot(a.x - b.x, a.y - b.y) < 1.5) return } add.push(ll) }
+    pushLL(map.containerPointToLatLng(L.point(prn.qx, prn.qy)))
+    for (const r of midRoots) pushLL({ lat: nodes[r].lat, lng: nodes[r].lon })
+    pushLL(map.containerPointToLatLng(L.point(pr0.qx, pr0.qy)))
     setDrawPts((p) => [...p, ...add.map((ll) => [ll.lat, ll.lng])])
     setNotice('')
   }
