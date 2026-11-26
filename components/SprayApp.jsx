@@ -317,7 +317,7 @@ const SECTIONS_MANAGER = [
     landing: { id: 'spray-home', label: 'Spray Program', m: 'land', r: 'spray' },
     items: [
       { id: 'program', label: 'Annual Program', m: 'spray', r: 'program', follow: true, noAll: true },
-      { id: 'sheets', label: 'Spray Sheets', m: 'spray', r: 'list', follow: true },
+      { id: 'sheets', label: 'Spray Sheets', m: 'spray', r: 'list', follow: true, noAll: true },
       { id: 'fert', label: 'Fert Sheets', m: 'spray', r: 'fert', follow: true },
       { id: 'invcount', label: 'Inventory', m: 'spray', r: 'invcount' },
       { id: 'chemicals', label: 'Chemical Library', m: 'spray', r: 'chemicals' },
