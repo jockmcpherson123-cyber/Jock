@@ -341,6 +341,60 @@ export default function GreensMap({ user, nav }) {
 
   const startDraw = () => { setSelAreaId(null); setEditing(false); setNewArea(null); setDrawPts([]); setDrawing(true) }
   const finishDraw = () => { if (drawPts.length >= 3) setNewArea({ hole: '', type: 'green', name: '' }) }
+  // Close the open side of the shape along a neighbouring area's existing line,
+  // so the two areas share the exact same border instead of hand-tracing it.
+  const followLine = () => {
+    const map = mapRef.current, L = LRef.current
+    const pts = drawPts
+    if (!map || !L || pts.length < 2) return
+    const areasList = areasRef.current || []
+    const cpOf = ([lat, lon]) => map.latLngToContainerPoint({ lat, lng: lon })
+    const cp0 = cpOf(pts[0]), cpn = cpOf(pts[pts.length - 1])
+    const projectOnRing = (ringPx, cp) => {
+      let best = null
+      for (let i = 0; i < ringPx.length; i++) {
+        const A = ringPx[i], B = ringPx[(i + 1) % ringPx.length]
+        const dx = B.x - A.x, dy = B.y - A.y, len2 = dx * dx + dy * dy
+        let t = len2 ? ((cp.x - A.x) * dx + (cp.y - A.y) * dy) / len2 : 0
+        t = Math.max(0, Math.min(1, t))
+        const qx = A.x + t * dx, qy = A.y + t * dy
+        const d = Math.hypot(qx - cp.x, qy - cp.y)
+        if (!best || d < best.d) best = { d, seg: i, t, qx, qy }
+      }
+      return best
+    }
+    let chosen = null
+    for (const a of areasList) {
+      if (!a.ring || a.ring.length < 3) continue
+      const ringPx = a.ring.map(([lon, lat]) => map.latLngToContainerPoint({ lat, lng: lon }))
+      const pr0 = projectOnRing(ringPx, cp0), prn = projectOnRing(ringPx, cpn)
+      const score = pr0.d + prn.d
+      if (!chosen || score < chosen.score) chosen = { a, ringPx, pr0, prn, score }
+    }
+    const TOL = 45 // px: both ends must land reasonably near the same line
+    if (!chosen || chosen.pr0.d > TOL || chosen.prn.d > TOL) {
+      setNotice('Couldn’t find an existing line near both ends. Drop your first and last corners right on the neighbouring edge, then tap Follow line.')
+      return
+    }
+    const ring = chosen.a.ring, n = ring.length
+    const a = chosen.pr0.seg, b = chosen.prn.seg
+    const toLL = (idx) => { const [lon, lat] = ring[((idx % n) + n) % n]; return map.latLngToContainerPoint({ lat, lng: lon }) }
+    const q0 = L.point(chosen.pr0.qx, chosen.pr0.qy), qn = L.point(chosen.prn.qx, chosen.prn.qy)
+    // Walk from Pn's projection (on edge b) to P0's projection (on edge a), both ways.
+    const arcLen = (verts) => { let d = 0, prev = qn; for (const v of verts) { d += Math.hypot(v.x - prev.x, v.y - prev.y); prev = v } d += Math.hypot(q0.x - prev.x, q0.y - prev.y); return d }
+    const fwd = []; for (let i = b + 1; ; i++) { const idx = ((i % n) + n) % n; fwd.push(idx); if (idx === a) break; if (fwd.length > n) break }
+    const bwd = []; for (let i = b; ; i--) { const idx = ((i % n) + n) % n; bwd.push(idx); if (idx === ((a + 1) % n)) break; if (bwd.length > n) break }
+    const fwdPx = fwd.map(toLL), bwdPx = bwd.map(toLL)
+    const useFwd = arcLen(fwdPx) <= arcLen(bwdPx)
+    const arcIdx = useFwd ? fwd : bwd
+    const add = []
+    const pushLL = (ll) => { const last = add[add.length - 1]; if (last && Math.hypot(map.latLngToContainerPoint(last).x - map.latLngToContainerPoint(ll).x, map.latLngToContainerPoint(last).y - map.latLngToContainerPoint(ll).y) < 1.5) return; add.push(ll) }
+    pushLL(map.containerPointToLatLng(qn))
+    for (const idx of arcIdx) { const [lon, lat] = ring[idx]; pushLL({ lat, lng: lon }) }
+    pushLL(map.containerPointToLatLng(q0))
+    setDrawPts((p) => [...p, ...add.map((ll) => [ll.lat, ll.lng])])
+    setNotice('')
+  }
   const cancelDraw = () => { setDrawing(false); setDrawPts([]); setNewArea(null) }
   const saveNew = async () => {
     if (!ctx?.club?.id || drawPts.length < 3) return
@@ -453,6 +507,7 @@ export default function GreensMap({ user, nav }) {
               <div className="flex items-center gap-2 ml-1">
                 <span className="font-body text-[12px]" style={{ color: FERN }}>Tap the map to drop corners ({drawPts.length})</span>
                 <button onClick={() => setSnapOn((v) => !v)} title="Snap new corners onto the lines of areas you've already drawn" className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={snapOn ? { backgroundColor: FOREST, color: '#fff' } : { border: `1px solid ${HAIR}`, color: INK_2 }}>Snap {snapOn ? 'on' : 'off'}</button>
+                <button onClick={followLine} disabled={drawPts.length < 2} title="Trace the rest of the shape along a neighbouring area's line so they share the exact border" className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-40" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>Follow line</button>
                 <button onClick={() => setDrawPts((p) => p.slice(0, -1))} disabled={!drawPts.length} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-40" style={{ border: `1px solid ${HAIR}`, color: INK_2 }}>Undo</button>
                 <button onClick={finishDraw} disabled={drawPts.length < 3} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Finish</button>
                 <button onClick={cancelDraw} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button>
