@@ -897,7 +897,6 @@ function HomeLanding({ clubName, onPickId }) {
   const lowStock = (products || []).filter((p) => (Number(p.stock) || 0) < 0 || (p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold))
   const licAlerts = computeLicenseAlerts(settings.applicatorLicenses || {})
   const compGaps = libraryComplianceGaps(products, sheets, settings.applicatorLicenses || {})
-  const openJobs = (tasks || []).filter((t) => (t.status || 'todo') !== 'done').length
   const timeoff = Array.isArray(courseInfo.timeoff) ? courseInfo.timeoff : []
 
   return (
@@ -913,7 +912,7 @@ function HomeLanding({ clubName, onPickId }) {
         <div className="space-y-4 min-w-0">
           <SoilTempCard soilNow={soilNow} openWins={openWins} onPickId={onPickId} />
           <RainTotalsCard today={todayRain} week={rainWeek} month={rainMonth} year={rain.ytd} />
-          <NeedsAttention lowStock={lowStock} licAlerts={licAlerts} comp={compGaps} openJobs={openJobs} onPickId={onPickId} />
+          <NeedsAttention lowStock={lowStock} licAlerts={licAlerts} comp={compGaps} onPickId={onPickId} />
         </div>
       </div>
       {addOpen && <EventModal onClose={() => setAddOpen(false)} onSave={(ev) => { saveEvents([...events, ev]); setAddOpen(false) }} />}
@@ -1094,13 +1093,12 @@ function RainTotalsCard({ today = null, week = 0, month = 0, year = 0 }) {
   )
 }
 
-function NeedsAttention({ lowStock = [], licAlerts = [], comp = null, openJobs = 0, onPickId }) {
+function NeedsAttention({ lowStock = [], licAlerts = [], comp = null, onPickId }) {
   const items = []
   lowStock.slice(0, 4).forEach((p) => items.push({ key: 'ls' + p.name, tone: 'bad', label: `${p.name} · ${shortfallText(p)}`, cta: 'Order', go: () => onPickId('chemicals') }))
   if (lowStock.length > 4) items.push({ key: 'lsmore', tone: 'bad', label: `+${lowStock.length - 4} more low on stock`, cta: 'Order', go: () => onPickId('chemicals') })
   licAlerts.forEach((a, i) => items.push({ key: 'lic' + i, tone: a.level === 'expired' ? 'bad' : 'warn', label: `${a.name} — ${a.type} license ${a.label.toLowerCase()}`, cta: 'Update', go: () => onPickId('settings') }))
   if (comp && comp.total) items.push({ key: 'comp', tone: 'warn', label: `${comp.total} compliance record${comp.total !== 1 ? 's' : ''} missing`, sub: [...(comp.productGaps || []).slice(0, 2).map((g) => g.name), ...(comp.peopleGaps || []).slice(0, 1).map((g) => g.name)].filter(Boolean).join(', '), cta: 'Fix', go: () => onPickId('settings') })
-  if (openJobs) items.push({ key: 'jobs', tone: 'info', label: `${openJobs} open job${openJobs !== 1 ? 's' : ''}`, cta: 'Board', go: () => onPickId('jobboard') })
   const tone = { bad: '#B23A2E', warn: '#92660D', info: FERN }
   return (
     <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>

@@ -107,7 +107,6 @@ export default function CommandCentre() {
   const plannedWk = new Set()
   ;(programApps || []).forEach((a) => { if (a.plannedDate && !a.linkedSheetId && inWk(a.plannedDate)) plannedWk.add(`${a.plannedDate}|${a.area}`) })
   const spraysThisWeek = (sheets || []).filter((s) => inWk(s.date)).length + (fertSheets || []).filter((f) => inWk(f.date)).length + plannedWk.size
-  const openJobs = (tasks || []).filter((t) => (t.status || 'todo') !== 'done').length
   const rain7 = (wx.season || []).filter((d) => d.date >= weekAgo && d.date <= today).reduce((s, d) => s + (Number(d.precip) || 0), 0)
   const seasonGdd = (wx.season.length || wx.forecast.length) ? seasonGddToDate(wx.season, wx.forecast) : null
 
@@ -154,9 +153,8 @@ export default function CommandCentre() {
       </div>
 
       {/* Shared property strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
         <PropTile icon={ClipboardList} label="This week · sprays" value={spraysThisWeek} />
-        <PropTile icon={ClipboardList} label="Open jobs" value={openJobs} accent={openJobs ? '#B45309' : FERN} />
         <PropTile icon={CloudRain} label="Rain · last 7 days" value={`${rain7.toFixed(2)}"`} />
         <PropTile icon={Thermometer} label="GDD to date" value={seasonGdd != null ? seasonGdd.toLocaleString() : '—'} sub="base 50°F · since Jan 1" />
       </div>
