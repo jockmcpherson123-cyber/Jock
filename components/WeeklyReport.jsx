@@ -90,6 +90,7 @@ function weekWindows(today = new Date()) {
 export default function WeeklyReport({ daily = [], clippings = [], practices = [], speeds = [], areas = {}, courseInfo = {}, onSaveCourse, userEmail = '', userName = '', courseFilter = '' }) {
   const [apps, setApps] = useState([])
   const [fertSheets, setFertSheets] = useState([])
+  const [sheets, setSheets] = useState([]) // actual spray sheets (so a hand-made sheet for next week shows too)
   const [program, setProgram] = useState(null)
   const [loading, setLoading] = useState(true)
   const [course, setCourse] = useState(() => courseFilter || (Array.isArray(courseInfo.courses) ? courseInfo.courses : []).map((c) => c && c.name).filter(Boolean)[0] || '')
@@ -158,16 +159,18 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
     (async () => {
       try {
         const progs = await db.fetchPrograms()
-        // Pick the same program the rest of the app shows: an explicitly active
-        // one, else this calendar year's, else the newest — so a spray planned
-        // for next week on the Spray Program calendar also lands on this report.
+        // Pick the SAME program the Spray Program calendar uses: this calendar
+        // year's first (ignoring status, which can point elsewhere), then an
+        // explicitly active one, then the newest — so a spray planned for next
+        // week on the calendar also lands on this report.
         const curYear = new Date().getFullYear()
-        const active = progs.find((p) => p.status === 'active')
-          || progs.find((p) => Number(p.year) === curYear)
+        const active = progs.find((p) => Number(p.year) === curYear)
+          || progs.find((p) => p.status === 'active')
           || [...progs].sort((a, b) => Number(b.year || 0) - Number(a.year || 0))[0]
         if (active) { setProgram(active); setApps(await db.fetchApplications(active.id)) }
       } catch (e) { console.error(e) }
       try { setFertSheets(await db.fetchFertSheets()) } catch (e) { console.error(e) }
+      try { setSheets(await db.fetchSheets()) } catch (e) { console.error(e) }
       setLoading(false)
     })()
   }, [])
@@ -188,16 +191,34 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   const inRange = (dISO, a, b) => dISO && dISO >= iso(a) && dISO <= iso(b)
 
   // Next week's sprays, grouped by day → area (filtered to the chosen course).
+  // Two sources: planned program applications NOT yet turned into a sheet, and
+  // actual spray sheets dated next week (so a hand-made sheet shows too). A
+  // planned app that became a sheet is shown once, as the sheet.
   const sprayDays = useMemo(() => {
-    const next = apps.filter((a) => inRange(a.plannedDate, W.nextMon, W.nextSun) && inCourse(a.area))
     const byKey = {}
-    next.forEach((a) => {
-      const key = `${a.plannedDate}||${a.area}`
-      if (!byKey[key]) byKey[key] = { date: a.plannedDate, area: a.area, items: [] }
-      byKey[key].items.push(a)
-    })
+    const add = (date, area, item) => {
+      const key = `${date}||${area}`
+      if (!byKey[key]) byKey[key] = { date, area, items: [] }
+      byKey[key].items.push(item)
+    }
+    apps
+      .filter((a) => inRange(a.plannedDate, W.nextMon, W.nextSun) && !a.linkedSheetId && inCourse(a.area))
+      .forEach((a) => add(a.plannedDate, a.area, a))
+    sheets
+      .filter((s) => inRange(s.date, W.nextMon, W.nextSun) && inCourse(s.area))
+      .forEach((s) => {
+        const lines = (s.products || []).filter((p) => p.product)
+        if (!lines.length) { add(s.date, s.area, { id: s.id, product: s.sheetType && s.sheetType !== s.area ? s.sheetType : 'Spray', target: (s.targets || []).join(', ') }); return }
+        lines.forEach((p, i) => add(s.date, s.area, {
+          id: `${s.id}:${i}`,
+          product: p.product,
+          rateOzM: p.basis === 'oz / M' ? p.rate : undefined,
+          rateOzA: p.basis === 'oz / A' ? p.rate : undefined,
+          target: p.target || (s.targets || []).join(', '),
+        }))
+      })
     return Object.values(byKey).sort((x, y) => x.date.localeCompare(y.date) || String(x.area).localeCompare(String(y.area)))
-  }, [apps, W, course])
+  }, [apps, sheets, W, course])
 
   // Next week's fertility sheets (planned feeds).
   const fertNext = useMemo(() => (
