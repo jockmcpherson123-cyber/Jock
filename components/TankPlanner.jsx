@@ -30,13 +30,14 @@ export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal =
   const picked = areaList.find((a) => a.name === areaName)
   const areaSqft = areaUnit === 'ac' ? (Number(areaInput) || 0) * SQFT_PER_ACRE : (Number(areaInput) || 0)
 
-  // Seed the total-area box from the picked area's stored size, but it's fully
-  // editable — the stored size is often per-tank coverage, so type the real
-  // total acreage for the whole area (e.g. all fairways).
+  // Each area remembers its own setup: when the area changes, seed the total-area
+  // box and the tank count from that area's current plan (editable). Stops one
+  // area's tank count from bleeding onto the others.
   useEffect(() => {
     const ar = areaList.find((a) => a.name === areaName)
     const sqft = Number(ar?.sqft) || 0
     setAreaInput(sqft ? String(areaUnit === 'ac' ? Math.round((sqft / SQFT_PER_ACRE) * 100) / 100 : Math.round(sqft)) : '')
+    if (ar && ar.tanks != null && isFinite(Number(ar.tanks)) && Number(ar.tanks) > 0) setTanks(Number(ar.tanks))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [areaName])
 

@@ -1269,9 +1269,18 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   apps.forEach((a) => { areaCounts[a.area] = (areaCounts[a.area] || 0) + 1 })
   const areaNames = Object.keys(areaCounts).sort()
   const visibleApps = areaFilter === 'all' ? apps : apps.filter((a) => a.area === areaFilter)
-  // Areas that actually carry planned sprays, with their size — fed to the Tank
-  // Planner on the Early Order so you can size tanks per area and order for it.
-  const plannerAreas = areaNames.map((name) => ({ name, sqft: Number(areaMatch(areas, name)?.sqft) || 0 }))
+  // Areas that carry planned sprays, each with its current tank count and the
+  // REAL total area it covers (area-per-tank × tanks), fed to the Tank Planner so
+  // every area remembers its own setup instead of sharing one tank number.
+  const plannerAreas = areaNames.map((name) => {
+    const areaApps = apps.filter((a) => a.area === name)
+    const withTanks = areaApps.find((a) => a.tanks != null && a.tanks !== '' && a.tanks !== 0 && a.tanks !== '0')
+    const curTanks = withTanks ? Number(withTanks.tanks) : null
+    const ar = areaMatch(areas, name)
+    const perTank = Number(withTanks?.sqftPerTankOverride) > 0 ? Number(withTanks.sqftPerTankOverride) : (Number(ar?.sqft) || 0)
+    const totalSqft = curTanks && perTank ? perTank * curTanks : (Number(ar?.sqft) || 0)
+    return { name, sqft: totalSqft, tanks: curTanks }
+  })
 
   // Derived groupings + a season summary for the redesigned browse views.
   const monthGroups = groupByMonth(visibleApps)
