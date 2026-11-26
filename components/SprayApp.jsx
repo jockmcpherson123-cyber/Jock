@@ -1688,13 +1688,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
       const s = sheets.find((x) => x.id === f.id)
       if (s) { setActiveSheet(s); setRoute('view'); focusHandled.current = `${nav.seq}:${f.id}` }
     }
-    // Opening a planned program spray from another page (e.g. the Spray Program
-    // calendar) hands us its planned applications; turn them into an editable
-    // sheet right here instead of just landing on the Annual Program.
-    if (f?.type === 'fromProgram' && Array.isArray(f.items) && f.items.length && !loading && focusHandled.current !== `${nav.seq}:fp`) {
-      createSheetFromProgram(f.items); focusHandled.current = `${nav.seq}:fp`
-    }
-  }, [nav, sheets, loading]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nav, sheets]) // eslint-disable-line react-hooks/exhaustive-deps
   const [deliveries, setDeliveries] = useState([])
   const [programApps, setProgramApps] = useState([]) // applications of the current program
   const [areas, setAreas] = useState({})
@@ -2105,6 +2099,19 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
     })
     setRoute('edit')
   }
+
+  // Opening a planned program spray from another page (e.g. the Spray Program
+  // calendar) hands us its planned applications via the nav focus; once this
+  // module's products/areas have loaded, turn them into an editable sheet right
+  // here instead of just landing on the Annual Program. Placed after the state
+  // and the handler are declared so nothing is referenced before it exists.
+  useEffect(() => {
+    const f = nav?.focus
+    if (f?.type === 'fromProgram' && Array.isArray(f.items) && f.items.length && !loading && focusHandled.current !== `${nav.seq}:fp`) {
+      createSheetFromProgram(f.items)
+      focusHandled.current = `${nav.seq}:fp`
+    }
+  }, [nav, loading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Scope the displayed sheets to the course picked in the global course bar
   // (by first-word match on the sheet's area). This filters the view only —
