@@ -70,6 +70,7 @@ export default function GreensMap({ user, nav }) {
   const [savingArea, setSavingArea] = useState(false)
   const [newArea, setNewArea] = useState(null) // {hole,type,name} while naming a freshly drawn shape
   const [snapOn, setSnapOn] = useState(true) // snap new corners onto existing areas' lines
+  const [penOn, setPenOn] = useState(false) // freehand pen: hold & drag to draw instead of tapping corners
   const [areaColors, setAreaColors] = useState({}) // per-area colour overrides (by area id)
   const [typeColors, setTypeColors] = useState({}) // per-TYPE default colour overrides
   const [showColors, setShowColors] = useState(false)
@@ -285,15 +286,52 @@ export default function GreensMap({ user, nav }) {
     areasLayerRef.current = grp
   }, [mapReady, tab, areas, selAreaId, showAreas, editing, drawing, areaColors, typeColors])
 
-  // Draw mode: collect taps as polygon corners.
+  // Draw mode (tap): each tap drops one corner. Off while the pen is active.
   useEffect(() => {
     const map = mapRef.current
-    if (!map || !drawing) return
+    if (!map || !drawing || penOn) return
     const onClick = (e) => { const ll = snapRef.current ? snapLatLng(e.latlng) : e.latlng; setDrawPts((p) => [...p, [ll.lat, ll.lng]]) }
     map.on('click', onClick)
     const el = map.getContainer(); const prev = el.style.cursor; el.style.cursor = 'crosshair'
     return () => { map.off('click', onClick); el.style.cursor = prev }
-  }, [drawing])
+  }, [drawing, penOn])
+
+  // Draw mode (pen): hold & drag to trace a freehand outline. Panning is paused
+  // so the drag draws; points are sampled every few pixels along the stroke.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !drawing || !penOn) return
+    const el = map.getContainer()
+    map.dragging.disable()
+    const prevCursor = el.style.cursor; el.style.cursor = 'crosshair'
+    let stroke = false, last = null
+    const addFrom = (ev) => { const ll = map.mouseEventToLatLng(ev); setDrawPts((p) => [...p, [ll.lat, ll.lng]]) }
+    const start = (ev) => {
+      if (ev.target?.closest?.('.leaflet-control')) return
+      if (ev.button != null && ev.button > 0) return
+      stroke = true; last = { x: ev.clientX, y: ev.clientY }
+      try { el.setPointerCapture?.(ev.pointerId) } catch {}
+      addFrom(ev); ev.preventDefault()
+    }
+    const move = (ev) => {
+      if (!stroke) return
+      const dx = ev.clientX - last.x, dy = ev.clientY - last.y
+      if (dx * dx + dy * dy < 16) return // ~4px sampling
+      last = { x: ev.clientX, y: ev.clientY }; addFrom(ev)
+    }
+    const end = (ev) => { if (!stroke) return; stroke = false; try { el.releasePointerCapture?.(ev.pointerId) } catch {} }
+    el.addEventListener('pointerdown', start)
+    el.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    return () => {
+      el.removeEventListener('pointerdown', start)
+      el.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      map.dragging.enable(); el.style.cursor = prevCursor
+    }
+  }, [drawing, penOn])
 
   // Draw preview (polygon + corner dots).
   useEffect(() => {
@@ -601,7 +639,8 @@ export default function GreensMap({ user, nav }) {
             {manage && <button onClick={() => setShowColors((v) => !v)} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full" style={showColors ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>Default colours</button>}
             {drawing && (
               <div className="flex items-center gap-2 ml-1">
-                <span className="font-body text-[12px]" style={{ color: FERN }}>Tap the map to drop corners ({drawPts.length})</span>
+                <span className="font-body text-[12px]" style={{ color: FERN }}>{penOn ? 'Hold & drag to draw' : 'Tap the map to drop corners'} ({drawPts.length})</span>
+                <button onClick={() => setPenOn((v) => !v)} title="Freehand pen — hold and drag to trace the outline instead of tapping corners" className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={penOn ? { backgroundColor: FOREST, color: '#fff' } : { border: `1px solid ${HAIR}`, color: INK_2 }}>Pen {penOn ? 'on' : 'off'}</button>
                 <button onClick={() => setSnapOn((v) => !v)} title="Snap new corners onto the lines of areas you've already drawn" className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={snapOn ? { backgroundColor: FOREST, color: '#fff' } : { border: `1px solid ${HAIR}`, color: INK_2 }}>Snap {snapOn ? 'on' : 'off'}</button>
                 <button onClick={followLine} disabled={drawPts.length < 2} title="Trace the rest of the shape along a neighbouring area's line so they share the exact border" className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-40" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>Follow line</button>
                 <button onClick={smoothDraw} disabled={drawPts.length < 3} title="Round the corners into smooth curves instead of straight lines (tap again for more)" className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-40" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>Smooth</button>
