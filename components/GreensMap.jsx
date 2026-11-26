@@ -64,6 +64,7 @@ export default function GreensMap({ user, nav }) {
   const [drawPts, setDrawPts] = useState([]) // [[lat,lon],…]
   const [editing, setEditing] = useState(false)
   const [editRing, setEditRing] = useState(null) // committed edit ring [[lon,lat],…]
+  const [editEpoch, setEditEpoch] = useState(0) // bump to rebuild edit vertices after a programmatic change
   const [liveSqft, setLiveSqft] = useState(null)  // sqft while dragging vertices
   const [showTotals, setShowTotals] = useState(false)
   const [savingArea, setSavingArea] = useState(false)
@@ -329,7 +330,7 @@ export default function GreensMap({ user, nav }) {
     })
     editLayerRef.current = grp
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, selAreaId])
+  }, [editing, selAreaId, editEpoch])
 
   const reloadImagery = async () => {
     const imgs = await cmdb.fetchImagery(courseId)
@@ -341,6 +342,61 @@ export default function GreensMap({ user, nav }) {
 
   const startDraw = () => { setSelAreaId(null); setEditing(false); setNewArea(null); setDrawPts([]); setDrawing(true) }
   const finishDraw = () => { if (drawPts.length >= 3) setNewArea({ hole: '', type: 'green', name: '' }) }
+  // Round the drawn outline into curves (Chaikin corner-cutting) instead of
+  // straight segments. Endpoints stay put so a "Follow line" close still lines up.
+  const smoothDraw = () => {
+    setDrawPts((pts) => {
+      if (pts.length < 3) return pts
+      let p = pts
+      for (let k = 0; k < 2; k++) {
+        if (p.length > 400) break
+        const out = [p[0]]
+        for (let i = 0; i < p.length - 1; i++) {
+          const a = p[i], b = p[i + 1]
+          out.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25])
+          out.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75])
+        }
+        out.push(p[p.length - 1])
+        p = out
+      }
+      return p
+    })
+  }
+  // While editing a saved shape: pull any vertex that sits close to another
+  // area's line exactly onto it, so shared borders zip together.
+  const snapNeighbours = () => {
+    const map = mapRef.current, L = LRef.current
+    if (!map || !L || !editRingRef.current) return
+    const THRESH_V = 22, THRESH_E = 18
+    const others = (areasRef.current || []).filter((a) => a.id !== selAreaId && a.ring?.length >= 2)
+    let moved = 0
+    const newRing = editRingRef.current.map(([lon, lat]) => {
+      const cp = map.latLngToContainerPoint({ lat, lng: lon })
+      let bestV = null, bestVd = THRESH_V
+      for (const a of others) for (const [olon, olat] of a.ring) { const p = map.latLngToContainerPoint({ lat: olat, lng: olon }); const d = Math.hypot(p.x - cp.x, p.y - cp.y); if (d < bestVd) { bestVd = d; bestV = [olon, olat] } }
+      if (bestV) { moved++; return bestV }
+      let bestE = null, bestEd = THRESH_E
+      for (const a of others) {
+        const pts = a.ring.map(([ol, oa]) => map.latLngToContainerPoint({ lat: oa, lng: ol }))
+        for (let i = 0; i < pts.length; i++) {
+          const A = pts[i], B = pts[(i + 1) % pts.length]
+          const dx = B.x - A.x, dy = B.y - A.y, len2 = dx * dx + dy * dy
+          let t = len2 ? ((cp.x - A.x) * dx + (cp.y - A.y) * dy) / len2 : 0
+          t = Math.max(0, Math.min(1, t))
+          const qx = A.x + t * dx, qy = A.y + t * dy
+          const d = Math.hypot(qx - cp.x, qy - cp.y)
+          if (d < bestEd) { bestEd = d; const ll = map.containerPointToLatLng(L.point(qx, qy)); bestE = [ll.lng, ll.lat] }
+        }
+      }
+      if (bestE) { moved++; return bestE }
+      return [lon, lat]
+    })
+    editRingRef.current = newRing
+    setEditRing(newRing.map((p) => [...p]))
+    setLiveSqft(geodesicAreaSqft(newRing))
+    setEditEpoch((e) => e + 1)
+    setNotice(moved ? `Snapped ${moved} point${moved > 1 ? 's' : ''} onto neighbouring lines.` : 'No neighbouring lines were close enough to snap.')
+  }
   // Close the open side of the shape along a neighbouring area's existing line,
   // so the two areas share the exact same border instead of hand-tracing it.
   const followLine = () => {
@@ -508,6 +564,7 @@ export default function GreensMap({ user, nav }) {
                 <span className="font-body text-[12px]" style={{ color: FERN }}>Tap the map to drop corners ({drawPts.length})</span>
                 <button onClick={() => setSnapOn((v) => !v)} title="Snap new corners onto the lines of areas you've already drawn" className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={snapOn ? { backgroundColor: FOREST, color: '#fff' } : { border: `1px solid ${HAIR}`, color: INK_2 }}>Snap {snapOn ? 'on' : 'off'}</button>
                 <button onClick={followLine} disabled={drawPts.length < 2} title="Trace the rest of the shape along a neighbouring area's line so they share the exact border" className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-40" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>Follow line</button>
+                <button onClick={smoothDraw} disabled={drawPts.length < 3} title="Round the corners into smooth curves instead of straight lines (tap again for more)" className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-40" style={{ border: `1px solid ${HAIR}`, color: FOREST }}>Smooth</button>
                 <button onClick={() => setDrawPts((p) => p.slice(0, -1))} disabled={!drawPts.length} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-40" style={{ border: `1px solid ${HAIR}`, color: INK_2 }}>Undo</button>
                 <button onClick={finishDraw} disabled={drawPts.length < 3} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Finish</button>
                 <button onClick={cancelDraw} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button>
@@ -531,7 +588,7 @@ export default function GreensMap({ user, nav }) {
           {selArea && (
             <AreaPanel
               area={selArea} editing={editing} liveSqft={liveSqft} manage={manage} busy={savingArea} color={colorOf(selArea)}
-              onEdit={startEdit} onSave={saveEdit} onCancelEdit={cancelEdit} onDelete={removeArea} onClose={() => { setSelAreaId(null); cancelEdit() }} onSaveDetails={saveAreaDetails} defColor={defColor}
+              onEdit={startEdit} onSave={saveEdit} onCancelEdit={cancelEdit} onDelete={removeArea} onClose={() => { setSelAreaId(null); cancelEdit() }} onSaveDetails={saveAreaDetails} onSnapNeighbours={snapNeighbours} defColor={defColor}
             />
           )}
 
@@ -717,7 +774,7 @@ function NewAreaForm({ value, onChange, sqft, busy, onSave, onCancel, defColor }
   )
 }
 
-function AreaPanel({ area, editing, liveSqft, manage, busy, color, onEdit, onSave, onCancelEdit, onDelete, onClose, onSaveDetails, defColor }) {
+function AreaPanel({ area, editing, liveSqft, manage, busy, color, onEdit, onSave, onCancelEdit, onDelete, onClose, onSaveDetails, onSnapNeighbours, defColor }) {
   const dc = defColor || typeColor
   const [hist, setHist] = useState([])
   const [details, setDetails] = useState(null) // {type,name,color} while renaming/recolouring
@@ -776,6 +833,7 @@ function AreaPanel({ area, editing, liveSqft, manage, busy, color, onEdit, onSav
           ) : (
             <>
               <span className="font-body text-[11.5px] self-center" style={{ color: FERN }}>Drag the dots to reshape</span>
+              {onSnapNeighbours && <button onClick={onSnapNeighbours} title="Pull any point sitting close to another area's line exactly onto it" className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: FOREST, border: `1px solid ${HAIR}` }}>Snap to lines</button>}
               <button onClick={onSave} disabled={busy} className="font-body text-[12px] font-bold px-4 py-1.5 rounded-lg text-white disabled:opacity-40 ml-auto" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save'}</button>
               <button onClick={onCancelEdit} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button>
             </>
