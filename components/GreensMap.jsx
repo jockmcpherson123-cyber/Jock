@@ -24,9 +24,12 @@ import { resolveTarget } from '@/lib/coursemap/targets'
 import { parseWorldFile, parseNearmapName, upperLeftFromCenter, worldFileCorners, geodesicAreaSqft, perimeterFt } from '@/lib/coursemap/geo'
 import { formatDate, formatNumber } from '@/lib/format'
 
-const AREA_TYPES = [['green', 'Green', '#22C55E'], ['approach', 'Approach', '#A3E635'], ['fairway', 'Fairway', '#4AD07D'], ['tee', 'Tee', '#14B8A6'], ['bunker', 'Bunker', '#E8D8A0'], ['other', 'Other', '#9AA6B2']]
+const AREA_TYPES = [['green', 'Green', '#22C55E'], ['approach', 'Approach', '#A3E635'], ['fairway', 'Fairway', '#4AD07D'], ['tee', 'Tee', '#14B8A6'], ['rough', 'Rough', '#5E8C4E'], ['native', 'Natives', '#B59A6B'], ['bunker', 'Bunker', '#E8D8A0'], ['water', 'Water', '#3B82C4'], ['other', 'Other', '#9AA6B2']]
 const typeColor = (t) => (AREA_TYPES.find((x) => x[0] === t) || [])[2] || '#9AA6B2'
-const typeLabel = (t) => (AREA_TYPES.find((x) => x[0] === t) || [, t])[1]
+// Unknown (custom) types show their own text as the label.
+const typeLabel = (t) => { const f = AREA_TYPES.find((x) => x[0] === t); return f ? f[1] : (t || 'Area') }
+// A palette for recolouring any shape.
+const SWATCHES = ['#22C55E', '#4AD07D', '#5E8C4E', '#A3E635', '#14B8A6', '#B59A6B', '#E8D8A0', '#3B82C4', '#C9A84C', '#E0714E', '#9333EA', '#9AA6B2']
 
 const PAGE = 'max-w-[1200px] mx-auto px-4 sm:px-6'
 const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -66,6 +69,7 @@ export default function GreensMap({ user, nav }) {
   const [savingArea, setSavingArea] = useState(false)
   const [newArea, setNewArea] = useState(null) // {hole,type,name} while naming a freshly drawn shape
   const [snapOn, setSnapOn] = useState(true) // snap new corners onto existing areas' lines
+  const [areaColors, setAreaColors] = useState({}) // per-area colour overrides (by area id)
 
   const LRef = useRef(null)
   const mapRef = useRef(null)
@@ -114,6 +118,15 @@ export default function GreensMap({ user, nav }) {
     }
     return bestE || latlng
   }
+  // Per-shape colours live in the course settings (no DB change). colorOf falls
+  // back to the type's default colour.
+  useEffect(() => { db.fetchSettings().then((s) => setAreaColors(s.courseInfo?.areaColors || {})).catch(() => {}) }, [])
+  const saveAreaColor = async (areaId, color) => {
+    if (!areaId) return
+    setAreaColors((prev) => ({ ...prev, [areaId]: color }))
+    try { const s = await db.fetchSettings(); const ci = { ...(s.courseInfo || {}), areaColors: { ...(s.courseInfo?.areaColors || {}), [areaId]: color } }; await db.saveSettings({ courseInfo: ci }) } catch (e) { console.error(e) }
+  }
+  const colorOf = (a) => areaColors[a?.id] || typeColor(a?.type)
 
   // When the menu switches between Irrigation → Greens Today and Resources →
   // Course Map, re-sync the active tab (this component stays mounted across both).
@@ -248,12 +261,13 @@ export default function GreensMap({ user, nav }) {
     for (const a of areas) {
       if (editing && a.id === selAreaId) continue // edit overlay draws this one
       const sel = a.id === selAreaId
-      const poly = L.polygon(a.ring.map(([lon, lat]) => [lat, lon]), { color: typeColor(a.type), weight: sel ? 3 : 1.5, opacity: 0.95, fillOpacity: sel ? 0.35 : 0.15 })
+      const col = colorOf(a)
+      const poly = L.polygon(a.ring.map(([lon, lat]) => [lat, lon]), { color: col, fillColor: col, weight: sel ? 3 : 1.5, opacity: 0.95, fillOpacity: sel ? 0.35 : 0.15 })
       poly.on('click', (e) => { L.DomEvent.stop(e); if (!drawing) { setSelAreaId(a.id); setEditing(false) } })
       poly.addTo(grp)
     }
     areasLayerRef.current = grp
-  }, [mapReady, tab, areas, selAreaId, showAreas, editing, drawing])
+  }, [mapReady, tab, areas, selAreaId, showAreas, editing, drawing, areaColors])
 
   // Draw mode: collect taps as polygon corners.
   useEffect(() => {
@@ -318,10 +332,12 @@ export default function GreensMap({ user, nav }) {
     setSavingArea(true)
     try {
       const ring = drawPts.map(([lat, lon]) => [lon, lat])
-      await cmdb.saveArea({
-        clubId: ctx.club.id, courseId, hole: newArea.hole ? Number(newArea.hole) : null, type: newArea.type,
-        name: newArea.name || `${typeLabel(newArea.type)}${newArea.hole ? ' ' + newArea.hole : ''}`, ring, sqft: geodesicAreaSqft(ring),
+      const type = newArea.type || 'other'
+      const saved = await cmdb.saveArea({
+        clubId: ctx.club.id, courseId, hole: newArea.hole ? Number(newArea.hole) : null, type,
+        name: newArea.name || `${typeLabel(type)}${newArea.hole ? ' ' + newArea.hole : ''}`, ring, sqft: geodesicAreaSqft(ring),
       })
+      if (newArea.color && saved?.id) await saveAreaColor(saved.id, newArea.color)
       await reloadAreas()
     } catch (e) { console.error(e) }
     setSavingArea(false); setDrawing(false); setDrawPts([]); setNewArea(null)
@@ -343,6 +359,18 @@ export default function GreensMap({ user, nav }) {
     if (!selArea || !window.confirm(`Delete ${selArea.name || typeLabel(selArea.type)}? This can't be undone.`)) return
     setSavingArea(true)
     try { await cmdb.deleteArea(selArea.id); setSelAreaId(null); setEditing(false); await reloadAreas() } catch (e) { console.error(e) }
+    setSavingArea(false)
+  }
+  // Rename / re-type / recolour an existing shape (keeps its outline).
+  const saveAreaDetails = async (patch) => {
+    if (!selArea) return
+    setSavingArea(true)
+    try {
+      const type = patch.type || selArea.type || 'other'
+      await cmdb.saveArea({ id: selArea.id, clubId: ctx.club.id, courseId, hole: selArea.hole, type, name: patch.name || `${typeLabel(type)}${selArea.hole ? ' ' + selArea.hole : ''}`, ring: selArea.ring, sqft: selArea.sqft ?? geodesicAreaSqft(selArea.ring) })
+      if (patch.color) await saveAreaColor(selArea.id, patch.color)
+      await reloadAreas()
+    } catch (e) { console.error(e) }
     setSavingArea(false)
   }
 
@@ -427,8 +455,8 @@ export default function GreensMap({ user, nav }) {
 
           {selArea && (
             <AreaPanel
-              area={selArea} editing={editing} liveSqft={liveSqft} manage={manage} busy={savingArea}
-              onEdit={startEdit} onSave={saveEdit} onCancelEdit={cancelEdit} onDelete={removeArea} onClose={() => { setSelAreaId(null); cancelEdit() }}
+              area={selArea} editing={editing} liveSqft={liveSqft} manage={manage} busy={savingArea} color={colorOf(selArea)}
+              onEdit={startEdit} onSave={saveEdit} onCancelEdit={cancelEdit} onDelete={removeArea} onClose={() => { setSelAreaId(null); cancelEdit() }} onSaveDetails={saveAreaDetails}
             />
           )}
 
@@ -553,23 +581,55 @@ export function AddPhoto({ courses, clubId, defaultCourseId, onClose, onDone }) 
   )
 }
 
+// A type dropdown that also lets you type your own type, plus a colour picker.
+function TypeColorRow({ value, onChange }) {
+  const isCustom = !AREA_TYPES.some((x) => x[0] === value.type)
+  const curColor = value.color || typeColor(value.type)
+  const pickType = (t) => {
+    if (t === '__custom__') { onChange({ ...value, type: '' }); return }
+    // follow the new type's default colour unless the user set a custom one
+    onChange({ ...value, type: t, color: value.color && value.colorManual ? value.color : undefined })
+  }
+  return (
+    <>
+      <div>
+        <label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Type</label>
+        <select value={isCustom ? '__custom__' : value.type} onChange={(e) => pickType(e.target.value)} className="font-body text-[12px] px-2 py-1.5 rounded-lg bg-white mt-0.5" style={{ border: `1px solid ${HAIR}` }}>
+          {AREA_TYPES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          <option value="__custom__">+ Custom…</option>
+        </select>
+      </div>
+      {isCustom && (
+        <div>
+          <label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Custom type</label>
+          <input value={value.type} onChange={(e) => onChange({ ...value, type: e.target.value })} placeholder="e.g. Wetland" className="w-28 font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} />
+        </div>
+      )}
+      <div>
+        <label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Colour</label>
+        <div className="flex items-center gap-1 mt-1">
+          {SWATCHES.map((c) => (
+            <button key={c} type="button" onClick={() => onChange({ ...value, color: c, colorManual: true })} aria-label={c} className="w-5 h-5 rounded" style={{ backgroundColor: c, outline: curColor.toLowerCase() === c.toLowerCase() ? `2px solid ${FOREST}` : 'none', outlineOffset: 1 }} />
+          ))}
+          <input type="color" value={/^#([0-9a-f]{6})$/i.test(curColor) ? curColor : '#4AD07D'} onChange={(e) => onChange({ ...value, color: e.target.value, colorManual: true })} className="w-6 h-6 p-0 border-0 bg-transparent" title="Custom colour" />
+        </div>
+      </div>
+    </>
+  )
+}
+
 function NewAreaForm({ value, onChange, sqft, busy, onSave, onCancel }) {
   return (
     <div className="rounded-2xl border p-3 mb-2" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
       <div className="flex flex-wrap items-end gap-3">
-        <div>
-          <label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Type</label>
-          <select value={value.type} onChange={(e) => onChange({ ...value, type: e.target.value })} className="font-body text-[12px] px-2 py-1.5 rounded-lg bg-white mt-0.5" style={{ border: `1px solid ${HAIR}` }}>
-            {AREA_TYPES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-          </select>
-        </div>
+        <TypeColorRow value={value} onChange={onChange} />
         <div>
           <label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Hole</label>
           <input value={value.hole} onChange={(e) => onChange({ ...value, hole: e.target.value.replace(/[^0-9]/g, '') })} placeholder="—" className="w-16 font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} />
         </div>
         <div className="flex-1 min-w-[140px]">
           <label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Name</label>
-          <input value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} placeholder={`${typeLabel(value.type)}${value.hole ? ' ' + value.hole : ''}`} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} />
+          <input value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} placeholder={`${typeLabel(value.type) || 'Area'}${value.hole ? ' ' + value.hole : ''}`} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} />
         </div>
         <div className="font-body text-[13px]" style={{ color: INK }}><b>{formatNumber(Math.round(sqft))}</b> sqft</div>
         <div className="flex gap-2">
@@ -581,8 +641,10 @@ function NewAreaForm({ value, onChange, sqft, busy, onSave, onCancel }) {
   )
 }
 
-function AreaPanel({ area, editing, liveSqft, manage, busy, onEdit, onSave, onCancelEdit, onDelete, onClose }) {
+function AreaPanel({ area, editing, liveSqft, manage, busy, color, onEdit, onSave, onCancelEdit, onDelete, onClose, onSaveDetails }) {
   const [hist, setHist] = useState([])
+  const [details, setDetails] = useState(null) // {type,name,color} while renaming/recolouring
+  useEffect(() => { setDetails(null) }, [area.id])
   useEffect(() => { let live = true; cmdb.fetchAreaHistory(area.id).then((h) => { if (live) setHist(h) }); return () => { live = false } }, [area.id])
   const sqft = editing && liveSqft != null ? liveSqft : (area.sqft ?? geodesicAreaSqft(area.ring))
   const acres = sqft / 43560
@@ -592,7 +654,7 @@ function AreaPanel({ area, editing, liveSqft, manage, busy, onEdit, onSave, onCa
     <div className="rounded-2xl border p-4 mt-3" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: typeColor(area.type) }} />
+          <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: color || typeColor(area.type) }} />
           <div>
             <p className="font-display text-[15px] font-semibold" style={{ color: FOREST }}>{area.name || `${typeLabel(area.type)}${area.hole ? ' ' + area.hole : ''}`}</p>
             <p className="font-body text-[11px]" style={{ color: INK_3 }}>{typeLabel(area.type)}{area.hole ? ` · hole ${area.hole}` : ''}</p>
@@ -600,6 +662,21 @@ function AreaPanel({ area, editing, liveSqft, manage, busy, onEdit, onSave, onCa
         </div>
         <button onClick={onClose} className="font-body text-xl px-2" style={{ color: INK_3 }} aria-label="Close">×</button>
       </div>
+      {details && (
+        <div className="rounded-xl border p-2.5 mt-3" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
+          <div className="flex flex-wrap items-end gap-3">
+            <TypeColorRow value={details} onChange={setDetails} />
+            <div className="flex-1 min-w-[120px]">
+              <label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>Name</label>
+              <input value={details.name} onChange={(e) => setDetails({ ...details, name: e.target.value })} placeholder={typeLabel(details.type) || 'Area'} className="w-full font-body text-[12px] px-2 py-1.5 rounded-lg mt-0.5" style={{ border: `1px solid ${HAIR}` }} />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setDetails(null)} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button>
+              <button onClick={() => { onSaveDetails && onSaveDetails(details); setDetails(null) }} disabled={busy} className="font-body text-[12px] font-bold px-4 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-end gap-4 mt-2">
         <div>
           <p className="font-display text-2xl font-bold" style={{ color: INK }}>{formatNumber(Math.round(sqft))}<span className="font-body text-[13px] font-normal" style={{ color: INK_3 }}> sqft</span></p>
@@ -616,6 +693,7 @@ function AreaPanel({ area, editing, liveSqft, manage, busy, onEdit, onSave, onCa
           {!editing ? (
             <>
               <button onClick={onEdit} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg text-white" style={{ backgroundColor: FOREST }}>Edit shape</button>
+              <button onClick={() => setDetails({ type: area.type, name: area.name || '', color: color || typeColor(area.type), colorManual: !!color })} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: FOREST, border: `1px solid ${HAIR}` }}>Rename / colour</button>
               <button onClick={onDelete} disabled={busy} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ color: '#B23A2E', border: `1px solid ${HAIR}` }}>Delete</button>
             </>
           ) : (
