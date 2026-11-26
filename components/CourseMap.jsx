@@ -238,6 +238,48 @@ export default function CourseMap({ user, manage }) {
   const areaDrawRef = useRef(false)
   const areaDrawLayerRef = useRef(null)
   const areaEditLayerRef = useRef(null)
+  // Snap a new area corner onto an existing area's vertex or edge, so neighbours
+  // (fairway ↔ bunker ↔ rough) share the exact same boundary — no gaps/overlaps.
+  const [snapOn, setSnapOn] = useState(true)
+  const snapRef = useRef(true)
+  const sharedAreasRef = useRef([])
+  const areaDrawPtsRef = useRef([])
+  useEffect(() => { snapRef.current = snapOn }, [snapOn])
+  useEffect(() => { sharedAreasRef.current = sharedAreas }, [sharedAreas])
+  useEffect(() => { areaDrawPtsRef.current = areaDrawPts }, [areaDrawPts])
+  // Given a click, return the nearest existing corner (preferred) or point on an
+  // existing edge within ~16px — else the click itself. Reads refs so it stays
+  // current inside the map's click handler.
+  const snapLatLng = (latlng) => {
+    const map = mainMap.current, L = LRef.current
+    if (!map || !L) return latlng
+    const THRESH = 16
+    const cp = map.latLngToContainerPoint(latlng)
+    const px = (ll) => map.latLngToContainerPoint(ll)
+    let bestV = null, bestVd = THRESH
+    const areasList = sharedAreasRef.current || []
+    const ownPts = (areaDrawPtsRef.current || []).map(([lat, lon]) => ({ lat, lng: lon }))
+    const tryVertex = (ll) => { const p = px(ll); const d = Math.hypot(p.x - cp.x, p.y - cp.y); if (d < bestVd) { bestVd = d; bestV = ll } }
+    for (const a of areasList) { if (!a.ring?.length) continue; for (const [lon, lat] of a.ring) tryVertex({ lat, lng: lon }) }
+    ownPts.forEach(tryVertex)
+    if (bestV) return bestV
+    // No corner close enough — snap onto the nearest edge (the "line").
+    let bestE = null, bestEd = THRESH
+    for (const a of areasList) {
+      if (!a.ring || a.ring.length < 2) continue
+      const pts = a.ring.map(([lon, lat]) => px({ lat, lng: lon }))
+      for (let i = 0; i < pts.length; i++) {
+        const A = pts[i], B = pts[(i + 1) % pts.length]
+        const dx = B.x - A.x, dy = B.y - A.y, len2 = dx * dx + dy * dy
+        let t = len2 ? ((cp.x - A.x) * dx + (cp.y - A.y) * dy) / len2 : 0
+        t = Math.max(0, Math.min(1, t))
+        const qx = A.x + t * dx, qy = A.y + t * dy
+        const d = Math.hypot(qx - cp.x, qy - cp.y)
+        if (d < bestEd) { bestEd = d; bestE = map.containerPointToLatLng(L.point(qx, qy)) }
+      }
+    }
+    return bestE || latlng
+  }
   const areaEditRingRef = useRef(null)
   useEffect(() => { drawRefState.current = draw }, [draw])
   useEffect(() => { eraserRef.current = eraser }, [eraser])
@@ -609,7 +651,7 @@ export default function CourseMap({ user, manage }) {
     const map = mainMap.current
     if (!map) return
     const handler = (e) => {
-      if (areaDrawRef.current) { setAreaDrawPts((p) => [...p, [e.latlng.lat, e.latlng.lng]]); return }
+      if (areaDrawRef.current) { const ll = snapRef.current ? snapLatLng(e.latlng) : e.latlng; setAreaDrawPts((p) => [...p, [ll.lat, ll.lng]]); return }
       if (moveRef.current) { placeRef.current?.(e.latlng, 'relocate'); return }
       if (drawRefState.current) { setDraw((d) => (d ? { ...d, pts: [...d.pts, [e.latlng.lat, e.latlng.lng]] } : d)); return }
       if (eraserRef.current) { eraseNearestPipe(e.latlng); return }
@@ -1238,6 +1280,7 @@ export default function CourseMap({ user, manage }) {
             {areaMode === 'draw' && (
               <div className="absolute z-[650] top-2 left-1/2 -translate-x-1/2 bg-white/95 rounded-xl shadow px-2.5 py-2 flex flex-wrap items-center gap-2">
                 <span className="font-body text-[12px] font-bold" style={{ color: FERN }}>Tap corners ({areaDrawPts.length})</span>
+                <button onClick={() => setSnapOn((v) => !v)} title="Snap new corners onto the lines of areas you've already drawn" className="font-body text-[12px] font-bold px-2.5 py-1 rounded-lg" style={snapOn ? { backgroundColor: FOREST, color: '#fff' } : { border: '1px solid #E2E8E4', color: '#475569' }}>Snap {snapOn ? 'on' : 'off'}</button>
                 <button onClick={() => setAreaDrawPts((p) => p.slice(0, -1))} disabled={!areaDrawPts.length} className="font-body text-[12px] font-bold px-2.5 py-1 rounded-lg disabled:opacity-40" style={{ border: '1px solid #E2E8E4', color: '#475569' }}>Undo</button>
                 <button onClick={finishAreaDraw} disabled={areaDrawPts.length < 3} className="font-body text-[12px] font-bold px-3 py-1 rounded-lg text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Finish</button>
                 <button onClick={cancelAreaDraw} className="font-body text-[12px] font-bold px-2.5 py-1 rounded-lg" style={{ color: '#475569' }}>Cancel</button>
