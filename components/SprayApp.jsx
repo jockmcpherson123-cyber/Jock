@@ -888,14 +888,14 @@ function HomeLanding({ clubName, onPickId }) {
   return (
     <LandingShell clubName={clubName} title="Home"
       right={<a href="/command" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: HAIR, backgroundColor: 'white' }} title="Open the wide Command Center on a monitor or shop TV"><BarChart3 size={13} /> Command Center ↗</a>}>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-4">
+      <div className="grid gap-4 lg:grid-cols-3 min-w-0">
+        <div className="lg:col-span-2 space-y-4 min-w-0">
           <SprayWindowStrip current={wx.current} today={band} hasLocation={hasLocation} onGoWeather={() => onPickId('weather')} sky={forecast7[0]?.code != null ? (weatherCodeInfo(forecast7[0].code)?.label || '') : ''} />
           <ForecastWeek days={forecast7} total={rainWeekFc} />
           <HomeCalendar events={events} timeoff={timeoff} today={today} onAdd={() => setAddOpen(true)}
             onDeleteEvent={(id) => saveEvents(events.filter((e) => e.id !== id))} />
         </div>
-        <div className="space-y-4">
+        <div className="space-y-4 min-w-0">
           <SoilTempCard soilNow={soilNow} openWins={openWins} onPickId={onPickId} />
           <RainTotalsCard week={rainWeek} month={rainMonth} year={rain.ytd} />
           <NeedsAttention lowStock={lowStock} licAlerts={licAlerts} comp={compGaps} openJobs={openJobs} onPickId={onPickId} />
@@ -1199,8 +1199,8 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
     <LandingShell clubName={clubName} title="This week's sprays"
       intro={`Both courses · ${landMD(sun)} – ${landMD(sat)} · every spray, any area`}
       right={<button onClick={() => onGo && onGo('spray', 'list', { type: 'new' })} className="font-body text-xs font-bold px-3.5 py-2 rounded-full inline-flex items-center gap-1.5 text-white" style={{ backgroundColor: FOREST }}><Plus size={14} /> New spray sheet</button>}>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-4">
+      <div className="grid gap-4 lg:grid-cols-3 min-w-0">
+        <div className="lg:col-span-2 space-y-4 min-w-0">
           <div className="bg-white rounded-2xl border shadow-sm overflow-hidden" style={{ borderColor: HAIR }}>
             {rows.length === 0 ? (
               <p className="font-body text-[13px] p-6 text-center" style={{ color: INK_3 }}>No sprays or fert sheets dated this week yet.</p>
@@ -1485,8 +1485,8 @@ function IrrigationLanding({ clubName, onPickId, course = '', courses = [] }) {
 
   return (
     <LandingShell clubName={clubName} title="Irrigation" intro={LANDING_INTRO.irrigation}>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-4">
+      <div className="grid gap-4 lg:grid-cols-3 min-w-0">
+        <div className="lg:col-span-2 space-y-4 min-w-0">
           <div className="grid grid-cols-3 gap-3">
             <ETTile label="ET today" value={etToday != null ? `${(Math.round(etToday * 100) / 100).toFixed(2)}"` : '—'} />
             <ETTile label="ET tomorrow" value={etTom != null ? `${(Math.round(etTom * 100) / 100).toFixed(2)}"` : '—'} />
