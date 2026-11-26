@@ -1002,13 +1002,16 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   }
   // Tank Planner → Early Order: set the chosen tank count on every planned spray
   // in an area, so the order quantities (rate × area × tanks) order for it.
-  const applyTanksToArea = async (areaName, tanks) => {
+  const applyTanksToArea = async (areaName, tanks, _waterRate, perTankSqft) => {
     const nt = Number(tanks)
+    const spt = Number(perTankSqft) > 0 ? Math.round(Number(perTankSqft)) : null
     // Leave deliberately-skipped sprays (tanks 0) alone; set the rest.
     const targets = apps.filter((a) => a.area === areaName && a.tanks !== 0 && a.tanks !== '0')
     if (!targets.length) { showToast(`No planned sprays in ${areaName}`); return }
     try {
-      for (const a of targets) await db.upsertApplication({ ...a, tanks: nt, tanksManual: true, programId: activeProgram.id })
+      // Set the tank count and, from the planner's total area, the area-per-tank
+      // override — so rate × area/1000 × tanks orders for the whole acreage.
+      for (const a of targets) await db.upsertApplication({ ...a, tanks: nt, tanksManual: true, ...(spt ? { sqftPerTankOverride: spt } : {}), programId: activeProgram.id })
       setAllApps(await db.fetchApplications(activeProgram.id))
       showToast(`Set ${nt % 1 === 0 ? nt : nt.toFixed(1)} tank${nt === 1 ? '' : 's'} on ${targets.length} spray${targets.length === 1 ? '' : 's'} in ${areaName}`)
     } catch (e) { console.error(e); showToast('Could not update tanks') }

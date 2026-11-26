@@ -5,7 +5,7 @@
 // you don't run short mid-pass, and the Early Order quantities fall out of the
 // tank count. Lives on the Annual Program; can push the chosen tank count onto
 // every planned spray in the area.
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp, Beaker } from 'lucide-react'
 import { FOREST, FERN, GOLD, HAIR, INK, INK_2, INK_3, RED, AMBER, PAPER } from '@/lib/theme'
 
@@ -19,8 +19,8 @@ export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal =
   const [open, setOpen] = useState(true)
   const areaList = (areas || []).filter((a) => a && a.name)
   const [areaName, setAreaName] = useState(areaList[0]?.name || '')
-  const [manualArea, setManualArea] = useState('') // used when "— type an area size —" is picked
-  const [areaUnit, setAreaUnit] = useState('ft')
+  const [areaUnit, setAreaUnit] = useState('ac')
+  const [areaInput, setAreaInput] = useState('') // the TOTAL area for this spot, editable
   const [tankGal, setTankGal] = useState(String(defaultTankGal))
   const [target, setTarget] = useState('1.0')
   const [spare, setSpare] = useState('10')
@@ -28,9 +28,24 @@ export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal =
   const [applied, setApplied] = useState(null)
 
   const picked = areaList.find((a) => a.name === areaName)
-  const areaSqft = areaName === '__manual__'
-    ? (areaUnit === 'ac' ? (Number(manualArea) || 0) * SQFT_PER_ACRE : (Number(manualArea) || 0))
-    : (Number(picked?.sqft) || 0)
+  const areaSqft = areaUnit === 'ac' ? (Number(areaInput) || 0) * SQFT_PER_ACRE : (Number(areaInput) || 0)
+
+  // Seed the total-area box from the picked area's stored size, but it's fully
+  // editable — the stored size is often per-tank coverage, so type the real
+  // total acreage for the whole area (e.g. all fairways).
+  useEffect(() => {
+    const ar = areaList.find((a) => a.name === areaName)
+    const sqft = Number(ar?.sqft) || 0
+    setAreaInput(sqft ? String(areaUnit === 'ac' ? Math.round((sqft / SQFT_PER_ACRE) * 100) / 100 : Math.round(sqft)) : '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areaName])
+
+  const switchUnit = (u) => {
+    if (u === areaUnit) return
+    const sqft = areaSqft
+    setAreaUnit(u)
+    setAreaInput(sqft ? String(u === 'ac' ? Math.round((sqft / SQFT_PER_ACRE) * 100) / 100 : Math.round(sqft)) : '')
+  }
   const ts = Number(tankGal) || 0
   const tgt = Number(target) || 0
   const minSpare = Number(spare) || 0
@@ -74,8 +89,9 @@ export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal =
   const toneBg = { good: BAND, warn: GOLD_WASH, bad: '#FBEAE7' }
 
   const apply = () => {
-    if (!onApplyTanks || areaName === '__manual__' || !picked) return
-    onApplyTanks(picked.name, tanks, r2(waterRate))
+    if (!onApplyTanks || !picked || !(tanks > 0)) return
+    const perTank = tanks > 0 ? Math.round(areaSqft / tanks) : 0
+    onApplyTanks(picked.name, tanks, r2(waterRate), perTank)
     setApplied(`${tanks % 1 === 0 ? tanks : tanks.toFixed(1)} tank${tanks === 1 ? '' : 's'} set on ${picked.name}`)
     setTimeout(() => setApplied(null), 3500)
   }
@@ -102,28 +118,20 @@ export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal =
             <div>
               <label className="block mb-1" style={label10}>Area</label>
               <select value={areaName} onChange={(e) => { setAreaName(e.target.value); setApplied(null) }} style={{ ...numInput }}>
-                {areaList.map((a) => <option key={a.name} value={a.name}>{a.name}{a.sqft ? ` · ${fmtInt(a.sqft)} sq ft` : ''}</option>)}
-                <option value="__manual__">— type an area size —</option>
+                {areaList.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
               </select>
             </div>
-            {areaName === '__manual__' ? (
-              <div>
-                <label className="block mb-1" style={label10}>Area total</label>
-                <div className="flex items-center gap-2">
-                  <input inputMode="decimal" value={manualArea} onChange={(e) => setManualArea(e.target.value)} placeholder="e.g. 300000" style={{ ...numInput }} />
-                  <div className="inline-flex rounded-lg overflow-hidden shrink-0" style={{ border: `1px solid ${HAIR}` }}>
-                    {['ft', 'ac'].map((u) => (
-                      <button key={u} type="button" onClick={() => setAreaUnit(u)} className="font-body text-[11px] font-bold px-2.5 py-2" style={areaUnit === u ? { backgroundColor: FOREST, color: PAPER } : { backgroundColor: 'white', color: INK_3 }}>{u === 'ft' ? 'sq ft' : 'acres'}</button>
-                    ))}
-                  </div>
+            <div>
+              <label className="block mb-1" style={label10}>Total area <span className="normal-case tracking-normal" style={{ color: INK_3, fontWeight: 500 }}>· the whole spot</span></label>
+              <div className="flex items-center gap-2">
+                <input inputMode="decimal" value={areaInput} onChange={(e) => { setAreaInput(e.target.value); setApplied(null) }} placeholder={areaUnit === 'ac' ? 'e.g. 42.7' : 'e.g. 1859000'} style={{ ...numInput }} />
+                <div className="inline-flex rounded-lg overflow-hidden shrink-0" style={{ border: `1px solid ${HAIR}` }}>
+                  {['ac', 'ft'].map((u) => (
+                    <button key={u} type="button" onClick={() => switchUnit(u)} className="font-body text-[11px] font-bold px-2.5 py-2" style={areaUnit === u ? { backgroundColor: FOREST, color: PAPER } : { backgroundColor: 'white', color: INK_3 }}>{u === 'ft' ? 'sq ft' : 'acres'}</button>
+                  ))}
                 </div>
               </div>
-            ) : (
-              <div>
-                <label className="block mb-1" style={label10}>Area size</label>
-                <div className="font-display text-lg font-semibold" style={{ color: FOREST }}>{areaSqft > 0 ? `${fmtInt(areaSqft)} sq ft` : '—'}<span className="font-body text-[11px] font-normal" style={{ color: INK_3 }}>{areaSqft > 0 ? ` · ${r2(areaSqft / SQFT_PER_ACRE)} ac` : ''}</span></div>
-              </div>
-            )}
+            </div>
             <div>
               <label className="block mb-1" style={label10}>Tank size (gal)</label>
               <input inputMode="decimal" value={tankGal} onChange={(e) => setTankGal(e.target.value)} style={{ ...numInput }} />
@@ -186,10 +194,10 @@ export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal =
           {/* apply */}
           {onApplyTanks && (
             <div className="mt-4 flex items-center gap-3 flex-wrap">
-              <button type="button" onClick={apply} disabled={areaName === '__manual__' || !picked || !(tanks > 0)} className="font-body text-[13px] font-bold px-4 py-2.5 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>
-                Set {tanks % 1 === 0 ? tanks : tanks.toFixed(1)} tank{tanks === 1 ? '' : 's'} on {areaName === '__manual__' ? 'this area' : areaName}
+              <button type="button" onClick={apply} disabled={!picked || !(tanks > 0) || !(areaSqft > 0)} className="font-body text-[13px] font-bold px-4 py-2.5 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>
+                Set {tanks % 1 === 0 ? tanks : tanks.toFixed(1)} tank{tanks === 1 ? '' : 's'} on {areaName}
               </button>
-              <span className="font-body text-[11px]" style={{ color: INK_3 }}>Writes the tank count onto every planned spray in the area, so the Early Order orders for it.</span>
+              <span className="font-body text-[11px]" style={{ color: INK_3 }}>Writes the tank count and area‑per‑tank onto every planned spray in the area, so the Early Order orders for the whole acreage.</span>
               {applied && <span className="font-body text-[12px] font-bold" style={{ color: FERN }}>✓ {applied}</span>}
             </div>
           )}
