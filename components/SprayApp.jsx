@@ -3814,6 +3814,13 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
     // Products already in the tank float to the top (shown ticked), then A–Z.
     .sort((a, b) => (addedNames.has(b.name) - addedNames.has(a.name)) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
   const builtRows = sortByMixOrder(s.products.filter((p) => p.product), (p) => products.find((pr) => pr.name === p.product), courseInfo.mixOrder)
+  // The sheet reads like a lined tank-mix sheet: filled rows (mix order) first,
+  // then any blank lines still waiting for a product typed into them.
+  const blankRows = (s.products || []).filter((p) => !p.product)
+  const gridRows = [...builtRows, ...blankRows]
+  const productNames = products.map((pr) => pr.name)
+  // Add an empty product line to type into (the "+ Add product line" button).
+  const addBlankRow = () => setS((prev) => ({ ...prev, products: [...(prev.products || []), { id: uid(), product: '', rate: '', forceGal: false }] }))
   // Columns shared by the grid header and every product row.
   const GRID_COLS = '24px minmax(104px,1.2fr) 78px 86px minmax(92px,1.1fr) 92px 78px 26px'
 
@@ -3921,44 +3928,20 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
             <FieldLabel noMargin>Products</FieldLabel>
             <span className="font-body text-[11px] text-slate-400">{addedNames.size} in tank</span>
           </div>
-          <div className="lg:flex lg:gap-3 lg:items-start">
-            {/* LEFT — chemical library: search, filter, tap + to drop onto the sheet */}
-            <div className="lg:w-56 lg:flex-none mb-3 lg:mb-0 border border-slate-200 rounded-xl p-2 bg-white">
-              <div className="relative mb-2">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-300" />
-                <input value={libQuery} onChange={(e) => setLibQuery(e.target.value)} placeholder="Search products…" className="w-full border border-slate-200 rounded-lg pl-7 pr-2 py-1.5 text-sm font-body bg-white" />
-              </div>
-              <div className="flex flex-wrap gap-1 mb-2">
-                {LIB_TABS.map((t) => (
-                  <button key={t.k} type="button" onClick={() => setLibCat(t.k)} className="font-body text-[10px] font-semibold px-2 py-1 rounded-full" style={libCat === t.k ? { backgroundColor: FOREST, color: '#fff' } : { backgroundColor: '#F1EFEA', color: INK_2 }}>{t.label}</button>
-                ))}
-              </div>
-              <div className="max-h-[380px] overflow-y-auto overscroll-contain pr-0.5">
-                {libList.map((prod) => {
-                  const on = addedNames.has(prod.name)
-                  return (
-                    <button key={prod.name} type="button" onClick={() => toggleProductRow(prod.name)} className="w-full flex items-center gap-2 px-1.5 py-1.5 rounded-lg hover:bg-slate-50 text-left">
-                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: catDot(catOf(prod)) }} />
-                      <span className="flex-1 min-w-0 truncate font-body text-[12.5px]" style={{ color: on ? INK_3 : INK }}>{prod.name}</span>
-                      <span className="w-5 h-5 rounded-md grid place-items-center text-[13px] font-bold shrink-0" style={on ? { backgroundColor: FERN, color: '#fff', border: `1px solid ${FERN}` } : { backgroundColor: '#EAF2EC', color: '#2F5A3D', border: '1px solid #D5E5DA' }}>{on ? '✓' : '+'}</span>
-                    </button>
-                  )
-                })}
-                {libList.length === 0 && <p className="font-body text-xs text-slate-400 px-2 py-3">No products match.</p>}
-              </div>
-            </div>
-
-            {/* RIGHT — the sheet as a spreadsheet grid */}
-            <div className="flex-1 min-w-0">
-              {builtRows.length === 0 ? (
-                <div className="border border-dashed border-slate-200 rounded-xl py-10 text-center font-body text-sm text-slate-400">Tap products in the library to build the tank mix.</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <div className="md:min-w-[600px] border border-slate-200 rounded-xl overflow-hidden">
-                    <div className="hidden md:grid items-center bg-[#F3F1EC] border-b border-slate-200 px-2.5 py-2 font-body text-[9px] font-bold uppercase tracking-wide text-slate-400" style={{ gridTemplateColumns: GRID_COLS }}>
+          <div>
+            {/* The sheet as a lined tank-mix grid. Type a product on each line
+                (search-as-you-type against the chemical library); picking one
+                fills its rate so per-tank + total compute, with the label check. */}
+            <div>
+                <div>
+                  <div className="border border-slate-200 rounded-xl">
+                    <div className="hidden md:grid items-center bg-[#F3F1EC] border-b border-slate-200 px-2.5 py-2 font-body text-[9px] font-bold uppercase tracking-wide text-slate-400 rounded-t-xl" style={{ gridTemplateColumns: GRID_COLS }}>
                       <span>#</span><span>Product</span><span>Rate</span><span>Unit</span><span>Spraying for</span><span className="text-right">Per tank</span><span className="text-right">Total</span><span></span>
                     </div>
-                    {builtRows.map((p, mixIdx) => {
+                    {gridRows.length === 0 && (
+                      <div className="py-8 text-center font-body text-sm text-slate-400">No products yet — tap <b>“+ Add product line”</b> below, then type a product.</div>
+                    )}
+                    {gridRows.map((p, mixIdx) => {
                       const { amt, unit: amtUnit, total } = sheetLineAmts(parseFloat(p.rate), p.basis, bd, perTankSqft, p.forceGal)
                       const prodInfo = products.find((pr) => pr.name === p.product)
                       const { min: labelMin, max: labelMax } = labelRange(prodInfo, p.basis)
@@ -3981,10 +3964,10 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                           <div className="md:hidden px-3 py-2.5">
                             <div className="flex items-center gap-2">
                               <span className="inline-flex items-center justify-center font-body text-[10px] font-extrabold rounded shrink-0" style={{ width: 19, height: 19, backgroundColor: '#EAF2EC', color: FOREST }}>{mixIdx + 1}</span>
-                              <button type="button" onClick={toggleOpen} className="flex-1 min-w-0 text-left">
-                                <span className="font-body text-sm font-bold block truncate" style={{ color: FOREST }}>{p.product}</span>
-                                <span className="font-body text-[9px] font-semibold text-slate-400">{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>
-                              </button>
+                              <div className="flex-1 min-w-0">
+                                <SearchSelect value={p.product} options={productNames} onPick={(name) => handleProductSelect(p.id, name)} placeholder="Type a product…" compact />
+                                {p.product && <span className="font-body text-[9px] font-semibold text-slate-400 block mt-0.5 ml-0.5">{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>}
+                              </div>
                               <div className="text-right leading-tight shrink-0">
                                 {amt !== null ? (
                                   <>
@@ -4017,10 +4000,10 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                           </div>
                           <div className="hidden md:grid items-center px-2.5 py-1.5 gap-1.5" style={{ gridTemplateColumns: GRID_COLS }}>
                             <span className="inline-flex items-center justify-center font-body text-[10px] font-extrabold rounded" style={{ width: 19, height: 19, backgroundColor: '#EAF2EC', color: FOREST }}>{mixIdx + 1}</span>
-                            <button type="button" onClick={toggleOpen} className="min-w-0 text-left">
-                              <span className="font-body text-[13px] font-bold block truncate" style={{ color: FOREST }}>{p.product}</span>
-                              <span className="font-body text-[9px] font-semibold text-slate-400">{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>
-                            </button>
+                            <div className="min-w-0">
+                              <SearchSelect value={p.product} options={productNames} onPick={(name) => handleProductSelect(p.id, name)} placeholder="Type a product…" compact />
+                              {p.product && <span className="font-body text-[9px] font-semibold text-slate-400 block mt-0.5 ml-0.5">{FORMULATION_LABEL[effectiveFormulation(prodInfo || { name: p.product })] || 'Other'}</span>}
+                            </div>
                             <input type="number" inputMode="decimal" step="any" placeholder={p.defaultRate ? String(p.defaultRate) : 'Rate'} value={p.rate} onChange={(e) => updateProduct(p.id, { rate: e.target.value })} className="w-full border rounded-lg px-2 py-1.5 text-sm font-semibold font-body tabular-nums" style={{ borderColor: outOfRange ? '#EF4444' : GOLD, backgroundColor: outOfRange ? '#FEF2F2' : '#FFFBF0' }} />
                             <SearchSelect value={p.basis} options={BASIS_OPTIONS} onPick={(v) => updateProduct(p.id, { basis: v })} sort={false} placeholder="Unit…" compact />
                             <button type="button" onClick={toggleOpen} className="min-w-0 flex flex-wrap items-center gap-1 text-left">
@@ -4102,13 +4085,17 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                       )
                     })}
 
-                    <div className="flex items-center justify-between px-3 py-2 bg-[#F3F1EC] border-t border-slate-200 font-body text-[11px]">
+                    <div className="px-2.5 py-2 border-t border-slate-200 bg-white">
+                      <button type="button" onClick={addBlankRow} className="inline-flex items-center gap-2 font-body text-[13px] font-bold px-3 py-2 rounded-lg border border-dashed" style={{ borderColor: HAIR, color: FERN }}>
+                        <span className="inline-grid place-items-center w-4 h-4 rounded-full text-white text-[12px]" style={{ backgroundColor: FERN }}>+</span> Add product line
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between px-3 py-2 bg-[#F3F1EC] border-t border-slate-200 font-body text-[11px] rounded-b-xl">
                       <span className="font-bold text-slate-600">{builtRows.length} product{builtRows.length !== 1 ? 's' : ''}</span>
                       <span className="text-slate-500">Tank <b className="text-slate-800 tabular-nums">{disp.galTank || bd.galTank || 0} gal</b> · <b className="text-slate-800">{tanksLabel}</b></span>
                     </div>
                   </div>
                 </div>
-              )}
             </div>
           </div>
         </Card>
