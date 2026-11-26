@@ -2551,7 +2551,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
           ) : (
             /* Early Order — how much to buy for the season (quantities + cases) */
             <div>
-              <TankPlanner areas={plannerAreas} onApplyTanks={applyTanksToArea} />
+              <TankPlanner areas={plannerAreas} onApplyTanks={applyTanksToArea} selectedArea={areaFilter} />
               {courseFilter && (
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
                   <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Order scope</span>

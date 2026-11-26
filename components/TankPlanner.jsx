@@ -15,7 +15,7 @@ const fmtInt = (n) => (isFinite(n) ? Math.round(n).toLocaleString() : '0')
 const GOLD_WASH = '#FBF4DF'
 const BAND = '#EEF3EE'
 
-export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal = 300 }) {
+export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal = 300, selectedArea = '' }) {
   const [open, setOpen] = useState(true)
   const areaList = (areas || []).filter((a) => a && a.name)
   const [areaName, setAreaName] = useState(areaList[0]?.name || '')
@@ -39,6 +39,16 @@ export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal =
     setAreaInput(sqft ? String(areaUnit === 'ac' ? Math.round((sqft / SQFT_PER_ACRE) * 100) / 100 : Math.round(sqft)) : '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [areaName])
+
+  // Follow the area chips at the top of the program — click Natives, then Rough,
+  // and the planner moves with you.
+  useEffect(() => {
+    if (selectedArea && selectedArea !== 'all' && areaList.some((a) => a.name === selectedArea) && selectedArea !== areaName) {
+      setAreaName(selectedArea)
+      setApplied(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedArea])
 
   const switchUnit = (u) => {
     if (u === areaUnit) return
