@@ -65,6 +65,7 @@ export default function GreensMap({ user, nav }) {
   const [showTotals, setShowTotals] = useState(false)
   const [savingArea, setSavingArea] = useState(false)
   const [newArea, setNewArea] = useState(null) // {hole,type,name} while naming a freshly drawn shape
+  const [snapOn, setSnapOn] = useState(true) // snap new corners onto existing areas' lines
 
   const LRef = useRef(null)
   const mapRef = useRef(null)
@@ -76,6 +77,43 @@ export default function GreensMap({ user, nav }) {
   const editLayerRef = useRef(null)
   const editRingRef = useRef(null)
   const editPolyRef = useRef(null)
+  const snapRef = useRef(true)
+  const areasRef = useRef([])
+  const drawPtsRef = useRef([])
+  useEffect(() => { snapRef.current = snapOn }, [snapOn])
+  useEffect(() => { areasRef.current = areas }, [areas])
+  useEffect(() => { drawPtsRef.current = drawPts }, [drawPts])
+  // Snap a tapped corner onto the nearest existing area vertex (preferred) or
+  // edge within ~16px, so neighbouring areas share the exact same boundary.
+  const snapLatLng = (latlng) => {
+    const map = mapRef.current, L = LRef.current
+    if (!map || !L) return latlng
+    const THRESH = 16
+    const cp = map.latLngToContainerPoint(latlng)
+    const px = (ll) => map.latLngToContainerPoint(ll)
+    let bestV = null, bestVd = THRESH
+    const areasList = areasRef.current || []
+    const ownPts = (drawPtsRef.current || []).map(([lat, lon]) => ({ lat, lng: lon }))
+    const tryVertex = (ll) => { const p = px(ll); const d = Math.hypot(p.x - cp.x, p.y - cp.y); if (d < bestVd) { bestVd = d; bestV = ll } }
+    for (const a of areasList) { if (!a.ring?.length) continue; for (const [lon, lat] of a.ring) tryVertex({ lat, lng: lon }) }
+    ownPts.forEach(tryVertex)
+    if (bestV) return bestV
+    let bestE = null, bestEd = THRESH
+    for (const a of areasList) {
+      if (!a.ring || a.ring.length < 2) continue
+      const pts = a.ring.map(([lon, lat]) => px({ lat, lng: lon }))
+      for (let i = 0; i < pts.length; i++) {
+        const A = pts[i], B = pts[(i + 1) % pts.length]
+        const dx = B.x - A.x, dy = B.y - A.y, len2 = dx * dx + dy * dy
+        let t = len2 ? ((cp.x - A.x) * dx + (cp.y - A.y) * dy) / len2 : 0
+        t = Math.max(0, Math.min(1, t))
+        const qx = A.x + t * dx, qy = A.y + t * dy
+        const d = Math.hypot(qx - cp.x, qy - cp.y)
+        if (d < bestEd) { bestEd = d; bestE = map.containerPointToLatLng(L.point(qx, qy)) }
+      }
+    }
+    return bestE || latlng
+  }
 
   // When the menu switches between Irrigation → Greens Today and Resources →
   // Course Map, re-sync the active tab (this component stays mounted across both).
@@ -221,7 +259,7 @@ export default function GreensMap({ user, nav }) {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !drawing) return
-    const onClick = (e) => setDrawPts((p) => [...p, [e.latlng.lat, e.latlng.lng]])
+    const onClick = (e) => { const ll = snapRef.current ? snapLatLng(e.latlng) : e.latlng; setDrawPts((p) => [...p, [ll.lat, ll.lng]]) }
     map.on('click', onClick)
     const el = map.getContainer(); const prev = el.style.cursor; el.style.cursor = 'crosshair'
     return () => { map.off('click', onClick); el.style.cursor = prev }
@@ -370,6 +408,7 @@ export default function GreensMap({ user, nav }) {
             {drawing && (
               <div className="flex items-center gap-2 ml-1">
                 <span className="font-body text-[12px]" style={{ color: FERN }}>Tap the map to drop corners ({drawPts.length})</span>
+                <button onClick={() => setSnapOn((v) => !v)} title="Snap new corners onto the lines of areas you've already drawn" className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={snapOn ? { backgroundColor: FOREST, color: '#fff' } : { border: `1px solid ${HAIR}`, color: INK_2 }}>Snap {snapOn ? 'on' : 'off'}</button>
                 <button onClick={() => setDrawPts((p) => p.slice(0, -1))} disabled={!drawPts.length} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-40" style={{ border: `1px solid ${HAIR}`, color: INK_2 }}>Undo</button>
                 <button onClick={finishDraw} disabled={drawPts.length < 3} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Finish</button>
                 <button onClick={cancelDraw} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button>
