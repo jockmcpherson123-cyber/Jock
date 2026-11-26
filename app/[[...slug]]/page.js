@@ -7,12 +7,6 @@
 import { getUser } from '@/lib/getUser'
 import SprayApp from '@/components/SprayApp'
 
-// The manager app shows the same desktop layout on every device, scaled to fit
-// (pinch to zoom in). Pinning a desktop-width viewport here renders it right
-// from the first paint — no mobile→desktop flash. Crew/kiosk pages have their
-// own routes and keep the root layout's finger-friendly device-width viewport.
-export const viewport = { width: 1280, viewportFit: 'cover' }
-
 export default async function Page({ params }) {
   const user = await getUser()
   const { slug } = await params

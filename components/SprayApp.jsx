@@ -452,21 +452,6 @@ export default function SprayApp({ user, initialPath = '/' }) {
     } catch (e) { console.error(e) }
   })() }, [])
 
-  // One consistent look on every device: render the full desktop layout (sidebar
-  // + multi-column pages) and let the phone scale it to fit, exactly like the
-  // computer view, just smaller — pinch to zoom in to read or tap. We do this by
-  // pinning the viewport to a desktop width while the manager app is mounted.
-  // The crew Field Data page is a separate route (a full page load) and keeps the
-  // finger-friendly device-width viewport from the root layout.
-  useEffect(() => {
-    if (typeof document === 'undefined') return
-    const meta = document.querySelector('meta[name="viewport"]')
-    if (!meta) return
-    const prev = meta.getAttribute('content')
-    meta.setAttribute('content', 'width=1280, viewport-fit=cover')
-    return () => { if (prev) meta.setAttribute('content', prev) }
-  }, [])
-
   // A stable nav token — only changes when the user actually picks a sidebar item,
   // so modules re-sync their internal route on a click (and on a re-click) but not
   // on every incidental re-render (which would clobber in-module navigation).
