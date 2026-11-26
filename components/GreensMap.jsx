@@ -542,8 +542,15 @@ export default function GreensMap({ user, nav }) {
       })
       if (newArea.color && saved?.id) await saveAreaColor(saved.id, newArea.color)
       await reloadAreas()
-    } catch (e) { console.error(e) }
-    setSavingArea(false); setDrawing(false); setDrawPts([]); setNewArea(null)
+      setDrawing(false); setDrawPts([]); setNewArea(null); setNotice('')
+    } catch (e) {
+      console.error(e)
+      const msg = /areas_type_check|violates check constraint/i.test(e?.message || '')
+        ? `This area type isn’t enabled in the database yet — run supabase/phase42.sql, then save again. Your shape is still here.`
+        : `Couldn’t save this area: ${e?.message || e}. Your shape is still here — try again.`
+      setNotice(msg)
+    }
+    setSavingArea(false)
   }
 
   const startEdit = () => { if (!selArea) return; editRingRef.current = selArea.ring.map((p) => [...p]); setEditRing(selArea.ring.map((p) => [...p])); setLiveSqft(geodesicAreaSqft(selArea.ring)); setEditing(true) }
@@ -555,8 +562,12 @@ export default function GreensMap({ user, nav }) {
       const ring = editRingRef.current
       await cmdb.saveArea({ id: selArea.id, hole: selArea.hole, type: selArea.type, name: selArea.name, ring, sqft: geodesicAreaSqft(ring) })
       await reloadAreas()
-    } catch (e) { console.error(e) }
-    setSavingArea(false); setEditing(false); setEditRing(null); setLiveSqft(null); editRingRef.current = null
+      setEditing(false); setEditRing(null); setLiveSqft(null); editRingRef.current = null; setNotice('')
+    } catch (e) {
+      console.error(e)
+      setNotice(`Couldn’t save your changes: ${e?.message || e}. Your edits are still here — try again.`)
+    }
+    setSavingArea(false)
   }
   const removeArea = async () => {
     if (!selArea || !window.confirm(`Delete ${selArea.name || typeLabel(selArea.type)}? This can't be undone.`)) return
