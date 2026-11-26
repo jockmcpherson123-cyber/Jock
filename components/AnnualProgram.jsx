@@ -20,6 +20,7 @@ import { localDateISO } from '@/lib/dates'
 import { diseasesForProduct } from '@/lib/fungicides'
 import { DEFAULT_TARGETS, sortByMixOrder } from '@/lib/defaults'
 import { MultiSelect, SearchSelect } from '@/components/pickers'
+import TankPlanner from '@/components/TankPlanner'
 import ProductPerformance from '@/components/ProductPerformance'
 
 // ── Coverage grid helpers ────────────────────────────────────────────────────
@@ -999,6 +1000,19 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
       if (opts.syncRate && opts.oldRate != null) offerRateSync(fresh, { product: next.product, area: next.area, newRate: next.rateOzM, oldRate: opts.oldRate, editId: next.id })
     } catch (e) { console.error(e); showToast('Could not save') }
   }
+  // Tank Planner → Early Order: set the chosen tank count on every planned spray
+  // in an area, so the order quantities (rate × area × tanks) order for it.
+  const applyTanksToArea = async (areaName, tanks) => {
+    const nt = Number(tanks)
+    // Leave deliberately-skipped sprays (tanks 0) alone; set the rest.
+    const targets = apps.filter((a) => a.area === areaName && a.tanks !== 0 && a.tanks !== '0')
+    if (!targets.length) { showToast(`No planned sprays in ${areaName}`); return }
+    try {
+      for (const a of targets) await db.upsertApplication({ ...a, tanks: nt, tanksManual: true, programId: activeProgram.id })
+      setAllApps(await db.fetchApplications(activeProgram.id))
+      showToast(`Set ${nt % 1 === 0 ? nt : nt.toFixed(1)} tank${nt === 1 ? '' : 's'} on ${targets.length} spray${targets.length === 1 ? '' : 's'} in ${areaName}`)
+    } catch (e) { console.error(e); showToast('Could not update tanks') }
+  }
   // Edit a library cell (caseSize / ozPerCase / costPerCase) — changes the
   // product for EVERY row using it, like editing the Pesticide List tab.
   const gridCommitProduct = async (prod, patch, label) => {
@@ -1252,6 +1266,9 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   apps.forEach((a) => { areaCounts[a.area] = (areaCounts[a.area] || 0) + 1 })
   const areaNames = Object.keys(areaCounts).sort()
   const visibleApps = areaFilter === 'all' ? apps : apps.filter((a) => a.area === areaFilter)
+  // Areas that actually carry planned sprays, with their size — fed to the Tank
+  // Planner on the Early Order so you can size tanks per area and order for it.
+  const plannerAreas = areaNames.map((name) => ({ name, sqft: Number(areaMatch(areas, name)?.sqft) || 0 }))
 
   // Derived groupings + a season summary for the redesigned browse views.
   const monthGroups = groupByMonth(visibleApps)
@@ -2531,6 +2548,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
           ) : (
             /* Early Order — how much to buy for the season (quantities + cases) */
             <div>
+              <TankPlanner areas={plannerAreas} onApplyTanks={applyTanksToArea} />
               {courseFilter && (
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
                   <span className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Order scope</span>
