@@ -557,8 +557,8 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
             {sprayDays.map((d) => (
               <div key={`${d.date}-${d.area}`} className="rounded-lg border border-black/5 overflow-hidden avoid-break">
                 <div className="flex items-baseline gap-2 px-2.5 py-0.5" style={{ backgroundColor: '#F0F6F2' }}>
-                  <span className="font-body text-[11px] font-bold" style={{ color: FOREST }}>{fmtDay(d.date)}</span>
-                  <span className="font-body text-[10px] font-semibold" style={{ color: FERN }}>· {d.area}</span>
+                  <span className="font-body text-[11px] font-bold" style={{ color: FOREST }}>{d.area}</span>
+                  <span className="font-body text-[10px] font-semibold" style={{ color: FERN }}>· {fmtDay(d.date)}</span>
                 </div>
                 <table className="w-full border-collapse">
                   <tbody>
