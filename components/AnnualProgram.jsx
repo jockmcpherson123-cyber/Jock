@@ -352,7 +352,9 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
     const amt = planAppOz(a, area, prod)
     const rateM = amt?.rateM ?? (a.rateOzM != null && a.rateOzM !== '' ? Number(a.rateOzM) : null)
     const tanks = amt?.tanks ?? 1
-    const sqft = Number(area?.sqft) || 0
+    // Per-tank area honours the row's override (what the Tank Planner stamps on),
+    // so the per-tank amount shown matches the totals and the spray sheet.
+    const sqft = Number(a.sqftPerTankOverride) > 0 ? Number(a.sqftPerTankOverride) : (Number(area?.sqft) || 0)
     const ozPerTank = rateM != null && sqft ? rateM * (sqft / 1000) : null
     const totalOz = amt?.oz ?? (ozPerTank != null ? ozPerTank * tanks : null)
     const ozPerCase = Number(prod.ozPerCase) || null
