@@ -68,7 +68,7 @@ import {
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { duplicateCandidates } from '@/lib/products'
-import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, fetchNbmForecast, overlayForecastTemps, projectGddReachDate, buildRainYear, weatherCodeInfo, seasonGddToDate, finalizeRainDaily } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, fetchNbmForecast, overlayForecastTemps, projectGddReachDate, buildRainYear, weatherCodeInfo, seasonGddToDate, finalizeRainDaily, fetchTodayRain } from '@/lib/weather'
 import { fungicideLogByArea } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, soilRate, projectWindow, TIMING_WINDOWS } from '@/lib/soiltiming'
@@ -807,6 +807,7 @@ function HomeLanding({ clubName, onPickId }) {
   const [wx, setWx] = useState({ current: null, today: null, forecast: [], season: [], breakdownTemps: [] })
   const [events, setEvents] = useState([])
   const [addOpen, setAddOpen] = useState(false)
+  const [todayRain, setTodayRain] = useState(null) // live rain so far today
   const ciRef = useRef(null)
 
   useEffect(() => {
@@ -833,6 +834,20 @@ function HomeLanding({ clubName, onPickId }) {
     })()
     return () => { live = false }
   }, [])
+
+  // Live "rain so far today": poll the 15-minute precipitation every few minutes
+  // so the dashboard shows a near-live running total for the day (and whether
+  // it's raining right now). Separate from the season totals, which only settle
+  // the next morning.
+  useEffect(() => {
+    let live = true, timer = null
+    const loc = ciRef.current?.location || data?.settings?.location
+    if (!(data && loc?.lat != null)) return
+    const tick = async () => { try { const r = await fetchTodayRain(loc.lat, loc.lng); if (live) setTodayRain(r) } catch { /* ignore */ } }
+    tick()
+    timer = setInterval(tick, 5 * 60 * 1000)
+    return () => { live = false; if (timer) clearInterval(timer) }
+  }, [data])
 
   // A season total must never go down: once a past day's rain is final (the next
   // morning) we freeze it into courseInfo.rainDaily and total from the frozen
@@ -897,7 +912,7 @@ function HomeLanding({ clubName, onPickId }) {
         </div>
         <div className="space-y-4 min-w-0">
           <SoilTempCard soilNow={soilNow} openWins={openWins} onPickId={onPickId} />
-          <RainTotalsCard week={rainWeek} month={rainMonth} year={rain.ytd} />
+          <RainTotalsCard today={todayRain} week={rainWeek} month={rainMonth} year={rain.ytd} />
           <NeedsAttention lowStock={lowStock} licAlerts={licAlerts} comp={compGaps} openJobs={openJobs} onPickId={onPickId} />
         </div>
       </div>
@@ -1051,7 +1066,7 @@ function SoilTempCard({ soilNow, openWins = [], onPickId }) {
   )
 }
 
-function RainTotalsCard({ week = 0, month = 0, year = 0 }) {
+function RainTotalsCard({ today = null, week = 0, month = 0, year = 0 }) {
   const monthName = MONTHS[new Date().getMonth()]
   const row = (label, val) => (
     <div className="flex items-baseline justify-between py-1.5 border-b last:border-0" style={{ borderColor: 'rgba(0,0,0,0.05)' }}>
@@ -1059,9 +1074,19 @@ function RainTotalsCard({ week = 0, month = 0, year = 0 }) {
       <span className="font-display text-base font-bold tnum" style={{ color: '#3A6187' }}>{(Number(val) || 0).toFixed(2)}"</span>
     </div>
   )
+  const raining = !!today?.raining
   return (
     <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
       <div className="flex items-center gap-1.5 mb-1.5"><CloudRain size={13} style={{ color: '#94A3A0' }} /><p className="font-body text-[10px] font-bold uppercase tracking-wide" style={{ color: INK_3 }}>Rain totals</p></div>
+      {/* Today's live running total — the rain that's actually fallen so far today,
+          from 15-minute readings, refreshed every few minutes. */}
+      <div className="flex items-baseline justify-between py-2 mb-0.5 px-2.5 -mx-0.5 rounded-lg" style={{ backgroundColor: raining ? '#EAF2F8' : '#F6F8FA' }}>
+        <span className="font-body text-[12px] font-semibold flex items-center gap-1.5" style={{ color: INK_2 }}>
+          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: raining ? '#2563EB' : '#9AA7AE', boxShadow: raining ? '0 0 0 3px rgba(37,99,235,0.18)' : 'none' }} />
+          Today {raining ? '· raining now' : today ? '· so far' : ''}
+        </span>
+        <span className="font-display text-lg font-bold tnum" style={{ color: '#2C5B86' }}>{today ? `${(Number(today.todayIn) || 0).toFixed(2)}"` : '—'}</span>
+      </div>
       {row('This week (Sun–today)', week)}
       {row(`This month (${monthName} 1–today)`, month)}
       {row('This year (Jan 1–today)', year)}
