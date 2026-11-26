@@ -45,10 +45,21 @@ export async function proxy(request) {
 
   const { pathname } = request.nextUrl
 
+  // The Data section moved from /agronomy to /data. Keep old bookmarks working.
+  if (pathname === '/agronomy' || pathname.startsWith('/agronomy/')) {
+    const url = request.nextUrl.clone()
+    url.pathname = pathname.replace(/^\/agronomy/, '/data')
+    return NextResponse.redirect(url)
+  }
+
   // Paths that a logged-out visitor is allowed to reach.
   // The crew's Field Data QR page (and the endpoint it saves through) needs no
-  // login — the club key in the link (?k=) is checked by /api/crew itself.
-  const isFieldData = pathname === '/data' || pathname === '/api/crew'
+  // login — the club key in the link (?k=) is checked by /api/crew itself. Only
+  // a /data link that carries a key is public; a keyless /data is the manager
+  // Data section and still sits behind the login.
+  const isFieldData =
+    (pathname === '/data' && request.nextUrl.searchParams.has('k')) ||
+    pathname === '/api/crew'
   const isPublicPath =
     pathname.startsWith('/login') || pathname.startsWith('/auth') || isFieldData
 

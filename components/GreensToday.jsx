@@ -16,7 +16,7 @@ import * as cmdb from '@/lib/coursemap/db'
 import { planReadingsImport, guessReadingMapping } from '@/lib/coursemap/import'
 import { idwValue, moistureStops, changeStops, colorAt, changeReadings } from '@/lib/coursemap/heat'
 import { suggestDepth, planByDepth } from '@/lib/coursemap/depth'
-import { lonLatToPixel } from '@/lib/coursemap/geo'
+import { lonLatToPixel, lonLatTo3857, m3857ToLonLat } from '@/lib/coursemap/geo'
 import { resolveTarget, withException, coverageIssues, timelineMonths, targetFields, targetAvg } from '@/lib/coursemap/targets'
 import { fetchWeather, dailyFromHourly } from '@/lib/weather'
 import { formatNumber, formatDate } from '@/lib/format'
@@ -46,6 +46,7 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
   const [selId, setSelId] = useState(null)
   const [showSpots, setShowSpots] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [staleDate, setStaleDate] = useState(null) // set when today is blank and we fall back to the last day with readings
   const [addOpen, setAddOpen] = useState(false)
   const [aerial, setAerial] = useState(null)
   const [etDraft, setEtDraft] = useState('')
@@ -57,8 +58,20 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
     if (!courseId) { setLoading(false); return }
     const g = await cmdb.fetchGreens(courseId)
     setGreens(g)
+    const areaIds = g.map((x) => x.id)
     const start = `${date}T00:00:00`; const end = `${date}T23:59:59.999`
-    const rs = await cmdb.fetchDayRounds(courseId, g.map((x) => x.id), new Date(start).toISOString(), new Date(end).toISOString())
+    let rs = await cmdb.fetchDayRounds(courseId, areaIds, new Date(start).toISOString(), new Date(end).toISOString())
+    // When the chosen day has no readings, fall back to the most recent day that
+    // does (shown greyed with its date), so the page is never blank — rather than
+    // leave the superintendent staring at an empty heatmap first thing.
+    if (rs.length === 0) {
+      const latestDate = await cmdb.fetchLatestRoundDate(areaIds)
+      if (latestDate && latestDate !== date) {
+        const ls = `${latestDate}T00:00:00`; const le = `${latestDate}T23:59:59.999`
+        const lr = await cmdb.fetchDayRounds(courseId, areaIds, new Date(ls).toISOString(), new Date(le).toISOString())
+        if (lr.length) { rs = lr; setStaleDate(latestDate) } else setStaleDate(null)
+      } else setStaleDate(null)
+    } else setStaleDate(null)
     setRounds(rs)
     const p = await cmdb.fetchWateringPlan(courseId, date)
     setPlan(p); setEtDraft(p.day?.forecast_et != null ? String(p.day.forecast_et) : '0.10')
@@ -211,7 +224,13 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
           <span className="font-body text-[10.5px] self-center" style={{ color: INK_3 }}>Sets the average for the whole {baseTarget.name || 'season'} — more on the Targets tab.</span>
         </div>
       )}
-      <div className="flex items-center justify-between mb-3">
+      {staleDate && (
+        <div className="rounded-xl border px-3 py-2 mb-3 flex items-center gap-2" style={{ borderColor: HAIR, backgroundColor: PAPER_2 }}>
+          <span className="font-body text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ color: INK_3, backgroundColor: PAPER }}>Latest</span>
+          <p className="font-body text-[12px]" style={{ color: INK_2 }}>No readings {date === todayISO() ? 'today' : 'on this day'} — showing the last round from <b>{formatDate(staleDate, 'list')}</b>.</p>
+        </div>
+      )}
+      <div className="flex items-center justify-between mb-3" style={staleDate ? { opacity: 0.6 } : undefined}>
         <div className="flex gap-1.5">
           {[['morning', 'Morning'], ['afternoon', 'Afternoon'], ['change', 'Change']].map(([k, label]) => (
             <button key={k} onClick={() => setView(k)} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-full" style={view === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: INK_2, border: `1px solid ${HAIR}` }}>{label}</button>
@@ -222,7 +241,7 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
       {addOpen && <AddReadings ctx={ctx} courseId={courseId} greens={greens} onClose={() => setAddOpen(false)} onDone={() => { setAddOpen(false); setLoading(true); load() }} />}
 
       {/* Green buttons */}
-      <div className="flex flex-wrap gap-1.5 mb-4">
+      <div className="flex flex-wrap gap-1.5 mb-4" style={staleDate ? { opacity: 0.85 } : undefined}>
         {greens.map((g, i) => {
           const avg = greenAvg(g.id)
           const st = statusOf(avg, targetFor(g.id))
@@ -482,14 +501,17 @@ function ManualReadings({ ctx, courseId, greens, onDone }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [geoMsg, setGeoMsg] = useState('')
+  const [showMap, setShowMap] = useState(false)
+  const [activeSpot, setActiveSpot] = useState(0) // which spot the next map tap places
 
   useEffect(() => {
     setSpots((prev) => {
       if (nSpots === prev.length) return prev
-      const next = prev.slice(0, nSpots)
+      const next = prev.slice(0, nSpots).map((x, i) => ({ ...x, label: `Spot ${i + 1}` }))
       for (let i = prev.length; i < nSpots; i++) next.push({ label: `Spot ${i + 1}`, v: '', temp: '', sal: '', lat: null, lon: null })
       return next
     })
+    setActiveSpot((a) => Math.min(a, nSpots - 1))
   }, [nSpots])
 
   // Reuse the green's saved spots (label + GPS from its last round), so the crew
@@ -501,8 +523,12 @@ function ManualReadings({ ctx, courseId, greens, onDone }) {
       try {
         const saved = await cmdb.fetchLatestSpots(greenId)
         if (!live || !saved.length) return
-        setSpots(saved.map((s, i) => ({ label: s.label || `Spot ${i + 1}`, v: '', temp: '', sal: '', lat: s.lat ?? null, lon: s.lon ?? null })))
+        // Always renumber Spot 1…N in the order they were walked (taken_at),
+        // ignoring whatever stray labels the last round carried (DEACON exports
+        // come in jumbled like 3, 11, 8, 2, 6), so the crew walks a clean count.
+        setSpots(saved.map((s, i) => ({ label: `Spot ${i + 1}`, v: '', temp: '', sal: '', lat: s.lat ?? null, lon: s.lon ?? null })))
         setNSpots(saved.length)
+        setActiveSpot(0)
       } catch { /* ignore */ }
     })()
     return () => { live = false }
@@ -518,6 +544,13 @@ function ManualReadings({ ctx, courseId, greens, onDone }) {
       { enableHighAccuracy: true, timeout: 10000 },
     )
   }
+  // Tap-the-map placement: drop the active spot where the finger lands, then
+  // auto-advance to the next spot so the crew taps around the green in order.
+  const placeOnMap = (lat, lon) => {
+    setSpot(activeSpot, { lat, lon })
+    setActiveSpot((a) => Math.min(a + 1, spots.length - 1))
+  }
+
   const entered = spots.filter((s) => s.v !== '' && !isNaN(Number(s.v)))
   const avg = entered.length ? Math.round((entered.reduce((a, s) => a + Number(s.v), 0) / entered.length) * 10) / 10 : null
 
@@ -568,13 +601,29 @@ function ManualReadings({ ctx, courseId, greens, onDone }) {
         </div>
       </div>
 
-      <div className="flex items-center justify-between mb-2">
-        <p className="font-body text-[11px]" style={{ color: INK_3 }}>Type each spot's moisture %. Tap <b>GPS</b> to pin a spot so it draws on the heatmap (optional).</p>
-        <label className="flex items-center gap-1.5 font-body text-[11px] font-semibold" style={{ color: INK_2 }}>
-          <input type="checkbox" checked={showExtra} onChange={(e) => setShowExtra(e.target.checked)} /> Temp / salinity
-        </label>
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <p className="font-body text-[11px]" style={{ color: INK_3 }}>Type each spot's moisture %. Pin each spot with <b>GPS</b> or <b>tap the map</b> so it draws on the heatmap (optional).</p>
+        <div className="flex items-center gap-3">
+          {green?.ring?.length >= 3 && (
+            <button type="button" onClick={() => setShowMap((v) => !v)} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-lg" style={showMap ? { backgroundColor: FOREST, color: 'white' } : { border: `1px solid ${HAIR}`, color: INK_2 }}>{showMap ? 'Hide map' : 'Tap the map'}</button>
+          )}
+          <label className="flex items-center gap-1.5 font-body text-[11px] font-semibold" style={{ color: INK_2 }}>
+            <input type="checkbox" checked={showExtra} onChange={(e) => setShowExtra(e.target.checked)} /> Temp / salinity
+          </label>
+        </div>
       </div>
       {geoMsg && <p className="font-body text-[11px] mb-2" style={{ color: '#B7791F' }}>{geoMsg}</p>}
+      {showMap && green?.ring?.length >= 3 && (
+        <div className="mb-3">
+          <p className="font-body text-[11px] mb-1.5" style={{ color: INK_2 }}>Tap the green to drop <b>Spot {activeSpot + 1}</b>. It moves to the next spot each tap.</p>
+          <GreenTapMap green={green} spots={spots} activeSpot={activeSpot} onPlace={placeOnMap} />
+          <div className="flex flex-wrap gap-1 mt-2">
+            {spots.map((s, i) => (
+              <button key={i} type="button" onClick={() => setActiveSpot(i)} className="font-body text-[11px] font-bold w-7 h-7 rounded-full flex items-center justify-center" style={i === activeSpot ? { backgroundColor: FOREST, color: 'white' } : s.lat != null ? { backgroundColor: FERN, color: 'white' } : { border: `1px solid ${HAIR}`, color: INK_2 }}>{i + 1}</button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="space-y-1.5 max-h-[46vh] overflow-y-auto pr-1">
         {spots.map((s, i) => (
@@ -593,6 +642,61 @@ function ManualReadings({ ctx, courseId, greens, onDone }) {
         <div><span className="font-body text-[10px] font-bold uppercase tracking-widest block" style={{ color: INK_3 }}>Entered</span><span className="font-display text-lg font-semibold" style={{ color: INK }}>{entered.length}/{spots.length}</span></div>
         <button onClick={save} disabled={!entered.length || busy} className="ml-auto font-body text-sm font-bold px-5 py-2.5 rounded-full text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>{busy ? 'Saving…' : 'Save readings'}</button>
       </div>
+    </div>
+  )
+}
+
+// A plain outline of the green (no aerial) that the crew taps to drop a reading
+// spot. The ring is projected to EPSG:3857 so the shape keeps its true aspect;
+// a tap is inverted back to lon/lat. Placed spots draw as numbered dots.
+function GreenTapMap({ green, spots, activeSpot, onPlace }) {
+  const wrapRef = useRef(null)
+  const W = 320
+  const proj = useMemo(() => {
+    const ring = green.ring.map(([lon, lat]) => lonLatTo3857(lon, lat))
+    const xs = ring.map((p) => p[0]); const ys = ring.map((p) => p[1])
+    const minX = Math.min(...xs); const maxX = Math.max(...xs)
+    const minY = Math.min(...ys); const maxY = Math.max(...ys)
+    const pad = 16
+    const spanX = Math.max(maxX - minX, 1e-6); const spanY = Math.max(maxY - minY, 1e-6)
+    const scale = (W - pad * 2) / spanX
+    const H = Math.max(140, Math.min(360, spanY * scale + pad * 2))
+    // project 3857 → svg px (y flips because 3857 north is up)
+    const toPx = (x, y) => ({ x: pad + (x - minX) * scale, y: pad + (maxY - y) * scale })
+    const toMerc = (px, py) => ({ x: minX + (px - pad) / scale, y: maxY - (py - pad) / scale })
+    return { ring, toPx, toMerc, H, scale }
+  }, [green.id])
+
+  const pts = proj.ring.map((p) => proj.toPx(p[0], p[1]))
+  const dPath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z'
+
+  const handleTap = (e) => {
+    const rect = wrapRef.current.getBoundingClientRect()
+    const src = e.touches?.[0] || e.changedTouches?.[0] || e
+    const px = ((src.clientX - rect.left) / rect.width) * W
+    const py = ((src.clientY - rect.top) / rect.height) * proj.H
+    const m = proj.toMerc(px, py)
+    const [lon, lat] = m3857ToLonLat(m.x, m.y)
+    onPlace(lat, lon)
+  }
+
+  return (
+    <div ref={wrapRef} className="rounded-xl overflow-hidden select-none" style={{ border: `1px solid ${HAIR}`, backgroundColor: PAPER, touchAction: 'manipulation', maxWidth: W }}>
+      <svg viewBox={`0 0 ${W} ${proj.H}`} width="100%" style={{ display: 'block', cursor: 'crosshair' }} onClick={handleTap}>
+        <path d={dPath} fill="#E4EEE2" stroke={FOREST} strokeWidth="2" />
+        {spots.map((s, i) => {
+          if (s.lat == null || s.lon == null) return null
+          const [mx, my] = lonLatTo3857(s.lon, s.lat)
+          const p = proj.toPx(mx, my)
+          const on = i === activeSpot
+          return (
+            <g key={i}>
+              <circle cx={p.x} cy={p.y} r={on ? 11 : 9} fill={on ? GOLD : FOREST} stroke="white" strokeWidth="2" />
+              <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize="10" fontWeight="700" fill={on ? INK : 'white'}>{i + 1}</text>
+            </g>
+          )
+        })}
+      </svg>
     </div>
   )
 }

@@ -51,7 +51,7 @@ export default function CommandCentre() {
         db.fetchSettings(),
         db.fetchSheets().catch(() => []),
         db.fetchGreensSpeeds().catch(() => []),
-        db.fetchCrewTasks(addDaysISO(today, -6), addDaysISO(today, 7)).catch(() => []),
+        db.fetchCrewTasks(addDaysISO(today, -120), addDaysISO(today, 180)).catch(() => []),
         db.fetchFertSheets().catch(() => []),
         db.fetchPrograms().catch(() => []),
       ])

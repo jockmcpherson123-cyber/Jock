@@ -68,7 +68,7 @@ import {
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
 import { duplicateCandidates } from '@/lib/products'
-import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, fetchNbmForecast, overlayForecastTemps, projectGddReachDate, buildRainYear, weatherCodeInfo, seasonGddToDate } from '@/lib/weather'
+import { fetchCurrent, fetchSeasonDaily, gddFromDaily, gddSince, fetchWeather, dailyFromHourly, sprayWindow, fetchBreakdownTemps, dailyFromForecastBlock, mergeDaily, fetchNbmForecast, overlayForecastTemps, projectGddReachDate, buildRainYear, weatherCodeInfo, seasonGddToDate, finalizeRainDaily } from '@/lib/weather'
 import { fungicideLogByArea } from '@/lib/disease'
 import { recommend, suggestedAnnualN, baseSaturation, MLSN } from '@/lib/soil'
 import { applicationTimings, openWindows, soilTrend, currentSoilTemp, soilRate, projectWindow, TIMING_WINDOWS } from '@/lib/soiltiming'
@@ -385,12 +385,13 @@ const SECTIONS_CREW = [
 ]
 
 // Each page's own URL, so pages can be bookmarked and a refresh lands on the
-// same page. The crew's Field Data QR lives at /data (public), so the manager
-// Data section is rooted at /agronomy to avoid colliding with it.
+// same page. The manager Data section is rooted at /data; the crew's Field Data
+// QR shares /data but carries a club key (?k=), which the /data route branches
+// on (keyed = crew page, keyless = this manager section).
 const NAV_PATHS = {
   home: '/', jobboard: '/home/job-board', weekly: '/home/weekly-report', weather: '/home/weather', season: '/home/season-reports',
   'spray-home': '/spray', program: '/spray/annual-program', sheets: '/spray/sheets', fert: '/spray/fert-sheets', invcount: '/spray/inventory', chemicals: '/spray/chemical-library',
-  'data-home': '/agronomy', wetting: '/agronomy/moisture', speed: '/agronomy/green-speeds', clippings: '/agronomy/clipping-yields', firmness: '/agronomy/firmness', scouting: '/agronomy/scouting', gdd: '/agronomy/gdd', soil: '/agronomy/soil-tests',
+  'data-home': '/data', wetting: '/data/moisture', speed: '/data/green-speeds', clippings: '/data/clipping-yields', firmness: '/data/firmness', scouting: '/data/scouting', gdd: '/data/gdd', soil: '/data/soil-tests',
   'irr-home': '/irrigation', greenstoday: '/irrigation/greens-today', irrmap: '/irrigation/map', parts: '/irrigation/parts',
   'res-home': '/resources', reference: '/resources/reference', training: '/resources/training', playbook: '/resources/playbook', coursemap: '/resources/course-map', chemguide: '/resources/chemistry-guide', timing: '/resources/soil-temp-timing',
   'mech-home': '/mechanical', hoc: '/mechanical/height-of-cut',
@@ -723,6 +724,9 @@ const courseColorOf = (courses, name) => {
 }
 // How much of a product you're short of its reorder point, with its unit.
 const shortfallText = (p) => { const s = Math.max(0, (Number(p.lowStockThreshold) || 0) - (Number(p.stock) || 0)); return s > 0 ? `short ${Math.round(s).toLocaleString()} ${p.unit || ''}`.trim() : 'low on stock' }
+// Clippings are reported in litres, but crew-QR entries were saved in mL — so
+// normalise to L for display (stored rows are left untouched).
+const clipLitres = (c) => { const v = Number(c?.volume); if (isNaN(v)) return null; return c?.unit === 'mL' ? v / 1000 : v }
 const LAND_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const landMD = (iso) => { const p = String(iso || '').split('-'); return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : String(iso || '') }
@@ -830,6 +834,26 @@ function HomeLanding({ clubName, onPickId }) {
     return () => { live = false }
   }, [])
 
+  // A season total must never go down: once a past day's rain is final (the next
+  // morning) we freeze it into courseInfo.rainDaily and total from the frozen
+  // days, so later archive revisions can't make the running total shrink. Only
+  // today still uses the live value; manual gauge overrides always win on top.
+  useEffect(() => {
+    const season = wx.season || []
+    const forecast = wx.forecast || []
+    if (!season.length && !forecast.length) return
+    const today = localDateISO()
+    const ci = ciRef.current || {}
+    const { rainDaily, changed } = finalizeRainDaily(ci.rainDaily || {}, season, forecast, today)
+    if (!changed) return
+    const nextCi = { ...ci, rainDaily }
+    ciRef.current = nextCi
+    setData((d) => (d ? { ...d, settings: { ...d.settings, courseInfo: nextCi } } : d))
+    ;(async () => {
+      try { const fresh = await db.fetchSettings(); const merged = { ...(fresh.courseInfo || {}), rainDaily }; ciRef.current = merged; await db.saveSettings({ courseInfo: merged }) } catch (e) { console.error(e) }
+    })()
+  }, [wx.season, wx.forecast])
+
   const saveEvents = async (next) => {
     setEvents(next)
     let ci = ciRef.current || {}
@@ -848,7 +872,7 @@ function HomeLanding({ clubName, onPickId }) {
   const band = wx.today ? { ...wx.today, spray: sprayWindow(wx.today) } : null
   const forecast7 = (wx.forecast || []).filter((d) => d.date >= today).slice(0, 7)
   const rainWeekFc = forecast7.reduce((s, d) => s + (Number(d.precip) || 0), 0)
-  const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today)
+  const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today, courseInfo?.rainDaily || {})
   const sun = sundayOf(today)
   const rainWeek = (rain.days || []).filter((d) => d.date >= sun && d.date <= today).reduce((s, d) => s + d.precip, 0)
   const rainMonth = rain.byMonth?.[today.slice(0, 7)] || 0
@@ -866,7 +890,7 @@ function HomeLanding({ clubName, onPickId }) {
       right={<a href="/command" target="_blank" rel="noopener noreferrer" className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 border" style={{ color: FOREST, borderColor: HAIR, backgroundColor: 'white' }} title="Open the wide Command Center on a monitor or shop TV"><BarChart3 size={13} /> Command Center ↗</a>}>
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
-          <SprayWindowStrip current={wx.current} today={band} hasLocation={hasLocation} onGoWeather={() => onPickId('weather')} />
+          <SprayWindowStrip current={wx.current} today={band} hasLocation={hasLocation} onGoWeather={() => onPickId('weather')} sky={forecast7[0]?.code != null ? (weatherCodeInfo(forecast7[0].code)?.label || '') : ''} />
           <ForecastWeek days={forecast7} total={rainWeekFc} />
           <HomeCalendar events={events} timeoff={timeoff} today={today} onAdd={() => setAddOpen(true)}
             onDeleteEvent={(id) => saveEvents(events.filter((e) => e.id !== id))} />
@@ -1266,10 +1290,10 @@ function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
   const spdLatest = spdData.length ? spdData[spdData.length - 1].value : null
   // Clipping yields — logged in litres (the page's unit). The headline is the
   // latest reading's volume; the chart is the per-day average.
-  const clpRows = (d.clippings || []).filter((c) => inC(c.area) && c.volume != null && !isNaN(Number(c.volume)))
-  const clpData = byDateAvg(clpRows, (c) => c.date, (c) => c.volume)
+  const clpRows = (d.clippings || []).filter((c) => inC(c.area) && clipLitres(c) != null)
+  const clpData = byDateAvg(clpRows, (c) => c.date, (c) => clipLitres(c))
   const clpLatestRec = clpRows.length ? [...clpRows].sort((a, b) => String(a.date).localeCompare(String(b.date)))[clpRows.length - 1] : null
-  const clpLatest = clpLatestRec ? Number(clpLatestRec.volume) : null
+  const clpLatest = clpLatestRec ? clipLitres(clpLatestRec) : null
   // Moisture (round averages)
   const moistData = [...(d.moist || [])].filter((r) => r.avg != null).sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))).map((r) => ({ date: String(r.startedAt).slice(0, 10), value: Number(r.avg) }))
   const moistLatest = moistData.length ? moistData[moistData.length - 1].value : null
@@ -1284,7 +1308,7 @@ function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
       <div className="grid gap-4 mb-4 grid-cols-1 md:grid-cols-3">
         <DataGraphCard label="Greens moisture & wetting agent" latest={moistLatest != null ? `${Math.round(moistLatest * 10) / 10}%` : '—'} sub="avg %VWC per round" data={moistData} range={rangeLabel(moistData)} color="#3A6187" onClick={() => onPickId('wetting')} />
         <DataGraphCard label="Green speeds" latest={spdLatest != null ? fmtStimp(spdLatest) : '—'} sub="stimp" data={spdData} range={rangeLabel(spdData)} color={FOREST} onClick={() => onPickId('speed')} />
-        <DataGraphCard label="Clipping yields" latest={clpLatest != null ? clpLatest.toLocaleString() : '—'} sub="litres · latest reading" data={clpData} range={rangeLabel(clpData)} color={FERN} onClick={() => onPickId('clippings')} />
+        <DataGraphCard label="Clipping yields" latest={clpLatest != null ? `${Math.round(clpLatest * 10) / 10} L` : '—'} sub="L · latest reading" data={clpData} range={rangeLabel(clpData)} color={FERN} onClick={() => onPickId('clippings')} />
       </div>
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2" style={{ maxWidth: 680 }}>
         <button onClick={() => onPickId('gdd')} className="text-left bg-white rounded-2xl border p-4 shadow-sm hover:shadow-md transition" style={{ borderColor: HAIR }}>
@@ -3019,7 +3043,7 @@ function Dashboard({ sheets, pending, approved, todaySheets, products, areas, on
 
           {/* Rain — a little year-to-date box; taps through to the full tracker */}
           {manage && hasLocation && wx.season.length > 0 && (() => {
-            const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today)
+            const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today, courseInfo?.rainDaily || {})
             return (
               <button onClick={onGoWeather} className="w-full paper-card p-4 text-left transition">
                 <div className="flex items-center gap-2 mb-2">
@@ -3095,7 +3119,7 @@ const WINDOW_STYLE = {
   caution: { bg: '#FEF3DD', fg: '#92660D', dot: '#D97706', label: 'Caution' },
   poor: { bg: '#FEE2E2', fg: '#B91C1C', dot: '#DC2626', label: 'Poor window' },
 }
-function SprayWindowStrip({ current, today, hasLocation, attention = [], onGoWeather }) {
+function SprayWindowStrip({ current, today, hasLocation, attention = [], onGoWeather, sky = '' }) {
   const win = today?.spray?.level ? WINDOW_STYLE[today.spray.level] : null
   const toneColor = { bad: '#DC2626', warn: '#92660D', ok: FERN }
   return (
@@ -3111,10 +3135,10 @@ function SprayWindowStrip({ current, today, hasLocation, attention = [], onGoWea
               </span>
             </div>
             {current && (current.wind || current.humidity) && (() => {
-              const sky = today?.code != null ? (weatherCodeInfo(today.code)?.label || '') : ''
+              const skyLabel = sky || (today?.code != null ? (weatherCodeInfo(today.code)?.label || '') : '')
               return (
                 <span className="font-body text-[11px] opacity-70 flex items-center gap-2 min-w-0 truncate">
-                  {sky && <span>{sky}</span>}
+                  {skyLabel && <span>{skyLabel}</span>}
                   {current.wind && <span className="flex items-center gap-1 tnum"><Wind size={11} />{current.wind} mph{current.windDir ? ` ${current.windDir}` : ''}</span>}
                   {current.humidity && <span className="tnum">{current.humidity}% RH</span>}
                 </span>
@@ -13060,6 +13084,11 @@ function ClippingsTab({ clippings, areas, courseInfo, onSaveCourse, onAddMany, o
             {msg.text}
           </div>
         )}
+        {entries.some((g) => Number(vols[g]) > 50) && (
+          <div className="rounded-xl px-3 py-2 mb-2 font-body text-[12px] font-semibold" style={{ backgroundColor: '#FEF3DD', color: '#92660D' }}>
+            Some values are over 50&nbsp;L — did you mean mL? Clippings are logged in litres (one green is usually a few litres).
+          </div>
+        )}
         <button onClick={save} disabled={busy || entries.length === 0} className="w-full py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-50" style={{ backgroundColor: FOREST }}>
           {busy ? 'Saving…' : `Log ${entries.length || ''} green${entries.length !== 1 ? 's' : ''}`.trim()}
         </button>
@@ -13077,7 +13106,7 @@ function ClippingsTab({ clippings, areas, courseInfo, onSaveCourse, onAddMany, o
       {(() => {
         const allLogs = [...shown].filter((c) => c.volume != null && c.volume !== '' && !isNaN(Number(c.volume)))
           .sort((a, b) => String(a.date).localeCompare(String(b.date)))
-          .map((c) => ({ date: c.date, value: Number(c.volume), rec: c }))
+          .map((c) => ({ date: c.date, value: clipLitres(c), rec: c }))
         if (allLogs.length < 2) return null
         return (
           <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">

@@ -347,7 +347,7 @@ export default function Weather({ location, courseInfo, products = [], manage = 
     .filter((r) => !(r.id === 'dollar_spot' && dollarSpot.hasData))
   // Year-to-date rainfall from the season archive + forecast + manual entries,
   // plus last year to the same date for a fair comparison.
-  const rain = buildRainYear(state.season, rawDaily, rainOverrides, today)
+  const rain = buildRainYear(state.season, rawDaily, rainOverrides, today, courseInfo?.rainDaily || {})
   const prevRain = state.prevSeason?.length
     ? buildRainYear(state.prevSeason, [], {}, `${Number(today.slice(0, 4)) - 1}-${today.slice(5)}`)
     : null
