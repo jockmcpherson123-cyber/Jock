@@ -139,14 +139,7 @@ export default function SprayCalendar({ sheets = [], products = [], programApps 
                 }}
               >
                 <span className="font-body text-[12px] font-semibold px-0.5 tnum" style={{ color: isSel ? FOREST : INK_2 }}>{c.d}</span>
-                {/* Phones: just coloured dots (the 8px labels were unreadable); the
-                    tapped day's full list shows in the agenda below. */}
-                {labels.length > 0 && (
-                  <div className="sm:hidden flex flex-wrap gap-0.5 mt-1 px-0.5">
-                    {labels.slice(0, 4).map((it, i) => <span key={i} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: it.color }} />)}
-                  </div>
-                )}
-                <div className="hidden sm:block mt-0.5 space-y-0.5 overflow-hidden">
+                <div className="mt-0.5 space-y-0.5 overflow-hidden">
                   {shown.map((it, i) => (
                     <div
                       key={i}

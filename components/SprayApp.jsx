@@ -963,9 +963,8 @@ function HomeCalendar({ events = [], timeoff = [], today, onAdd, onDeleteEvent }
         </div>
         <button onClick={onAdd} className="font-body text-[12px] font-bold px-3 py-2 rounded-full inline-flex items-center gap-1.5 text-white shrink-0" style={{ backgroundColor: FOREST }}><Plus size={13} /> Add event</button>
       </div>
-      {/* Month grid on tablet/desktop; on a phone the squeezed 7-column grid is
-          unreadable, so below sm we show a scrollable agenda list instead. */}
-      <div className="hidden sm:grid grid-cols-7 gap-1">
+      {/* The full month grid on every screen — same calendar as the computer. */}
+      <div className="grid grid-cols-7 gap-1">
         {LAND_DOW.map((d) => <div key={d} className="text-center font-body text-[10px] font-bold uppercase pb-1" style={{ color: INK_3 }}>{d}</div>)}
         {cells.map((iso, i) => {
           if (!iso) return <div key={`p${i}`} />
@@ -987,39 +986,6 @@ function HomeCalendar({ events = [], timeoff = [], today, onAdd, onDeleteEvent }
             </div>
           )
         })}
-      </div>
-      <div className="sm:hidden">
-        {(() => {
-          const rows = cells.filter(Boolean).map((iso) => ({ iso, evs: evOn(iso), offs: offOn(iso) })).filter((r) => r.evs.length || r.offs.length)
-          if (!rows.length) return <p className="font-body text-[13px] py-6 text-center" style={{ color: INK_3 }}>No events or time off this month.</p>
-          return (
-            <ul className="space-y-1.5">
-              {rows.map(({ iso, evs, offs }) => {
-                const isToday = iso === today
-                const dd = new Date(iso + 'T00:00:00')
-                return (
-                  <li key={iso} className="flex gap-3 rounded-xl p-2.5" style={{ border: `1px solid ${isToday ? GOLD : HAIR}`, backgroundColor: isToday ? '#FBF6E6' : '#FCFCFB' }}>
-                    <div className="shrink-0 text-center w-11">
-                      <p className="font-body text-[10px] font-bold uppercase" style={{ color: INK_3 }}>{dd.toLocaleDateString('en-US', { weekday: 'short' })}</p>
-                      <p className="font-display text-lg font-bold leading-tight" style={{ color: isToday ? '#886717' : FOREST }}>{Number(iso.slice(8))}</p>
-                    </div>
-                    <div className="min-w-0 flex-1 space-y-1">
-                      {evs.map((e) => (
-                        <button key={e.id} onClick={() => onDeleteEvent && window.confirm(`Delete event "${e.title}"?`) && onDeleteEvent(e.id)}
-                          className="block w-full text-left font-body text-[13px] font-semibold px-2 py-1.5 rounded-lg" style={{ backgroundColor: '#E6F2EA', color: '#2F5A3D' }}>
-                          {!e.allDay && e.time ? `${e.time} · ` : ''}{e.title}
-                        </button>
-                      ))}
-                      {offs.map((o, j) => (
-                        <div key={`o${j}`} className="font-body text-[13px] font-semibold px-2 py-1.5 rounded-lg" style={{ backgroundColor: '#FBF1D6', color: '#886717' }}>{o.person} — time off</div>
-                      ))}
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )
-        })()}
       </div>
       <p className="font-body text-[10px] mt-2 flex flex-wrap items-center gap-3" style={{ color: INK_3 }}>
         <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#8CC2A0' }} /> Event</span>
