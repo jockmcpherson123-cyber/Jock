@@ -58,42 +58,51 @@ export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal =
   }
   const ts = Number(tankGal) || 0
   const tgt = Number(target) || 0
-  const minSpare = Number(spare) || 0
+  const cushion = Number(spare) || 0
 
+  const areaM = areaSqft / 1000
   const totGal = tanks * ts
-  const waterRate = areaSqft > 0 ? totGal / (areaSqft / 1000) : 0
+  const applyGal = Math.max(0, totGal - cushion)          // water actually sprayed
+  // The water rate to SET so you finish the area with the cushion still in the
+  // tank. The rate flexes; the cushion is what stays fixed.
+  const waterRate = areaM > 0 ? applyGal / areaM : 0
   const areaPerTank = tanks > 0 ? areaSqft / tanks : 0
 
   const options = useMemo(() => {
     if (!(areaSqft > 0 && ts > 0 && tgt > 0)) return []
-    const needGal = tgt * (areaSqft / 1000)
-    const base = Math.max(0.5, Math.floor((needGal / ts) * 2) / 2)
+    const am = areaSqft / 1000
+    // tanks needed to apply the area at the target rate AND keep the cushion
+    const needTotal = tgt * am + cushion
+    const base = Math.max(0.5, Math.floor((needTotal / ts) * 2) / 2)
     const cands = []
     for (let k = 0; k <= 4; k++) cands.push(Math.round((base + k * 0.5) * 2) / 2)
     const uniq = [...new Set(cands.filter((x) => x >= 0.5))].sort((a, b) => a - b)
-    const rows = uniq.map((t) => {
-      const g = t * ts
-      const rate = g / (areaSqft / 1000)
-      const sp = g - needGal
+    return uniq.map((t) => {
+      const total = t * ts
+      const apply = Math.max(0, total - cushion)
+      const rate = am > 0 ? apply / am : 0         // spray rate that leaves the cushion
+      const delta = tgt > 0 ? rate - tgt : 0
       const partial = t % 1 !== 0
-      let tag, tone
-      if (sp < -0.5) { tag = 'Runs short'; tone = 'bad' }
-      else if (sp < minSpare) { tag = 'Tight'; tone = 'warn' }
-      else if (sp <= minSpare + ts * 0.45) { tag = partial ? 'Good · half tank' : 'Good cushion'; tone = 'good' }
-      else { tag = 'Wastes mix'; tone = 'bad' }
-      return { t, rate, g, sp, partial, tag, tone }
+      return { t, total, apply, rate, delta, partial }
     })
-    return rows
-  }, [areaSqft, ts, tgt, minSpare])
+  }, [areaSqft, ts, tgt, cushion])
 
+  // best = the tank count whose spray rate (leaving the cushion) is closest to
+  // your target rate; prefer a whole tank on a near tie.
   const best = useMemo(() => {
     let b = null
     options.forEach((r) => {
-      if (r.sp < minSpare - 0.001) return
-      if (!b || r.sp < b.sp - 0.001 || (Math.abs(r.sp - b.sp) < 0.001 && !r.partial && b.partial)) b = r
+      if (!b || Math.abs(r.delta) < Math.abs(b.delta) - 0.0005 || (Math.abs(r.delta) < Math.abs(b.delta) + 0.0005 && !r.partial && b.partial)) b = r
     })
     return b
-  }, [options, minSpare])
+  }, [options])
+
+  const tagFor = (r, isBest) => {
+    if (isBest) return { label: 'Best fit', tone: 'good' }
+    const pct = tgt > 0 ? (r.delta / tgt) * 100 : 0
+    if (Math.abs(pct) <= 5) return { label: 'On target', tone: 'good' }
+    return { label: pct < 0 ? 'Lighter' : 'Heavier', tone: Math.abs(pct) <= 15 ? 'warn' : 'bad' }
+  }
 
   const toneColor = { good: FERN, warn: AMBER, bad: RED }
   const toneBg = { good: BAND, warn: GOLD_WASH, bad: '#FBEAE7' }
@@ -156,15 +165,27 @@ export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal =
             </div>
           </div>
 
-          {/* result */}
+          {/* set your target + cushion */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3">
+            <label className="flex items-center gap-1.5"><span style={label10}>Target rate</span>
+              <input inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} className="tabular-nums text-center" style={{ width: 60, border: 'none', borderBottom: `1.5px solid ${GOLD}`, padding: '2px 0', fontSize: 15, fontWeight: 600, color: INK, background: 'transparent' }} />
+              <span className="font-body text-[11px]" style={{ color: INK_2 }}>gal/1000</span></label>
+            <label className="flex items-center gap-1.5"><span style={label10}>Leave in tank</span>
+              <input inputMode="decimal" value={spare} onChange={(e) => setSpare(e.target.value)} className="tabular-nums text-center" style={{ width: 52, border: 'none', borderBottom: `1.5px solid ${GOLD}`, padding: '2px 0', fontSize: 15, fontWeight: 600, color: INK, background: 'transparent' }} />
+              <span className="font-body text-[11px]" style={{ color: INK_2 }}>gal left over</span></label>
+          </div>
+
+          {/* result — the rate to SET so you finish with the cushion left */}
           <div className="grid gap-2.5 mt-3" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))' }}>
             <div className="rounded-xl p-3" style={{ backgroundColor: GOLD_WASH, border: `1px solid ${GOLD}` }}>
-              <div style={label10}>Water rate</div>
+              <div style={label10}>Spray at this rate</div>
               <div className="font-display font-bold tabular-nums" style={{ color: FOREST, fontSize: 26 }}>{r2(waterRate).toFixed(2)}<span className="font-body text-[12px] font-semibold" style={{ color: INK_3 }}> gal/1000</span></div>
+              <div className="font-body text-[10.5px] font-semibold mt-0.5" style={{ color: FERN }}>finishes with {fmtInt(cushion)} gal left in the tank</div>
             </div>
             <div className="rounded-xl p-3" style={{ border: `1px solid ${HAIR}` }}>
-              <div style={label10}>Total water</div>
+              <div style={label10}>Total mixed</div>
               <div className="font-display font-bold tabular-nums" style={{ color: FOREST, fontSize: 21 }}>{fmtInt(totGal)}<span className="font-body text-[12px] font-semibold" style={{ color: INK_3 }}> gal</span></div>
+              <div className="font-body text-[10.5px] mt-0.5" style={{ color: INK_3 }}>{fmtInt(applyGal)} gal sprayed</div>
             </div>
             <div className="rounded-xl p-3" style={{ border: `1px solid ${HAIR}` }}>
               <div style={label10}>Area / tank</div>
@@ -172,29 +193,23 @@ export default function TankPlanner({ areas = [], onApplyTanks, defaultTankGal =
             </div>
           </div>
 
-          {/* target + options */}
+          {/* options — each tank count's spray rate (all leave your cushion) */}
           <div className="mt-4 pt-3 border-t" style={{ borderColor: HAIR }}>
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-3">
-              <span className="font-display text-[15px] font-semibold" style={{ color: FOREST }}>Dial it to a rate you like</span>
-              <label className="flex items-center gap-1.5"><span style={label10}>Target rate</span>
-                <input inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} className="tabular-nums text-center" style={{ width: 60, border: 'none', borderBottom: `1.5px solid ${GOLD}`, padding: '2px 0', fontSize: 15, fontWeight: 600, color: INK, background: 'transparent' }} />
-                <span className="font-body text-[11px]" style={{ color: INK_2 }}>gal/1000</span></label>
-              <label className="flex items-center gap-1.5"><span style={label10}>Leave spare</span>
-                <input inputMode="decimal" value={spare} onChange={(e) => setSpare(e.target.value)} className="tabular-nums text-center" style={{ width: 52, border: 'none', borderBottom: `1.5px solid ${GOLD}`, padding: '2px 0', fontSize: 15, fontWeight: 600, color: INK, background: 'transparent' }} />
-                <span className="font-body text-[11px]" style={{ color: INK_2 }}>gal cushion</span></label>
-            </div>
+            <p className="font-body text-[12px] mb-2.5" style={{ color: INK_2 }}>Each option already <b>covers the whole area</b> and leaves your {fmtInt(cushion)}‑gal cushion — only the <b>water rate changes</b>. Pick the tank count whose rate you like.</p>
             <div className="flex flex-col gap-2">
               {options.length === 0 && <p className="font-body text-[12px]" style={{ color: INK_3 }}>Enter area, tank size and a target rate.</p>}
               {options.map((r) => {
                 const isBest = best && r.t === best.t
+                const tg = tagFor(r, isBest)
+                const pct = tgt > 0 ? (r.delta / tgt) * 100 : 0
                 return (
                   <button key={r.t} type="button" onClick={() => setTanks(r.t)} className="grid items-center gap-3 rounded-xl px-3 py-2.5 text-left" style={{ gridTemplateColumns: 'auto 1fr auto', border: `1px solid ${isBest ? FERN : HAIR}`, backgroundColor: isBest ? BAND : 'white' }}>
                     <span className="font-display text-lg font-bold tabular-nums" style={{ color: FOREST }}>{r.t % 1 === 0 ? r.t : r.t.toFixed(1)}<span className="font-body text-[10px] font-semibold block -mt-0.5" style={{ color: INK_3 }}>tanks</span></span>
                     <span className="min-w-0">
-                      <span className="font-body text-[14px] font-bold tabular-nums" style={{ color: INK }}>{r2(r.rate).toFixed(2)} gal/1000</span>
-                      <span className="font-body text-[11px] block" style={{ color: INK_3 }}>{fmtInt(r.g)} gal total · {r.sp >= 0 ? `${fmtInt(r.sp)} gal spare` : `${fmtInt(-r.sp)} gal short`}{isBest ? ' · best fit' : ''}</span>
+                      <span className="font-body text-[14px] font-bold tabular-nums" style={{ color: INK }}>spray at {r2(r.rate).toFixed(2)} gal/1000</span>
+                      <span className="font-body text-[11px] block" style={{ color: INK_3 }}>{fmtInt(r.total)} gal mixed · leaves {fmtInt(cushion)} gal · {Math.abs(pct) < 0.5 ? 'on target' : `${pct > 0 ? '+' : ''}${pct.toFixed(0)}% vs target`}</span>
                     </span>
-                    <span className="font-body text-[10px] font-extrabold uppercase tracking-wide px-2 py-1 rounded-full whitespace-nowrap" style={{ color: toneColor[r.tone], backgroundColor: toneBg[r.tone] }}>{r.tag}</span>
+                    <span className="font-body text-[10px] font-extrabold uppercase tracking-wide px-2 py-1 rounded-full whitespace-nowrap" style={{ color: toneColor[tg.tone], backgroundColor: toneBg[tg.tone] }}>{tg.label}</span>
                   </button>
                 )
               })}
