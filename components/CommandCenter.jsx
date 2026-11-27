@@ -14,6 +14,8 @@ import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, w
 import { sheetApplied } from '@/lib/applied'
 import { localDateISO } from '@/lib/dates'
 import { fmtStimp } from '@/lib/greenspeed'
+import { fetchTargets } from '@/lib/coursemap/db'
+import { resolveTarget, targetRangeLabel } from '@/lib/coursemap/targets'
 
 import { FOREST, FERN, GOLD, INK_3 } from '@/lib/theme'
 const BG = '#EEF1EE'
@@ -59,10 +61,11 @@ export default function CommandCentre() {
       ])
       let programApps = []
       if (programs.length) { const cur = new Date().getFullYear(); const prog = programs.find((p) => Number(p.year) === cur) || programs[0]; try { programApps = await db.fetchApplications(prog.id) } catch { programApps = [] } }
+      const moistTargets = await fetchTargets().catch(() => []) // the club's moisture targets (same source as Greens Today)
       const courseInfo = settings.courseInfo || {}
       ciRef.current = courseInfo
       if (!cmdInit.current) { setCommand(courseInfo.command || {}); cmdInit.current = true }
-      setLive({ areas: settings.areas || {}, courseInfo, sheets, speeds, tasks, fertSheets, programApps })
+      setLive({ areas: settings.areas || {}, courseInfo, sheets, speeds, tasks, fertSheets, programApps, moistTargets })
       const loc = settings.location
       if (loc?.lat != null) {
         ;(async () => { try { const c = await fetchCurrent(loc.lat, loc.lng); setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ } })()
@@ -90,8 +93,10 @@ export default function CommandCentre() {
 
   if (loading || !live) return <div style={{ minHeight: '100vh', backgroundColor: BG }} className="flex items-center justify-center"><RefreshCw className="animate-spin text-slate-300" size={30} /></div>
 
-  const { areas, courseInfo, sheets, speeds, tasks, fertSheets = [], programApps = [] } = live
+  const { areas, courseInfo, sheets, speeds, tasks, fertSheets = [], programApps = [], moistTargets = [] } = live
   const today = localDateISO()
+  // The moisture target range to hold, read from the same source as Greens Today.
+  const moistTargetLabel = targetRangeLabel(resolveTarget(moistTargets, today))
   const year = today.slice(0, 4)
   const weekSun = (() => { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0, 10) })()
   const weekSat = addDaysISO(weekSun, 6)
@@ -179,6 +184,7 @@ export default function CommandCentre() {
             course={c}
             metrics={courseMetrics(c)}
             state={(command && command[c.name]) || {}}
+            moistTargetLabel={moistTargetLabel}
             onPatch={(patch) => patchCourse(c.name, patch)}
           />
         ))}
@@ -222,7 +228,7 @@ function PropTile({ icon: Icon, label, value, sub, accent = FOREST }) {
 }
 
 // One course's card: live stats on top, editable focus + to-do below.
-function CourseCard({ course, metrics, state, onPatch }) {
+function CourseCard({ course, metrics, state, onPatch, moistTargetLabel }) {
   const color = course.color || FERN
   const todos = Array.isArray(state.todos) ? state.todos : []
   const [draft, setDraft] = useState('')
@@ -250,7 +256,9 @@ function CourseCard({ course, metrics, state, onPatch }) {
       <div className="grid grid-cols-3 gap-2 mb-4">
         <Stat icon={Gauge} label="Greens speed" value={metrics.speed ? fmtStimp(metrics.speed.avg) : '—'} unit="" sub={metrics.speed?.day ? mdShort(metrics.speed.day) : ''} />
         <Stat icon={Sprout} label="Height of cut" value={metrics.hoc ? String(metrics.hoc).replace(/\s*in$/i, '') : '—'} unit="in" />
-        <EditStat label="Moisture tgt" value={moist} unit="% VWC" onCommit={(v) => { setMoist(v); onPatch({ moistureTgt: v }) }} onChange={setMoist} placeholder="—" />
+        {moistTargetLabel
+          ? <Stat icon={Gauge} label="Moisture tgt" value={moistTargetLabel} unit="VWC" />
+          : <EditStat label="Moisture tgt" value={moist} unit="% VWC" onCommit={(v) => { setMoist(v); onPatch({ moistureTgt: v }) }} onChange={setMoist} placeholder="—" />}
       </div>
 
       {/* Today's focus */}

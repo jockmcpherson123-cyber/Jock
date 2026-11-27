@@ -17,7 +17,7 @@ import { planReadingsImport, guessReadingMapping } from '@/lib/coursemap/import'
 import { idwValue, moistureStops, changeStops, colorAt, changeReadings } from '@/lib/coursemap/heat'
 import { suggestDepth, planByDepth } from '@/lib/coursemap/depth'
 import { lonLatToPixel, lonLatTo3857, m3857ToLonLat } from '@/lib/coursemap/geo'
-import { resolveTarget, withException, coverageIssues, timelineMonths, targetFields, targetAvg } from '@/lib/coursemap/targets'
+import { resolveTarget, withException, coverageIssues, timelineMonths, targetFields, targetRangeFields, targetRangeLabel, moistureStatus, targetAvg } from '@/lib/coursemap/targets'
 import { fetchWeather, dailyFromHourly } from '@/lib/weather'
 import { formatNumber, formatDate } from '@/lib/format'
 
@@ -29,10 +29,8 @@ const canApprove = (role) => role === 'superintendent' || role === 'director'
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 const shiftDate = (iso, days) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + days); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 const statusOf = (avg, t) => {
-  if (avg == null || t == null) return { label: '—', c: INK_3 }
-  const d = avg - (t.aim ?? ((t.lo + t.hi) / 2))
-  if (Math.abs(d) <= 2) return { label: 'On target', c: GREEN_OK }
-  return d < 0 ? { label: `${Math.abs(d).toFixed(1)} under`, c: RED } : { label: `${d.toFixed(1)} over`, c: BLUE }
+  const s = moistureStatus(avg, t)
+  return { label: s.label, c: s.color }
 }
 
 export default function GreensToday({ ctx, courseId, manage, user, activeImagery }) {
@@ -127,9 +125,9 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
 
   const reloadTargets = async () => setTargets(await cmdb.fetchTargets(courseId))
   const saveRange = async () => {
-    const t = Number(adjTarget.target)
-    if (!isFinite(t)) { alert('Enter a target %.'); return }
-    const f = targetFields(t)
+    const lo = Number(adjTarget.lo), hi = Number(adjTarget.hi)
+    if (!isFinite(lo) || !isFinite(hi)) { alert('Enter a low and a high %.'); return }
+    const f = targetRangeFields(lo, hi)
     const full = targets.find((x) => x.id === baseTarget.id)
     try {
       await cmdb.saveTarget(full ? { ...full, clubId: ctx.club.id, courseId, ...f } : { clubId: ctx.club.id, courseId, name: 'All season', startMd: '11-01', endMd: '10-31', ...f })
@@ -226,16 +224,18 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="font-body text-[12px] px-2 py-1.5 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK }} />
         <button onClick={() => setDate(shiftDate(date, 1))} className="font-body text-[13px] font-bold px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${HAIR}`, color: INK_2 }} aria-label="Next day">›</button>
         {date !== todayISO() && <button onClick={() => setDate(todayISO())} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: FERN }}>Today</button>}
-        <span className="font-body text-[11.5px] ml-1" style={{ color: INK_3 }}>target {selTarget.aim}%{selTarget.exception ? ' (green exception)' : ''}</span>
-        {manage && !adjTarget && <button onClick={() => setAdjTarget({ target: baseTarget.aim })} className="font-body text-[11.5px] font-bold" style={{ color: FERN }}>Adjust target</button>}
+        <span className="font-body text-[11.5px] ml-1" style={{ color: INK_3 }}>target {targetRangeLabel(selTarget)}{selTarget.exception ? ' (green exception)' : ''}</span>
+        {manage && !adjTarget && <button onClick={() => setAdjTarget({ lo: baseTarget.lo, hi: baseTarget.hi })} className="font-body text-[11.5px] font-bold" style={{ color: FERN }}>Adjust target</button>}
       </div>
       {adjTarget && (
         <div className="rounded-xl border p-2.5 mb-3 flex flex-wrap items-end gap-2" style={{ borderColor: HAIR, backgroundColor: PAPER }}>
-          <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>{baseTarget.name || 'Season'} target %</label>
-            <input value={adjTarget.target ?? ''} onChange={(e) => setAdjTarget({ target: e.target.value })} className="w-20 font-body text-[13px] px-2 py-1.5 rounded-lg mt-0.5 text-right" style={{ border: `1px solid ${HAIR}` }} /></div>
+          <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>{baseTarget.name || 'Season'} low %</label>
+            <input value={adjTarget.lo ?? ''} onChange={(e) => setAdjTarget((a) => ({ ...a, lo: e.target.value }))} className="w-20 font-body text-[13px] px-2 py-1.5 rounded-lg mt-0.5 text-right" style={{ border: `1px solid ${HAIR}` }} /></div>
+          <div><label className="font-body text-[10px] font-bold uppercase block" style={{ color: INK_3 }}>high %</label>
+            <input value={adjTarget.hi ?? ''} onChange={(e) => setAdjTarget((a) => ({ ...a, hi: e.target.value }))} className="w-20 font-body text-[13px] px-2 py-1.5 rounded-lg mt-0.5 text-right" style={{ border: `1px solid ${HAIR}` }} /></div>
           <button onClick={saveRange} className="font-body text-[12px] font-bold px-3 py-1.5 rounded-lg text-white" style={{ backgroundColor: FOREST }}>Save</button>
           <button onClick={() => setAdjTarget(null)} className="font-body text-[12px] font-bold px-2.5 py-1.5 rounded-lg" style={{ color: INK_2 }}>Cancel</button>
-          <span className="font-body text-[10.5px] self-center" style={{ color: INK_3 }}>Sets the average for the whole {baseTarget.name || 'season'} — more on the Targets tab.</span>
+          <span className="font-body text-[10.5px] self-center" style={{ color: INK_3 }}>The range to hold for the whole {baseTarget.name || 'season'}: in range is green, below red→orange, above blue. More on the Targets tab.</span>
         </div>
       )}
       {staleDate && (
