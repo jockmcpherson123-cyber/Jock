@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { CloudRain, Gauge, Sprout, Thermometer, RefreshCw, Plus, X, ClipboardList, Sun, CloudSun, Cloud, CloudDrizzle, CloudSnow, CloudFog, CloudLightning } from 'lucide-react'
 import * as db from '@/lib/db'
-import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, weatherCodeInfo, fetchNbmForecast, overlayForecastTemps, seasonGddToDate } from '@/lib/weather'
+import { fetchCurrent, fetchWeather, dailyFromForecastBlock, fetchSeasonDaily, weatherCodeInfo, fetchNbmForecast, overlayForecastTemps, seasonGddToDate, buildRainYear, fetchTodayRain } from '@/lib/weather'
 import { sheetApplied } from '@/lib/applied'
 import { localDateISO } from '@/lib/dates'
 import { fmtStimp } from '@/lib/greenspeed'
@@ -29,10 +29,11 @@ const tok = (s) => String(s || '').trim().split(/\s+/)[0].toLowerCase()
 const uid = () => Math.random().toString(36).slice(2, 9)
 const addDaysISO = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
 const fmtLongDate = (d) => d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+const fmtShort = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
 export default function CommandCentre() {
   const [live, setLive] = useState(null)
-  const [wx, setWx] = useState({ current: null, forecast: [], season: [] })
+  const [wx, setWx] = useState({ current: null, forecast: [], season: [], todayRain: null })
   const [command, setCommand] = useState(null) // editable per-course state
   const [loading, setLoading] = useState(true)
   const [clock, setClock] = useState('')
@@ -66,6 +67,7 @@ export default function CommandCentre() {
         ;(async () => { try { const c = await fetchCurrent(loc.lat, loc.lng); setWx((w) => ({ ...w, current: c })) } catch { /* ignore */ } })()
         ;(async () => { try { const d = await fetchWeather(loc.lat, loc.lng); let fc = dailyFromForecastBlock(d); try { const nbm = await fetchNbmForecast(loc.lat, loc.lng); fc = overlayForecastTemps(fc, nbm) } catch { /* keep base */ } setWx((w) => ({ ...w, forecast: fc })) } catch { /* ignore */ } })()
         ;(async () => { try { const s = await fetchSeasonDaily(loc.lat, loc.lng); setWx((w) => ({ ...w, season: s })) } catch { /* ignore */ } })()
+        ;(async () => { try { const tr = await fetchTodayRain(loc.lat, loc.lng); setWx((w) => ({ ...w, todayRain: tr })) } catch { /* ignore */ } })()
       }
     } catch (e) { console.error(e) }
     setLoading(false)
@@ -107,7 +109,12 @@ export default function CommandCentre() {
   const plannedWk = new Set()
   ;(programApps || []).forEach((a) => { if (a.plannedDate && !a.linkedSheetId && inWk(a.plannedDate)) plannedWk.add(`${a.plannedDate}|${a.area}`) })
   const spraysThisWeek = (sheets || []).filter((s) => inWk(s.date)).length + (fertSheets || []).filter((f) => inWk(f.date)).length + plannedWk.size
-  const rain7 = (wx.season || []).filter((d) => d.date >= weekAgo && d.date <= today).reduce((s, d) => s + (Number(d.precip) || 0), 0)
+  // Rain, from the SAME computation as Home / Weather / Weekly Report: frozen
+  // daily snapshot for past days, live "so far" for today, manual gauge wins.
+  // Totalling only these saved daily values (never forecast) keeps "last 7 days"
+  // honest — Nov 21–27, not a forecast-inflated number.
+  const rainYr = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today, courseInfo?.rainDaily || {}, wx.todayRain?.todayIn ?? null)
+  const rain7 = rainYr.last7
   const seasonGdd = (wx.season.length || wx.forecast.length) ? seasonGddToDate(wx.season, wx.forecast) : null
 
   const forecast7 = (wx.forecast || []).filter((d) => d.date >= today)
@@ -155,7 +162,7 @@ export default function CommandCentre() {
       {/* Shared property strip */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
         <PropTile icon={ClipboardList} label="This week · sprays" value={spraysThisWeek} />
-        <PropTile icon={CloudRain} label="Rain · last 7 days" value={`${rain7.toFixed(2)}"`} />
+        <PropTile icon={CloudRain} label="Rain · last 7 days" value={`${rain7.toFixed(2)}"`} sub={rainYr.from7 ? `${fmtShort(rainYr.from7)}–${fmtShort(today)}` : ''} />
         <PropTile icon={Thermometer} label="GDD to date" value={seasonGdd != null ? seasonGdd.toLocaleString() : '—'} sub="base 50°F · since Jan 1" />
       </div>
       <p className="font-body text-[11px] text-slate-400 mb-4 flex items-center gap-1.5">

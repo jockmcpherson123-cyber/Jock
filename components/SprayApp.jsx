@@ -887,7 +887,7 @@ function HomeLanding({ clubName, onPickId }) {
   const band = wx.today ? { ...wx.today, spray: sprayWindow(wx.today) } : null
   const forecast7 = (wx.forecast || []).filter((d) => d.date >= today).slice(0, 7)
   const rainWeekFc = forecast7.reduce((s, d) => s + (Number(d.precip) || 0), 0)
-  const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today, courseInfo?.rainDaily || {})
+  const rain = buildRainYear(wx.season, wx.forecast, courseInfo?.rainOverrides || {}, today, courseInfo?.rainDaily || {}, todayRain?.todayIn ?? null)
   const sun = sundayOf(today)
   const rainWeek = (rain.days || []).filter((d) => d.date >= sun && d.date <= today).reduce((s, d) => s + d.precip, 0)
   const rainMonth = rain.byMonth?.[today.slice(0, 7)] || 0
@@ -905,7 +905,7 @@ function HomeLanding({ clubName, onPickId }) {
       <div className="grid gap-4 lg:grid-cols-3 min-w-0">
         <div className="lg:col-span-2 space-y-4 min-w-0">
           <SprayWindowStrip current={wx.current} today={band} hasLocation={hasLocation} onGoWeather={() => onPickId('weather')} sky={forecast7[0]?.code != null ? (weatherCodeInfo(forecast7[0].code)?.label || '') : ''} />
-          <ForecastWeek days={forecast7} total={rainWeekFc} />
+          <ForecastWeek days={forecast7} total={rainWeekFc} todayLiveIn={todayRain?.todayIn ?? null} today={today} />
           <HomeCalendar events={events} timeoff={timeoff} today={today} onAdd={() => setAddOpen(true)}
             onDeleteEvent={(id) => saveEvents(events.filter((e) => e.id !== id))} />
         </div>
@@ -920,7 +920,7 @@ function HomeLanding({ clubName, onPickId }) {
   )
 }
 
-function ForecastWeek({ days = [], total = 0 }) {
+function ForecastWeek({ days = [], total = 0, todayLiveIn = null, today = '' }) {
   return (
     <div className="bg-white rounded-2xl border shadow-sm p-4" style={{ borderColor: HAIR }}>
       <div className="flex items-center justify-between mb-2">
@@ -942,7 +942,7 @@ function ForecastWeek({ days = [], total = 0 }) {
                 <WI size={22} className="mx-auto my-1" style={{ color: wi.color }} />
                 <p className="font-display text-base font-bold" style={{ color: FOREST }}>{Math.round(d.tMax)}°</p>
                 <p className="font-body text-[11px]" style={{ color: INK_3 }}>{Math.round(d.tMin)}°</p>
-                <p className="font-body text-[10px] mt-0.5" style={{ color: '#3A6187' }}>{(Number(d.precip) || 0).toFixed(2)}"</p>
+                <p className="font-body text-[10px] mt-0.5" style={{ color: '#3A6187' }}>{(Number(d.date === today && todayLiveIn != null ? todayLiveIn : d.precip) || 0).toFixed(2)}"{d.date === today && todayLiveIn != null ? ' so far' : ''}</p>
               </div>
             )
           })}

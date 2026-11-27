@@ -9,6 +9,7 @@ import * as db from '@/lib/db'
 import { Printer, Download, Mail, Loader2, Calendar, Thermometer, Scissors, Gauge, Sprout } from 'lucide-react'
 import { fmtStimp } from '@/lib/greenspeed'
 import { areaInCourse } from '@/lib/calc'
+import { buildRainYear } from '@/lib/weather'
 
 import { FOREST, FERN, GOLD } from '@/lib/theme'
 const TYPE_COLOR = { Fungicide: '#3A6B4A', Herbicide: '#D97706', Insecticide: '#DC2626', 'Growth Reg': '#7C3AED', Fertilizer: '#2563EB', Biological: '#0D9488', 'Wetting Agent': '#64748B' }
@@ -239,6 +240,11 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   }
   const twx = wxSummary(wxThis)
   const nwx = wxSummary(wxNext)
+  // This week's rain uses the SAME per-day values as Home / Weather / Command
+  // Center (frozen daily snapshot + manual gauge), not a separate sum — so the
+  // numbers agree. Window is Mon–today; the dates are shown on the report.
+  const rainY = buildRainYear([], daily, courseInfo?.rainOverrides || {}, iso(W.today), courseInfo?.rainDaily || {})
+  twx.precip = rainY.days.filter((d) => inRange(d.date, W.thisMon, W.today)).reduce((s, d) => s + d.precip, 0)
 
   // This week's collected data (filtered to the chosen course).
   const speedsThis = speeds.filter((s) => inRange(s.date, W.thisMon, W.thisSun) && s.speed != null && inCourse(s.area))
@@ -681,7 +687,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
         )}
 
         {/* This week's data — compact stat band + mowing */}
-        <H icon={Gauge}>This week</H>
+        <H icon={Gauge}>This week · {fmtDay(iso(W.thisMon)).replace(/^\w+, /, '')}–{fmtDay(iso(W.today)).replace(/^\w+, /, '')}</H>
         <div className="grid grid-cols-3 md:grid-cols-6 gap-1.5 avoid-break">
           {[
             { k: 'stimpAvg', label: 'Stimp avg', display: dStimpAvg, sub: speedStat ? `${speedStat.n}×` : '' },

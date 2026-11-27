@@ -5,7 +5,7 @@
 // All from Open-Meteo using the club's saved location — no API key required.
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, CloudRain, Thermometer, Droplets, TrendingUp, AlertTriangle, MapPin, Wind, Info } from 'lucide-react'
-import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDaily, dailyFromForecastBlock, mergeDaily, fetchNbmForecast, overlayForecastTemps, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps, buildRainYear, smithKernsModel } from '@/lib/weather'
+import { fetchWeather, dailyFromHourly, summarize, fetchSeasonDaily, fetchYearDaily, dailyFromForecastBlock, mergeDaily, fetchNbmForecast, overlayForecastTemps, gddFromDaily, fetchCurrent, sprayWindow, hourlyForDay, irrigationNeed, turfStress, fetchBreakdownTemps, buildRainYear, smithKernsModel, fetchTodayRain } from '@/lib/weather'
 import { applicationTimings, soilTrend, currentSoilTemp } from '@/lib/soiltiming'
 import { diseaseRisks, pestWatch, matchLibraryForPest } from '@/lib/pests'
 import { profileById, photoSearchUrl } from '@/lib/knowledge'
@@ -154,7 +154,7 @@ function RainfallYearCard({ rain, prev, canEdit, onEditDay }) {
           </div>
           <div className="text-right">
             <p className="font-body text-sm font-bold text-slate-700">{rain.last30.toFixed(2)} in</p>
-            <p className="font-body text-[11px] text-slate-400">Last 30 days</p>
+            <p className="font-body text-[11px] text-slate-400">Last 30 days{rain.from30 && rain.days?.length ? ` (${fmtDay(rain.from30).replace(/^\w+, /, '')}–${fmtDay(rain.days[rain.days.length - 1].date).replace(/^\w+, /, '')})` : ''}</p>
             {rain.wettest && <p className="font-body text-[10px] text-slate-400 mt-1">Wettest: {fmtDay(rain.wettest.date)} · {rain.wettest.precip.toFixed(2)}"</p>}
           </div>
         </div>
@@ -217,6 +217,7 @@ function RainfallYearCard({ rain, prev, canEdit, onEditDay }) {
 export default function Weather({ location, courseInfo, products = [], manage = false, onSaveRain, onGoToSettings }) {
   const [state, setState] = useState({ loading: true, error: null, daily: null, summary: null })
   const [current, setCurrent] = useState(null)
+  const [todayRain, setTodayRain] = useState(null) // live "rain so far today" — the one source for today
   const [soilSeries, setSoilSeries] = useState([]) // recent daily soil temps
   const [etPct, setEtPct] = useState(80) // % of ET to replace with irrigation
   // Manual rainfall corrections { 'YYYY-MM-DD': inches } — for when the modeled
@@ -265,6 +266,8 @@ export default function Weather({ location, courseInfo, products = [], manage = 
 
         // Live current conditions (best-effort — doesn't block the page).
         try { const c = await fetchCurrent(location.lat, location.lng); if (!cancelled) setCurrent(c) } catch { /* ignore */ }
+        // Live "rain so far today" — the single source for today's rain everywhere.
+        try { const tr = await fetchTodayRain(location.lat, location.lng); if (!cancelled) setTodayRain(tr) } catch { /* ignore */ }
         // Recent soil temperatures (drive the soil-temp readout + timing windows).
         try { const bt = await fetchBreakdownTemps(location.lat, location.lng); if (!cancelled) setSoilSeries(bt) } catch { /* ignore */ }
 
@@ -328,8 +331,15 @@ export default function Weather({ location, courseInfo, products = [], manage = 
   const { daily: rawDaily, summary, fullSeason } = state
   // Apply any manual rainfall corrections so every readout below — the Rain stat,
   // the forecast, ET "put back tonight", and the disease models — uses them.
-  const daily = rawDaily.map((d) => (rainOverrides[d.date] != null ? { ...d, precip: rainOverrides[d.date], rainManual: true } : d))
   const today = localDateISO()
+  const todayLiveIn = todayRain?.todayIn ?? null
+  const daily = rawDaily.map((d) => {
+    if (rainOverrides[d.date] != null) return { ...d, precip: rainOverrides[d.date], rainManual: true }
+    // Today's precip comes from the live "so far" reading, so the Rain-today stat
+    // and the rainy-days list match Home, the Command Center and the Weekly Report.
+    if (d.date === today && todayLiveIn != null) return { ...d, precip: todayLiveIn, rainToday: true }
+    return d
+  })
   const todayRow = daily.find((d) => d.date === today) || daily[daily.length - 1]
   const forecast = daily.filter((d) => d.date >= today).slice(0, 7)
   const recentDays = daily.filter((d) => d.date < today).slice(-7).reverse()
@@ -347,7 +357,7 @@ export default function Weather({ location, courseInfo, products = [], manage = 
     .filter((r) => !(r.id === 'dollar_spot' && dollarSpot.hasData))
   // Year-to-date rainfall from the season archive + forecast + manual entries,
   // plus last year to the same date for a fair comparison.
-  const rain = buildRainYear(state.season, rawDaily, rainOverrides, today, courseInfo?.rainDaily || {})
+  const rain = buildRainYear(state.season, rawDaily, rainOverrides, today, courseInfo?.rainDaily || {}, todayLiveIn)
   const prevRain = state.prevSeason?.length
     ? buildRainYear(state.prevSeason, [], {}, `${Number(today.slice(0, 4)) - 1}-${today.slice(5)}`)
     : null
@@ -412,10 +422,10 @@ export default function Weather({ location, courseInfo, products = [], manage = 
         <Stat icon={<Droplets size={15} />} label="Avg Humidity" value={todayRow?.rhMean != null ? `${Math.round(todayRow.rhMean)}%` : '—'} accent={FERN} />
         {canEditRain ? (
           <button type="button" onClick={() => openRainEdit(today, todayRow?.precip)} className="text-left w-full">
-            <Stat icon={<CloudRain size={15} />} label={todayRow?.rainManual ? 'Rain today · yours' : 'Rain today · tap to edit'} value={todayRow ? `${todayRow.precip}"` : '—'} accent="#2563EB" />
+            <Stat icon={<CloudRain size={15} />} label={todayRow?.rainManual ? 'Rain today · yours' : 'Rain today · so far'} value={todayRow ? `${(Number(todayRow.precip) || 0).toFixed(2)}"` : '—'} accent="#2563EB" />
           </button>
         ) : (
-          <Stat icon={<CloudRain size={15} />} label="Rain today" value={todayRow ? `${todayRow.precip}"` : '—'} accent="#2563EB" />
+          <Stat icon={<CloudRain size={15} />} label="Rain today · so far" value={todayRow ? `${(Number(todayRow.precip) || 0).toFixed(2)}"` : '—'} accent="#2563EB" />
         )}
         <Stat icon={<TrendingUp size={15} />} label={fullSeason ? 'GDD since Jan 1' : 'GDD (last ~90d)'} value={Math.round(summary.gddNow).toLocaleString()} accent={FOREST} />
       </div>
