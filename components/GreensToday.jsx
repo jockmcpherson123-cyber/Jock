@@ -56,7 +56,9 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
 
   const load = async () => {
     if (!courseId) { setLoading(false); return }
-    const g = await cmdb.fetchGreens(courseId)
+    const g0 = await cmdb.fetchGreens(courseId)
+    // Order the greens (and therefore the chips) 1, 2, 3… by hole number.
+    const g = [...g0].sort((a, b) => (Number(a.hole) || 999) - (Number(b.hole) || 999) || String(a.name || '').localeCompare(String(b.name || '')))
     setGreens(g)
     const areaIds = g.map((x) => x.id)
     const start = `${date}T00:00:00`; const end = `${date}T23:59:59.999`
@@ -74,11 +76,13 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
     } else setStaleDate(null)
     setRounds(rs)
     const p = await cmdb.fetchWateringPlan(courseId, date)
-    setPlan(p); setEtDraft(p.day?.forecast_et != null ? String(p.day.forecast_et) : '0.10')
+    setPlan(p); setEtDraft(p.day?.forecast_et != null ? String(p.day.forecast_et) : (autoEt != null ? String(autoEt) : ''))
     const [tg, ex] = await Promise.all([cmdb.fetchTargets(courseId), cmdb.fetchExceptions()])
     setTargets(tg); setExceptions(ex)
     setView(rs.some((r) => r.slot === 'afternoon') ? 'afternoon' : 'morning')
-    setSelId((cur) => cur || g[0]?.id || null)
+    // Open on the green that has today's readings, else Green 1 (first in order).
+    const withReadings = new Set(rs.map((r) => r.areaId))
+    setSelId((cur) => cur || g.find((x) => withReadings.has(x.id))?.id || g[0]?.id || null)
     setLoading(false)
   }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [courseId, date])
@@ -157,8 +161,8 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
     try { await cmdb.setWateringDepth({ clubId: ctx.club.id, courseId, areaId, date, depthIn: depth }); const p = await cmdb.fetchWateringPlan(courseId, date); setPlan(p) } catch (e) { console.error(e) }
     setBusy(false)
   }
-  const saveEt = async () => {
-    const et = Number(etDraft)
+  const saveEt = async (val) => {
+    const et = Number(val != null && val !== undefined && !(val?.target) ? val : etDraft)
     if (!isFinite(et)) return
     try { await cmdb.saveForecastEt({ clubId: ctx.club.id, courseId, date, et }); setPlan((p) => ({ ...p, day: { ...p.day, forecast_et: et } })) } catch (e) { console.error(e) }
   }
@@ -183,11 +187,21 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
   const selTarget = targetFor(sel.id)
   const selRound = roundForView(sel.id)
   const latest = roundsByGreen[sel.id]?.latest
-  const et = plan.day?.forecast_et != null ? Number(plan.day.forecast_et) : (Number(etDraft) || autoEt || 0)
-  const etIsAuto = plan.day?.forecast_et == null && autoEt != null && (etDraft === '' || Number(etDraft) === autoEt)
+  // One ET for the night, the same on every green: a saved override wins,
+  // otherwise tonight's forecast ET. (The editable field is just a convenience;
+  // it never silently diverges from the forecast the way a stale default did.)
+  const etSaved = plan.day?.forecast_et != null ? Number(plan.day.forecast_et) : null
+  const et = etSaved != null ? etSaved : (autoEt != null ? autoEt : (Number(etDraft) || 0))
+  const etIsAuto = etSaved == null && autoEt != null
+  const etEdited = etSaved != null && autoEt != null && Math.abs(etSaved - autoEt) > 0.001
   const ipp = ctx?.settings?.inches_per_point ?? 0.03
   const maxDepth = ctx?.settings?.max_depth ?? 0.25
-  const suggested = latest?.avg != null ? suggestDepth({ et, aim: selTarget.aim, latestAvg: Number(latest.avg), inchesPerPoint: ipp, maxDepth }) : null
+  // A suggestion only makes sense from a recent reading. If the green's latest
+  // round is more than 2 days old, don't guess — say it's too old.
+  const latestDateISO = latest ? String(latest.startedAt).slice(0, 10) : null
+  const latestAgeDays = latestDateISO ? Math.round((new Date(date + 'T00:00:00') - new Date(latestDateISO + 'T00:00:00')) / 86400000) : null
+  const staleForSuggest = latestAgeDays != null && latestAgeDays > 2
+  const suggested = (latest?.avg != null && !staleForSuggest) ? suggestDepth({ et, aim: selTarget.aim, latestAvg: Number(latest.avg), inchesPerPoint: ipp, maxDepth }) : null
 
   // readings for the heat view
   let heatReadings = selRound?.readings || []
@@ -277,10 +291,14 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
         <div className="rounded-2xl border p-4" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
           <p className="font-body text-[12px]" style={{ color: INK_3 }}>Green {sel.hole || ''} {selRound ? `· ${formatDate(selRound.startedAt, 'list')}` : ''}</p>
           {view === 'change' ? (
-            <>
-              <p className="font-display text-3xl font-bold mt-1" style={{ color: INK }}>{vals.length ? `${(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)} pts` : '—'}</p>
-              <span className="font-body text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ color: '#9A3412', backgroundColor: '#FDE8D6' }}>Dried {vals.length ? Math.abs(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '0'} points since morning</span>
-            </>
+            changeMissing ? (
+              <p className="font-body text-[13px] mt-1" style={{ color: INK_3 }}>Need a morning and an afternoon round to show the change.</p>
+            ) : (
+              <>
+                <p className="font-display text-3xl font-bold mt-1" style={{ color: INK }}>{vals.length ? `${(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)} pts` : '—'}</p>
+                <span className="font-body text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ color: '#9A3412', backgroundColor: '#FDE8D6' }}>Dried {vals.length ? Math.abs(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '0'} points since morning</span>
+              </>
+            )
           ) : (
             <>
               <div className="flex items-center gap-2 mt-1">
@@ -307,12 +325,15 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
               })}
             </div>
             <p className="font-body text-[11px] mt-1.5" style={{ color: INK_3 }}>
-              {suggested != null ? `Suggested ${suggested.toFixed(2)} in — ` : ''}uses the latest reading{latest ? ` (${formatDate(latest.startedAt, 'list')} · ${Number(latest.avg).toFixed(1)}%)` : ''}.
+              {staleForSuggest
+                ? `Last read ${formatDate(latest.startedAt, 'list')} — too old to suggest.`
+                : <>{suggested != null ? `Suggested ${suggested.toFixed(2)} in — ` : ''}uses the latest reading{latest ? ` (${formatDate(latest.startedAt, 'list')} · ${Number(latest.avg).toFixed(1)}%)` : ''}.</>}
             </p>
             <div className="flex items-center gap-2 mt-2">
               <span className="font-body text-[11px]" style={{ color: INK_2 }}>Forecast ET</span>
               <input value={etDraft} onChange={(e) => setEtDraft(e.target.value)} onBlur={saveEt} disabled={!manage} className="w-16 font-body text-[12px] px-2 py-1 rounded-lg text-right" style={{ border: `1px solid ${HAIR}` }} />
-              <span className="font-body text-[11px]" style={{ color: INK_3 }}>in {etIsAuto ? '· auto from forecast' : autoEt != null ? `· forecast ${autoEt}` : ''}</span>
+              <span className="font-body text-[11px]" style={{ color: INK_3 }}>in {etIsAuto ? '· auto from forecast' : etEdited ? `· edited (forecast ${autoEt?.toFixed(2)})` : autoEt != null ? `· forecast ${autoEt.toFixed(2)}` : ''}</span>
+              {etEdited && manage && <button onClick={() => { setEtDraft(String(autoEt)); saveEt(autoEt) }} className="font-body text-[11px] font-bold px-2 py-0.5 rounded-lg" style={{ color: FERN, border: `1px solid ${HAIR}` }}>Reset</button>}
             </div>
           </div>
         </div>
