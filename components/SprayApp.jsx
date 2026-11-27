@@ -7319,7 +7319,10 @@ function Inventory({ products, deliveries, onAddDelivery }) {
       <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Stock on Hand</p>
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 mb-6 items-start">
         {filtered.map((p) => {
-          const low = p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold
+          const onHand = Number(p.stock) || 0
+          const needCount = onHand < 0 // a negative tally means more was recorded out than in — never shown as a real on-hand
+          const low = needCount || (p.lowStockThreshold > 0 && onHand <= p.lowStockThreshold)
+          const gal = /oz/i.test(p.unit || '') && onHand >= 128 ? ` (${(onHand / 128).toFixed(1)} gal)` : ''
           return (
             <div key={p.name} className="bg-white rounded-2xl border p-4 shadow-sm flex items-center justify-between" style={{ borderColor: low ? '#FCA5A5' : 'rgba(0,0,0,0.05)' }}>
               <div>
@@ -7327,8 +7330,17 @@ function Inventory({ products, deliveries, onAddDelivery }) {
                 <p className="font-body text-[11px] text-slate-400">{p.type}</p>
               </div>
               <div className="text-right">
-                <p className="font-display text-xl font-bold" style={{ color: low ? '#DC2626' : FOREST }}>{p.stock ?? 0} <span className="text-xs font-body font-medium text-slate-400">{p.unit}</span></p>
-                {low && <p className="font-body text-[10px] font-bold text-red-500">LOW STOCK</p>}
+                {needCount ? (
+                  <>
+                    <p className="font-display text-base font-bold" style={{ color: '#DC2626' }}>Count needed</p>
+                    <p className="font-body text-[10px] text-slate-400">tally {Math.round(onHand).toLocaleString()} {p.unit} — recount on hand</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-display text-xl font-bold" style={{ color: low ? '#DC2626' : FOREST }}>{Math.round(onHand * 100) / 100}<span className="text-xs font-body font-medium text-slate-400"> {p.unit}{gal}</span></p>
+                    {low && <p className="font-body text-[10px] font-bold text-red-500">LOW STOCK</p>}
+                  </>
+                )}
               </div>
             </div>
           )
@@ -7743,7 +7755,7 @@ function ReorderReport({ sheets, products, areas }) {
             <div key={r.name} className="bg-white rounded-2xl border border-black/5 p-3 shadow-sm flex items-center gap-3" style={r.needs ? { borderColor: '#FCA5A5' } : undefined}>
               <div className="min-w-0 flex-1">
                 <p className="font-body text-sm font-bold text-slate-900 truncate">{r.name} {r.needs && <span className="font-body text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1" style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}>LOW</span>}</p>
-                <p className="font-body text-[11px] text-slate-400">On hand {r.stock} · low at {r.low} · used {Math.round(r.used * 10) / 10} {r.usedUnit} this season</p>
+                <p className="font-body text-[11px] text-slate-400">On hand {r.stock < 0 ? 'count needed' : r.stock} · low at {r.low} · used {Math.round(r.used * 10) / 10} {r.usedUnit} this season</p>
               </div>
               <div className="text-right shrink-0">
                 <p className="font-body text-sm font-bold" style={{ color: r.suggest > 0 ? FOREST : '#94A3B8' }}>{r.suggest > 0 ? `+${r.suggest} ${r.unit}` : '—'}</p>
