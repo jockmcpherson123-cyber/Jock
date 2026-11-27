@@ -577,7 +577,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
                           <span className="font-body text-[11.5px] font-bold text-slate-800">{a.product}</span>
                           {a.type && <span className="font-body text-[8px] font-bold uppercase tracking-wide ml-1.5" style={{ color: typeColor(a.type) }}>{a.type}</span>}
                         </td>
-                        <td className="px-2.5 py-0.5 font-body text-[10px] text-slate-500 whitespace-nowrap tabular-nums align-top">{a.rateOzM ? `${a.rateOzM} oz/M` : a.rateOzA ? `${a.rateOzA} oz/A` : ''}</td>
+                        <td className="px-2.5 py-0.5 font-body text-[10px] text-slate-500 whitespace-nowrap tabular-nums align-top">{a.rateOzM ? `${round(a.rateOzM, 2)} oz/M` : a.rateOzA ? `${round(a.rateOzA, 2)} oz/A` : ''}</td>
                         <td className="px-2.5 py-0.5 font-body text-[10px] text-slate-500 align-top">{a.target || ''}</td>
                       </tr>
                     ))}

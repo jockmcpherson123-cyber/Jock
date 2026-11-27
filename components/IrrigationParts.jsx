@@ -37,7 +37,9 @@ function compressPartPhoto(file) {
   })
 }
 
-const isLow = (p) => p.lowStock > 0 && p.stock <= p.lowStock
+// Low when at/under the set minimum, OR simply out — 0 on hand always counts as
+// low even when no minimum has been entered.
+const isLow = (p) => (Number(p.stock) || 0) <= 0 || (p.lowStock > 0 && p.stock <= p.lowStock)
 
 export default function IrrigationParts({ manage = false }) {
   const [parts, setParts] = useState([])
@@ -185,7 +187,7 @@ export default function IrrigationParts({ manage = false }) {
                 <div className="mt-auto flex items-center justify-between px-3 py-2 border-t" style={{ borderColor: 'rgba(0,0,0,0.05)', backgroundColor: low ? '#FEF2F2' : '#F8FAF8' }}>
                   <div>
                     <span className="font-display text-xl font-bold" style={{ color: low ? '#DC2626' : FOREST }}>{p.stock}</span>
-                    <span className="font-body text-[11px] text-slate-400 ml-1">{p.unit}{low ? ` · low (≤${p.lowStock})` : p.lowStock > 0 ? ` · min ${p.lowStock}` : ''}</span>
+                    <span className="font-body text-[11px] text-slate-400 ml-1">{p.unit}{(Number(p.stock) || 0) <= 0 ? ' · out — count needed' : low ? ` · low (≤${p.lowStock})` : p.lowStock > 0 ? ` · min ${p.lowStock}` : ''}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button onClick={() => bump(p, -1)} className="w-8 h-8 rounded-full flex items-center justify-center border border-slate-200 bg-white active:bg-slate-100" aria-label="Use one"><Minus size={15} style={{ color: FOREST }} /></button>
