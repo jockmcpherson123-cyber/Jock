@@ -16,6 +16,8 @@ const TYPE_COLOR = { Fungicide: '#3A6B4A', Herbicide: '#D97706', Insecticide: '#
 const typeColor = (t) => TYPE_COLOR[t] || '#64748B'
 
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+// Clipping volume normalised to litres (mL rows ÷ 1000) — matches the Data page.
+const clipLitres = (c) => { const v = Number(c?.volume); if (isNaN(v)) return null; return c?.unit === 'mL' ? v / 1000 : v }
 const fmtLong = (d) => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 const fmtDay = (isoStr) => (isoStr ? new Date(isoStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '')
 const round = (n, p = 0) => { const f = 10 ** p; return Math.round(n * f) / f }
@@ -281,10 +283,11 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
 
   const clipStat = (() => {
     if (!clipsThis.length) return null
-    const unit = clipsThis[0].unit || 'L'
-    const vols = clipsThis.map((c) => Number(c.volume || 0))
-    // Average clipping yield this week (not the summed total across surfaces).
-    return { unit, avg: round(vols.reduce((a, b) => a + b, 0) / vols.length, 1) }
+    // Everything is normalised to litres (mL rows ÷ 1000) so the number and the
+    // trend below match the Data page and Clipping Yields.
+    const vols = clipsThis.map(clipLitres).filter((v) => v != null)
+    if (!vols.length) return null
+    return { unit: 'L', avg: round(vols.reduce((a, b) => a + b, 0) / vols.length, 1) }
   })()
 
   // Trend data (recent readings) for the little charts — aggregated per date.
@@ -295,7 +298,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
   }, [speeds, course])
   const clipTrend = useMemo(() => {
     const byDate = {}
-    clippings.filter((c) => inCourse(c.area) && c.volume != null).forEach((c) => { (byDate[c.date] = byDate[c.date] || []).push(Number(c.volume)) })
+    clippings.filter((c) => inCourse(c.area) && c.volume != null).forEach((c) => { const l = clipLitres(c); if (l != null) (byDate[c.date] = byDate[c.date] || []).push(l) })
     return Object.keys(byDate).sort().slice(-8).map((d) => ({ label: shortDay(d), v: round(avg(byDate[d]), 1) }))
   }, [clippings, course])
 
@@ -715,7 +718,7 @@ export default function WeeklyReport({ daily = [], clippings = [], practices = [
             {speedTrend.length >= 2 ? <TrendLine points={speedTrend} color={FERN} fmt={fmtStimp} /> : <p className="font-body text-[10px] text-slate-300 no-print">Chart appears after 2+ stimp readings.</p>}
           </div>
           <div>
-            <p className="font-body text-[9px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Clipping yield trend</p>
+            <p className="font-body text-[9px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Clipping yield trend (L)</p>
             {clipTrend.length >= 2 ? <TrendLine points={clipTrend} color={FERN} /> : <p className="font-body text-[10px] text-slate-300 no-print">Chart appears after 2+ clipping logs.</p>}
           </div>
         </div>

@@ -30,6 +30,7 @@ const uid = () => Math.random().toString(36).slice(2, 9)
 const addDaysISO = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
 const fmtLongDate = (d) => d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 const fmtShort = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+const mdShort = (iso) => { const p = String(iso).split('-'); return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : '' }
 
 export default function CommandCentre() {
   const [live, setLive] = useState(null)
@@ -247,7 +248,7 @@ function CourseCard({ course, metrics, state, onPatch }) {
 
       {/* Live stats */}
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <Stat icon={Gauge} label="Greens speed" value={metrics.speed ? fmtStimp(metrics.speed.avg) : '—'} unit="" />
+        <Stat icon={Gauge} label="Greens speed" value={metrics.speed ? fmtStimp(metrics.speed.avg) : '—'} unit="" sub={metrics.speed?.day ? mdShort(metrics.speed.day) : ''} />
         <Stat icon={Sprout} label="Height of cut" value={metrics.hoc ? String(metrics.hoc).replace(/\s*in$/i, '') : '—'} unit="in" />
         <EditStat label="Moisture tgt" value={moist} unit="% VWC" onCommit={(v) => { setMoist(v); onPatch({ moistureTgt: v }) }} onChange={setMoist} placeholder="—" />
       </div>
@@ -296,7 +297,7 @@ function CourseCard({ course, metrics, state, onPatch }) {
   )
 }
 
-function Stat({ icon: Icon, label, value, unit }) {
+function Stat({ icon: Icon, label, value, unit, sub }) {
   return (
     <div className="rounded-xl px-3 py-2.5" style={{ backgroundColor: '#F6F5F1' }}>
       <p className="font-body text-[9px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">{label}</p>
@@ -304,6 +305,7 @@ function Stat({ icon: Icon, label, value, unit }) {
         <span className="font-display text-2xl font-bold" style={{ color: FOREST }}>{value}</span>
         {value !== '—' && <span className="font-body text-[11px] text-slate-400">{unit}</span>}
       </div>
+      {sub ? <p className="font-body text-[10px] text-slate-400 mt-0.5">{sub}</p> : null}
     </div>
   )
 }

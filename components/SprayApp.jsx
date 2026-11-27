@@ -1348,9 +1348,15 @@ function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
   const clpData = byDateAvg(clpRows, (c) => c.date, (c) => clipLitres(c))
   const clpLatestRec = clpRows.length ? [...clpRows].sort((a, b) => String(a.date).localeCompare(String(b.date)))[clpRows.length - 1] : null
   const clpLatest = clpLatestRec ? clipLitres(clpLatestRec) : null
-  // Moisture (round averages)
-  const moistData = [...(d.moist || [])].filter((r) => r.avg != null).sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))).map((r) => ({ date: String(r.startedAt).slice(0, 10), value: Number(r.avg) }))
+  // Moisture (round averages). The headline is the LATEST round (not an average
+  // of rounds), captioned with that round's date + time.
+  const moistRows = [...(d.moist || [])].filter((r) => r.avg != null).sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)))
+  const moistData = moistRows.map((r) => ({ date: String(r.startedAt).slice(0, 10), value: Number(r.avg) }))
   const moistLatest = moistData.length ? moistData[moistData.length - 1].value : null
+  const moistLatestRec = moistRows.length ? moistRows[moistRows.length - 1] : null
+  const moistLatestWhen = moistLatestRec?.startedAt
+    ? new Date(moistLatestRec.startedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })
+    : ''
   // GDD — one shared value (base 50, from Jan 1, season+forecast), as on Weather.
   const gdd = (d.season?.length || d.forecast?.length) ? seasonGddToDate(d.season, d.forecast) : null
   const soilLatest = (d.soilTests || []).filter((t) => inC(t.area)).map((t) => t.date).sort().pop() || null
@@ -1360,7 +1366,7 @@ function DataLanding({ clubName, onPickId, course = '', courses = [] }) {
   return (
     <LandingShell clubName={clubName} title="Data" intro={LANDING_INTRO.data}>
       <div className="grid gap-4 mb-4 grid-cols-1 md:grid-cols-3">
-        <DataGraphCard label="Greens moisture & wetting agent" latest={moistLatest != null ? `${Math.round(moistLatest * 10) / 10}%` : '—'} sub="avg %VWC per round" data={moistData} range={rangeLabel(moistData)} color="#3A6187" onClick={() => onPickId('wetting')} />
+        <DataGraphCard label="Greens moisture & wetting agent" latest={moistLatest != null ? `${moistLatest.toFixed(1)}%` : '—'} sub={moistLatestWhen ? `Latest round · ${moistLatestWhen}` : 'Latest round'} data={moistData} range={rangeLabel(moistData)} color="#3A6187" onClick={() => onPickId('wetting')} />
         <DataGraphCard label="Green speeds" latest={spdLatest != null ? fmtStimp(spdLatest) : '—'} sub="stimp" data={spdData} range={rangeLabel(spdData)} color={FOREST} onClick={() => onPickId('speed')} />
         <DataGraphCard label="Clipping yields" latest={clpLatest != null ? `${Math.round(clpLatest * 10) / 10} L` : '—'} sub="L · latest reading" data={clpData} range={rangeLabel(clpData)} color={FERN} onClick={() => onPickId('clippings')} />
       </div>
