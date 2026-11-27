@@ -177,7 +177,7 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
     return (
       <div>
         {manage && <div className="flex justify-end mb-3"><button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 font-body text-[12px] font-bold px-3 py-2 rounded-xl text-white" style={{ backgroundColor: FOREST }}><Upload size={14} /> Add readings</button></div>}
-        {addOpen && <AddReadings ctx={ctx} courseId={courseId} greens={greens} onClose={() => setAddOpen(false)} onDone={() => { setAddOpen(false); setLoading(true); load() }} />}
+        {addOpen && <AddReadings ctx={ctx} courseId={courseId} greens={greens} onClose={() => setAddOpen(false)} onDone={() => { setAddOpen(false); load() }} />}
         <div className="rounded-2xl border border-dashed p-8 text-center" style={{ borderColor: HAIR }}><p className="font-body text-[13px]" style={{ color: INK_2 }}>Draw your greens on the <b>Map</b> tab first.</p></div>
       </div>
     )
@@ -252,7 +252,7 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
         </div>
         {manage && <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 font-body text-[12px] font-bold px-3 py-2 rounded-xl text-white" style={{ backgroundColor: FOREST }}><Upload size={14} /> Add readings</button>}
       </div>
-      {addOpen && <AddReadings ctx={ctx} courseId={courseId} greens={greens} onClose={() => setAddOpen(false)} onDone={() => { setAddOpen(false); setLoading(true); load() }} />}
+      {addOpen && <AddReadings ctx={ctx} courseId={courseId} greens={greens} onClose={() => setAddOpen(false)} onDone={() => { setAddOpen(false); load() }} />}
 
       {/* Green buttons */}
       <div className="flex flex-wrap gap-1.5 mb-4" style={staleDate ? { opacity: 0.85 } : undefined}>
@@ -367,7 +367,7 @@ function DriestSpot({ round }) {
   let lo = null
   for (const r of round.readings) if (r.vwcPct != null && (!lo || r.vwcPct < lo.vwcPct)) lo = r
   if (!lo) return null
-  return <p className="font-body text-[12px] mt-1" style={{ color: INK_2 }}>Driest spot <b>{Number(lo.vwcPct).toFixed(1)}%</b>{lo.spot ? ` · spot ${lo.spot}` : ''}</p>
+  return <p className="font-body text-[12px] mt-1" style={{ color: INK_2 }}>Driest spot <b>{Number(lo.vwcPct).toFixed(1)}%</b>{lo.spot ? ` · ${/^spot\b/i.test(String(lo.spot)) ? lo.spot : `Spot ${lo.spot}`}` : ''}</p>
 }
 
 function MoreTable({ round }) {
@@ -386,7 +386,7 @@ function MoreTable({ round }) {
                   <td className="px-2 py-1.5 font-body text-[12px] text-right tabular-nums" style={{ color: INK }}>{Number(r.vwcPct).toFixed(1)}%</td>
                   <td className="px-2 py-1.5 font-body text-[12px] text-right tabular-nums" style={{ color: INK_2 }}>{r.soilTempF != null ? Number(r.soilTempF).toFixed(1) : '—'}</td>
                   <td className="px-2 py-1.5 font-body text-[12px] text-right tabular-nums" style={{ color: INK_2 }}>{r.salinityDsm != null ? Number(r.salinityDsm).toFixed(3) : '—'}</td>
-                  <td className="px-2 py-1.5 font-body text-[12px] text-right tabular-nums" style={{ color: INK_3 }}>{r.takenAt ? formatDate(r.takenAt, 'list') : '—'}</td>
+                  <td className="px-2 py-1.5 font-body text-[12px] text-right tabular-nums" style={{ color: INK_3 }}>{r.takenAt ? new Date(r.takenAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -456,20 +456,29 @@ function GreenHeat({ green, readings, mode, lo, hi, showSpots, aerial, georef })
     ring.forEach((p, i) => { const [x, y] = toC(p[0], p[1]); if (i === 0) path.moveTo(x, y); else path.lineTo(x, y) })
     path.closePath()
 
-    // heatmap, clipped to the green
+    // Heatmap, clipped to the green. Render the IDW surface into a small lon/lat
+    // raster, then upscale it with bilinear smoothing so it reads as a continuous
+    // gradient instead of a grid/checker of semi-transparent cells.
     const stops = mode === 'change' ? changeStops() : moistureStops(lo, hi)
-    ctx.save(); ctx.clip(path); ctx.globalAlpha = 0.62
-    const stepLon = (bbox.maxLon - bbox.minLon) / 70, stepLat = (bbox.maxLat - bbox.minLat) / 70
-    for (let la = bbox.minLat; la <= bbox.maxLat; la += stepLat) {
-      for (let lo2 = bbox.minLon; lo2 <= bbox.maxLon; lo2 += stepLon) {
+    const GW = 120, GH = Math.max(1, Math.round(GW * H / W))
+    const off = document.createElement('canvas'); off.width = GW; off.height = GH
+    const octx = off.getContext('2d')
+    const img = octx.createImageData(GW, GH); const data = img.data
+    for (let gy = 0; gy < GH; gy++) {
+      const la = bbox.maxLat - ((gy + 0.5) / GH) * (bbox.maxLat - bbox.minLat)
+      for (let gx = 0; gx < GW; gx++) {
+        const lo2 = bbox.minLon + ((gx + 0.5) / GW) * (bbox.maxLon - bbox.minLon)
         const v = idwValue(lo2, la, readings)
-        if (v == null) continue
-        const col = colorAt(v, stops); if (!col) continue
-        const [x, y] = toC(lo2, la)
-        ctx.fillStyle = col
-        ctx.fillRect(Math.floor(x) - 1, Math.floor(y) - 1, (W / 70) + 2, (H / 70) + 2)
+        const idx = (gy * GW + gx) * 4
+        const hex = v == null ? null : colorAt(v, stops)
+        if (!hex) { data[idx + 3] = 0; continue }
+        const n = parseInt(hex.slice(1), 16)
+        data[idx] = (n >> 16) & 255; data[idx + 1] = (n >> 8) & 255; data[idx + 2] = n & 255; data[idx + 3] = 255
       }
     }
+    octx.putImageData(img, 0, 0)
+    ctx.save(); ctx.clip(path); ctx.globalAlpha = 0.62; ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(off, 0, 0, GW, GH, 0, 0, W, H)
     ctx.restore()
 
     // outline
@@ -646,7 +655,7 @@ function ManualReadings({ ctx, courseId, greens, onDone }) {
         </div>
       )}
 
-      <div className="space-y-1.5 max-h-[46vh] overflow-y-auto pr-1">
+      <div className="space-y-1.5 max-h-[46vh] overflow-y-auto pr-1 pb-20">
         {spots.map((s, i) => (
           <div key={i} className="flex items-center gap-2">
             <span className="font-body text-[13px] font-semibold w-16 shrink-0" style={{ color: INK }}>{s.label}</span>
@@ -735,6 +744,8 @@ export function AddReadings({ ctx, courseId, greens, onClose, onDone }) {
   const [error, setError] = useState('')
 
   useEffect(() => { cmdb.fetchMoistureMapping().then((m) => m && setMapping((cur) => ({ ...m, ...cur }))); cmdb.fetchReadingKeys().then(setKeys) }, [])
+  // Close on Esc (the dialog is modal).
+  useEffect(() => { const h = (e) => { if (e.key === 'Escape') onClose?.() }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h) }, [onClose])
 
   async function onFile(file) {
     setError('')
@@ -775,7 +786,7 @@ export function AddReadings({ ctx, courseId, greens, onClose, onDone }) {
     <div className="fixed inset-0 z-[80] flex items-start justify-center p-0 sm:p-4 sm:overflow-y-auto" style={{ backgroundColor: 'rgba(10,20,14,0.5)' }} onClick={onClose}>
       {/* Full-screen on phones (no wasted margins, big keypad), a centred card on
           wider screens. */}
-      <div className="relative w-full max-w-2xl min-h-full sm:min-h-0 sm:my-8 rounded-none sm:rounded-2xl bg-white p-4 sm:p-5 shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label="Add readings" className="relative w-full max-w-2xl min-h-full sm:min-h-0 sm:my-8 rounded-none sm:rounded-2xl bg-white p-4 sm:p-5 shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3"><h3 className="font-display text-lg font-bold" style={{ color: FOREST }}>Add readings</h3><button onClick={onClose} className="font-body px-2 -mr-1 w-10 h-10 flex items-center justify-center" style={{ color: INK_3, fontSize: 24 }} aria-label="Close">×</button></div>
         <div className="flex gap-1.5 mb-4">
           {[['manual', 'Manual'], ['file', 'DEACON file']].map(([k, lab]) => (
