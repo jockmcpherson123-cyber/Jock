@@ -4932,7 +4932,11 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
   const canFill = true
   const [confirmDel, setConfirmDel] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [sig, setSig] = useState('')
+  // The designated spray approver (Settings → People). When set, only they can
+  // sign a sheet to Approved; otherwise any director on the list can.
+  const sprayApprover = courseInfo?.sprayApprover || ''
+  const approveOptions = sprayApprover && directors.includes(sprayApprover) ? [sprayApprover] : directors
+  const [sig, setSig] = useState(sprayApprover && directors.includes(sprayApprover) ? sprayApprover : '')
   const [dirPin, setDirPin] = useState('')
   const [dirSig, setDirSig] = useState('')
   const [pinError, setPinError] = useState('')
@@ -5459,7 +5463,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
               {sheet.status === 'pending' && approve && (
                 <div className="space-y-2">
                   <FieldLabel noMargin>Approve this sheet</FieldLabel>
-                  <Select value={sig} onChange={(v) => { setSig(v); setPinError('') }} options={directors} placeholder="Select director to approve..." />
+                  <Select value={sig} onChange={(v) => { setSig(v); setPinError('') }} options={approveOptions} placeholder={sprayApprover ? `${sprayApprover} approves sprays` : 'Select director to approve...'} />
                   {sig && (
                     <>
                       <div>
@@ -5480,7 +5484,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
               )}
               {sheet.status === 'approved' && sheet.directorSignature && (
                 <div>
-                  <p className="font-body text-[11px] text-slate-400 mb-1">Director signature — {sheet.directorSig}</p>
+                  <p className="font-body text-[12px] font-semibold text-slate-700 mb-1">Approved by {sheet.directorSig}{sheet.directorDate ? ` · ${new Date(sheet.directorDate).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}</p>
                   <img src={sheet.directorSignature} alt="Director signature" className="h-12 rounded border border-slate-100 bg-white" />
                 </div>
               )}
@@ -8521,7 +8525,7 @@ function SettingsPage({ areas, operators, directors, targets, sheetTypes, course
       {section === 'course' && <CourseInfoSettings courseInfo={courseInfo} grassTypes={grassTypes} onSave={onSave} />}
       {section === 'location' && <LocationSettings location={location} onSave={onSave} />}
       {section === 'aerial' && <AerialSettings />}
-      {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} onSave={onSave} />}
+      {section === 'people' && <PeopleSettings operators={operators} directors={directors} applicatorLicenses={applicatorLicenses} directorPins={directorPins} approver={courseInfo?.sprayApprover || ''} onSave={onSave} />}
       {section === 'users' && canUsers && <UsersSettings />}
       {section === 'areas' && <AreasSettings areas={areas} grassTypes={grassChoices} soilTypes={soilTypes} courses={courseInfo?.courses || []} onSave={onSave} />}
       {section === 'sprayers' && <SprayersSettings courseInfo={courseInfo} onSave={onSave} />}
@@ -9260,17 +9264,17 @@ function NameListEditor({ title, items, onSave, accent, presets }) {
   )
 }
 
-function PeopleSettings({ operators, directors, applicatorLicenses = {}, directorPins = {}, onSave }) {
+function PeopleSettings({ operators, directors, applicatorLicenses = {}, directorPins = {}, approver = '', onSave }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
       <ApplicatorsEditor operators={operators} licenses={applicatorLicenses} onSave={onSave} />
-      <DirectorsEditor directors={directors} pins={directorPins} onSave={onSave} />
+      <DirectorsEditor directors={directors} pins={directorPins} approver={approver} onSave={onSave} />
     </div>
   )
 }
 
 // Directors / approvers plus a private PIN each types to approve a spray sheet.
-function DirectorsEditor({ directors, pins, onSave }) {
+function DirectorsEditor({ directors, pins, approver = '', onSave }) {
   const [newName, setNewName] = useState('')
   const [show, setShow] = useState({})
 
@@ -9294,6 +9298,15 @@ function DirectorsEditor({ directors, pins, onSave }) {
     <Card>
       <p className="font-display text-base font-semibold text-slate-900 mb-1">Directors / Approvers</p>
       <p className="font-body text-[11px] text-slate-400 mb-3">Each director sets a private PIN. They type it (and sign) to approve a spray sheet — proving it was really them.</p>
+
+      <div className="rounded-xl border border-slate-100 p-3 mb-3" style={{ backgroundColor: '#F3F7F3' }}>
+        <FieldLabel noMargin>Spray approver</FieldLabel>
+        <p className="font-body text-[10.5px] text-slate-400 mb-1.5">The person who signs sprays to Approved. When set, only they can approve.</p>
+        <select value={approver} onChange={(e) => onSave({ sprayApprover: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-body bg-white">
+          <option value="">Any director can approve</option>
+          {directors.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+      </div>
 
       <div className="space-y-3">
         {directors.map((name) => (
