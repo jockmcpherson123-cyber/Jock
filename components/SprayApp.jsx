@@ -2042,6 +2042,53 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
     }
   }
 
+  // "Add to next year as a spare" from the Deliveries report: drop a product
+  // into next year's program as a spare, prefilled from how it was sprayed this
+  // year (most-sprayed area + the product's default rate) so it's ready to tweak.
+  async function addSpareNextYear(productName, fromYear) {
+    try {
+      const targetYear = Number(fromYear) + 1
+      const progs = await db.fetchPrograms()
+      const prog = progs.find((p) => Number(p.year) === targetYear)
+      if (!prog) {
+        showToast(`Create the ${targetYear} program first (Annual Program → year)`)
+        return null
+      }
+      const prod = products.find((p) => p.name === productName)
+      // Most-sprayed area for this product this season, for a sensible prefill.
+      const yearSheets = (sheets || []).filter((s) => String(s.date || '').slice(0, 4) === String(fromYear))
+      const usage = productUsage(yearSheets, products, areas).find((u) => u.name === productName)
+      let area = ''
+      if (usage && usage.byArea) {
+        const sorted = Object.entries(usage.byArea).sort((a, b) => b[1] - a[1])
+        if (sorted.length) area = sorted[0][0]
+      }
+      const basis = prod?.basis || 'oz / M'
+      const perAcre = /\/\s*A/.test(basis)
+      const rate = prod?.rate != null && prod?.rate !== '' ? Number(prod.rate) : null
+      await db.upsertApplication({
+        programId: prog.id,
+        area,
+        product: productName,
+        rateOzM: perAcre ? null : rate,
+        rateOzA: perAcre ? rate : null,
+        basis,
+        type: prod?.type || '',
+        target: '',
+        plannedDate: null,
+        kind: 'spare',
+        spareTitle: `From ${fromYear} extra`,
+        spareGroup: crypto.randomUUID(),
+      })
+      showToast(area ? `Added to ${targetYear} spares (${area}) — adjust in Annual Program` : `Added to ${targetYear} spares — set its area in Annual Program`)
+      return true
+    } catch (e) {
+      console.error(e)
+      showToast('Could not add spare')
+      return null
+    }
+  }
+
   async function saveSheet(sheet) {
     setSaving(true)
     try {
@@ -2441,7 +2488,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} products={products} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
         {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} allAreas={areas} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} courseFilter={course} />}
-        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} programApps={programApps} onSaveSettings={saveSettings} applicatorLicenses={applicatorLicenses} location={location} stockDeliveries={stockDeliveries} deliveries={deliveries} />}
+        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} programApps={programApps} onSaveSettings={saveSettings} applicatorLicenses={applicatorLicenses} location={location} stockDeliveries={stockDeliveries} deliveries={deliveries} onAddSpareNextYear={addSpareNextYear} />}
         {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} courseFilter={course} />}
         {route === 'training' && manage && <TrainingTab sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
@@ -7809,7 +7856,7 @@ function Inventory({ products, deliveries, onAddDelivery, manage = false, sheets
 }
 
 // ── REPORTS ───────────────────────────────────────────────────────────────
-function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], programApps = [], onSaveSettings, applicatorLicenses = {}, location = {}, stockDeliveries = [], deliveries = [] }) {
+function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], programApps = [], onSaveSettings, applicatorLicenses = {}, location = {}, stockDeliveries = [], deliveries = [], onAddSpareNextYear }) {
   const [view, setView] = useState('byArea')
   const [report, setReport] = useState('npk') // 'npk' | 'rotation'
 
@@ -7979,7 +8026,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
       {report === 'usage' && <ProductUsageReport sheets={seasonSheets} products={products} areas={areas} />}
       {report === 'history' && <SprayHistoryReport sheets={seasonSheets.filter(sheetApplied)} />}
       {report === 'spares' && <SparesReport programApps={programApps} />}
-      {report === 'deliveries' && <DeliveriesReport stockDeliveries={stockDeliveries} deliveries={deliveries} sheets={seasonSheets} products={products} areas={areas} year={reportYear} />}
+      {report === 'deliveries' && <DeliveriesReport stockDeliveries={stockDeliveries} deliveries={deliveries} sheets={seasonSheets} products={products} areas={areas} year={reportYear} onAddSpareNextYear={onAddSpareNextYear} />}
       {report === 'since' && <DaysSinceReport sheets={sheets} />}
 
       {report === 'npk' && (<>
@@ -8860,8 +8907,15 @@ function appliedToOz(total, unit) {
   }
 }
 
-function DeliveriesReport({ stockDeliveries = [], deliveries = [], sheets = [], products = [], areas = {}, year }) {
+function DeliveriesReport({ stockDeliveries = [], deliveries = [], sheets = [], products = [], areas = {}, year, onAddSpareNextYear }) {
   const inYear = (d) => !year || String(d || '').slice(0, 4) === String(year)
+  const [spared, setSpared] = useState({})
+  const addSpare = async (name) => {
+    if (!onAddSpareNextYear || spared[name] === 'busy') return
+    setSpared((s) => ({ ...s, [name]: 'busy' }))
+    const ok = await onAddSpareNextYear(name, year)
+    setSpared((s) => ({ ...s, [name]: ok ? 'done' : undefined }))
+  }
 
   const data = useMemo(() => {
     const byProduct = {} // name -> { planned, extra, used, cost }
@@ -8942,15 +8996,31 @@ function DeliveriesReport({ stockDeliveries = [], deliveries = [], sheets = [], 
                 <span key={h} className={`font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 ${i === 0 ? '' : 'text-right'}`}>{h}</span>
               ))}
             </div>
-            {data.rows.map((r) => (
-              <div key={r.name} className="grid grid-cols-5 gap-1 px-3 py-2.5 border-b border-black/5 last:border-0 items-center">
-                <span className="font-body text-[12px] font-semibold text-slate-800 truncate">{r.name}</span>
-                <span className="font-body text-[12px] text-slate-600 text-right tabular-nums">{r.planned.toLocaleString()}</span>
-                <span className="font-body text-[12px] text-right tabular-nums" style={{ color: r.extra > 0 ? '#92660D' : '#CBD5E1' }}>{r.extra ? r.extra.toLocaleString() : '—'}</span>
-                <span className="font-body text-[12px] text-slate-600 text-right tabular-nums">{r.used.toLocaleString()}</span>
-                <span className="font-body text-[12px] font-bold text-right tabular-nums" style={{ color: r.left < 0 ? '#DC2626' : FERN }}>{r.left.toLocaleString()}</span>
-              </div>
-            ))}
+            {data.rows.map((r) => {
+              const canSpare = onAddSpareNextYear && (r.left > 0 || r.extra > 0)
+              return (
+                <div key={r.name} className="px-3 py-2.5 border-b border-black/5 last:border-0">
+                  <div className="grid grid-cols-5 gap-1 items-center">
+                    <span className="font-body text-[12px] font-semibold text-slate-800 truncate">{r.name}</span>
+                    <span className="font-body text-[12px] text-slate-600 text-right tabular-nums">{r.planned.toLocaleString()}</span>
+                    <span className="font-body text-[12px] text-right tabular-nums" style={{ color: r.extra > 0 ? '#92660D' : '#CBD5E1' }}>{r.extra ? r.extra.toLocaleString() : '—'}</span>
+                    <span className="font-body text-[12px] text-slate-600 text-right tabular-nums">{r.used.toLocaleString()}</span>
+                    <span className="font-body text-[12px] font-bold text-right tabular-nums" style={{ color: r.left < 0 ? '#DC2626' : FERN }}>{r.left.toLocaleString()}</span>
+                  </div>
+                  {canSpare && (
+                    <div className="flex justify-end mt-1">
+                      {spared[r.name] === 'done' ? (
+                        <span className="font-body text-[10px] font-bold" style={{ color: FERN }}>✓ Added to {Number(year) + 1} spares</span>
+                      ) : (
+                        <button onClick={() => addSpare(r.name)} disabled={spared[r.name] === 'busy'} className="font-body text-[10px] font-bold inline-flex items-center gap-1 disabled:opacity-50" style={{ color: FOREST }}>
+                          <Plus size={11} /> Add to {Number(year) + 1} as a spare
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
 
           {data.reasons.length > 0 && (
