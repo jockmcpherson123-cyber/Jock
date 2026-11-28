@@ -237,7 +237,16 @@ function computeEarlyOrder(apps, products, areas) {
     if (!area?.sqft) { missingSqft = true; return }
     const prod = prodByName[a.product]
     const r = planAppOz(a, area, prod)
-    const oz = r?.oz
+    let oz = r?.oz
+    // Both-courses area (Rough: Blue 8 + Gold 9): order for the combined tanks
+    // once, so Early Order matches the two per-course sheets and isn't counted
+    // separately in each course tab.
+    const ct = area?.courseTanks && Object.keys(area.courseTanks).length >= 2 ? area.courseTanks : null
+    if (ct && r?.rateM != null) {
+      const sqft = Number(a.sqftPerTankOverride) > 0 ? Number(a.sqftPerTankOverride) : (Number(area.sqft) || 0)
+      const combined = Object.values(ct).reduce((s, v) => s + (Number(v) || 0), 0)
+      if (sqft > 0 && combined > 0) oz = r.rateM * (sqft / 1000) * combined
+    }
     if (!oz || !isFinite(oz)) return
     areaSet.add(a.area)
     if (!perProduct[a.product]) perProduct[a.product] = { name: a.product, type: prodByName[a.product]?.type || a.type || 'Other', totalOz: 0, byArea: {} }
@@ -351,7 +360,12 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
     const area = areaMatch(areas, a.area)
     const amt = planAppOz(a, area, prod)
     const rateM = amt?.rateM ?? (a.rateOzM != null && a.rateOzM !== '' ? Number(a.rateOzM) : null)
-    const tanks = amt?.tanks ?? 1
+    // A "both courses" area orders for BOTH courses at once, so its total uses
+    // the combined tank count (e.g. Rough: Blue 8 + Gold 9 = 17). Each course's
+    // sheet still carries only its own tanks, so the two sheets add back to this.
+    const courseTanks = area?.courseTanks && Object.keys(area.courseTanks).length >= 2 ? area.courseTanks : null
+    const combinedTanks = courseTanks ? Object.values(courseTanks).reduce((s, v) => s + (Number(v) || 0), 0) : null
+    const tanks = combinedTanks != null ? combinedTanks : (amt?.tanks ?? 1)
     // Per-tank area honours the row's override (what the Tank Planner stamps on),
     // so the per-tank amount shown matches the totals and the spray sheet.
     const sqft = Number(a.sqftPerTankOverride) > 0 ? Number(a.sqftPerTankOverride) : (Number(area?.sqft) || 0)
@@ -371,7 +385,7 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
     const totalArea = effSqft && isFinite(tanks) ? effSqft * tanks : null
     const galTank = Number(area?.galTank) || 0
     const partialGal = galTank > 0 && isFinite(tanks) ? Math.round((tanks - Math.floor(tanks)) * galTank) : 0
-    return { prod, rateM, tanks, ozPerTank, totalOz, ozPerCase, cases, costPerCase, totalCost, label, dry: isDry(prod), areaSqft, effSqft, totalArea, galTank, partialGal, override: Number(a.sqftPerTankOverride) > 0 }
+    return { prod, rateM, tanks, ozPerTank, totalOz, ozPerCase, cases, costPerCase, totalCost, label, dry: isDry(prod), areaSqft, effSqft, totalArea, galTank, partialGal, courseTanks, override: Number(a.sqftPerTankOverride) > 0 }
   }
   // Whole packages + leftover oz: "5 gal + 20 oz" (liquids) or "1 lb 3 oz" (dry).
   const galOz = (oz, dry) => {
@@ -518,8 +532,14 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
                   <td className={td}><input disabled={locked} inputMode="decimal" data-gcol="sqft" data-grow={row} value={g(a, 'sqftPerTankOverride', c.effSqft || '')} onChange={(e) => setD(a, 'sqftPerTankOverride', e.target.value)} onBlur={(e) => commitField(a, 'sqftPerTankOverride', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'sqft', row)} className={cell} style={{ width: 72, color: c.override ? FOREST : '#94A3B8' }} title={c.override ? 'Row override' : 'Area default — type to override'} /></td>
                   <td className={td} style={{ color: '#64748B' }} title="Per-tank area × tanks — the whole area this spray covers">{c.totalArea != null ? Math.round(c.totalArea).toLocaleString() : '—'}</td>
                   <td className={td}>
-                    <input disabled={locked} inputMode="decimal" data-gcol="tanks" data-grow={row} value={g(a, 'tanks', a.tanks ?? c.tanks)} onChange={(e) => setD(a, 'tanks', e.target.value)} onBlur={(e) => commitField(a, 'tanks', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'tanks', row)} className={cell} style={{ width: 48 }} title={c.partialGal > 0 ? `${Math.floor(c.tanks)} full + 1 partial (${c.partialGal} gal)` : ''} />
-                    {c.partialGal > 0 && <span className="font-body text-[8px] block" style={{ color: '#B07A16' }} title={`${Math.floor(c.tanks)} full + 1 partial (${c.partialGal} gal)`}>+{c.partialGal} gal</span>}
+                    {c.courseTanks ? (
+                      <span className="font-body text-[10px] font-semibold" style={{ color: FOREST }} title="Per-course tanks — edit in Settings → Areas. One sheet per course.">{Object.entries(c.courseTanks).map(([cn, t]) => `${String(cn).slice(0, 4)} ${t}`).join(' · ')}<span className="block text-[8px] text-slate-400">= {c.tanks} total</span></span>
+                    ) : (
+                      <>
+                        <input disabled={locked} inputMode="decimal" data-gcol="tanks" data-grow={row} value={g(a, 'tanks', a.tanks ?? c.tanks)} onChange={(e) => setD(a, 'tanks', e.target.value)} onBlur={(e) => commitField(a, 'tanks', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'tanks', row)} className={cell} style={{ width: 48 }} title={c.partialGal > 0 ? `${Math.floor(c.tanks)} full + 1 partial (${c.partialGal} gal)` : ''} />
+                        {c.partialGal > 0 && <span className="font-body text-[8px] block" style={{ color: '#B07A16' }} title={`${Math.floor(c.tanks)} full + 1 partial (${c.partialGal} gal)`}>+{c.partialGal} gal</span>}
+                      </>
+                    )}
                   </td>
                   <td className={td}>{c.ozPerTank != null ? round1(c.ozPerTank).toLocaleString() : '—'}</td>
                   <td className={td} style={{ color: '#64748B' }}>{galOz(c.ozPerTank, c.dry)}</td>

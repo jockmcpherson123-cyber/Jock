@@ -731,6 +731,8 @@ const LAND_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const landMD = (iso) => { const p = String(iso || '').split('-'); return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : String(iso || '') }
 const sundayOf = (iso) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0, 10) }
+// Monday of the week containing `iso` (rough sprays are always a Monday).
+const mondayOf = (iso) => { const d = new Date(iso + 'T00:00:00'); const dow = d.getDay(); d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 
 function LandingShell({ clubName, title, intro, right, children }) {
   return (
@@ -2063,21 +2065,19 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   // Build a spray sheet pre-filled from one or more planned applications (a
   // single area on a single day). The user reviews/edits it, then saves — at
   // which point those applications are marked as executed.
-  function createSheetFromProgram(planned) {
-    const area = matchSprayArea(planned[0].area)
+  // Build one spray-sheet object from a set of planned program applications.
+  // `tanks`/`course`/`date` override the defaults (used by the per-course split).
+  function buildProgramSheet(planned, { area, tanks, course, date } = {}) {
     const lead = planned[0]
-    // Carry the PLANNED tank count (and any per-row area/tank override) onto the
-    // sheet so its totals match the program's Early Order; flag it manual so the
-    // tank math multiplies the per-tank amount up instead of using the area once.
-    const plannedTanks = lead.tanks != null && lead.tanks !== '' ? Number(lead.tanks) : null
-    setActiveSheet({
+    return {
       id: crypto.randomUUID(),
       sheetType: area || 'Spray Sheet',
-      date: lead.plannedDate || localDateISO(),
+      date: date || lead.plannedDate || localDateISO(),
       operator: '',
       area,
-      tanks: plannedTanks != null ? plannedTanks : (area && areas[area] ? areas[area].tanks : 1),
-      tanksManual: plannedTanks != null,
+      ...(course ? { course } : {}),
+      tanks: tanks != null ? tanks : (area && areas[area] ? areas[area].tanks : 1),
+      tanksManual: tanks != null,
       ...(lead.sqftPerTankOverride ? { sqft: lead.sqftPerTankOverride } : {}),
       weather: { temp: '', wind: '', humidity: '', windDir: '' },
       products: planned.map((a) => {
@@ -2108,7 +2108,33 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
       directorDate: '',
       createdAt: new Date().toISOString(),
       _sourceAppIds: planned.map((a) => a.id),
-    })
+    }
+  }
+
+  async function createSheetFromProgram(planned) {
+    const area = matchSprayArea(planned[0].area)
+    const lead = planned[0]
+    // A "both courses" area (e.g. Rough: Blue 8, Gold 9) makes ONE sheet per
+    // course — same products & rates, each its own tank count — on the same
+    // Monday, so the crew ticks the right number on each course's iPad. The two
+    // sheets together use Blue+Gold tanks' worth of product, matching the order.
+    const ct = area && areas[area] ? areas[area].courseTanks : null
+    const courseList = ct ? Object.entries(ct).filter(([, t]) => Number(t) > 0) : null
+    if (courseList && courseList.length >= 2) {
+      const mon = mondayOf(lead.plannedDate || localDateISO())
+      let first = null
+      for (const [course, t] of courseList) {
+        const saved = await saveSheet(buildProgramSheet(planned, { area, tanks: Number(t), course, date: mon }))
+        if (!first && saved) first = saved
+      }
+      showToast(`Created ${courseList.map(([c, t]) => `${c} ${t} tanks`).join(' + ')} — review & approve`)
+      if (first) { setActiveSheet(first); setRoute('edit') }
+      return
+    }
+    // Carry the PLANNED tank count onto a single sheet so its totals match the
+    // program's Early Order; flag it manual so the per-tank amount multiplies up.
+    const plannedTanks = lead.tanks != null && lead.tanks !== '' ? Number(lead.tanks) : null
+    setActiveSheet(buildProgramSheet(planned, { area, tanks: plannedTanks }))
     setRoute('edit')
   }
 
@@ -9563,6 +9589,11 @@ function AreasSettings({ areas, grassTypes = [], soilTypes = [], courses = [], o
     // so the carrier volume is always consistent. Also stored as gal/ac for the
     // legacy sprayRate field. Never used to back-calculate area.
     const waterRate = (galTank > 0 && sqft > 0) ? Math.round((galTank / (sqft / 1000)) * 100) / 100 : 0
+    // Per-course tank counts for a "both courses" area (e.g. Rough: Blue 8,
+    // Gold 9). Only kept when two or more courses have a positive count — that's
+    // what makes one program entry create a sheet per course.
+    const ct = {}
+    Object.entries(draft.courseTanks || {}).forEach(([c, v]) => { const n = Number(v); if (n > 0) ct[c] = Math.round(n * 100) / 100 })
     next[draft.name] = {
       gear: draft.gear, psi: draft.psi,
       tanks: Number(draft.tanks) || 1, galTank, waterRate,
@@ -9571,6 +9602,7 @@ function AreasSettings({ areas, grassTypes = [], soilTypes = [], courses = [], o
       course: draft.course || '',
       grasses: draft.grasses || [],
       soilType: draft.soilType || '',
+      ...(Object.keys(ct).length >= 2 ? { courseTanks: ct } : {}),
     }
     onSave({ areas: next })
     cancel()
@@ -9618,6 +9650,18 @@ function AreasSettings({ areas, grassTypes = [], soilTypes = [], courses = [], o
               <div><FieldLabel>Nozzle</FieldLabel>
                 <input value={draft.nozzle} onChange={(e) => setDraft({ ...draft, nozzle: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="White Nozzle" /></div>
             </div>
+            {courseNames.length >= 2 && (
+              <div className="rounded-xl border border-slate-100 p-3" style={{ backgroundColor: '#F3F7F3' }}>
+                <FieldLabel noMargin>Spray both courses (one entry → a sheet per course)</FieldLabel>
+                <p className="font-body text-[10px] text-slate-400 mb-2">Same products &amp; rates, but each course gets its own tank count and its own sheet (so the crew ticks the right number). Leave both blank for a single-course area. Edit these when the acreage changes.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {courseNames.map((cn) => (
+                    <div key={cn}><FieldLabel>{cn} tanks</FieldLabel>
+                      <input type="number" inputMode="decimal" step="any" value={draft.courseTanks?.[cn] ?? ''} onChange={(e) => setDraft((d) => ({ ...d, courseTanks: { ...(d.courseTanks || {}), [cn]: e.target.value } }))} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body bg-white" placeholder="—" /></div>
+                  ))}
+                </div>
+              </div>
+            )}
             {(() => {
               const dGal = Number(draft.galTank) || 0, dSqft = Number(draft.sqft) || 0, dTanks = Number(draft.tanks) || 0
               const wrM = (dGal > 0 && dSqft > 0) ? Math.round((dGal / (dSqft / 1000)) * 100) / 100 : null
