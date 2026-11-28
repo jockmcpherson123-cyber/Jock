@@ -60,18 +60,9 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
     setGreens(g)
     const areaIds = g.map((x) => x.id)
     const start = `${date}T00:00:00`; const end = `${date}T23:59:59.999`
-    let rs = await cmdb.fetchDayRounds(courseId, areaIds, new Date(start).toISOString(), new Date(end).toISOString())
-    // When the chosen day has no readings, fall back to the most recent day that
-    // does (shown greyed with its date), so the page is never blank — rather than
-    // leave the superintendent staring at an empty heatmap first thing.
-    if (rs.length === 0) {
-      const latestDate = await cmdb.fetchLatestRoundDate(areaIds, date)
-      if (latestDate && latestDate !== date) {
-        const ls = `${latestDate}T00:00:00`; const le = `${latestDate}T23:59:59.999`
-        const lr = await cmdb.fetchDayRounds(courseId, areaIds, new Date(ls).toISOString(), new Date(le).toISOString())
-        if (lr.length) { rs = lr; setStaleDate(latestDate) } else setStaleDate(null)
-      } else setStaleDate(null)
-    } else setStaleDate(null)
+    // Show ONLY the selected day's readings — no carry-over from a prior day.
+    const rs = await cmdb.fetchDayRounds(courseId, areaIds, new Date(start).toISOString(), new Date(end).toISOString())
+    setStaleDate(null)
     setRounds(rs)
     const p = await cmdb.fetchWateringPlan(courseId, date)
     setPlan(p); setEtDraft(p.day?.forecast_et != null ? String(p.day.forecast_et) : (autoEt != null ? String(autoEt) : ''))
@@ -273,9 +264,9 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="rounded-2xl border p-3" style={{ borderColor: HAIR, backgroundColor: 'white' }}>
           {changeMissing ? (
-            <div className="h-64 flex items-center justify-center text-center font-body text-[13px]" style={{ color: INK_3 }}>Need a morning and an afternoon round today.</div>
+            <div className="h-64 flex items-center justify-center text-center font-body text-[13px]" style={{ color: INK_3 }}>Need a morning and an afternoon round {date === todayISO() ? 'today' : 'on this day'}.</div>
           ) : vals.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-center font-body text-[13px]" style={{ color: INK_3 }}>No {view} readings on this green today.</div>
+            <div className="h-64 flex items-center justify-center text-center font-body text-[13px]" style={{ color: INK_3 }}>No {view} readings on this green {date === todayISO() ? 'today' : 'on this day'}.</div>
           ) : (
             <>
               <div className="flex items-center justify-between mb-2">
@@ -325,9 +316,11 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
               })}
             </div>
             <p className="font-body text-[11px] mt-1.5" style={{ color: INK_3 }}>
-              {staleForSuggest
-                ? `Last read ${formatDate(latest.startedAt, 'list')} — too old to suggest.`
-                : <>{suggested != null ? `Suggested ${suggested.toFixed(2)} in — ` : ''}uses the latest reading{latest ? ` (${formatDate(latest.startedAt, 'list')} · ${Number(latest.avg).toFixed(1)}%)` : ''}.</>}
+              {!latest
+                ? `No readings ${date === todayISO() ? 'today' : 'on this day'} — add a round to get a suggestion.`
+                : staleForSuggest
+                  ? `Last read ${formatDate(latest.startedAt, 'list')} — too old to suggest.`
+                  : <>{suggested != null ? `Suggested ${suggested.toFixed(2)} in — ` : ''}uses this round{latest ? ` (${formatDate(latest.startedAt, 'list')} · ${Number(latest.avg).toFixed(1)}%)` : ''}.</>}
             </p>
             <div className="flex items-center gap-2 mt-2">
               <span className="font-body text-[11px]" style={{ color: INK_2 }}>Forecast ET</span>
