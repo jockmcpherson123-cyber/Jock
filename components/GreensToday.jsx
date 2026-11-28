@@ -65,7 +65,7 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
     // does (shown greyed with its date), so the page is never blank — rather than
     // leave the superintendent staring at an empty heatmap first thing.
     if (rs.length === 0) {
-      const latestDate = await cmdb.fetchLatestRoundDate(areaIds)
+      const latestDate = await cmdb.fetchLatestRoundDate(areaIds, date)
       if (latestDate && latestDate !== date) {
         const ls = `${latestDate}T00:00:00`; const le = `${latestDate}T23:59:59.999`
         const lr = await cmdb.fetchDayRounds(courseId, areaIds, new Date(ls).toISOString(), new Date(le).toISOString())
