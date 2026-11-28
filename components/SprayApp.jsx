@@ -168,6 +168,26 @@ function labelRange(prod, basis) {
     : { min: pick(prod.labelMinA, prod.labelMinM), max: pick(prod.labelMaxA, prod.labelMaxM) }
 }
 
+// Convert an amount in a product's own "ounce" convention (fluid oz for
+// liquids, weight oz for dry) into that product's stock unit. convertUnits()
+// treats oz strictly as a fluid-volume unit, so it can't cross to lbs/kg/g for
+// a dry product — hence this helper, which branches on weight vs volume.
+function ozToStockUnit(oz, prod) {
+  const u = (prod && prod.unit) || 'oz'
+  const n = Number(oz) || 0
+  if (!n) return 0
+  if (u === 'oz' || u === 'fl oz') return n
+  if (u === 'lbs') return n / 16
+  if (u === 'kg') return n * 0.0283495
+  if (u === 'g') return n * 28.3495
+  if (u === 'gal') return n / 128
+  if (u === 'qt') return n / 32
+  if (u === 'pt') return n / 16
+  if (u === 'L') return n / 33.814
+  if (u === 'ml') return n * 29.5735
+  return n // 'each', 'bag', 'case', 'jug' and the like — no oz mapping, treat 1:1
+}
+
 function sheetDeductions(sheet, area) {
   const map = {}
   const bd = sheetBreakdown(sheet, area)
@@ -1955,7 +1975,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
       for (const [name, oz] of Object.entries(byProduct)) {
         const prod = next.find((p) => p.name === name)
         if (!prod) continue
-        const converted = convertUnits(oz, 'oz', prod.unit)
+        const converted = ozToStockUnit(oz, prod)
         const updated = { ...prod, stock: Math.round(((prod.stock || 0) + converted) * 1000) / 1000 }
         next = next.map((p) => (p.name === name ? updated : p))
         try { await db.upsertProduct(updated) } catch (e) { console.error('Stock update failed', e) }
@@ -1987,7 +2007,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
       for (const [name, oz] of Object.entries(byProduct)) {
         const prod = next.find((p) => p.name === name)
         if (!prod) continue
-        const converted = convertUnits(oz, 'oz', prod.unit)
+        const converted = ozToStockUnit(oz, prod)
         const updated = { ...prod, stock: Math.round(((prod.stock || 0) - converted) * 1000) / 1000 }
         next = next.map((p) => (p.name === name ? updated : p))
         try { await db.upsertProduct(updated) } catch (e) { console.error('Stock update failed', e) }
@@ -2421,7 +2441,7 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
         )}
         {route === 'weather' && <Weather location={location} courseInfo={courseInfo} products={products} manage={manage} onSaveRain={async (rainOverrides) => { await saveSettings({ courseInfo: { ...courseInfo, rainOverrides } }); showToast('Rainfall saved') }} onGoToSettings={() => manage && setRoute('settings')} />}
         {route === 'program' && manage && <AnnualProgram areas={scopeAreas(areas)} allAreas={areas} products={products} sheets={visibleSheets} location={location} courseInfo={courseInfo} onProductsChanged={reloadProducts} onCreateSheet={createSheetFromProgram} courseFilter={course} />}
-        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} programApps={programApps} onSaveSettings={saveSettings} applicatorLicenses={applicatorLicenses} location={location} />}
+        {route === 'reports' && manage && <Reports sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} fertSheets={fertSheets} programApps={programApps} onSaveSettings={saveSettings} applicatorLicenses={applicatorLicenses} location={location} stockDeliveries={stockDeliveries} deliveries={deliveries} />}
         {route === 'fert' && <FertSheets manage={manage} courseInfo={courseInfo} courseFilter={course} />}
         {route === 'training' && manage && <TrainingTab sheets={sheets} products={products} areas={areas} courseInfo={courseInfo} />}
         {route === 'settings' && manage && (
@@ -7366,7 +7386,7 @@ function buildProductMovements(product, { sheets = [], stockDeliveries = [], del
     (d.lines || []).filter((l) => l.product === name).forEach((l) => {
       const oz = Number(l.oz) || 0
       if (!oz) return
-      const delta = round2(convertUnits(oz, 'oz', unit))
+      const delta = round2(ozToStockUnit(oz, product))
       ev.push({ key: 'd' + d.id + l.id, ts: d.date, date: d.date, type: 'delivery', delta, label: `Delivery +${delta} ${unit}`, note: [d.vendor, l.kind === 'extra' ? `Extra${l.reason ? ': ' + l.reason : ''}` : 'Planned'].filter(Boolean).join(' · ') })
     })
   })
@@ -7606,7 +7626,7 @@ function Inventory({ products, deliveries, onAddDelivery, manage = false, sheets
             {lines.map((l, idx) => {
               const prod = products.find((pr) => pr.name === l.product)
               const oz = lineOz(l)
-              const stockAdd = prod && oz ? round2(convertUnits(oz, 'oz', prod.unit)) : null
+              const stockAdd = prod && oz ? round2(ozToStockUnit(oz, prod)) : null
               return (
                 <div key={l.id} className="rounded-xl border border-slate-200 p-3">
                   <div className="flex items-start gap-2">
@@ -7789,7 +7809,7 @@ function Inventory({ products, deliveries, onAddDelivery, manage = false, sheets
 }
 
 // ── REPORTS ───────────────────────────────────────────────────────────────
-function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], programApps = [], onSaveSettings, applicatorLicenses = {}, location = {} }) {
+function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], programApps = [], onSaveSettings, applicatorLicenses = {}, location = {}, stockDeliveries = [], deliveries = [] }) {
   const [view, setView] = useState('byArea')
   const [report, setReport] = useState('npk') // 'npk' | 'rotation'
 
@@ -7900,7 +7920,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
       </div>
 
       <div className="flex gap-2 mt-4 mb-1 overflow-x-auto pb-1">
-        {[['npk', 'Nutrients'], ['nitrogen', 'Nitrogen vs Target'], ['reorder', 'Reorder'], ['cost', 'Cost'], ['impact', 'Impact (EIQ)'], ['rotation', 'Rotation'], ['usage', 'Product Usage'], ['history', 'Spray History'], ['spares', 'Spares'], ['since', 'Days Since']].map(([k, l]) => (
+        {[['npk', 'Nutrients'], ['nitrogen', 'Nitrogen vs Target'], ['reorder', 'Reorder'], ['cost', 'Cost'], ['impact', 'Impact (EIQ)'], ['rotation', 'Rotation'], ['usage', 'Product Usage'], ['history', 'Spray History'], ['spares', 'Spares'], ['deliveries', 'Deliveries'], ['since', 'Days Since']].map(([k, l]) => (
           <button key={k} onClick={() => setReport(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap transition" style={report === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
@@ -7959,6 +7979,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
       {report === 'usage' && <ProductUsageReport sheets={seasonSheets} products={products} areas={areas} />}
       {report === 'history' && <SprayHistoryReport sheets={seasonSheets.filter(sheetApplied)} />}
       {report === 'spares' && <SparesReport programApps={programApps} />}
+      {report === 'deliveries' && <DeliveriesReport stockDeliveries={stockDeliveries} deliveries={deliveries} sheets={seasonSheets} products={products} areas={areas} year={reportYear} />}
       {report === 'since' && <DaysSinceReport sheets={sheets} />}
 
       {report === 'npk' && (<>
@@ -8814,6 +8835,140 @@ function SparesReport({ programApps = [] }) {
         </div>
       )}
       <p className="font-body text-[10px] text-slate-400 mt-3">Spares are contingency sprays kept on the shelf per area. A spare that's been used shows the date it was pulled.</p>
+    </div>
+  )
+}
+
+// ── DELIVERIES ────────────────────────────────────────────────────────────
+// A season view of stock bought vs sprayed, from the receiving records and the
+// sprays marked applied. Deliveries are split Planned vs Extra (with Extra
+// grouped by reason) so over-ordering is visible. Separate from Finance — the
+// cost shown here is for ordering only and never feeds Budget.
+function appliedToOz(total, unit) {
+  const n = Number(total) || 0
+  if (!n) return 0
+  switch (unit) {
+    case 'gal': return n * 128
+    case 'qt': return n * 32
+    case 'pt': return n * 16
+    case 'L': return n * 33.814
+    case 'ml': return n / 29.5735
+    case 'lbs': return n * 16
+    case 'kg': return n * 35.274
+    case 'g': return n / 28.3495
+    default: return n // oz / fl oz / unknown
+  }
+}
+
+function DeliveriesReport({ stockDeliveries = [], deliveries = [], sheets = [], products = [], areas = {}, year }) {
+  const inYear = (d) => !year || String(d || '').slice(0, 4) === String(year)
+
+  const data = useMemo(() => {
+    const byProduct = {} // name -> { planned, extra, used, cost }
+    const ensure = (name) => (byProduct[name] = byProduct[name] || { name, planned: 0, extra: 0, used: 0, cost: 0 })
+    const extraByReason = {}
+
+    ;(stockDeliveries || []).filter((d) => inYear(d.date)).forEach((d) => {
+      (d.lines || []).forEach((l) => {
+        if (!l.product) return
+        const oz = Number(l.oz) || 0
+        const row = ensure(l.product)
+        if (l.kind === 'extra') {
+          row.extra += oz
+          const r = String(l.reason || '').trim() || 'No reason given'
+          extraByReason[r] = (extraByReason[r] || 0) + oz
+        } else {
+          row.planned += oz
+        }
+        if (l.cases != null && l.costPerCase != null) row.cost += (Number(l.cases) || 0) * (Number(l.costPerCase) || 0)
+      })
+    })
+    // Legacy single-line deliveries count as planned receipts.
+    ;(deliveries || []).filter((d) => inYear(d.date)).forEach((d) => {
+      if (!d.product) return
+      ensure(d.product).planned += appliedToOz(d.qty, d.unit)
+    })
+    // Used this season, from sprays marked applied.
+    productUsage(sheets, products, areas).forEach((u) => {
+      ensure(u.name).used += appliedToOz(u.total, u.unit)
+    })
+
+    const rows = Object.values(byProduct).map((r) => {
+      const received = round2(r.planned + r.extra)
+      return { ...r, planned: round2(r.planned), extra: round2(r.extra), used: round2(r.used), received, left: round2(received - r.used), cost: round2(r.cost) }
+    }).sort((a, b) => b.received - a.received || a.name.localeCompare(b.name))
+
+    const reasons = Object.entries(extraByReason).map(([reason, oz]) => ({ reason, oz: round2(oz) })).sort((a, b) => b.oz - a.oz)
+    const totals = rows.reduce((t, r) => ({ received: t.received + r.received, extra: t.extra + r.extra, used: t.used + r.used, cost: t.cost + r.cost }), { received: 0, extra: 0, used: 0, cost: 0 })
+    return { rows, reasons, totals }
+  }, [stockDeliveries, deliveries, sheets, products, areas, year])
+
+  const exportCSV = () => {
+    const out = [['Product', 'Planned (oz)', 'Extra (oz)', 'Received (oz)', 'Used (oz)', 'Left (oz)', 'Cost']]
+    data.rows.forEach((r) => out.push([r.name, r.planned, r.extra, r.received, r.used, r.left, r.cost ? r.cost.toFixed(2) : '']))
+    downloadCSV(out, `Deliveries_${year || ''}_${localDateISO()}.csv`)
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+          <p className="font-display text-2xl font-bold" style={{ color: FOREST }}>{Math.round(data.totals.received).toLocaleString()}</p>
+          <p className="font-body text-[11px] text-slate-400 mt-0.5">oz received</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+          <p className="font-display text-2xl font-bold" style={{ color: '#92660D' }}>{Math.round(data.totals.extra).toLocaleString()}</p>
+          <p className="font-body text-[11px] text-slate-400 mt-0.5">oz extra</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+          <p className="font-display text-2xl font-bold text-slate-900">{data.totals.cost > 0 ? `$${Math.round(data.totals.cost).toLocaleString()}` : '—'}</p>
+          <p className="font-body text-[11px] text-slate-400 mt-0.5">spend (not in Budget)</p>
+        </div>
+      </div>
+
+      {data.rows.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
+          No deliveries received in {year}. Receive a delivery from the Inventory screen to see it here.
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide">By product</p>
+            <button onClick={exportCSV} className="font-body text-xs font-bold px-3 py-1.5 rounded-full text-white flex items-center gap-1.5" style={{ backgroundColor: FOREST }}><Package size={13} /> Export</button>
+          </div>
+          <div className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm mb-5">
+            <div className="grid grid-cols-5 gap-1 px-3 py-2 bg-slate-50 border-b border-black/5">
+              {['Product', 'Planned', 'Extra', 'Used', 'Left'].map((h, i) => (
+                <span key={h} className={`font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 ${i === 0 ? '' : 'text-right'}`}>{h}</span>
+              ))}
+            </div>
+            {data.rows.map((r) => (
+              <div key={r.name} className="grid grid-cols-5 gap-1 px-3 py-2.5 border-b border-black/5 last:border-0 items-center">
+                <span className="font-body text-[12px] font-semibold text-slate-800 truncate">{r.name}</span>
+                <span className="font-body text-[12px] text-slate-600 text-right tabular-nums">{r.planned.toLocaleString()}</span>
+                <span className="font-body text-[12px] text-right tabular-nums" style={{ color: r.extra > 0 ? '#92660D' : '#CBD5E1' }}>{r.extra ? r.extra.toLocaleString() : '—'}</span>
+                <span className="font-body text-[12px] text-slate-600 text-right tabular-nums">{r.used.toLocaleString()}</span>
+                <span className="font-body text-[12px] font-bold text-right tabular-nums" style={{ color: r.left < 0 ? '#DC2626' : FERN }}>{r.left.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+
+          {data.reasons.length > 0 && (
+            <>
+              <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Extra by reason</p>
+              <div className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm mb-2">
+                {data.reasons.map((r) => (
+                  <div key={r.reason} className="flex items-center justify-between px-4 py-2.5 border-b border-black/5 last:border-0">
+                    <span className="font-body text-[12px] text-slate-700">{r.reason}</span>
+                    <span className="font-body text-[12px] font-bold tabular-nums" style={{ color: '#92660D' }}>{r.oz.toLocaleString()} oz</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          <p className="font-body text-[10px] text-slate-400 mt-2">Planned = received on a planned order line; Extra = added outside the plan (with a reason). Left = received − used this season. Amounts in each product's ounce (fl oz for liquids, weight oz for dry).</p>
+        </>
+      )}
     </div>
   )
 }
