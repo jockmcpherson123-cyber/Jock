@@ -897,6 +897,9 @@ function HomeLanding({ clubName, onPickId }) {
   const lowStock = (products || []).filter((p) => (Number(p.stock) || 0) < 0 || (p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold))
   const licAlerts = computeLicenseAlerts(settings.applicatorLicenses || {})
   const compGaps = libraryComplianceGaps(products, sheets, settings.applicatorLicenses || {})
+  // Approved sprays whose date has passed but which the operator never signed off
+  // — the records gap that makes every report read near zero.
+  const unsignedApproved = (sheets || []).filter((s) => s.status === 'approved' && !sheetApplied(s) && s.date && s.date <= today)
   const timeoff = Array.isArray(courseInfo.timeoff) ? courseInfo.timeoff : []
 
   return (
@@ -912,7 +915,7 @@ function HomeLanding({ clubName, onPickId }) {
         <div className="space-y-4 min-w-0">
           <SoilTempCard soilNow={soilNow} openWins={openWins} onPickId={onPickId} />
           <RainTotalsCard today={todayRain} week={rainWeek} month={rainMonth} year={rain.ytd} />
-          <NeedsAttention lowStock={lowStock} licAlerts={licAlerts} comp={compGaps} onPickId={onPickId} />
+          <NeedsAttention lowStock={lowStock} licAlerts={licAlerts} comp={compGaps} unsignedApproved={unsignedApproved} onPickId={onPickId} />
         </div>
       </div>
       {addOpen && <EventModal onClose={() => setAddOpen(false)} onSave={(ev) => { saveEvents([...events, ev]); setAddOpen(false) }} />}
@@ -1093,8 +1096,9 @@ function RainTotalsCard({ today = null, week = 0, month = 0, year = 0 }) {
   )
 }
 
-function NeedsAttention({ lowStock = [], licAlerts = [], comp = null, onPickId }) {
+function NeedsAttention({ lowStock = [], licAlerts = [], comp = null, unsignedApproved = [], onPickId }) {
   const items = []
+  if (unsignedApproved && unsignedApproved.length) items.push({ key: 'unsigned', tone: 'bad', label: `${unsignedApproved.length} approved spray${unsignedApproved.length !== 1 ? 's' : ''} not signed off`, sub: unsignedApproved.slice(0, 3).map((s) => `${s.area || 'spray'} ${fmtDate(s.date)}`).join(', '), cta: 'Sign off', go: () => onPickId('list') })
   lowStock.slice(0, 4).forEach((p) => items.push({ key: 'ls' + p.name, tone: 'bad', label: `${p.name} · ${shortfallText(p)}`, cta: 'Order', go: () => onPickId('chemicals') }))
   if (lowStock.length > 4) items.push({ key: 'lsmore', tone: 'bad', label: `+${lowStock.length - 4} more low on stock`, cta: 'Order', go: () => onPickId('chemicals') })
   licAlerts.forEach((a, i) => items.push({ key: 'lic' + i, tone: a.level === 'expired' ? 'bad' : 'warn', label: `${a.name} — ${a.type} license ${a.label.toLowerCase()}`, cta: 'Update', go: () => onPickId('settings') }))
@@ -1180,6 +1184,7 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
   const lowStock = (products || []).filter((p) => (Number(p.stock) || 0) < 0 || (p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold))
   const licAlerts = computeLicenseAlerts(settings.applicatorLicenses || {})
   const compGaps = libraryComplianceGaps(products, sheets, settings.applicatorLicenses || {})
+  const unsignedApproved = (sheets || []).filter((s) => s.status === 'approved' && !sheetApplied(s) && s.date && s.date <= today)
   const soilNow = currentSoilTemp(wx.breakdownTemps)
   const openWins = soilNow != null ? openWindows(soilNow, soilTrend(wx.breakdownTemps)) : []
   const dowName = (iso) => LAND_DOW[new Date(iso + 'T00:00:00').getDay()]
@@ -1251,7 +1256,7 @@ function SprayProgramLanding({ clubName, onPickId, onGo, courses = [] }) {
         </div>
         <div className="space-y-4">
           <SprayLowStock lowStock={lowStock} onPickId={onPickId} />
-          <SprayAlerts licAlerts={licAlerts} openWins={openWins} comp={compGaps} onPickId={onPickId} />
+          <SprayAlerts licAlerts={licAlerts} openWins={openWins} comp={compGaps} unsignedApproved={unsignedApproved} onPickId={onPickId} />
         </div>
       </div>
     </LandingShell>
@@ -1276,8 +1281,9 @@ function SprayLowStock({ lowStock = [], onPickId }) {
   )
 }
 
-function SprayAlerts({ licAlerts = [], openWins = [], comp = null, onPickId }) {
+function SprayAlerts({ licAlerts = [], openWins = [], comp = null, unsignedApproved = [], onPickId }) {
   const items = []
+  if (unsignedApproved && unsignedApproved.length) items.push({ key: 'unsigned', bad: true, label: `${unsignedApproved.length} approved spray${unsignedApproved.length !== 1 ? 's' : ''} not signed off`, go: () => onPickId('list') })
   licAlerts.forEach((a, i) => items.push({ key: 'l' + i, label: `${a.name} — ${a.type} license ${a.label.toLowerCase()}`, go: () => onPickId('settings') }))
   openWins.forEach((w, i) => items.push({ key: 'w' + i, label: `Soil-temp window open: ${w.label}`, go: () => onPickId('timing') }))
   if (comp && comp.total) items.push({ key: 'c', label: `${comp.total} compliance record${comp.total !== 1 ? 's' : ''} missing`, go: () => onPickId('settings') })
@@ -7541,7 +7547,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
       {report === 'impact' && <ImpactReport sheets={seasonSheets} products={products} areas={areas} />}
       {report === 'rotation' && <RotationReport sheets={seasonSheets} products={products} />}
       {report === 'usage' && <ProductUsageReport sheets={seasonSheets} products={products} areas={areas} />}
-      {report === 'history' && <SprayHistoryReport sheets={seasonSheets} />}
+      {report === 'history' && <SprayHistoryReport sheets={seasonSheets.filter(sheetApplied)} />}
       {report === 'since' && <DaysSinceReport sheets={sheets} />}
 
       {report === 'npk' && (<>
