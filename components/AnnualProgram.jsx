@@ -280,7 +280,13 @@ function computeEarlyOrder(apps, products, areas) {
     const plannedCases = casesToOrder != null ? Math.max(0, casesToOrder - spareCases) : null
     const spareCost = spareCases && costPerCase ? Math.round(spareCases * costPerCase * 100) / 100 : 0
     const plannedCost = estCost != null ? Math.max(0, Math.round((estCost - spareCost) * 100) / 100) : null
-    return { ...r, company: (p.company || p.manufacturer || '').trim(), ozPerCase, unit, caseSize: p.caseSize || '', onHandOz, netOz, casesExact, casesToOrder, spareCases, plannedCases, spareCost, plannedCost, totalInUnits, costPerCase, estCost, missingCase: !ozPerCase, missingPrice, costPerOz: ozPerCase && costPerCase ? Math.round((costPerCase / ozPerCase) * 1000) / 1000 : null }
+    // Label yearly maximum (total product per calendar year, set per product in
+    // the Chemical Library). Compare the whole planned season total against it so
+    // an over-plan is caught before anything is sprayed. ≥90% warns, >100% is over.
+    const yearlyMax = Number(p.labelYearlyMax) || 0
+    const yearlyPct = yearlyMax > 0 ? Math.round((r.totalOz / yearlyMax) * 100) : null
+    const overYearly = yearlyMax > 0 && r.totalOz > yearlyMax
+    return { ...r, company: (p.company || p.manufacturer || '').trim(), ozPerCase, unit, caseSize: p.caseSize || '', onHandOz, netOz, casesExact, casesToOrder, spareCases, plannedCases, spareCost, plannedCost, totalInUnits, costPerCase, estCost, missingCase: !ozPerCase, missingPrice, yearlyMax, yearlyPct, overYearly, costPerOz: ozPerCase && costPerCase ? Math.round((costPerCase / ozPerCase) * 1000) / 1000 : null }
   }).sort((a, b) => b.totalOz - a.totalOz)
 
   const areaList = [...areaSet].sort()
@@ -315,7 +321,8 @@ function computeEarlyOrder(apps, products, areas) {
   })
   const byTypeCost = Object.entries(typeCost).filter(([, v]) => v > 0).map(([type, cost]) => ({ type, cost })).sort((a, b) => b.cost - a.cost)
   const byAreaCost = Object.entries(areaCost).filter(([, v]) => v > 0).map(([area, cost]) => ({ area, cost: Math.round(cost) })).sort((a, b) => b.cost - a.cost)
-  return { rows, companies, hasCompanies, byTypeCost, byAreaCost, areaList, casesTotal, estTotalCost, estSpareCost, estPlannedCost, hasSpares, missingCaseCount, missingPriceRows, missingSqft }
+  const yearlyMaxFlags = rows.filter((r) => r.yearlyPct != null && r.yearlyPct >= 90).map((r) => ({ name: r.name, pct: r.yearlyPct, over: r.overYearly, totalOz: Math.round(r.totalOz), max: r.yearlyMax, unit: r.unit })).sort((a, b) => b.pct - a.pct)
+  return { rows, companies, hasCompanies, byTypeCost, byAreaCost, areaList, casesTotal, estTotalCost, estSpareCost, estPlannedCost, hasSpares, missingCaseCount, missingPriceRows, missingSqft, yearlyMaxFlags }
 }
 
 // Convert a stock amount into ounces so it can be netted against a season total.
@@ -2769,6 +2776,21 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                     {earlyOrder.missingCaseCount > 0 && <>{earlyOrder.missingCaseCount} product{earlyOrder.missingCaseCount !== 1 ? 's' : ''} missing “Oz/case” — add it in the Chemical Library (Ordering section) to get its cases-needed. </>}
                     {earlyOrder.missingSqft && <>Some areas have no square footage set (Settings → Sprayer Areas), so their totals can't be calculated.</>}
                   </p>
+                </div>
+              )}
+
+              {(earlyOrder.yearlyMaxFlags || []).length > 0 && (
+                <div className="flex items-start gap-2 rounded-xl p-3 mb-3 border" style={{ backgroundColor: earlyOrder.yearlyMaxFlags.some((f) => f.over) ? '#FEF2F2' : '#FFFBEB', borderColor: earlyOrder.yearlyMaxFlags.some((f) => f.over) ? '#FCA5A5' : '#FDE68A' }}>
+                  <AlertTriangle size={15} className="shrink-0 mt-0.5" style={{ color: earlyOrder.yearlyMaxFlags.some((f) => f.over) ? '#DC2626' : '#D97706' }} />
+                  <div className="min-w-0">
+                    <p className="font-body text-[11px] font-bold" style={{ color: earlyOrder.yearlyMaxFlags.some((f) => f.over) ? '#991B1B' : '#92660D' }}>
+                      {earlyOrder.yearlyMaxFlags.some((f) => f.over) ? 'Planned program exceeds a label yearly maximum' : 'Planned program is near a label yearly maximum'}
+                    </p>
+                    <p className="font-body text-[11px] mt-0.5" style={{ color: earlyOrder.yearlyMaxFlags.some((f) => f.over) ? '#B91C1C' : '#A16207' }}>
+                      {earlyOrder.yearlyMaxFlags.map((f) => `${f.name} at ${f.pct}% (${f.totalOz.toLocaleString()} of ${f.max.toLocaleString()} ${f.unit}/yr)${f.over ? ' — OVER' : ''}`).join(' · ')}
+                    </p>
+                    <p className="font-body text-[9px] mt-0.5" style={{ color: '#A16207' }}>Label yearly maximums are set per product in the Chemical Library.</p>
+                  </div>
                 </div>
               )}
 

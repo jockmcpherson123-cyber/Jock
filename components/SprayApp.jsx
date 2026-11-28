@@ -1646,7 +1646,8 @@ function ResourcesLanding({ clubName, onPickId, pages = [] }) {
     if (withMax.length) {
       const yr = String(new Date().getFullYear())
       const yearSheets = (d.sheets || []).filter((s) => s.date && s.date.startsWith(yr))
-      const usage = productUsage(yearSheets, d.products, d.settings.areas || {})
+      const usageList = productUsage(yearSheets, d.products, d.settings.areas || {})
+      const usage = {}; usageList.forEach((u) => { usage[u.name] = u })
       const flags = withMax.map((p) => { const used = usage[p.name]?.total || 0; const pct = Math.round((used / Number(p.labelYearlyMax)) * 100); return { name: p.name, pct } }).filter((x) => x.pct >= 60).sort((a, b) => b.pct - a.pct)
       if (flags.length) items.push({ key: 'max', label: 'Yearly max', text: flags.map((f) => `${f.name} at ${f.pct}% of label max`).join(' · '), go: () => onPickId('chemicals') })
     } else {
