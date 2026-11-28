@@ -7516,7 +7516,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
       </div>
 
       <div className="flex gap-2 mt-4 mb-1 overflow-x-auto pb-1">
-        {[['npk', 'Nutrients'], ['nitrogen', 'Nitrogen vs Target'], ['reorder', 'Reorder'], ['cost', 'Cost'], ['impact', 'Impact (EIQ)'], ['rotation', 'Rotation'], ['usage', 'Product Usage'], ['history', 'Spray History'], ['since', 'Days Since']].map(([k, l]) => (
+        {[['npk', 'Nutrients'], ['nitrogen', 'Nitrogen vs Target'], ['reorder', 'Reorder'], ['cost', 'Cost'], ['impact', 'Impact (EIQ)'], ['rotation', 'Rotation'], ['usage', 'Product Usage'], ['history', 'Spray History'], ['spares', 'Spares'], ['since', 'Days Since']].map(([k, l]) => (
           <button key={k} onClick={() => setReport(k)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full whitespace-nowrap transition" style={report === k ? { backgroundColor: FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B', border: '1px solid rgba(0,0,0,0.08)' }}>
             {l}
           </button>
@@ -7574,6 +7574,7 @@ function Reports({ sheets, products, areas, courseInfo = {}, fertSheets = [], pr
       {report === 'rotation' && <RotationReport sheets={seasonSheets} products={products} />}
       {report === 'usage' && <ProductUsageReport sheets={seasonSheets} products={products} areas={areas} />}
       {report === 'history' && <SprayHistoryReport sheets={seasonSheets.filter(sheetApplied)} />}
+      {report === 'spares' && <SparesReport programApps={programApps} />}
       {report === 'since' && <DaysSinceReport sheets={sheets} />}
 
       {report === 'npk' && (<>
@@ -8339,6 +8340,96 @@ function DaysSinceReport({ sheets }) {
         </div>
       )}
       <p className="font-body text-[10px] text-slate-400 mt-3">Days since each area's most recent approved or completed spray. Red past 30 days.</p>
+    </div>
+  )
+}
+
+// ── SPARES ──────────────────────────────────────────────────────────────────
+// Spare sprays are contingency applications planned against an area but left
+// undated. When one is "used" it becomes a dated planned spray (kind flips to
+// 'planned') but keeps spareUsed + spareGroup so its lineage is traceable here.
+// This report shows, per area, every spare: those still on the shelf (unused)
+// and those that were pulled (used, with the date and products).
+function spareRate(a) {
+  const perA = (a.basis || '').endsWith('/ A')
+  const n = perA ? a.rateOzA : a.rateOzM
+  if (n == null || n === '') return ''
+  return `${Number(n).toFixed(2)} ${a.basis || 'oz / M'}`
+}
+
+function SparesReport({ programApps = [] }) {
+  const [area, setArea] = useState('all')
+  const spares = (programApps || []).filter((a) => a.kind === 'spare' || a.spareUsed)
+  const areaNames = [...new Set(spares.map((a) => a.area || '—'))].sort()
+  const scoped = area === 'all' ? spares : spares.filter((a) => (a.area || '—') === area)
+
+  // Group rows that belong to the same spare (shared spareGroup; singletons key
+  // on their own id).
+  const groupsByArea = {}
+  scoped.forEach((a) => {
+    const ar = a.area || '—'
+    const gk = a.spareGroup || a.id
+    groupsByArea[ar] = groupsByArea[ar] || {}
+    const g = (groupsByArea[ar][gk] = groupsByArea[ar][gk] || {
+      key: gk, area: ar, title: a.spareTitle || 'Spare', used: false, usedDate: null, products: [],
+    })
+    if (a.spareUsed) { g.used = true; g.usedDate = a.plannedDate || g.usedDate }
+    if (a.product) g.products.push({ name: a.product, rate: spareRate(a) })
+  })
+
+  const areaBlocks = Object.keys(groupsByArea).sort().map((ar) => {
+    const groups = Object.values(groupsByArea[ar]).sort((a, b) => Number(a.used) - Number(b.used) || a.title.localeCompare(b.title))
+    return { area: ar, groups, unused: groups.filter((g) => !g.used).length, used: groups.filter((g) => g.used).length }
+  })
+
+  return (
+    <div className="mt-4">
+      <div className="flex gap-2 mb-3 overflow-x-auto pb-1 items-center">
+        <div className="shrink-0" style={{ width: 170 }}>
+          <SearchSelect value={area} options={[{ value: 'all', label: 'All areas' }, ...areaNames]} onPick={setArea} sort={false} placeholder="Area…" />
+        </div>
+      </div>
+      {areaBlocks.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 p-10 text-center text-slate-400 font-body text-sm">
+          No spare sprays yet. Add spares from the Annual Program to keep contingency products on the shelf.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {areaBlocks.map((b) => (
+            <div key={b.area} className="bg-white rounded-2xl border border-black/5 p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <p className="font-body font-semibold text-sm text-slate-900">{b.area}</p>
+                <p className="font-body text-[10px] text-slate-400">{b.unused} on shelf · {b.used} used</p>
+              </div>
+              <div className="space-y-2">
+                {b.groups.map((g) => (
+                  <div key={g.key} className="rounded-xl border p-2.5" style={{ borderColor: g.used ? '#D8E6DC' : 'rgba(0,0,0,0.06)', backgroundColor: g.used ? '#F5FAF6' : '#FAFAFA' }}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-body text-xs font-bold text-slate-900">{g.title}</span>
+                      <span className="font-body text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide" style={g.used ? { backgroundColor: '#E8F3EC', color: FERN } : { backgroundColor: '#FEF3DD', color: '#92660D' }}>
+                        {g.used ? `Used ${g.usedDate ? fmtDate(g.usedDate) : ''}`.trim() : 'On shelf'}
+                      </span>
+                    </div>
+                    {g.products.length > 0 ? (
+                      <div className="space-y-0.5">
+                        {g.products.map((p, i) => (
+                          <div key={i} className="flex items-center justify-between gap-2">
+                            <span className="font-body text-[11px] text-slate-600 truncate">{p.name}</span>
+                            {p.rate && <span className="font-body text-[10px] text-slate-400 tabular-nums shrink-0">{p.rate}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="font-body text-[11px] text-slate-400">No products</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="font-body text-[10px] text-slate-400 mt-3">Spares are contingency sprays kept on the shelf per area. A spare that's been used shows the date it was pulled.</p>
     </div>
   )
 }
