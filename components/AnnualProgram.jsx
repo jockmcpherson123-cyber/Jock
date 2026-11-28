@@ -370,7 +370,10 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
     // so the per-tank amount shown matches the totals and the spray sheet.
     const sqft = Number(a.sqftPerTankOverride) > 0 ? Number(a.sqftPerTankOverride) : (Number(area?.sqft) || 0)
     const ozPerTank = rateM != null && sqft ? rateM * (sqft / 1000) : null
-    const totalOz = amt?.oz ?? (ozPerTank != null ? ozPerTank * tanks : null)
+    // Total uses the effective tank count (combined for a both-courses area), so
+    // per-tank × tanks always equals the total shown — and the two course sheets
+    // add back to it.
+    const totalOz = combinedTanks != null ? (ozPerTank != null ? ozPerTank * combinedTanks : null) : (amt?.oz ?? (ozPerTank != null ? ozPerTank * tanks : null))
     const ozPerCase = Number(prod.ozPerCase) || null
     const cases = ozPerCase && totalOz != null ? totalOz / ozPerCase : null
     const costPerCase = Number(prod.costPerCase) || null
@@ -2174,12 +2177,13 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
               const isDry = (prod) => isDryProduct(prod)
               // Rate display: keep 2–3 significant figures for small rates so a
               // real value like 0.046 oz/M never rounds to a bare "0".
+              // Match the Grid's rate precision (up to 3 decimals) so the same
+              // rate reads the same in both views.
               const rateFmt = (v) => {
                 if (v == null || !isFinite(v)) return '—'
                 const n = Number(v)
                 if (n === 0) return '0'
-                if (Math.abs(n) < 1) return String(Math.round(n * 1000) / 1000)
-                return round1(n)
+                return String(Math.round(n * 1000) / 1000)
               }
               // Whole packages + leftover oz, e.g. 166.67 oz → "1 gal + 38.67 oz"
               // (128 oz/gal for liquids, 16 oz/lb for dry). Mirrors the plan sheet.
@@ -2207,14 +2211,19 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
               const detailFor = (a) => {
                 const prod = products.find((p) => p.name === a.product) || {}
                 const area = areaMatch(areas, a.area)
-                const sqft = Number(area?.sqft) || 0
+                // Use the SAME effective per-tank area as the Grid and the total
+                // (the row's override, else the area default) so every column ties
+                // out — not the base area for display and the override for the total.
+                const sqft = Number(a.sqftPerTankOverride) > 0 ? Number(a.sqftPerTankOverride) : (Number(area?.sqft) || 0)
                 const amt = planAppOz(a, area, prod) // { oz(total), rateM, tanks, perTankOz }
                 const rateM = amt?.rateM ?? (a.rateOzM != null && a.rateOzM !== '' ? Number(a.rateOzM) : null)
-                const tanks = amt?.tanks ?? 1
+                const courseTanks = area?.courseTanks && Object.keys(area.courseTanks).length >= 2 ? area.courseTanks : null
+                const combinedTanks = courseTanks ? Object.values(courseTanks).reduce((s, v) => s + (Number(v) || 0), 0) : null
+                const tanks = combinedTanks != null ? combinedTanks : (amt?.tanks ?? 1)
                 const dry = isDry(prod)
                 const perM = dry ? 16 : 128
                 const ozPerTank = rateM != null && sqft ? rateM * (sqft / 1000) : null // one full pass
-                const totalOz = amt?.oz ?? (ozPerTank != null ? ozPerTank * tanks : null)
+                const totalOz = ozPerTank != null ? ozPerTank * tanks : (amt?.oz ?? null)
                 const ozPerCase = Number(prod.ozPerCase) || null
                 const casesExact = ozPerCase && totalOz != null ? totalOz / ozPerCase : null
                 const costPerUnit = Number(prod.costPerCase) || null
@@ -2225,15 +2234,9 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                   if (mn == null && mx == null) return '—'
                   return `${mn ?? ''}${mx != null ? `–${mx}` : ''} oz${per}`
                 })()
-                // Over / Under label check (A2) — compare the planned rate to the
-                // library's label range in oz/M (converting a /A-only label).
-                const labelMinM = prod.labelMinM != null ? Number(prod.labelMinM) : (prod.labelMinA != null ? Number(prod.labelMinA) / 43.56 : null)
-                const labelMaxM = prod.labelMaxM != null ? Number(prod.labelMaxM) : (prod.labelMaxA != null ? Number(prod.labelMaxA) / 43.56 : null)
-                let labelStatus = null
-                if (rateM != null) {
-                  if (labelMaxM != null && rateM > labelMaxM * 1.001) labelStatus = 'over'
-                  else if (labelMinM != null && rateM < labelMinM * 0.999) labelStatus = 'under'
-                }
+                // Over / Under label — the one shared check (label unit, no upward
+                // tolerance, non-pesticides exempt).
+                const labelStatus = labelFlag(prod, rateM)
                 const labelNode = (labelRate === '—' && !labelStatus) ? '—' : (
                   <span>{labelRate}{labelStatus && <span style={{ display: 'block', fontSize: 7, fontWeight: 800, letterSpacing: '0.04em', color: labelStatus === 'over' ? '#B91C1C' : '#B07A16' }}>{labelStatus === 'over' ? 'OVER LABEL' : 'UNDER LABEL'}</span>}</span>
                 )
