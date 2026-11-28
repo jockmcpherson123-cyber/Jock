@@ -367,7 +367,12 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
     if (rateM != null) { if (maxM != null && rateM > maxM * 1.001) label = 'over'; else if (minM != null && rateM < minM * 0.999) label = 'under' }
     const areaSqft = Number(area?.sqft) || 0
     const effSqft = Number(a.sqftPerTankOverride) > 0 ? Number(a.sqftPerTankOverride) : areaSqft
-    return { prod, rateM, tanks, ozPerTank, totalOz, ozPerCase, cases, costPerCase, totalCost, label, dry: isDry(prod), areaSqft, effSqft, override: Number(a.sqftPerTankOverride) > 0 }
+    // Total area this spray covers = per-tank area × tanks (worked out the same
+    // way everywhere). The per-tank column is effSqft; this is the whole job.
+    const totalArea = effSqft && isFinite(tanks) ? effSqft * tanks : null
+    const galTank = Number(area?.galTank) || 0
+    const partialGal = galTank > 0 && isFinite(tanks) ? Math.round((tanks - Math.floor(tanks)) * galTank) : 0
+    return { prod, rateM, tanks, ozPerTank, totalOz, ozPerCase, cases, costPerCase, totalCost, label, dry: isDry(prod), areaSqft, effSqft, totalArea, galTank, partialGal, override: Number(a.sqftPerTankOverride) > 0 }
   }
   // Whole packages + leftover oz: "5 gal + 20 oz" (liquids) or "1 lb 3 oz" (dry).
   const galOz = (oz, dry) => {
@@ -469,6 +474,7 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
             <th className={th}>Rate oz/A</th>
             <th className={th}>Label</th>
             <th className={th}>Area/tank</th>
+            <th className={th}>Total area</th>
             <th className={th}>#Tanks</th>
             <th className={th}>oz/Tank</th>
             <th className={th}>Amount/tank</th>
@@ -485,7 +491,7 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
         <tbody>
           {groups.flatMap((grp) => [
             <tr key={grp.key + ':h'} style={{ background: '#EAF2EC' }}>
-              <td colSpan={17} className="px-2 py-1.5" style={{ borderTop: '2px solid #D3DCD2' }}>
+              <td colSpan={18} className="px-2 py-1.5" style={{ borderTop: '2px solid #D3DCD2' }}>
                 <div style={{ position: 'sticky', left: 8, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                   <input type="date" key={grp.key + ':' + (grp.date || '')} defaultValue={grp.date || ''} onBlur={(e) => commitGroupDate(grp.items, e.target.value)} className="border border-slate-200 rounded px-1.5 py-1 text-[11px] font-body bg-white" style={{ width: 132 }} title="Move this whole tank mix to a date" />
                   <span className="font-body text-[13px] font-extrabold" style={{ color: FOREST }}>{grp.area || '—'}</span>
@@ -511,7 +517,11 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
                   <td className={td}><input disabled={locked} inputMode="decimal" data-gcol="rateOzA" data-grow={row} value={g(a, 'rateOzA', c.rateM != null ? ozA(c.rateM) : '')} onChange={(e) => { const v = e.target.value; setDraft((d) => ({ ...d, [K(a.id, 'rateOzA')]: v, [K(a.id, 'rateOzM')]: v === '' ? '' : String(r3(Number(v) / 43.56)) })); touchedRef.current.add(K(a.id, 'rate')) }} onBlur={() => commitRate(a)} onKeyDown={(e) => handleKey(e, a, 'rateOzA', row)} className={cell} style={{ width: 56 }} /></td>
                   <td className={td}>{c.label ? <span className="font-bold text-[9px]" style={{ color: c.label === 'over' ? '#B91C1C' : '#B07A16' }}>{c.label === 'over' ? 'OVER' : 'UNDER'}</span> : <span className="text-slate-300">—</span>}</td>
                   <td className={td}><input disabled={locked} inputMode="decimal" data-gcol="sqft" data-grow={row} value={g(a, 'sqftPerTankOverride', c.effSqft || '')} onChange={(e) => setD(a, 'sqftPerTankOverride', e.target.value)} onBlur={(e) => commitField(a, 'sqftPerTankOverride', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'sqft', row)} className={cell} style={{ width: 72, color: c.override ? FOREST : '#94A3B8' }} title={c.override ? 'Row override' : 'Area default — type to override'} /></td>
-                  <td className={td}><input disabled={locked} inputMode="decimal" data-gcol="tanks" data-grow={row} value={g(a, 'tanks', a.tanks ?? c.tanks)} onChange={(e) => setD(a, 'tanks', e.target.value)} onBlur={(e) => commitField(a, 'tanks', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'tanks', row)} className={cell} style={{ width: 44 }} /></td>
+                  <td className={td} style={{ color: '#64748B' }} title="Per-tank area × tanks — the whole area this spray covers">{c.totalArea != null ? Math.round(c.totalArea).toLocaleString() : '—'}</td>
+                  <td className={td}>
+                    <input disabled={locked} inputMode="decimal" data-gcol="tanks" data-grow={row} value={g(a, 'tanks', a.tanks ?? c.tanks)} onChange={(e) => setD(a, 'tanks', e.target.value)} onBlur={(e) => commitField(a, 'tanks', e.target.value)} onKeyDown={(e) => handleKey(e, a, 'tanks', row)} className={cell} style={{ width: 48 }} title={c.partialGal > 0 ? `${Math.floor(c.tanks)} full + 1 partial (${c.partialGal} gal)` : ''} />
+                    {c.partialGal > 0 && <span className="font-body text-[8px] block" style={{ color: '#B07A16' }} title={`${Math.floor(c.tanks)} full + 1 partial (${c.partialGal} gal)`}>+{c.partialGal} gal</span>}
+                  </td>
                   <td className={td}>{c.ozPerTank != null ? round1(c.ozPerTank).toLocaleString() : '—'}</td>
                   <td className={td} style={{ color: '#64748B' }}>{galOz(c.ozPerTank, c.dry)}</td>
                   <td className={td}>{c.totalOz != null ? Math.round(c.totalOz).toLocaleString() : '—'}</td>
