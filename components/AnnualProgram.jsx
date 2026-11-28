@@ -249,8 +249,9 @@ function computeEarlyOrder(apps, products, areas) {
     }
     if (!oz || !isFinite(oz)) return
     areaSet.add(a.area)
-    if (!perProduct[a.product]) perProduct[a.product] = { name: a.product, type: prodByName[a.product]?.type || a.type || 'Other', totalOz: 0, byArea: {} }
+    if (!perProduct[a.product]) perProduct[a.product] = { name: a.product, type: prodByName[a.product]?.type || a.type || 'Other', totalOz: 0, plannedOz: 0, spareOz: 0, byArea: {} }
     perProduct[a.product].totalOz += oz
+    if (a.kind === 'spare') perProduct[a.product].spareOz += oz; else perProduct[a.product].plannedOz += oz
     perProduct[a.product].byArea[a.area] = (perProduct[a.product].byArea[a.area] || 0) + oz
   })
 
@@ -272,12 +273,22 @@ function computeEarlyOrder(apps, products, areas) {
     // A product that's in the order but has no case price is hiding real spend
     // from the total — flag it so the order can be trusted against the spreadsheet.
     const missingPrice = r.totalOz > 0 && !costPerCase
-    return { ...r, company: (p.company || p.manufacturer || '').trim(), ozPerCase, unit, caseSize: p.caseSize || '', onHandOz, netOz, casesExact, casesToOrder, totalInUnits, costPerCase, estCost, missingCase: !ozPerCase, missingPrice, costPerOz: ozPerCase && costPerCase ? Math.round((costPerCase / ozPerCase) * 1000) / 1000 : null }
+    // Split the ordered cases into planned vs spare for the "4 planned + 2 spare"
+    // line and the cost split. Spare cases round from the spare oz; planned is
+    // the remainder so the two always add to the cases actually ordered.
+    const spareCases = ozPerCase && r.spareOz > 0 ? Math.min(casesToOrder || 0, Math.round(r.spareOz / ozPerCase)) : 0
+    const plannedCases = casesToOrder != null ? Math.max(0, casesToOrder - spareCases) : null
+    const spareCost = spareCases && costPerCase ? Math.round(spareCases * costPerCase * 100) / 100 : 0
+    const plannedCost = estCost != null ? Math.max(0, Math.round((estCost - spareCost) * 100) / 100) : null
+    return { ...r, company: (p.company || p.manufacturer || '').trim(), ozPerCase, unit, caseSize: p.caseSize || '', onHandOz, netOz, casesExact, casesToOrder, spareCases, plannedCases, spareCost, plannedCost, totalInUnits, costPerCase, estCost, missingCase: !ozPerCase, missingPrice, costPerOz: ozPerCase && costPerCase ? Math.round((costPerCase / ozPerCase) * 1000) / 1000 : null }
   }).sort((a, b) => b.totalOz - a.totalOz)
 
   const areaList = [...areaSet].sort()
   const casesTotal = rows.reduce((s, r) => s + (r.casesToOrder || 0), 0)
   const estTotalCost = Math.round(rows.reduce((s, r) => s + (r.estCost || 0), 0) * 100) / 100
+  const estSpareCost = Math.round(rows.reduce((s, r) => s + (r.spareCost || 0), 0) * 100) / 100
+  const estPlannedCost = Math.round((estTotalCost - estSpareCost) * 100) / 100
+  const hasSpares = rows.some((r) => r.spareCases > 0)
   const missingCaseCount = rows.filter((r) => r.missingCase).length
   const missingPriceRows = rows.filter((r) => r.missingPrice).map((r) => r.name)
 
@@ -304,7 +315,7 @@ function computeEarlyOrder(apps, products, areas) {
   })
   const byTypeCost = Object.entries(typeCost).filter(([, v]) => v > 0).map(([type, cost]) => ({ type, cost })).sort((a, b) => b.cost - a.cost)
   const byAreaCost = Object.entries(areaCost).filter(([, v]) => v > 0).map(([area, cost]) => ({ area, cost: Math.round(cost) })).sort((a, b) => b.cost - a.cost)
-  return { rows, companies, hasCompanies, byTypeCost, byAreaCost, areaList, casesTotal, estTotalCost, missingCaseCount, missingPriceRows, missingSqft }
+  return { rows, companies, hasCompanies, byTypeCost, byAreaCost, areaList, casesTotal, estTotalCost, estSpareCost, estPlannedCost, hasSpares, missingCaseCount, missingPriceRows, missingSqft }
 }
 
 // Convert a stock amount into ounces so it can be netted against a season total.
@@ -1446,6 +1457,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
               <>
                 <p className="font-display text-lg font-bold text-slate-900 leading-none">{r.casesToOrder}</p>
                 <p className="font-body text-[9px] uppercase tracking-wide text-slate-400 mt-0.5">case{r.casesToOrder !== 1 ? 's' : ''} · need {round1(r.casesExact)}</p>
+                {r.spareCases > 0 && <p className="font-body text-[9px] font-bold mt-0.5" style={{ color: '#92660D' }}>{r.plannedCases} planned + {r.spareCases} spare</p>}
                 {r.estCost != null ? <p className="font-body text-[11px] font-bold mt-0.5" style={{ color: FERN }}>${r.estCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p> : <p className="font-body text-[10px] font-semibold text-amber-600 mt-0.5">— no price</p>}
               </>
             ) : (
@@ -2736,6 +2748,11 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                 <div className="bg-white rounded-xl border border-black/5 px-3 py-2.5 shadow-sm">
                   <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400">Est. cost</p>
                   <p className="font-display font-bold text-slate-900" style={{ fontSize: 20, marginTop: 2 }}>{earlyOrder.estTotalCost > 0 ? `$${earlyOrder.estTotalCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—'}</p>
+                  {earlyOrder.hasSpares && earlyOrder.estTotalCost > 0 ? (
+                    <p className="font-body text-[9px] font-bold leading-tight" style={{ color: '#92660D' }}>
+                      ${Math.round(earlyOrder.estPlannedCost).toLocaleString('en-US')} planned + ${Math.round(earlyOrder.estSpareCost).toLocaleString('en-US')} spares
+                    </p>
+                  ) : null}
                   <p className="font-body text-[9px] text-slate-400 leading-tight">priced products only{(earlyOrder.missingPriceRows || []).length > 0 ? ` · ${earlyOrder.missingPriceRows.length} unpriced` : ''}</p>
                 </div>
                 <button onClick={exportEarlyOrder} className="rounded-xl text-white shadow-sm flex flex-col items-center justify-center gap-1" style={{ backgroundColor: FOREST }}>
