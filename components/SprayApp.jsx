@@ -63,7 +63,7 @@ import {
 } from 'lucide-react'
 import {
   uid, convertUnits, unitsAreCompatible, calcAmount, amtPerTankTotal, tankBreakdown, sheetBreakdown, lineAmounts, sheetLineAmts, fmtDate, aggregateNPK, npkDiagnostics, rotationByArea, rotationWarnings,
-  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productStockValue, areaRate, sprayRateGalAc, productRateForN, eiqLoad, measureOut, areaInCourse,
+  productUsage, sprayHistory, daysSinceByArea, downloadCSV, productCosts, costCPMA, programForecastByMonth, productStockValue, areaRate, sprayRateGalAc, productRateForN, eiqLoad, measureOut, areaInCourse, isPesticideType,
 } from '@/lib/calc'
 import { PRODUCT_TYPES, UNITS, DEFAULT_TARGETS, FORMULATIONS, FORMULATION_LABEL, guessFormulation, effectiveFormulation, sortByMixOrder } from '@/lib/defaults'
 import * as db from '@/lib/db'
@@ -3952,8 +3952,9 @@ function SheetEditor({ sheet, onSave, onCancel, saving, products, areas, operato
                       const prodInfo = products.find((pr) => pr.name === p.product)
                       const { min: labelMin, max: labelMax } = labelRange(prodInfo, p.basis)
                       const rateNum = parseFloat(p.rate)
-                      const overLimit = labelMax && rateNum && rateNum > labelMax
-                      const underLimit = !overLimit && labelMin && rateNum > 0 && rateNum < labelMin
+                      const chkLabel = isPesticideType(prodInfo?.type) // non-pesticides have no legal max
+                      const overLimit = chkLabel && labelMax && rateNum && rateNum > labelMax
+                      const underLimit = chkLabel && !overLimit && labelMin && rateNum > 0 && rateNum < labelMin
                       const outOfRange = overLimit
                       const sel = splitTargets(p.target)
                       const suggested = diseasesForProduct({ name: p.product, activeIngredient: prodInfo?.activeIngredient })
@@ -5308,7 +5309,7 @@ function SheetViewer({ sheet, onBack, onEdit, onDelete, onSprayAgain, onApprove,
                 const prodInfo = products?.find((pr) => pr.name === p.product)
                 const { min: labelMin, max: labelMax } = labelRange(prodInfo, p.basis)
                 const rateNum = parseFloat(p.rate)
-                const overLimit = labelMax && rateNum && rateNum > labelMax
+                const overLimit = isPesticideType(prodInfo?.type) && labelMax && rateNum && rateNum > labelMax
                 // Only flag going OVER the label rate — under-rate is intentional often.
                 const outOfRange = overLimit
                 const stock = prodInfo?.stock ?? null

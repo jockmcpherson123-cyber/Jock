@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid, Sparkles, TrendingUp, X } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
-import { downloadCSV, areaMatch, planAppOz, sheetsToApplications, sprayYears } from '@/lib/calc'
+import { downloadCSV, areaMatch, planAppOz, sheetsToApplications, sprayYears, labelFlag } from '@/lib/calc'
 import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
 import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
 import { buildProgram, toApplications, classifySurface, SURFACE_LABEL, grassesForSurface } from '@/lib/programgen'
@@ -361,10 +361,9 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
     const cases = ozPerCase && totalOz != null ? totalOz / ozPerCase : null
     const costPerCase = Number(prod.costPerCase) || null
     const totalCost = cases != null && costPerCase ? cases * costPerCase : null
-    const minM = prod.labelMinM != null ? Number(prod.labelMinM) : (prod.labelMinA != null ? Number(prod.labelMinA) / 43.56 : null)
-    const maxM = prod.labelMaxM != null ? Number(prod.labelMaxM) : (prod.labelMaxA != null ? Number(prod.labelMaxA) / 43.56 : null)
-    let label = null
-    if (rateM != null) { if (maxM != null && rateM > maxM * 1.001) label = 'over'; else if (minM != null && rateM < minM * 0.999) label = 'under' }
+    // One over/under-label check in the label's own unit, no upward tolerance,
+    // non-pesticides exempt — shared with the sheets and the Chemical Library.
+    const label = labelFlag(prod, rateM)
     const areaSqft = Number(area?.sqft) || 0
     const effSqft = Number(a.sqftPerTankOverride) > 0 ? Number(a.sqftPerTankOverride) : areaSqft
     // Total area this spray covers = per-tank area × tanks (worked out the same
