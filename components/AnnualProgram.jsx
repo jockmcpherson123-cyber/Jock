@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Upload, Calendar, Trash2, Loader2, AlertTriangle, Check, FileSpreadsheet, Plus, ChevronDown, ChevronRight, CalendarDays, MapPin, DollarSign, Package, Pencil, ClipboardList, Gauge, LayoutGrid, Sparkles, TrendingUp, X } from 'lucide-react'
 import * as db from '@/lib/db'
 import { parseWorkbook } from '@/lib/importXlsx'
-import { downloadCSV, areaMatch, planAppOz, sheetsToApplications, sprayYears, labelFlag } from '@/lib/calc'
+import { downloadCSV, areaMatch, planAppOz, sheetsToApplications, sprayYears, labelFlag, isDryProduct } from '@/lib/calc'
 import { fetchSeasonDaily, fetchBreakdownTemps, gddSince } from '@/lib/weather'
 import { buildPlanFromRecords, planToApplications, recordYears } from '@/lib/planbuilder'
 import { buildProgram, toApplications, classifySurface, SURFACE_LABEL, grassesForSurface } from '@/lib/programgen'
@@ -335,7 +335,7 @@ function ProgramGrid({ apps = [], products = [], areas = {}, doneSheetIds, onCom
   const g = (a, f, fb) => { const k = K(a.id, f); return k in draft ? draft[k] : fb }
   const setD = (a, f, v) => setDraft((d) => ({ ...d, [K(a.id, f)]: v }))
   const clr = (a, ...fs) => setDraft((d) => { const n = { ...d }; fs.forEach((f) => delete n[K(a.id, f)]); return n })
-  const isDry = (p) => { if (p?.unit === 'lbs') return true; const ju = String(p?.jugUnit || '').toLowerCase(); if (ju === 'lb' || ju === 'lbs') return true; return /\b(WDG|WG|WP|WSP|SG|SP|DF|DG|GR|GRANULAR)\b/.test(String(p?.formulation || p?.form || '').toUpperCase()) }
+  const isDry = (p) => isDryProduct(p)
   const num = (v) => (v === '' || v == null || !isFinite(Number(v)) ? null : Number(v))
   const r3 = (v) => (v == null || !isFinite(Number(v)) ? null : Math.round(Number(v) * 1000) / 1000)
   const ozA = (m) => (m == null || !isFinite(Number(m)) ? '' : Math.round(Number(m) * 43.56 * 10) / 10) // oz/A shown to 1 decimal
@@ -2151,13 +2151,7 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
               // A product is dry when its unit is pounds, its package is sold by
               // the pound, or its formulation is a dry one (WDG/WP/G/SG…). Dry
               // products convert at 16 oz/lb and read in lb + oz, never gal.
-              const isDry = (prod) => {
-                if (prod?.unit === 'lbs') return true
-                const ju = String(prod?.jugUnit || '').toLowerCase()
-                if (ju === 'lb' || ju === 'lbs') return true
-                const f = String(prod?.formulation || prod?.form || '').toUpperCase()
-                return /\b(WDG|WG|WP|WSP|SG|SP|DF|DG|GR|GRANULAR)\b/.test(f)
-              }
+              const isDry = (prod) => isDryProduct(prod)
               // Rate display: keep 2–3 significant figures for small rates so a
               // real value like 0.046 oz/M never rounds to a bare "0".
               const rateFmt = (v) => {
