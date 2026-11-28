@@ -1322,6 +1322,12 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   // The top "This Week" banner shows upcoming sprays only (next 7 days) — no
   // overdue/past-date sprays here, by design.
   const thisWeekEvents = groupByEvent(apps.filter((a) => a.plannedDate && a.plannedDate >= todayIso && a.plannedDate <= in7Iso)).filter((ev) => !isEventComplete(ev))
+  // Actual spray sheets dated this week that AREN'T a program application (e.g. a
+  // hand-made Rough Monday sheet) — so This Week matches the Spray Program
+  // calendar. Skip any already shown as a program event or linked to one.
+  const _shownKeys = new Set(thisWeekEvents.map((ev) => `${ev.area}||${ev.date}`))
+  const _linkedIds = new Set(apps.map((a) => a.linkedSheetId).filter(Boolean))
+  const thisWeekSheets = (sheets || []).filter((s) => s.date && s.date >= todayIso && s.date <= in7Iso && !_linkedIds.has(s.id) && !_shownKeys.has(`${s.area}||${s.date}`))
   const offYearCount = activeProgram ? apps.filter((a) => a.plannedDate && a.plannedDate.slice(0, 4) !== String(activeProgram.year)).length : 0
 
   // Early-order totals. Two scopes:
@@ -2056,11 +2062,25 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
               <p className="font-display text-base font-bold" style={{ color: '#92660D' }}>This Week</p>
               <span className="font-body text-[11px] text-slate-400">next 7 days</span>
             </div>
-            {thisWeekEvents.length === 0 ? (
+            {thisWeekEvents.length === 0 && thisWeekSheets.length === 0 ? (
               <p className="font-body text-sm text-slate-500">Nothing scheduled in the next 7 days.</p>
             ) : (
               <div className="space-y-2">
                 {thisWeekEvents.map((ev) => EventCard(ev))}
+                {thisWeekSheets.map((s) => (
+                  <div key={`sheet:${s.id}`} className="bg-white rounded-xl border border-black/5 overflow-hidden shadow-sm">
+                    <div className="flex items-center justify-between px-3 py-1.5 gap-2" style={{ backgroundColor: '#F0F6F2' }}>
+                      <p className="font-body text-[11px] font-bold flex items-center gap-1.5 min-w-0" style={{ color: FOREST }}>
+                        <Calendar size={11} className="shrink-0" /><span className="truncate">{fmtDateHeading(s.date)}</span>
+                      </p>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#EAF2EC', color: FERN }}>SHEET</span>
+                        <span className="font-body text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'white', color: FERN }}>{s.area}{s.course ? ` · ${s.course}` : ''}</span>
+                      </div>
+                    </div>
+                    <div className="px-3 py-1.5 font-body text-[11.5px] text-slate-500">{(s.products || []).map((p) => p.product).filter(Boolean).join(', ') || '—'}</div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
