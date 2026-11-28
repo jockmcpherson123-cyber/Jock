@@ -606,7 +606,13 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   // course by the parent (honoring each area's Course tag, with "Both" areas
   // included under every course), so an app is in scope when its area resolves
   // within that scoped set. Empty courseFilter = All courses (each area once).
-  const apps = courseFilter ? allApps.filter((a) => !!areaMatch(areas, a.area)) : allApps
+  const appsScoped = courseFilter ? allApps.filter((a) => !!areaMatch(areas, a.area)) : allApps
+  // Spares are planned-but-undated contingencies: they're ordered up front but
+  // never appear on the calendar, This Week, Home or the Applications/Spray-days
+  // totals. Keep the main `apps` list to real planned sprays only, and handle
+  // spares separately (shown under each area, included in Early Order).
+  const apps = appsScoped.filter((a) => a.kind !== 'spare')
+  const spares = appsScoped.filter((a) => a.kind === 'spare')
   const [loading, setLoading] = useState(true)
   const [areaFilter, setAreaFilter] = useState('all')
   const [imp, setImp] = useState(null) // import flow state
@@ -1050,6 +1056,33 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
       showToast(`Set ${nt % 1 === 0 ? nt : nt.toFixed(1)} tank${nt === 1 ? '' : 's'} on ${targets.length} spray${targets.length === 1 ? '' : 's'} in ${areaName}`)
     } catch (e) { console.error(e); showToast('Could not update tanks') }
   }
+  // ---- Spares (contingency sprays ordered up front, no date) ----
+  // Open the normal add-spray form, marked as a spare.
+  function addSpare(area) {
+    setEditApp({ area: area || (areaFilter !== 'all' ? areaFilter : (areaNames[0] || '')), kind: 'spare', spareTitle: 'Spare', plannedDate: null, products: [{ id: null, product: '', rateOzM: '', basis: 'oz / M' }], originalIds: [], trigger: { mode: 'date' } })
+  }
+  function editSpareGroup(group) {
+    setEditApp({ area: group.area, kind: 'spare', spareGroup: group.key, spareTitle: group.title, plannedDate: null, trigger: group.items[0]?.trigger || { mode: 'date' }, tanks: group.items[0]?.tanks, originalIds: group.items.map((a) => a.id), products: group.items.map((a) => ({ id: a.id, product: a.product, rateOzM: a.rateOzM ?? '', rateOzA: a.rateOzA ?? '', basis: a.basis || 'oz / M', type: a.type, target: a.target })) })
+  }
+  async function removeSpareGroup(group) {
+    if (!confirm(`Remove spare "${group.title}" in ${group.area}?`)) return
+    setBusy(true)
+    try { for (const a of group.items) await db.deleteApplication(a.id); setAllApps(await db.fetchApplications(activeProgram.id)); showToast('Spare removed') } catch (e) { console.error(e); showToast('Could not remove') }
+    setBusy(false)
+  }
+  async function useSpareGroup(group) {
+    const d = window.prompt('Date to run this spray (YYYY-MM-DD):', nowIso)
+    if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return
+    setBusy(true)
+    try {
+      // Turn the spare into a normal dated application, tagged "Spare used".
+      for (const a of group.items) await db.upsertApplication({ ...a, programId: activeProgram.id, kind: 'planned', plannedDate: d, spareUsed: true })
+      setAllApps(await db.fetchApplications(activeProgram.id))
+      showToast('Spare scheduled')
+    } catch (e) { console.error(e); showToast('Could not schedule') }
+    setBusy(false)
+  }
+
   // Edit a library cell (caseSize / ozPerCase / costPerCase) — changes the
   // product for EVERY row using it, like editing the Pesticide List tab.
   const gridCommitProduct = async (prod, patch, label) => {
@@ -1088,6 +1121,8 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
       return
     }
     setBusy(true)
+    // One stable group id for a spare so its product rows stay together.
+    const spareGroup = editApp.kind === 'spare' ? (editApp.spareGroup || crypto.randomUUID()) : null
     try {
       // Save each product in the mix (sharing the same area + date).
       for (const r of rows) {
@@ -1095,7 +1130,12 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
           id: r.id,
           programId: activeProgram.id,
           area: editApp.area,
-          plannedDate: editApp.plannedDate || null,
+          // A spare carries no date and its kind/title; a normal planned spray
+          // keeps its date and the default 'planned' kind.
+          plannedDate: editApp.kind === 'spare' ? null : (editApp.plannedDate || null),
+          kind: editApp.kind || 'planned',
+          spareTitle: editApp.kind === 'spare' ? (editApp.spareTitle || 'Spare') : '',
+          spareGroup,
           product: r.product,
           rateOzM: r.rateOzM === '' ? null : Number(r.rateOzM),
           rateOzA: r.rateOzA === '' ? null : Number(r.rateOzA),
@@ -1112,8 +1152,9 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
         if (!keptIds.has(id)) await db.deleteApplication(id)
       }
       setAllApps(await db.fetchApplications(activeProgram.id))
+      const wasSpare = editApp.kind === 'spare'
       setEditApp(null)
-      showToast('Planned spray saved')
+      showToast(wasSpare ? 'Spare saved' : 'Planned spray saved')
     } catch (e) {
       console.error(e)
       showToast('Could not save — check your connection')
@@ -1301,8 +1342,26 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   // Per-area counts for the current program.
   const areaCounts = {}
   apps.forEach((a) => { areaCounts[a.area] = (areaCounts[a.area] || 0) + 1 })
+  // Areas that have spares but no planned sprays still need a tab so you can see them.
+  spares.forEach((a) => { if (areaCounts[a.area] == null) areaCounts[a.area] = 0 })
   const areaNames = Object.keys(areaCounts).sort()
   const visibleApps = areaFilter === 'all' ? apps : apps.filter((a) => a.area === areaFilter)
+  // Rough cost of one application (rate × area × tanks → oz → cases → $), for the
+  // spares' "Spares: N · $X" summary. Uses the same inputs as Early Order.
+  const appCost = (a) => {
+    const area = areaMatch(areas, a.area); const prod = products.find((p) => p.name === a.product)
+    const r = planAppOz(a, area, prod); const oz = r?.oz
+    const ozPerCase = Number(prod?.ozPerCase) || 0, costPerCase = Number(prod?.costPerCase) || 0
+    if (!oz || !isFinite(oz) || !ozPerCase || !costPerCase) return 0
+    return (oz / ozPerCase) * costPerCase
+  }
+  // Group a multi-product spare's rows back into one spare.
+  const spareGroupsFor = (list) => {
+    const by = {}
+    list.forEach((s) => { const k = s.spareGroup || s.id; (by[k] = by[k] || { key: k, area: s.area, title: s.spareTitle || 'Spare', items: [] }).items.push(s) })
+    return Object.values(by).map((g) => ({ ...g, cost: g.items.reduce((x, a) => x + appCost(a), 0) }))
+  }
+  const visibleSpareGroups = spareGroupsFor(areaFilter === 'all' ? spares : spares.filter((s) => s.area === areaFilter))
   // Areas that carry planned sprays, each with its current tank count and the
   // REAL total area it covers (area-per-tank × tanks), fed to the Tank Planner so
   // every area remembers its own setup instead of sharing one tank number.
@@ -1361,7 +1420,10 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
   // to toggle. (The toggle's own useState is declared with the other hooks at the
   // top of the component — never after the `if (loading) return` early return.)
   const orderIsAll = !courseFilter || orderAllCourses
-  const earlyOrder = computeEarlyOrder(orderIsAll ? allApps : visibleApps, products, orderIsAll ? fullAreas : areas)
+  // Early Order includes spares (they're ordered up front and kept on hand).
+  // allApps already carries spares; the scoped list adds the in-scope ones.
+  const orderBase = orderIsAll ? allApps : [...visibleApps, ...(areaFilter === 'all' ? spares : spares.filter((s) => s.area === areaFilter))]
+  const earlyOrder = computeEarlyOrder(orderBase, products, orderIsAll ? fullAreas : areas)
   // An area that belongs to every course (tag "both", e.g. Rough) is "shared":
   // in a per-course view its cost is a partial allocation, so flag it.
   const sharedArea = (name) => !orderIsAll && (fullAreas?.[name] ?? fullAreas?.[String(name ?? '').trim()])?.course === 'both'
@@ -1700,9 +1762,11 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
         <div className="fixed inset-0 z-50 flex items-start justify-center p-3 overflow-y-auto overscroll-contain" style={{ backgroundColor: 'rgba(26,26,22,0.45)' }} onClick={() => setEditApp(null)}>
         <div className="bg-white rounded-2xl border-2 p-4 shadow-2xl my-6 w-full max-w-4xl" style={{ borderColor: GOLD }} onClick={(e) => e.stopPropagation()}>
           <p className="font-display text-base font-semibold text-slate-900 mb-1">
-            {editApp.originalIds?.length ? 'Edit planned spray' : 'New planned spray'}
+            {editApp.kind === 'spare'
+              ? (editApp.originalIds?.length ? 'Edit spare' : 'New spare')
+              : (editApp.originalIds?.length ? 'Edit planned spray' : 'New planned spray')}
           </p>
-          <p className="font-body text-xs text-slate-400 mb-3">One area, one date, and everything going in the tank.</p>
+          <p className="font-body text-xs text-slate-400 mb-3">{editApp.kind === 'spare' ? 'A contingency spray — ordered up front, with no date until you use it.' : 'One area, one date, and everything going in the tank.'}</p>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -1712,10 +1776,17 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
                   {[...new Set([...areaNames, ...Object.keys(areas || {})])].map((a) => <option key={a} value={a} />)}
                 </datalist>
               </div>
-              <div>
-                <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Baseline date</label>
-                <input type="date" value={editApp.plannedDate || ''} onChange={(e) => setEditApp({ ...editApp, plannedDate: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-              </div>
+              {editApp.kind === 'spare' ? (
+                <div>
+                  <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Spare name</label>
+                  <input value={editApp.spareTitle || ''} onChange={(e) => setEditApp({ ...editApp, spareTitle: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="Spare – Pythium" />
+                </div>
+              ) : (
+                <div>
+                  <label className="font-body text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-1.5">Baseline date</label>
+                  <input type="date" value={editApp.plannedDate || ''} onChange={(e) => setEditApp({ ...editApp, plannedDate: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
+                </div>
+              )}
             </div>
 
             <div>
@@ -2135,6 +2206,39 @@ export default function AnnualProgram({ areas, allAreas, products = [], sheets =
               </button>
             ))}
           </div>
+
+          {/* Spares — contingency sprays, ordered up front but not on the calendar.
+              They're excluded from the Applications / Spray-days totals and This
+              Week, but DO count in Early Order. */}
+          {viewMode === 'sheet' && (
+            <div className="rounded-2xl border border-dashed p-3 mb-4" style={{ borderColor: GOLD, backgroundColor: '#FFFDF6' }}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Sparkles size={14} style={{ color: '#92660D' }} />
+                  <p className="font-display text-sm font-bold shrink-0" style={{ color: '#92660D' }}>Spares</p>
+                  <span className="font-body text-[11px] text-slate-400 truncate">{visibleSpareGroups.length} · ${Math.round(visibleSpareGroups.reduce((s, g) => s + g.cost, 0)).toLocaleString()} · ordered up front, not on the calendar</span>
+                </div>
+                <button onClick={() => addSpare(areaFilter !== 'all' ? areaFilter : '')} className="font-body text-[11px] font-bold px-3 py-1.5 rounded-full text-white inline-flex items-center gap-1 shrink-0" style={{ backgroundColor: FERN }}><Plus size={12} /> Add spare</button>
+              </div>
+              {visibleSpareGroups.length === 0 ? (
+                <p className="font-body text-[12px] text-slate-400">No spares{areaFilter !== 'all' ? ` for ${areaFilter}` : ''} yet — add one to plan for the unexpected.</p>
+              ) : (
+                <div className="space-y-2">
+                  {visibleSpareGroups.map((g) => (
+                    <div key={g.key} className="bg-white rounded-xl border border-black/5 p-2.5 flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-body text-[12.5px] font-bold text-slate-800 truncate">{g.title}{g.items.some((i) => i.spareUsed) ? <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full ml-1" style={{ backgroundColor: '#EAF2EC', color: FERN }}>USED</span> : ''} <span className="font-normal text-slate-400">· {areaFilter === 'all' ? `${g.area} · ` : ''}{g.items.map((i) => i.product).filter(Boolean).join(', ') || 'no products yet'}</span></p>
+                        <p className="font-body text-[10.5px] text-slate-400">{g.items.length} product{g.items.length !== 1 ? 's' : ''} · ${Math.round(g.cost).toLocaleString()}</p>
+                      </div>
+                      <button onClick={() => editSpareGroup(g)} className="font-body text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 shrink-0">Edit</button>
+                      <button onClick={() => useSpareGroup(g)} className="font-body text-[11px] font-bold px-2.5 py-1.5 rounded-lg text-white shrink-0" style={{ backgroundColor: FOREST }}>Use</button>
+                      <button onClick={() => removeSpareGroup(g)} aria-label="Remove spare" className="text-slate-300 hover:text-red-500 shrink-0"><X size={15} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {viewMode === 'performance' ? (
             <ProductPerformance sheets={sheets} products={products} daily={season} location={location} courseInfo={courseInfo} />

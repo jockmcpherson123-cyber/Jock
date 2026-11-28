@@ -189,7 +189,7 @@ export default function GreensToday({ ctx, courseId, manage, user, activeImagery
   // round is more than 2 days old, don't guess — say it's too old.
   const latestDateISO = latest ? String(latest.startedAt).slice(0, 10) : null
   const latestAgeDays = latestDateISO ? Math.round((new Date(date + 'T00:00:00') - new Date(latestDateISO + 'T00:00:00')) / 86400000) : null
-  const staleForSuggest = latestAgeDays != null && latestAgeDays > 2
+  const staleForSuggest = latestAgeDays != null && latestAgeDays > 3
   const suggested = (latest?.avg != null && !staleForSuggest) ? suggestDepth({ et, aim: selTarget.aim, latestAvg: Number(latest.avg), inchesPerPoint: ipp, maxDepth }) : null
 
   // readings for the heat view
