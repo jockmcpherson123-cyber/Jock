@@ -1704,6 +1704,9 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
     }
   }, [nav, sheets]) // eslint-disable-line react-hooks/exhaustive-deps
   const [deliveries, setDeliveries] = useState([])
+  const [stockDeliveries, setStockDeliveries] = useState([]) // rich receiving records
+  const [stockAdjustments, setStockAdjustments] = useState([]) // manual corrections
+  const [invCounts, setInvCounts] = useState([]) // physical count log (movement trail)
   const [programApps, setProgramApps] = useState([]) // applications of the current program
   const [areas, setAreas] = useState({})
   const [operators, setOperators] = useState([])
@@ -1737,18 +1740,24 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
   async function loadAll() {
     setLoading(true)
     try {
-      const [s, p, d, settings, progs, ferts] = await Promise.all([
+      const [s, p, d, settings, progs, ferts, sd, sa, ic] = await Promise.all([
         db.fetchSheets(),
         db.fetchProducts(),
         db.fetchDeliveries(),
         db.fetchSettings(),
         db.fetchPrograms(),
         db.fetchFertSheets().catch(() => []),
+        db.fetchStockDeliveries().catch(() => []),
+        db.fetchStockAdjustments().catch(() => []),
+        db.fetchInventoryCounts().catch(() => []),
       ])
       setSheets(s)
       setProducts(p)
       setFertSheets(ferts || [])
       setDeliveries(d)
+      setStockDeliveries(sd || [])
+      setStockAdjustments(sa || [])
+      setInvCounts(ic || [])
       setAreas(settings.areas)
       setOperators(settings.operators)
       setDirectors(settings.directors)
@@ -1923,6 +1932,93 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
     } catch (e) {
       console.error(e)
       showToast('Could not log delivery')
+    }
+  }
+
+  // Rich "Receive delivery": persist the receiving record (date, vendor,
+  // invoice #, lines) AND add each line's oz to the matching product's stock,
+  // converting oz into the product's own base unit first. Cost rides along on
+  // the record for ordering/reporting only — it never feeds Finance.
+  async function receiveStockDelivery(delivery) {
+    try {
+      const saved = await db.addStockDelivery(delivery)
+      // Fold every line into stock, summing per product first so one product on
+      // two lines is a single save.
+      const byProduct = {}
+      for (const l of delivery.lines || []) {
+        if (!l.product) continue
+        const oz = Number(l.oz) || 0
+        if (!oz) continue
+        byProduct[l.product] = (byProduct[l.product] || 0) + oz
+      }
+      let next = [...products]
+      for (const [name, oz] of Object.entries(byProduct)) {
+        const prod = next.find((p) => p.name === name)
+        if (!prod) continue
+        const converted = convertUnits(oz, 'oz', prod.unit)
+        const updated = { ...prod, stock: Math.round(((prod.stock || 0) + converted) * 1000) / 1000 }
+        next = next.map((p) => (p.name === name ? updated : p))
+        try { await db.upsertProduct(updated) } catch (e) { console.error('Stock update failed', e) }
+      }
+      setProducts(next)
+      setStockDeliveries((prev) => [saved, ...prev])
+      const lineCount = (delivery.lines || []).filter((l) => l.product && Number(l.oz)).length
+      showToast(`Delivery received — ${lineCount} product${lineCount !== 1 ? 's' : ''} added to stock`)
+      return saved
+    } catch (e) {
+      console.error(e)
+      showToast('Could not save delivery')
+      return null
+    }
+  }
+
+  async function deleteStockDelivery(deliv) {
+    try {
+      await db.deleteStockDelivery(deliv.id)
+      // Reverse the stock that this delivery added, per product.
+      const byProduct = {}
+      for (const l of deliv.lines || []) {
+        if (!l.product) continue
+        const oz = Number(l.oz) || 0
+        if (!oz) continue
+        byProduct[l.product] = (byProduct[l.product] || 0) + oz
+      }
+      let next = [...products]
+      for (const [name, oz] of Object.entries(byProduct)) {
+        const prod = next.find((p) => p.name === name)
+        if (!prod) continue
+        const converted = convertUnits(oz, 'oz', prod.unit)
+        const updated = { ...prod, stock: Math.round(((prod.stock || 0) - converted) * 1000) / 1000 }
+        next = next.map((p) => (p.name === name ? updated : p))
+        try { await db.upsertProduct(updated) } catch (e) { console.error('Stock update failed', e) }
+      }
+      setProducts(next)
+      setStockDeliveries((prev) => prev.filter((d) => d.id !== deliv.id))
+      showToast('Delivery removed — stock reversed')
+    } catch (e) {
+      console.error(e)
+      showToast('Could not remove delivery')
+    }
+  }
+
+  // Manual stock adjustment from the movement log (spillage, miscount, write-off).
+  // qty is a signed change in the product's own stock unit.
+  async function adjustStock(adj) {
+    try {
+      const saved = await db.addStockAdjustment(adj)
+      const prod = products.find((p) => p.name === adj.product)
+      if (prod) {
+        const updated = { ...prod, stock: Math.round(((prod.stock || 0) + Number(adj.qty)) * 1000) / 1000 }
+        setProducts((prev) => prev.map((p) => (p.name === adj.product ? updated : p)))
+        try { await db.upsertProduct(updated) } catch (e) { console.error('Stock update failed', e) }
+      }
+      setStockAdjustments((prev) => [saved, ...prev])
+      showToast('Adjustment recorded')
+      return saved
+    } catch (e) {
+      console.error(e)
+      showToast('Could not record adjustment')
+      return null
     }
   }
 
@@ -2309,6 +2405,8 @@ function SprayOpsModule({ user, nav, hideChrome, homeMode, course = '' }) {
           <ChemicalHub
             products={products} grassTypes={grassTypes} deliveries={deliveries} manage={manage}
             onSaveProduct={saveProduct} onDeleteProduct={removeProduct} onMergeProducts={mergeProductsHandler} onImport={importProductsFromSheet} onAddDelivery={addDelivery} areas={areas}
+            sheets={sheets} stockDeliveries={stockDeliveries} stockAdjustments={stockAdjustments} invCounts={invCounts}
+            onReceive={receiveStockDelivery} onDeleteStockDelivery={deleteStockDelivery} onAdjust={adjustStock}
           />
         )}
         {route === 'invcount' && manage && (
@@ -6098,7 +6196,7 @@ const CHEM_SECTIONS = [
   { key: 'documents', label: 'Labels & SDS', icon: Info },
   { key: 'inventory', label: 'Inventory', icon: Package },
 ]
-function ChemicalHub({ products, grassTypes, deliveries, manage, onSaveProduct, onDeleteProduct, onMergeProducts, onImport, onAddDelivery, areas = {} }) {
+function ChemicalHub({ products, grassTypes, deliveries, manage, onSaveProduct, onDeleteProduct, onMergeProducts, onImport, onAddDelivery, areas = {}, sheets = [], stockDeliveries = [], stockAdjustments = [], invCounts = [], onReceive, onDeleteStockDelivery, onAdjust }) {
   const [section, setSection] = useState('library')
   return (
     <div className="md:flex md:gap-6">
@@ -6125,7 +6223,7 @@ function ChemicalHub({ products, grassTypes, deliveries, manage, onSaveProduct, 
       <div className="flex-1 min-w-0">
         {section === 'library' && <ChemicalLibrary products={products} grassTypes={grassTypes} onSaveProduct={onSaveProduct} onDeleteProduct={onDeleteProduct} onMergeProducts={onMergeProducts} onImport={onImport} areas={areas} />}
         {section === 'documents' && <DocumentsLibrary products={products} manage={manage} onSaveProduct={manage ? onSaveProduct : undefined} />}
-        {section === 'inventory' && <Inventory products={products} deliveries={deliveries} onAddDelivery={onAddDelivery} />}
+        {section === 'inventory' && <Inventory products={products} deliveries={deliveries} onAddDelivery={onAddDelivery} manage={manage} sheets={sheets} stockDeliveries={stockDeliveries} stockAdjustments={stockAdjustments} invCounts={invCounts} onReceive={onReceive} onDeleteStockDelivery={onDeleteStockDelivery} onAdjust={onAdjust} areas={areas} />}
       </div>
     </div>
   )
@@ -7250,35 +7348,230 @@ function ChemicalLibrary({ products, grassTypes = [], onSaveProduct, onDeletePro
 }
 
 // ── INVENTORY ─────────────────────────────────────────────────────────────
-function Inventory({ products, deliveries, onAddDelivery }) {
+// Reconstruct a product's stock movement trail from every source that moves
+// on-hand: physical counts (ground truth that resets the running balance),
+// deliveries (rich + legacy), sprays pulled at sign-off, and manual
+// adjustments. Also returns whether it was ever counted and how much is
+// "committed" (on an approved sheet that hasn't been sprayed yet).
+function round2(n) { return Math.round((Number(n) || 0) * 100) / 100 }
+function buildProductMovements(product, { sheets = [], stockDeliveries = [], deliveries = [], stockAdjustments = [], invCounts = [], areas = {} }) {
+  const unit = product.unit || 'oz'
+  const name = product.name
+  const ev = []
+  invCounts.filter((c) => c.product === name).forEach((c) => {
+    const to = round2(c.countedStock)
+    ev.push({ key: 'c' + c.id, ts: c.countedAt, date: c.countedAt ? String(c.countedAt).slice(0, 10) : null, type: 'count', countTo: to, delta: null, label: `Counted ${to} ${unit}`, note: c.countedBy ? `by ${c.countedBy}` : '' })
+  })
+  stockDeliveries.forEach((d) => {
+    (d.lines || []).filter((l) => l.product === name).forEach((l) => {
+      const oz = Number(l.oz) || 0
+      if (!oz) return
+      const delta = round2(convertUnits(oz, 'oz', unit))
+      ev.push({ key: 'd' + d.id + l.id, ts: d.date, date: d.date, type: 'delivery', delta, label: `Delivery +${delta} ${unit}`, note: [d.vendor, l.kind === 'extra' ? `Extra${l.reason ? ': ' + l.reason : ''}` : 'Planned'].filter(Boolean).join(' · ') })
+    })
+  })
+  deliveries.filter((d) => d.product === name).forEach((d) => {
+    const delta = round2(convertUnits(Number(d.qty) || 0, d.unit || unit, unit))
+    if (!delta) return
+    ev.push({ key: 'ld' + d.id, ts: d.date, date: d.date, type: 'delivery', delta, label: `Delivery +${delta} ${unit}`, note: d.supplier || '' })
+  })
+  sheets.filter((s) => s.stockDeducted).forEach((s) => {
+    const area = withSheetSetup(resolveArea(areas, s.area) || {}, s)
+    const d = sheetDeductions(s, area).find((x) => x.name === name)
+    if (!d) return
+    const used = round2(convertUnits(d.total, d.unit, unit))
+    if (!used) return
+    const when = s.completedAt || s.date || ''
+    ev.push({ key: 's' + s.id, ts: when, date: String(when).slice(0, 10), type: 'spray', delta: -used, label: `Sprayed ${used} ${unit}`, note: s.area || '' })
+  })
+  stockAdjustments.filter((a) => a.product === name).forEach((a) => {
+    const delta = round2(a.qty)
+    ev.push({ key: 'a' + a.id, ts: a.date || a.createdAt, date: a.date, type: 'adjust', delta, label: `Adjusted ${delta > 0 ? '+' : ''}${delta} ${unit}`, note: a.reason || '' })
+  })
+  ev.sort((x, y) => new Date(x.ts || 0) - new Date(y.ts || 0))
+  let run = null
+  for (const e of ev) {
+    if (e.type === 'count') { run = e.countTo; e.running = run }
+    else if (run != null) { run = round2(run + (e.delta || 0)); e.running = run }
+    else e.running = null
+  }
+  const everCounted = ev.some((e) => e.type === 'count')
+  let committed = 0
+  sheets.filter((s) => s.status === 'approved' && !s.stockDeducted).forEach((s) => {
+    const area = withSheetSetup(resolveArea(areas, s.area) || {}, s)
+    const d = sheetDeductions(s, area).find((x) => x.name === name)
+    if (d) committed += convertUnits(d.total, d.unit, unit)
+  })
+  return { events: ev.reverse(), everCounted, committed: round2(committed) }
+}
+
+const MOVE_TONE = {
+  count: { bg: '#EEF2FF', fg: '#4338CA', label: 'Count' },
+  delivery: { bg: '#E8F3EC', fg: '#2F7D4F', label: 'Delivery' },
+  spray: { bg: '#FEF3DD', fg: '#92660D', label: 'Spray' },
+  adjust: { bg: '#F1F5F9', fg: '#475569', label: 'Adjust' },
+}
+
+// The expandable per-product drilldown: current on hand, committed, a full
+// movement log, and (managers only) a quick adjustment.
+function StockMovementLog({ product, movements, manage, onAdjust }) {
+  const [adjQty, setAdjQty] = useState('')
+  const [adjReason, setAdjReason] = useState('')
+  const [adjDate, setAdjDate] = useState(localDateISO())
+  const [busy, setBusy] = useState(false)
+  const unit = product.unit || 'oz'
+  const { events, committed } = movements
+
+  const submitAdj = async () => {
+    const q = parseFloat(adjQty)
+    if (!q || busy) return
+    setBusy(true)
+    await onAdjust({ product: product.name, qty: q, unit, reason: adjReason, date: adjDate })
+    setBusy(false)
+    setAdjQty(''); setAdjReason(''); setAdjDate(localDateISO())
+  }
+
+  return (
+    <div className="border-t border-black/5 px-4 py-3 bg-slate-50/60">
+      {committed > 0 && (
+        <p className="font-body text-[11px] text-slate-500 mb-2">
+          <span className="font-bold" style={{ color: '#92660D' }}>{round2(committed)} {unit} committed</span> — on an approved sheet, not yet sprayed.
+        </p>
+      )}
+      {events.length === 0 ? (
+        <p className="font-body text-[11px] text-slate-400">No movements recorded yet.</p>
+      ) : (
+        <div className="space-y-1 mb-1">
+          {events.map((e) => {
+            const tone = MOVE_TONE[e.type] || MOVE_TONE.adjust
+            return (
+              <div key={e.key} className="flex items-center gap-2 py-1">
+                <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide shrink-0" style={{ backgroundColor: tone.bg, color: tone.fg }}>{tone.label}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-[11px] text-slate-700 truncate">{e.label}{e.note ? <span className="text-slate-400"> · {e.note}</span> : null}</p>
+                </div>
+                <span className="font-body text-[10px] text-slate-400 tabular-nums shrink-0">{e.date ? fmtDate(e.date) : '—'}</span>
+                <span className="font-body text-[11px] font-bold tabular-nums shrink-0 w-20 text-right" style={{ color: e.running == null ? '#94A3B8' : '#1E293B' }}>{e.running == null ? '—' : `${e.running} ${unit}`}</span>
+              </div>
+            )
+          })}
+          <p className="font-body text-[9px] text-slate-400 pt-1">Running on-hand resets at each physical count and is blank before the first count.</p>
+        </div>
+      )}
+      {manage && (
+        <div className="mt-2 pt-2 border-t border-black/5">
+          <p className="font-body text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Adjust stock</p>
+          <div className="flex flex-wrap items-end gap-2">
+            <div style={{ width: 92 }}>
+              <input type="number" inputMode="decimal" step="any" value={adjQty} onChange={(e) => setAdjQty(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-body" placeholder={`± ${unit}`} />
+            </div>
+            <div style={{ width: 140 }}>
+              <input type="date" value={adjDate} onChange={(e) => setAdjDate(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-body" />
+            </div>
+            <input value={adjReason} onChange={(e) => setAdjReason(e.target.value)} className="flex-1 min-w-[120px] border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-body" placeholder="Reason (spill, write-off, miscount…)" />
+            <button onClick={submitAdj} disabled={!parseFloat(adjQty) || busy} className="py-1.5 px-3 rounded-lg text-sm font-bold font-body text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Save</button>
+          </div>
+          <p className="font-body text-[9px] text-slate-400 mt-1">Use a negative number to remove stock. Positive adds it back.</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const freshLine = () => ({ id: crypto.randomUUID(), product: '', cases: '', ozPerCase: '', costPerCase: '', kind: 'planned', reason: '', linkedSheetId: null })
+
+function Inventory({ products, deliveries, onAddDelivery, manage = false, sheets = [], stockDeliveries = [], stockAdjustments = [], invCounts = [], onReceive, onDeleteStockDelivery, onAdjust, areas = {} }) {
   const [showForm, setShowForm] = useState(false)
-  const [draft, setDraft] = useState({ product: '', qty: '', unit: 'oz', supplier: '', date: localDateISO() })
+  const [header, setHeader] = useState({ date: localDateISO(), vendor: '', invoice: '', note: '' })
+  const [lines, setLines] = useState([freshLine()])
   const [filter, setFilter] = useState('All')
+  const [expanded, setExpanded] = useState(null)
+  const [histProduct, setHistProduct] = useState('all')
 
   const lowStock = products.filter((p) => p.lowStockThreshold > 0 && (p.stock || 0) <= p.lowStockThreshold)
   const filtered = (filter === 'All' ? products : products.filter((p) => p.type === filter))
     .slice()
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true }))
 
-  const submitDelivery = () => {
-    if (!draft.product || !draft.qty) return
-    onAddDelivery(draft)
-    setDraft({ product: '', qty: '', unit: 'oz', supplier: '', date: localDateISO() })
-    setShowForm(false)
+  // Recent sheets for the optional "bought for" link on a line.
+  const sheetOpts = useMemo(() => sheets.slice()
+    .sort((a, b) => new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0))
+    .slice(0, 80)
+    .map((s) => ({ value: s.id, label: `${s.area || 'Sheet'} · ${s.date ? fmtDate(s.date) : ''}` })), [sheets])
+
+  const lineOz = (l) => (Number(l.cases) || 0) * (Number(l.ozPerCase) || 0)
+  const lineCost = (l) => (Number(l.cases) || 0) * (Number(l.costPerCase) || 0)
+  const totalOz = lines.reduce((s, l) => s + (l.product ? lineOz(l) : 0), 0)
+  const totalCost = lines.reduce((s, l) => s + (l.product ? lineCost(l) : 0), 0)
+  const canSave = lines.some((l) => l.product && lineOz(l) > 0) && lines.every((l) => !(l.kind === 'extra' && l.product && lineOz(l) > 0 && !String(l.reason || '').trim()))
+
+  const pickLineProduct = (idx, name) => {
+    const p = products.find((pr) => pr.name === name)
+    setLines((ls) => ls.map((l, i) => i === idx ? { ...l, product: name, ozPerCase: p?.ozPerCase ? String(p.ozPerCase) : l.ozPerCase, costPerCase: (p?.costPerCase != null && p?.costPerCase !== '') ? String(p.costPerCase) : l.costPerCase } : l))
+  }
+  const setLine = (idx, patch) => setLines((ls) => ls.map((l, i) => (i === idx ? { ...l, ...patch } : l)))
+  const addLine = () => setLines((ls) => [...ls, freshLine()])
+  const removeLine = (idx) => setLines((ls) => (ls.length > 1 ? ls.filter((_, i) => i !== idx) : ls))
+
+  const resetForm = () => { setHeader({ date: localDateISO(), vendor: '', invoice: '', note: '' }); setLines([freshLine()]); setShowForm(false) }
+
+  const submitReceive = async () => {
+    if (!canSave || !onReceive) return
+    const payload = {
+      ...header,
+      lines: lines.filter((l) => l.product && lineOz(l) > 0).map((l) => ({
+        id: l.id, product: l.product,
+        cases: Number(l.cases) || 0, ozPerCase: Number(l.ozPerCase) || 0, oz: round2(lineOz(l)),
+        costPerCase: l.costPerCase === '' ? null : Number(l.costPerCase),
+        kind: l.kind === 'extra' ? 'extra' : 'planned', reason: l.kind === 'extra' ? (l.reason || '') : '',
+        linkedSheetId: l.linkedSheetId || null,
+      })),
+    }
+    const ok = await onReceive(payload)
+    if (ok) resetForm()
   }
 
-  const handleProductPick = (name) => {
-    const p = products.find((pr) => pr.name === name)
-    setDraft({ ...draft, product: name, unit: p?.unit || 'oz' })
+  // Delivery history: rich receiving records + legacy single-line deliveries,
+  // newest first, filterable by product.
+  const history = useMemo(() => {
+    const rich = (stockDeliveries || []).map((d) => ({
+      id: d.id, ts: d.date || d.createdAt, date: d.date, vendor: d.vendor, invoice: d.invoice,
+      note: d.note, lines: d.lines, legacy: false,
+    }))
+    const legacy = (deliveries || []).map((d) => ({
+      id: 'legacy-' + d.id, ts: d.date, date: d.date, vendor: d.supplier, invoice: '',
+      note: '', legacy: true,
+      lines: [{ id: d.id, product: d.product, oz: null, qtyLabel: `${d.qty} ${d.unit}`, kind: 'planned', reason: '' }],
+    }))
+    return [...rich, ...legacy].sort((a, b) => new Date(b.ts || 0) - new Date(a.ts || 0))
+  }, [stockDeliveries, deliveries])
+
+  const histProducts = useMemo(() => {
+    const set = new Set()
+    history.forEach((h) => h.lines.forEach((l) => l.product && set.add(l.product)))
+    return [...set].sort()
+  }, [history])
+  const histShown = histProduct === 'all' ? history : history.filter((h) => h.lines.some((l) => l.product === histProduct))
+
+  const exportHistory = () => {
+    const out = [['Date', 'Vendor', 'Invoice', 'Product', 'Cases', 'Oz', 'Cost/case', 'Line cost', 'Planned/Extra', 'Reason']]
+    histShown.forEach((h) => h.lines.filter((l) => histProduct === 'all' || l.product === histProduct).forEach((l) => {
+      out.push([h.date || '', h.vendor || '', h.invoice || '', l.product || '', l.cases ?? '', l.oz ?? (l.qtyLabel || ''),
+        l.costPerCase ?? '', (l.cases != null && l.costPerCase != null) ? round2(l.cases * l.costPerCase) : '',
+        l.kind === 'extra' ? 'Extra' : 'Planned', l.reason || ''])
+    }))
+    downloadCSV(out, `Deliveries_${localDateISO()}.csv`)
   }
 
   return (
     <div className="pt-6 pb-10">
       <div className="flex items-center justify-between mb-1">
         <SectionHeader title="Inventory" subtitle="Stock on hand, deliveries, and usage" noMargin />
-        <button onClick={() => setShowForm(!showForm)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
-          <Truck size={14} /> Log Delivery
-        </button>
+        {manage && onReceive && (
+          <button onClick={() => setShowForm(!showForm)} className="font-body text-xs font-bold px-3.5 py-2 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}>
+            <Truck size={14} /> Receive delivery
+          </button>
+        )}
       </div>
 
       {lowStock.length > 0 && (
@@ -7291,56 +7584,96 @@ function Inventory({ products, deliveries, onAddDelivery }) {
         </div>
       )}
 
-      {showForm && (
+      {showForm && manage && onReceive && (
         <div className="bg-white rounded-2xl border-2 p-4 mt-4 shadow-sm" style={{ borderColor: GOLD }}>
-          <p className="font-display text-base font-semibold text-slate-900 mb-3">Log a Delivery</p>
-          <div className="space-y-3">
+          <p className="font-display text-base font-semibold text-slate-900 mb-3">Receive a delivery</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
             <div>
-              <FieldLabel>Product</FieldLabel>
-              <SearchSelect value={draft.product} options={products.map((p) => p.name)} onPick={handleProductPick} placeholder="Search products…" />
+              <FieldLabel>Date</FieldLabel>
+              <input type="date" value={header.date} onChange={(e) => setHeader({ ...header, date: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <FieldLabel>Quantity Received</FieldLabel>
-                <input type="number" inputMode="decimal" step="any" value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. 32" />
-              </div>
-              <div>
-                <FieldLabel>Unit</FieldLabel>
-                <Select value={draft.unit} onChange={(v) => setDraft({ ...draft, unit: v })} options={UNITS} />
-              </div>
+            <div>
+              <FieldLabel>Vendor</FieldLabel>
+              <input value={header.vendor} onChange={(e) => setHeader({ ...header, vendor: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. SiteOne" />
             </div>
-            {draft.product && draft.qty && (() => {
-              const p = products.find((pr) => pr.name === draft.product)
-              if (!p) return null
-              if (draft.unit === p.unit) return null
-              if (!unitsAreCompatible(draft.unit, p.unit)) {
-                return (
-                  <p className="font-body text-[11px] font-semibold text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
-                    ⚠ This product tracks stock in {p.unit}, but you're logging {draft.unit} — these can't be converted automatically without density. Stock will be added as a raw number; double check it.
-                  </p>
-                )
-              }
-              const converted = convertUnits(Number(draft.qty), draft.unit, p.unit)
+            <div>
+              <FieldLabel>Invoice #</FieldLabel>
+              <input value={header.invoice} onChange={(e) => setHeader({ ...header, invoice: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="optional" />
+            </div>
+          </div>
+
+          <div className="space-y-2.5">
+            {lines.map((l, idx) => {
+              const prod = products.find((pr) => pr.name === l.product)
+              const oz = lineOz(l)
+              const stockAdd = prod && oz ? round2(convertUnits(oz, 'oz', prod.unit)) : null
               return (
-                <p className="font-body text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">
-                  ✓ Converts automatically: {draft.qty} {draft.unit} = {converted} {p.unit} added to stock. The product's rate display stays in {p.unit} — only this delivery is logged in {draft.unit}.
-                </p>
+                <div key={l.id} className="rounded-xl border border-slate-200 p-3">
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      <SearchSelect value={l.product} options={products.map((p) => p.name)} onPick={(n) => pickLineProduct(idx, n)} placeholder="Search products…" />
+                    </div>
+                    {lines.length > 1 && (
+                      <button onClick={() => removeLine(idx)} className="shrink-0 text-slate-300 hover:text-red-500 mt-1.5" aria-label="Remove line"><X size={16} /></button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mt-2">
+                    <div>
+                      <FieldLabel>Cases</FieldLabel>
+                      <input type="number" inputMode="decimal" step="any" value={l.cases} onChange={(e) => setLine(idx, { cases: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm font-body" placeholder="e.g. 4" />
+                    </div>
+                    <div>
+                      <FieldLabel>Oz / case</FieldLabel>
+                      <input type="number" inputMode="decimal" step="any" value={l.ozPerCase} onChange={(e) => setLine(idx, { ozPerCase: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm font-body" placeholder="512" />
+                    </div>
+                    <div>
+                      <FieldLabel>Cost / case</FieldLabel>
+                      <input type="number" inputMode="decimal" step="any" value={l.costPerCase} onChange={(e) => setLine(idx, { costPerCase: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm font-body" placeholder="$" />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 mt-2">
+                    <div className="flex rounded-lg overflow-hidden border border-slate-200">
+                      {['planned', 'extra'].map((k) => (
+                        <button key={k} onClick={() => setLine(idx, { kind: k })} className="font-body text-[11px] font-bold px-2.5 py-1.5 transition" style={l.kind === k ? { backgroundColor: k === 'extra' ? '#92660D' : FOREST, color: 'white' } : { backgroundColor: 'white', color: '#64748B' }}>
+                          {k === 'extra' ? 'Extra' : 'Planned'}
+                        </button>
+                      ))}
+                    </div>
+                    {oz > 0 && (
+                      <span className="font-body text-[11px] font-bold tabular-nums" style={{ color: FERN }}>
+                        = {round2(oz)} oz{stockAdd != null && prod.unit !== 'oz' ? ` (${stockAdd} ${prod.unit})` : ''}{lineCost(l) > 0 ? ` · $${round2(lineCost(l)).toLocaleString('en-US')}` : ''}
+                      </span>
+                    )}
+                    <div className="flex-1 min-w-[140px]">
+                      <SearchSelect value={l.linkedSheetId || ''} options={[{ value: '', label: 'Not linked to a sheet' }, ...sheetOpts]} onPick={(v) => setLine(idx, { linkedSheetId: v || null })} sort={false} placeholder="Link to a sheet (optional)…" />
+                    </div>
+                  </div>
+                  {l.kind === 'extra' && (
+                    <input value={l.reason} onChange={(e) => setLine(idx, { reason: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm font-body mt-2" style={!String(l.reason || '').trim() && l.product && oz > 0 ? { borderColor: '#F0A742', backgroundColor: '#FFFBF2' } : {}} placeholder="Why extra? (over-ordered, re-treat, replaced spoiled stock…) — required" />
+                  )}
+                </div>
               )
-            })()}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <FieldLabel>Date</FieldLabel>
-                <input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" />
-              </div>
-              <div>
-                <FieldLabel>Supplier (optional)</FieldLabel>
-                <input value={draft.supplier} onChange={(e) => setDraft({ ...draft, supplier: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. Site One" />
-              </div>
+            })}
+          </div>
+
+          <button onClick={addLine} className="font-body text-xs font-bold mt-2.5 inline-flex items-center gap-1.5" style={{ color: FOREST }}><Plus size={14} /> Add another product</button>
+
+          <div className="mt-3">
+            <FieldLabel>Note (optional)</FieldLabel>
+            <input value={header.note} onChange={(e) => setHeader({ ...header, note: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-body" placeholder="e.g. backordered item to follow" />
+          </div>
+
+          {(totalOz > 0 || totalCost > 0) && (
+            <div className="flex items-center justify-between mt-3 rounded-xl px-3 py-2" style={{ backgroundColor: '#F5FAF6' }}>
+              <span className="font-body text-[11px] font-bold text-slate-500">Receiving {round2(totalOz).toLocaleString('en-US')} oz across {lines.filter((l) => l.product && lineOz(l) > 0).length} line{lines.filter((l) => l.product && lineOz(l) > 0).length !== 1 ? 's' : ''}</span>
+              {totalCost > 0 && <span className="font-body text-sm font-bold" style={{ color: FOREST }}>${round2(totalCost).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>}
             </div>
-            <div className="flex gap-2 pt-1">
-              <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
-              <button onClick={submitDelivery} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white" style={{ backgroundColor: FOREST }}>Add to Stock</button>
-            </div>
+          )}
+          <p className="font-body text-[9px] text-slate-400 mt-1.5">Delivery cost is for your ordering picture only — it is never added to Finance or the Budget.</p>
+
+          <div className="flex gap-2 pt-3">
+            <button onClick={resetForm} className="flex-1 py-2.5 rounded-xl text-sm font-semibold font-body text-slate-500 border border-slate-200">Cancel</button>
+            <button onClick={submitReceive} disabled={!canSave} className="flex-1 py-2.5 rounded-xl text-sm font-bold font-body text-white disabled:opacity-40" style={{ backgroundColor: FOREST }}>Add to stock</button>
           </div>
         </div>
       )}
@@ -7357,47 +7690,98 @@ function Inventory({ products, deliveries, onAddDelivery }) {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 mb-6 items-start">
         {filtered.map((p) => {
           const onHand = Number(p.stock) || 0
-          const needCount = onHand < 0 // a negative tally means more was recorded out than in — never shown as a real on-hand
-          const low = needCount || (p.lowStockThreshold > 0 && onHand <= p.lowStockThreshold)
+          const movements = buildProductMovements(p, { sheets, stockDeliveries, deliveries, stockAdjustments, invCounts, areas })
+          const neverCounted = !movements.everCounted
+          const needCount = onHand < 0 || neverCounted
+          const low = onHand < 0 || (p.lowStockThreshold > 0 && onHand <= p.lowStockThreshold)
           const gal = /oz/i.test(p.unit || '') && onHand >= 128 ? ` (${(onHand / 128).toFixed(1)} gal)` : ''
+          const isOpen = expanded === p.name
           return (
-            <div key={p.name} className="bg-white rounded-2xl border p-4 shadow-sm flex items-center justify-between" style={{ borderColor: low ? '#FCA5A5' : 'rgba(0,0,0,0.05)' }}>
-              <div>
-                <p className="font-body font-semibold text-sm text-slate-900">{p.name}</p>
-                <p className="font-body text-[11px] text-slate-400">{p.type}</p>
-              </div>
-              <div className="text-right">
-                {needCount ? (
-                  <>
-                    <p className="font-display text-base font-bold" style={{ color: '#DC2626' }}>Count needed</p>
-                    <p className="font-body text-[10px] text-slate-400">tally {Math.round(onHand).toLocaleString()} {p.unit} — recount on hand</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="font-display text-xl font-bold" style={{ color: low ? '#DC2626' : FOREST }}>{Math.round(onHand * 100) / 100}<span className="text-xs font-body font-medium text-slate-400"> {p.unit}{gal}</span></p>
-                    {low && <p className="font-body text-[10px] font-bold text-red-500">LOW STOCK</p>}
-                  </>
-                )}
-              </div>
+            <div key={p.name} className="bg-white rounded-2xl border shadow-sm overflow-hidden self-start" style={{ borderColor: low ? '#FCA5A5' : 'rgba(0,0,0,0.05)' }}>
+              <button onClick={() => setExpanded(isOpen ? null : p.name)} className="w-full flex items-center justify-between p-4 text-left">
+                <div className="flex items-center gap-2 min-w-0">
+                  <ChevronDown size={15} style={{ transform: isOpen ? 'none' : 'rotate(-90deg)', transition: 'transform .15s', opacity: 0.5 }} className="shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-body font-semibold text-sm text-slate-900 truncate">{p.name}</p>
+                    <p className="font-body text-[11px] text-slate-400">{p.type}{movements.committed > 0 ? <span style={{ color: '#92660D' }}> · {round2(movements.committed)} {p.unit} committed</span> : ''}</p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0 pl-2">
+                  {onHand < 0 ? (
+                    <>
+                      <p className="font-display text-base font-bold" style={{ color: '#DC2626' }}>Count needed</p>
+                      <p className="font-body text-[10px] text-slate-400">tally {Math.round(onHand).toLocaleString()} {p.unit} — recount</p>
+                    </>
+                  ) : neverCounted ? (
+                    <>
+                      <p className="font-display text-base font-bold" style={{ color: '#DC2626' }}>Count needed</p>
+                      <p className="font-body text-[10px] text-slate-400">never counted{onHand ? ` · tally ${round2(onHand)} ${p.unit}` : ''}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-display text-xl font-bold" style={{ color: low ? '#DC2626' : FOREST }}>{round2(onHand)}<span className="text-xs font-body font-medium text-slate-400"> {p.unit}{gal}</span></p>
+                      {low && <p className="font-body text-[10px] font-bold text-red-500">LOW STOCK</p>}
+                    </>
+                  )}
+                </div>
+              </button>
+              {isOpen && <StockMovementLog product={p} movements={movements} manage={manage} onAdjust={onAdjust} />}
             </div>
           )
         })}
       </div>
 
-      <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Recent Deliveries</p>
-      {deliveries.length === 0 ? (
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <p className="font-body text-xs font-bold text-slate-400 uppercase tracking-wide">Delivery history</p>
+        <div className="flex items-center gap-2">
+          {histProducts.length > 0 && (
+            <div style={{ width: 170 }}>
+              <SearchSelect value={histProduct} options={[{ value: 'all', label: 'All products' }, ...histProducts]} onPick={setHistProduct} sort={false} placeholder="Product…" />
+            </div>
+          )}
+          {histShown.length > 0 && (
+            <button onClick={exportHistory} className="font-body text-xs font-bold px-3 py-1.5 rounded-full text-white flex items-center gap-1.5 shrink-0" style={{ backgroundColor: FOREST }}><Package size={13} /> Export</button>
+          )}
+        </div>
+      </div>
+      {histShown.length === 0 ? (
         <div className="bg-white rounded-2xl border border-black/5 p-8 text-center text-slate-400 font-body text-sm">No deliveries logged yet.</div>
       ) : (
-        <div className="bg-white rounded-2xl border border-black/5 overflow-hidden shadow-sm">
-          {deliveries.slice(0, 15).map((d, i) => (
-            <div key={d.id} className={`flex items-center justify-between px-4 py-3 ${i !== 0 ? 'border-t border-black/5' : ''}`}>
-              <div>
-                <p className="font-body text-sm font-semibold text-slate-800">{d.product}</p>
-                <p className="font-body text-[11px] text-slate-400">{d.date}{d.supplier ? ` · ${d.supplier}` : ''}</p>
+        <div className="space-y-2">
+          {histShown.slice(0, 40).map((h) => {
+            const shownLines = h.lines.filter((l) => histProduct === 'all' || l.product === histProduct)
+            const cost = shownLines.reduce((s, l) => s + (l.cases != null && l.costPerCase != null ? l.cases * l.costPerCase : 0), 0)
+            return (
+              <div key={h.id} className="bg-white rounded-2xl border border-black/5 p-3.5 shadow-sm">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <div className="min-w-0">
+                    <p className="font-body text-sm font-bold text-slate-800">{h.vendor || (h.legacy ? 'Delivery' : 'Received')}</p>
+                    <p className="font-body text-[11px] text-slate-400">{h.date ? fmtDate(h.date) : '—'}{h.invoice ? ` · Inv ${h.invoice}` : ''}{h.note ? ` · ${h.note}` : ''}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {cost > 0 && <span className="font-body text-sm font-bold" style={{ color: FOREST }}>${round2(cost).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>}
+                    {manage && !h.legacy && onDeleteStockDelivery && (
+                      <button onClick={() => { if (window.confirm('Remove this delivery and reverse the stock it added?')) onDeleteStockDelivery(stockDeliveries.find((d) => d.id === h.id)) }} className="text-slate-300 hover:text-red-500" aria-label="Remove delivery"><Trash2 size={15} /></button>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  {shownLines.map((l) => (
+                    <div key={l.id} className="flex items-center justify-between gap-2">
+                      <span className="font-body text-[12px] text-slate-700 truncate">
+                        {l.product}
+                        {l.kind === 'extra' && <span className="font-body text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase ml-1.5" style={{ backgroundColor: '#FEF3DD', color: '#92660D' }}>Extra</span>}
+                        {l.kind === 'extra' && l.reason ? <span className="text-slate-400"> · {l.reason}</span> : null}
+                      </span>
+                      <span className="font-body text-[12px] font-bold tabular-nums shrink-0" style={{ color: FERN }}>
+                        +{l.oz != null ? `${round2(l.oz)} oz` : (l.qtyLabel || '')}{l.cases != null && l.cases !== '' ? ` · ${l.cases} cs` : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <p className="font-body text-sm font-bold" style={{ color: FERN }}>+{d.qty} {d.unit}</p>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
